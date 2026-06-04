@@ -31,6 +31,15 @@ enum Commands {
         /// Path to the JSON document
         record: PathBuf,
     },
+    /// Compute the content-hash of a Novae Linguae artifact. Auto-detects
+    /// whether the input is a function record or a Nova Locutio message,
+    /// strips the appropriate fields per spec/canonical-serialization.md,
+    /// JCS-canonicalizes, and BLAKE3-256 hashes. Prints `<prefix>_<hex>`
+    /// to stdout followed by a newline.
+    Hash {
+        /// Path to the artifact (function record or Nova Locutio message)
+        record: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -38,6 +47,7 @@ fn main() -> ExitCode {
     let (result, print_ok) = match cli.command {
         Commands::Validate { schema, record } => (cmd_validate(&schema, &record), true),
         Commands::Canonicalize { record } => (cmd_canonicalize(&record), false),
+        Commands::Hash { record } => (cmd_hash(&record), false),
     };
 
     match result {
@@ -67,5 +77,12 @@ fn cmd_canonicalize(record: &PathBuf) -> Result<()> {
     std::io::stdout()
         .write_all(&canonical)
         .map_err(|e| anyhow::anyhow!("writing canonical bytes to stdout: {e}"))?;
+    Ok(())
+}
+
+fn cmd_hash(record: &PathBuf) -> Result<()> {
+    let value = nl_validator::read_json(record)?;
+    let hash = nl_validator::hash_artifact(&value)?;
+    println!("{hash}");
     Ok(())
 }

@@ -7,8 +7,8 @@
 //! will pin this once a second implementation exists.
 //!
 //! Subsequent versions of this crate will add:
-//! - BLAKE3-256 hashing
-//! - End-to-end record hash verification
+//! - End-to-end record hash verification (`hash_artifact` is in place; the
+//!   compare-against-stored-`hash`-field step is the next commit's job)
 //! - Ed25519 signature verification for Nova Locutio messages
 //! - Well-formedness checks beyond JSON Schema (type-var scoping, uniqueness,
 //!   ctor-kind compatibility)
@@ -66,4 +66,110 @@ pub fn validate(schema: &Value, instance: &Value) -> Result<()> {
 /// responsibility, performed before invoking `canonicalize`.
 pub fn canonicalize(value: &Value) -> Result<Vec<u8>> {
     serde_jcs::to_vec(value).map_err(|e| anyhow!("JCS canonicalization failed: {e}"))
+}
+
+// ---- artifact kind detection and field stripping ----
+
+/// Identifies what kind of Novae Linguae artifact a JSON value represents.
+/// Determines which fields to strip before hashing and which prefix to use
+/// when rendering the resulting hash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactKind {
+    FunctionRecord,
+    Message,
+}
+
+impl ArtifactKind {
+    /// Fields stripped from the artifact before JCS-canonicalizing and hashing,
+    /// per `spec/canonical-serialization.md`.
+    fn strip_fields(self) -> &'static [&'static str] {
+        match self {
+            ArtifactKind::FunctionRecord => &["hash"],
+            ArtifactKind::Message => &["hash", "signature"],
+        }
+    }
+
+    /// Content-address prefix used when rendering the hash.
+    pub fn prefix(self) -> &'static str {
+        match self {
+            ArtifactKind::FunctionRecord => "fn",
+            ArtifactKind::Message => "msg",
+        }
+    }
+
+    /// Auto-detect the artifact kind from the JSON shape.
+    ///
+    /// A *Nova Locutio* message has a top-level `kind` field whose value is
+    /// one of the v0.1 speech acts. A function record does not have a `kind`
+    /// field but has both `signature` and `body_hash`. v0.1 supports these
+    /// two independently-hashable artifact kinds; type expressions are
+    /// embedded sub-values and are not hashed at the top level.
+    pub fn detect(value: &Value) -> Result<Self> {
+        let obj = value
+            .as_object()
+            .ok_or_else(|| anyhow!("expected JSON object at top level"))?;
+
+        if let Some(kind_str) = obj.get("kind").and_then(|v| v.as_str()) {
+            const SPEECH_ACTS: &[&str] = &[
+                "request", "assert", "query", "propose", "commit", "retract", "delegate", "ack",
+                "reject",
+            ];
+            if SPEECH_ACTS.contains(&kind_str) {
+                return Ok(ArtifactKind::Message);
+            }
+        }
+
+        if obj.contains_key("signature") && obj.contains_key("body_hash") {
+            return Ok(ArtifactKind::FunctionRecord);
+        }
+
+        Err(anyhow!(
+            "could not detect artifact kind from JSON shape — expected a function record (has 'signature' and 'body_hash') or a Nova Locutio message (has 'kind' with a v0.1 speech-act value)"
+        ))
+    }
+}
+
+/// Return a copy of `value` with the fields stripped that would be removed
+/// before hashing for the given artifact kind.
+pub fn strip_for_hash(value: &Value, kind: ArtifactKind) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut cloned = map.clone();
+            for field in kind.strip_fields() {
+                cloned.remove(*field);
+            }
+            Value::Object(cloned)
+        }
+        _ => value.clone(),
+    }
+}
+
+// ---- BLAKE3-256 hashing ----
+
+/// BLAKE3-256 hash of arbitrary bytes. Returns the 32 raw bytes of the digest.
+pub fn blake3_hash(bytes: &[u8]) -> [u8; 32] {
+    *blake3::hash(bytes).as_bytes()
+}
+
+/// Render a 32-byte hash as `<prefix>_<64 lowercase hex chars>`.
+pub fn format_hash(prefix: &str, hash: &[u8; 32]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(prefix.len() + 1 + 64);
+    out.push_str(prefix);
+    out.push('_');
+    for byte in hash {
+        write!(out, "{:02x}", byte).expect("writing to String is infallible");
+    }
+    out
+}
+
+/// Compute the content-hash of an artifact end-to-end:
+/// detect kind, strip the appropriate fields, JCS-canonicalize, BLAKE3-256,
+/// and format with the kind's prefix. Returns e.g. `fn_<hex>` or `msg_<hex>`.
+pub fn hash_artifact(value: &Value) -> Result<String> {
+    let kind = ArtifactKind::detect(value)?;
+    let stripped = strip_for_hash(value, kind);
+    let canonical = canonicalize(&stripped)?;
+    let hash = blake3_hash(&canonical);
+    Ok(format_hash(kind.prefix(), &hash))
 }
