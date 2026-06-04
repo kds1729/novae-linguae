@@ -7,7 +7,6 @@
 //! will pin this once a second implementation exists.
 //!
 //! Subsequent versions of this crate will add:
-//! - JCS canonicalization per `spec/canonical-serialization.md`
 //! - BLAKE3-256 hashing
 //! - End-to-end record hash verification
 //! - Ed25519 signature verification for Nova Locutio messages
@@ -51,4 +50,20 @@ pub fn validate(schema: &Value, instance: &Value) -> Result<()> {
             errors.join("\n")
         ))
     }
+}
+
+/// JCS-canonicalize a JSON value to UTF-8 bytes per RFC 8785.
+///
+/// This is the canonical-form bytes referred to throughout
+/// `spec/canonical-serialization.md`. The output:
+/// - sorts all object keys lexicographically by UTF-16 code unit;
+/// - contains no whitespace between tokens;
+/// - is UTF-8 with no byte-order mark and no trailing newline;
+/// - uses ECMAScript number serialization rules per JCS §3.2.2.3.
+///
+/// This function does NOT remove any fields. Field-removal-before-hashing
+/// (e.g. stripping `hash` and `signature` for messages) is the caller's
+/// responsibility, performed before invoking `canonicalize`.
+pub fn canonicalize(value: &Value) -> Result<Vec<u8>> {
+    serde_jcs::to_vec(value).map_err(|e| anyhow!("JCS canonicalization failed: {e}"))
 }

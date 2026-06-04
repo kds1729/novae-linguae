@@ -7,7 +7,7 @@ Reference command-line validator, canonicalizer, and hasher for *Novae Linguae* 
 **v0.1, in progress.** Implemented checkboxes are live; unchecked are scoped for follow-up commits.
 
 - [x] Validate a JSON instance against a JSON Schema (draft 2020-12).
-- [ ] JCS-canonicalize a record per [`spec/canonical-serialization.md`](../../spec/canonical-serialization.md).
+- [x] JCS-canonicalize a record per [`spec/canonical-serialization.md`](../../spec/canonical-serialization.md).
 - [ ] BLAKE3-256 hash a canonicalized record.
 - [ ] Verify the `hash` field on a record matches its computed hash.
 - [ ] Verify Ed25519 signatures on *Nova Locutio* messages.

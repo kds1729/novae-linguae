@@ -25,17 +25,26 @@ enum Commands {
         /// Path to the JSON instance to validate
         record: PathBuf,
     },
+    /// JCS-canonicalize a JSON document (RFC 8785). Writes canonical UTF-8 bytes
+    /// to stdout with no trailing newline.
+    Canonicalize {
+        /// Path to the JSON document
+        record: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = match cli.command {
-        Commands::Validate { schema, record } => cmd_validate(&schema, &record),
+    let (result, print_ok) = match cli.command {
+        Commands::Validate { schema, record } => (cmd_validate(&schema, &record), true),
+        Commands::Canonicalize { record } => (cmd_canonicalize(&record), false),
     };
 
     match result {
         Ok(()) => {
-            eprintln!("OK");
+            if print_ok {
+                eprintln!("OK");
+            }
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -49,4 +58,14 @@ fn cmd_validate(schema: &PathBuf, record: &PathBuf) -> Result<()> {
     let schema = nl_validator::read_json(schema)?;
     let instance = nl_validator::read_json(record)?;
     nl_validator::validate(&schema, &instance)
+}
+
+fn cmd_canonicalize(record: &PathBuf) -> Result<()> {
+    use std::io::Write;
+    let value = nl_validator::read_json(record)?;
+    let canonical = nl_validator::canonicalize(&value)?;
+    std::io::stdout()
+        .write_all(&canonical)
+        .map_err(|e| anyhow::anyhow!("writing canonical bytes to stdout: {e}"))?;
+    Ok(())
 }
