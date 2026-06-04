@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "kind": "request",
+  "hash": "msg_e7a2b1c4d5e6f7081929384a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8",
+  "from": "did:nova:a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "to": "did:nova:9b22c1d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9b",
+  "in_reply_to": null,
+  "timestamp": "2026-06-04T18:00:00Z",
+  "constraints": {
+    "capabilities": [],
+    "budget_tokens": 1000,
+    "deadline_ms": 5000
+  },
+  "body": {
+    "action": "apply",
+    "target": "fn_3a9b1c5d8e7f2a4b6c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b",
+    "args": ["double", [1, 2, 3]]
+  },
+  "signature": "ed25519:Mq8KhA1FXLZcVuNqK7Hp2RnSjTbBdGwYxEuVoPiWl4M5Jc3eX9zAyBkLfRtNvO2DhSgIpMc4Ka6QrPwT0iE5+w=="
+}

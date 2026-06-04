@@ -1,0 +1,401 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/message.schema.json",
+  "title": "Nova Locutio Message",
+  "description": "The structured speech-act record agents exchange. Every message is content-addressed (its hash is computed over its canonical serialization minus the hash and signature fields) and signed by its sender. v0.1 — see spec/README.md for evolution policy and what is deliberately deferred.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "hash",
+    "from",
+    "body",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0",
+      "description": "Schema version pinned per message — old messages remain readable as the schema evolves."
+    },
+    "kind": {
+      "$ref": "#/$defs/speech_act",
+      "description": "The speech act this message performs. Discriminates the body shape."
+    },
+    "hash": {
+      "$ref": "#/$defs/message_address",
+      "description": "Content-hash of the canonical serialization of this message with 'hash' and 'signature' fields removed. The message's global identity."
+    },
+    "from": {
+      "$ref": "#/$defs/did",
+      "description": "DID of the sending agent."
+    },
+    "to": {
+      "oneOf": [
+        { "$ref": "#/$defs/did" },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "DID of the intended receiver, or null for broadcast. v0.1 is single-receiver-or-broadcast; multicast deferred."
+    },
+    "in_reply_to": {
+      "oneOf": [
+        { "$ref": "#/$defs/message_address" },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "Loose conversational threading — the prior message this is responding to. Distinct from body-level fields like 'acks' / 'rejects' / 'retracts' which carry semantic action on prior messages, not just threading."
+    },
+    "timestamp": {
+      "oneOf": [
+        { "type": "string", "format": "date-time" },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "Optional ISO 8601 timestamp. Advisory only — semantic ordering is via 'in_reply_to' and (later) causal references. Included in the signed canonical form when present."
+    },
+    "constraints": {
+      "oneOf": [
+        { "$ref": "#/$defs/constraints" },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "Optional constraints (capabilities, budget, deadline). Meaningful primarily for 'request', 'propose', and 'delegate'; ignored by other kinds without being an error."
+    },
+    "body": {
+      "description": "Body shape is discriminated by 'kind' — see allOf branches and $defs/*_body."
+    },
+    "signature": {
+      "$ref": "#/$defs/signature",
+      "description": "Cryptographic signature from 'from' over the canonical serialization of this message with the 'signature' field removed (the 'hash' field is included in what is signed)."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "request" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/request_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "assert" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/assert_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "query" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/query_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "propose" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/propose_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "commit" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/commit_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "retract" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/retract_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "delegate" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/delegate_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "ack" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/ack_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "reject" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/reject_body" } } }
+    }
+  ],
+  "$defs": {
+    "speech_act": {
+      "type": "string",
+      "enum": [
+        "request",
+        "assert",
+        "query",
+        "propose",
+        "commit",
+        "retract",
+        "delegate",
+        "ack",
+        "reject"
+      ],
+      "description": "Closed v0.1 vocabulary of speech acts. Each is distinct in intent (principle 7); adding a kind requires a schema version bump. Semantics:\n - request: sender asks receiver to perform an action; receiver is expected to comply or reject with reason.\n - assert: sender claims something is true, optionally with evidence.\n - query: sender asks for information; answer typically comes back as an assert.\n - propose: sender offers an option the receiver may accept or decline as a normal outcome (refusal is not a failure).\n - commit: sender binds themselves to an action or promise.\n - retract: sender withdraws one of their own prior statements.\n - delegate: sender grants a capability to the receiver.\n - ack: sender confirms receipt or completion.\n - reject: sender refuses to comply with a prior request, proposal, or delegation."
+    },
+    "content_address": {
+      "type": "string",
+      "pattern": "^(fn|expr|type|proof|msg)_[0-9a-f]{64}$",
+      "description": "Content-address: prefix + '_' + 64 lowercase hex chars (BLAKE3-256). Shared with function-record.schema.json — the two schemas must keep this definition in sync."
+    },
+    "message_address": {
+      "type": "string",
+      "pattern": "^msg_[0-9a-f]{64}$",
+      "description": "Content-address restricted to messages."
+    },
+    "did": {
+      "type": "string",
+      "pattern": "^did:[a-z0-9]+:[A-Za-z0-9._:-]+$",
+      "minLength": 8,
+      "maxLength": 256,
+      "description": "W3C Decentralized Identifier. v0.1 expects 'did:key:<multibase>' or 'did:nova:<hash>' but the pattern accepts any valid DID method."
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^ed25519:[A-Za-z0-9+/]+={0,2}$",
+      "description": "v0.1: Ed25519 signature, base64-encoded. Format 'ed25519:<base64>'. Multi-algorithm support deferred."
+    },
+    "capability": {
+      "type": "string",
+      "pattern": "^cap:[a-z][a-z0-9_-]*(/[a-z][a-z0-9_-]*)*$",
+      "minLength": 5,
+      "maxLength": 128,
+      "description": "Capability token — same format as function-record.schema.json. Must be kept in sync across schemas."
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/capability" },
+          "uniqueItems": true,
+          "description": "Capability tokens claimed by sender (in request/propose) or granted (in delegate)."
+        },
+        "budget_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum tokens the sender authorizes for fulfilling this message."
+        },
+        "budget_compute_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum compute time in milliseconds the sender authorizes."
+        },
+        "deadline_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Deadline in milliseconds relative to receipt. Absolute wall-clock deadlines deferred."
+        }
+      }
+    },
+    "request_body": {
+      "type": "object",
+      "required": ["action"],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["apply", "store", "validate"],
+          "description": "v0.1 closed vocabulary. 'apply' invokes a function. 'store' contributes a record to the commons. 'validate' asks the receiver to verify properties on a record."
+        },
+        "target": {
+          "$ref": "#/$defs/content_address",
+          "description": "Hash of the artifact being acted on. Required for 'apply' and 'validate'; omitted for 'store' (the artifact is provided in 'payload')."
+        },
+        "args": {
+          "type": "array",
+          "description": "Arguments for 'apply'. v0.1 uses the same bare-string-for-function-reference convention as function-record examples."
+        },
+        "payload": {
+          "type": "object",
+          "description": "Inline artifact for 'store' (a function record, a proof, etc.). v0.2+ may cross-reference the appropriate schema for validation."
+        }
+      }
+    },
+    "assert_body": {
+      "type": "object",
+      "required": ["subject", "claim"],
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "$ref": "#/$defs/content_address",
+          "description": "What the assertion is about."
+        },
+        "claim": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The claim being made. v0.1: string in surface syntax. v0.2+: structured claim AST."
+        },
+        "evidence": {
+          "oneOf": [
+            { "$ref": "#/$defs/content_address" },
+            { "type": "null" }
+          ],
+          "default": null,
+          "description": "Optional content-address of a proof certificate or supporting artifact."
+        }
+      }
+    },
+    "query_body": {
+      "type": "object",
+      "required": ["pattern"],
+      "additionalProperties": false,
+      "properties": {
+        "pattern": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Match criteria. All fields optional; multiple fields are conjunctive (AND).",
+          "properties": {
+            "signature_type": {
+              "type": "string",
+              "description": "Type signature to match. v0.1: string in surface syntax. v0.2+: structured type pattern with unification semantics."
+            },
+            "intent_tags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)*$"
+              },
+              "uniqueItems": true,
+              "description": "Intent tags any matching record must include."
+            },
+            "effects": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "fs.read", "fs.write", "net.read", "net.write",
+                  "alloc", "time", "random",
+                  "io.console", "process.spawn", "panic"
+                ]
+              },
+              "uniqueItems": true,
+              "description": "Effects the matching record must have at most (subset semantics — purer or equal)."
+            },
+            "terminates": {
+              "type": "string",
+              "enum": ["always", "conditional", "never", "unknown"]
+            }
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 50,
+          "description": "Maximum results to return."
+        },
+        "cursor": {
+          "type": "string",
+          "description": "Opaque pagination cursor from a prior query response."
+        }
+      }
+    },
+    "propose_body": {
+      "$ref": "#/$defs/request_body",
+      "description": "Same structural shape as request_body. The difference is semantic: in 'propose' the receiver declining is a normal outcome, not a failure."
+    },
+    "commit_body": {
+      "type": "object",
+      "required": ["commitment"],
+      "additionalProperties": false,
+      "properties": {
+        "commitment": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the sender is binding themselves to. v0.1: string in surface syntax. v0.2+: structured commitment AST."
+        },
+        "conditions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": [],
+          "description": "Preconditions that, if violated, release the sender from the commitment. v0.1 stringified."
+        },
+        "expires_at": {
+          "oneOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ],
+          "default": null,
+          "description": "Optional expiration. Null means open-ended."
+        }
+      }
+    },
+    "retract_body": {
+      "type": "object",
+      "required": ["retracts", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "retracts": {
+          "$ref": "#/$defs/message_address",
+          "description": "Hash of the prior message being retracted. Sender of the retraction must be the same agent that sent the retracted message; receivers MUST verify this."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why the message is being retracted. v0.1 free-form."
+        }
+      }
+    },
+    "delegate_body": {
+      "type": "object",
+      "required": ["capability"],
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/capability",
+          "description": "Capability token being granted to the message's receiver."
+        },
+        "expires_at": {
+          "oneOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ],
+          "default": null,
+          "description": "Optional expiration. Null means open-ended (rare; usually granted with a bound)."
+        },
+        "conditions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": [],
+          "description": "Conditions under which the delegation is valid. v0.1 stringified."
+        }
+      }
+    },
+    "ack_body": {
+      "type": "object",
+      "required": ["acks"],
+      "additionalProperties": false,
+      "properties": {
+        "acks": {
+          "$ref": "#/$defs/message_address",
+          "description": "Hash of the message being acknowledged."
+        },
+        "result": {
+          "description": "For acknowledging a 'request' or 'query', the result of the action or the query response. Any JSON value; the value sub-language is TBD."
+        }
+      }
+    },
+    "reject_body": {
+      "type": "object",
+      "required": ["rejects", "code"],
+      "additionalProperties": false,
+      "properties": {
+        "rejects": {
+          "$ref": "#/$defs/message_address",
+          "description": "Hash of the message being rejected."
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "not_authorized",
+            "constraint_violated",
+            "unknown_target",
+            "malformed",
+            "refused",
+            "timeout"
+          ],
+          "description": "Closed v0.1 categorical reason. Adding a code requires a schema version bump."
+        },
+        "reason": {
+          "type": "string",
+          "default": "",
+          "description": "Optional human/AI-readable expansion of the categorical code."
+        }
+      }
+    }
+  }
+}

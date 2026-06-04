@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/function-record.schema.json",
+  "title": "Nova Lingua Function Record",
+  "description": "The mandatory self-describing record for a function in the Nova Lingua commons. Every function is identified by the content-hash of the canonical serialization of this record. v0.1 — see spec/README.md for evolution policy and what is deliberately deferred.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "hash",
+    "signature",
+    "examples",
+    "body_hash"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0",
+      "description": "Schema version. Pinned to the record so old records remain readable as the schema evolves."
+    },
+    "hash": {
+      "$ref": "#/$defs/content_address",
+      "description": "Content-hash of this record's canonical serialization with the 'hash' field removed. The function's global identity."
+    },
+    "name_hints": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/name_hint" },
+      "uniqueItems": true,
+      "default": [],
+      "description": "Surface names useful for human display and lexical discovery. Carry no semantic weight; the function's identity is its hash."
+    },
+    "signature": {
+      "$ref": "#/$defs/signature"
+    },
+    "examples": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/example" },
+      "minItems": 1,
+      "description": "Canonical worked input/output pairs. At least one is required — a function with no example has not demonstrated its behavior."
+    },
+    "properties": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/property" },
+      "default": [],
+      "description": "Property-based invariants the function satisfies. Optional in the schema; a separate quality policy enforces presence for production records."
+    },
+    "intent_tags": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/intent_tag" },
+      "uniqueItems": true,
+      "default": [],
+      "description": "Semantic category tags for discovery. Drawn from a controlled vocabulary (TBD)."
+    },
+    "derived_from": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/content_address" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      ],
+      "default": null,
+      "description": "Hashes of functions this one was derived from (specialized, generalized, composed). Lineage; not authoritative provenance."
+    },
+    "supersedes": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/content_address" }
+      ],
+      "default": null,
+      "description": "Hash of a function this one replaces. The superseded function is not deleted (content-addressing makes that impossible) but consumers may prefer this one."
+    },
+    "body_hash": {
+      "$ref": "#/$defs/content_address",
+      "description": "Hash of the expression body, stored separately from this metadata record. Allows discovery queries to scan metadata without pulling bodies."
+    }
+  },
+  "$defs": {
+    "content_address": {
+      "type": "string",
+      "pattern": "^(fn|expr|type|proof|msg)_[0-9a-f]{64}$",
+      "description": "Content-address: prefix + '_' + 64 lowercase hex chars (BLAKE3-256 digest). Prefix discriminates the kind of object. v0.1 fixes the algorithm; v0.2+ may introduce multihash."
+    },
+    "name_hint": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "intent_tag": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)*$",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Slash-separated semantic tag, e.g. 'transform/list', 'parse/integer'. Controlled vocabulary TBD."
+    },
+    "signature": {
+      "type": "object",
+      "required": ["type", "effects", "capabilities", "terminates"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "v0.1: type written in the surface syntax as a string. v0.2+: structured type AST (separate schema). Required because untyped is not a valid state."
+        },
+        "refinements": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/refinement" },
+          "default": [],
+          "description": "Predicates the type system alone cannot express. v0.1: predicate expressed as string. v0.2+: structured predicate AST."
+        },
+        "effects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/effect" },
+          "uniqueItems": true,
+          "description": "Effects the function exercises. Empty array means pure. Effects are closed-vocabulary in v0.1 — see effects enum."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/capability" },
+          "uniqueItems": true,
+          "description": "Capability tokens the function requires the caller to grant. Open-vocabulary; tokens use cap:path/segment form."
+        },
+        "complexity": {
+          "type": "string",
+          "pattern": "^O\\([^)]+\\)$",
+          "description": "Big-O cost bound, e.g. 'O(n)', 'O(n log n)'. Optional in v0.1; required by future quality policy."
+        },
+        "terminates": {
+          "type": "string",
+          "enum": ["always", "conditional", "never", "unknown"],
+          "description": "Termination guarantee. 'conditional' means termination depends on input shape; 'unknown' is for v0.1 records that have not been analyzed yet and is expected to become disallowed."
+        }
+      }
+    },
+    "refinement": {
+      "type": "object",
+      "required": ["kind", "expr"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["pre", "post", "inv"],
+          "description": "pre: must hold on entry. post: must hold on exit. inv: must hold throughout."
+        },
+        "expr": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Predicate expression. v0.1: string in surface syntax. v0.2+: structured AST."
+        }
+      }
+    },
+    "effect": {
+      "type": "string",
+      "enum": [
+        "fs.read",
+        "fs.write",
+        "net.read",
+        "net.write",
+        "alloc",
+        "time",
+        "random",
+        "io.console",
+        "process.spawn",
+        "panic"
+      ],
+      "description": "Closed effect vocabulary for v0.1. Any new effect kind requires a schema version bump — keeps the vocabulary minimal (principle 7)."
+    },
+    "capability": {
+      "type": "string",
+      "pattern": "^cap:[a-z][a-z0-9_-]*(/[a-z][a-z0-9_-]*)*$",
+      "minLength": 5,
+      "maxLength": 128,
+      "description": "Capability token, e.g. 'cap:fs/read/home', 'cap:net/connect/github.com'. Tokens are open-vocabulary so domains can declare their own resources."
+    },
+    "example": {
+      "type": "object",
+      "required": ["args", "result"],
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "type": "array",
+          "description": "Argument values in positional order. Any JSON value; the value-representation sub-language is TBD."
+        },
+        "result": {
+          "description": "Result value. Any JSON value; the value-representation sub-language is TBD."
+        }
+      }
+    },
+    "property": {
+      "type": "object",
+      "required": ["name", "expr"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Identifier for the property (e.g. 'identity', 'composition'). Local to the function record; not globally unique."
+        },
+        "expr": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Property predicate. v0.1: string in surface syntax. v0.2+: structured AST evaluable by a property-based testing engine."
+        }
+      }
+    }
+  }
+}

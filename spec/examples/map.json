@@ -1,0 +1,37 @@
+{
+  "schema_version": "0.1.0",
+  "hash": "fn_3a9b1c5d8e7f2a4b6c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b",
+  "name_hints": ["map", "fmap", "list_map"],
+  "signature": {
+    "type": "forall a b. (a -> b) -> List a -> List b",
+    "refinements": [
+      { "kind": "post", "expr": "length(output) == length(input)" }
+    ],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "conditional"
+  },
+  "examples": [
+    { "args": ["double", [1, 2, 3]], "result": [2, 4, 6] },
+    { "args": ["negate", []],        "result": [] }
+  ],
+  "properties": [
+    {
+      "name": "identity",
+      "expr": "map(id, xs) == xs"
+    },
+    {
+      "name": "composition",
+      "expr": "map(f, map(g, xs)) == map(compose(f, g), xs)"
+    },
+    {
+      "name": "length_preserving",
+      "expr": "length(map(f, xs)) == length(xs)"
+    }
+  ],
+  "intent_tags": ["transform/list", "elementwise"],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_8f2c7d6e5b4a392817160f0e0d0c0b0a09080706050403020100ffeeddccbbaa"
+}
