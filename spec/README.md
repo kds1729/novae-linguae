@@ -8,6 +8,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 |------|--------|------|
 | `function-record.schema.json` | v0.1 draft | The mandatory metadata record for every function in *Nova Lingua* |
 | `message.schema.json` | v0.1 draft | The structured speech-act envelope for *Nova Locutio* messages |
+| `canonical-serialization.md` | v0.1 | Normative spec for canonical form (JCS RFC 8785) and hashing (BLAKE3-256) |
 | `examples/map.json` | example | Concrete function record for `map` |
 | `examples/request.json` | example | Concrete `request` message (apply `double` to `[1,2,3]`) |
 | `examples/assert.json` | example | Concrete `assert` message claiming an identity property |
@@ -42,7 +43,7 @@ These are real specifications that will arrive in their own schemas. v0.1 string
 3. **Property expression sub-language.** Same — v0.1 stringifies; v0.2+ will define an AST executable by a property-based testing engine.
 4. **Value representation in examples.** v0.1 allows any JSON value for `args` and `result`. As a v0.1 convention, function references in argument positions are written as bare strings naming the function (e.g. `"double"`) — informal and ambiguous with string literals, accepted only because the value sub-language is not yet defined. v0.2+ will define a canonical value representation including function references, opaque handles, and structured constants.
 5. **Body representation.** v0.1 references the body by hash (`body_hash`) but does not specify the body's structure. The expression AST is its own spec.
-6. **Canonical serialization for hashing.** v0.1 mentions canonical serialization but does not define it. Likely RFC 8785 (JCS) or RFC 8949 deterministic CBOR. Pinned in a separate document before any hash claims become binding.
+6. **Canonical serialization for hashing.** ~~v0.1 mentions canonical serialization but does not define it.~~ **RESOLVED in [`canonical-serialization.md`](canonical-serialization.md)**: JCS (RFC 8785) over UTF-8 JSON, BLAKE3-256 as the hash. Hash values in existing example records remain placeholder hex because the reference validator/hasher that recomputes them does not yet exist; they will become reproducible once that tool lands.
 7. **Controlled intent-tag vocabulary.** v0.1 allows any slash-separated lowercase tag. v0.2+ will publish a controlled vocabulary so two agents tag the same concept the same way.
 8. **Claim and commitment expression sub-languages.** v0.1 stringifies `assert.claim` and `commit.commitment`. v0.2+ will define structured ASTs so receivers can mechanically verify what is being asserted or committed to.
 9. **Multicast addressing.** v0.1 messages have a single receiver or null (broadcast). Multicast / group addressing deferred.
@@ -70,12 +71,13 @@ The fixed algorithm (BLAKE3-256) and fixed encoding (lowercase hex) are delibera
 
 ## Hashing and signing semantics (v0.1)
 
-Function records and messages both have a `hash` field that identifies the artifact globally.
+Function records and messages both have a `hash` field that identifies the artifact globally. The full normative procedure is in **[`canonical-serialization.md`](canonical-serialization.md)**; the brief summary:
 
-- **Function record hash**: BLAKE3-256 of the canonical serialization of the record with the `hash` field removed. Computed externally; the field is asserted, not validated, by the schema.
-- **Message hash**: BLAKE3-256 of the canonical serialization of the message with the `hash` and `signature` fields removed. The `signature` is then computed over the canonical serialization with only `signature` removed (so the `hash` is included in what is signed — tampering with the hash is detectable).
+- **Function record hash**: BLAKE3-256 of the JCS-canonical serialization of the record with the `hash` field removed. Computed externally; the field is asserted, not validated, by the schema.
+- **Message hash**: BLAKE3-256 of the JCS-canonical serialization of the message with the `hash` and `signature` fields removed.
+- **Message signature**: Ed25519 over the JCS-canonical serialization of the message with only the `signature` field removed (so the `hash` is included in what is signed — tampering with the hash is detectable).
 
-The canonical serialization itself is one of the items deferred (#6 above). Until that lands, hash values in examples are placeholder hex and not reproducible.
+Hash values in current example records remain placeholder hex; they become reproducible once a reference validator/hasher exists.
 
 ## Validating a record or message
 
