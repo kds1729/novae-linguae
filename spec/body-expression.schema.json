@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/body-expression.schema.json",
+  "title": "Nova Lingua Body Expression",
+  "description": "Structured AST for the executable body of a Nova Lingua function. Function records reference a body by `body_hash` (a content-address with the `expr_` prefix); this schema defines the body that hash resolves to. v0.1 covers seven expression kinds — `var`, `lit`, `app`, `let`, `lambda`, `case`, `field` — and four pattern kinds — `wildcard`, `bind`, `variant`, `lit`. Conditional `if` is intentionally absent: write it as `case` on a `bool` value (principle 7: minimal orthogonal vocabulary). Embedded types (in `lambda.params[].type`) and embedded values (in `lit.value` and `pat_lit.value`) are accepted as opaque objects at this layer; they must validate independently against type-expression.schema.json and value-expression.schema.json respectively. v0.2+ may tighten this via cross-file $refs once schema-resolution tooling exists. Well-formedness rules NOT enforced here (left to the verifier): variable scoping (every `var.name` bound by an enclosing function input, `let`, `lambda` param, or `case` pattern binding), pattern exhaustiveness in `case`, single-name-binding-per-arm, type-correctness of `app.fn` against args, payload-pattern-only-where-the-variant-carries-one. The body is just an expression — the function's parameter binding is on the OUTSIDE (typically the body is itself a `lambda` whose params match the function's signature). For deferred-to-later versions of this schema: type annotations on let bindings (currently inferred), multi-arm lambda equivalence, multi-binding let (currently chained), do-notation / monadic sugar, and (much later) effect rows / handler expressions.",
+  "$ref": "#/$defs/body",
+  "$defs": {
+    "body": {
+      "oneOf": [
+        { "$ref": "#/$defs/var" },
+        { "$ref": "#/$defs/lit" },
+        { "$ref": "#/$defs/app" },
+        { "$ref": "#/$defs/let" },
+        { "$ref": "#/$defs/lambda" },
+        { "$ref": "#/$defs/case" },
+        { "$ref": "#/$defs/field" }
+      ],
+      "description": "Any body expression. Discriminated by `kind`."
+    },
+    "var": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "var" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_][a-zA-Z0-9_']*$",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Name in scope. Bindings come from: enclosing lambda parameters, enclosing `let`, `case` pattern bindings, the enclosing function's own inputs, or a name from the outer environment (e.g. a built-in or a content-addressed function reference declared as a name)."
+        }
+      }
+    },
+    "lit": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "lit" },
+        "value": {
+          "type": "object",
+          "description": "A Nova Lingua value. Must validate against value-expression.schema.json; checked structurally only here."
+        }
+      }
+    },
+    "app": {
+      "type": "object",
+      "required": ["kind", "fn", "args"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "app" },
+        "fn": {
+          "$ref": "#/$defs/body",
+          "description": "The function being applied. Typically a `var` (resolving to a built-in or named binding), a `lit` containing a `fn_ref` value, or another `app` (curried/higher-order). Could also be a `lambda` for an immediately-invoked anonymous function."
+        },
+        "args": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/body" },
+          "description": "Positional arguments. Uncurried; arity-checking is the verifier's job."
+        }
+      }
+    },
+    "let": {
+      "type": "object",
+      "required": ["kind", "name", "value", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "let" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_][a-zA-Z0-9_']*$",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "value": { "$ref": "#/$defs/body" },
+        "body": { "$ref": "#/$defs/body" }
+      },
+      "description": "Single-binding `let name = value in body`. Multiple bindings are written as a chain. Type of the bound name is inferred in v0.1; v0.2+ may add an optional explicit type annotation."
+    },
+    "lambda": {
+      "type": "object",
+      "required": ["kind", "params", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "lambda" },
+        "params": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z_][a-zA-Z0-9_']*$",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "type": {
+                "type": "object",
+                "description": "Parameter type. Must validate against type-expression.schema.json; checked structurally only here."
+              }
+            }
+          },
+          "description": "Lambda parameters in positional order. JSON Schema cannot enforce 'unique by .name'; the verifier checks. Zero-arg lambdas (empty params) ARE permitted — they're sometimes useful for deferring a computation."
+        },
+        "body": { "$ref": "#/$defs/body" }
+      }
+    },
+    "case": {
+      "type": "object",
+      "required": ["kind", "scrutinee", "arms"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "case" },
+        "scrutinee": {
+          "$ref": "#/$defs/body",
+          "description": "The expression being matched."
+        },
+        "arms": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["pattern", "body"],
+            "additionalProperties": false,
+            "properties": {
+              "pattern": { "$ref": "#/$defs/pattern" },
+              "body": { "$ref": "#/$defs/body" }
+            }
+          },
+          "description": "Match arms in order. The verifier checks pattern exhaustiveness against the scrutinee's type."
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": ["kind", "record", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "field" },
+        "record": {
+          "$ref": "#/$defs/body",
+          "description": "The record expression."
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Field name to project out. Verifier checks the record type actually has this field."
+        }
+      }
+    },
+
+    "pattern": {
+      "oneOf": [
+        { "$ref": "#/$defs/pat_wildcard" },
+        { "$ref": "#/$defs/pat_bind" },
+        { "$ref": "#/$defs/pat_variant" },
+        { "$ref": "#/$defs/pat_lit" }
+      ],
+      "description": "A pattern in a `case` arm. Discriminated by `kind`."
+    },
+    "pat_wildcard": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "wildcard" }
+      },
+      "description": "Match anything; bind nothing."
+    },
+    "pat_bind": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "bind" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_][a-zA-Z0-9_']*$",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "description": "Match anything and bind the matched value to `name` for use in the arm's body."
+    },
+    "pat_variant": {
+      "type": "object",
+      "required": ["kind", "tag"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "variant" },
+        "tag": {
+          "type": "string",
+          "pattern": "^[A-Z][a-zA-Z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Variant tag, PascalCase per the sum-type convention. Verifier checks against the scrutinee's sum type."
+        },
+        "payload": {
+          "$ref": "#/$defs/pattern",
+          "description": "Pattern matched against the variant's payload. Omit for nullary variants. Required when the variant carries a payload."
+        }
+      },
+      "description": "Match a specific sum variant by its tag, optionally destructuring its payload with an inner pattern."
+    },
+    "pat_lit": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "lit" },
+        "value": {
+          "type": "object",
+          "description": "Match against this literal value. Must validate against value-expression.schema.json; checked structurally only here."
+        }
+      },
+      "description": "Match a specific literal (e.g., a particular int, the bool true, or the variant tag for an enum-like sum). Note: `kind: \"lit\"` here is the *pattern* kind named `lit`; not to be confused with the body-expression `lit` (they share a kind name because they share semantics — a literal value — but live in different oneOf groups)."
+    }
+  }
+}

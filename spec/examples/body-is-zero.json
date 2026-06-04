@@ -1,0 +1,32 @@
+{
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "n",
+      "type": { "kind": "builtin", "name": "nat" }
+    }
+  ],
+  "body": {
+    "kind": "case",
+    "scrutinee": { "kind": "var", "name": "n" },
+    "arms": [
+      {
+        "pattern": {
+          "kind": "lit",
+          "value": { "kind": "nat", "value": 0 }
+        },
+        "body": {
+          "kind": "lit",
+          "value": { "kind": "bool", "value": true }
+        }
+      },
+      {
+        "pattern": { "kind": "wildcard" },
+        "body": {
+          "kind": "lit",
+          "value": { "kind": "bool", "value": false }
+        }
+      }
+    ]
+  }
+}

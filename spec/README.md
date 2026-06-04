@@ -12,6 +12,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `type-expression.schema.json` | v0.1 draft | Structured AST for *Nova Lingua* type expressions (used inline by `function-record.v0.2.schema.json`) |
 | `predicate-expression.schema.json` | v0.1 draft | Structured AST for refinement predicates and property tests (used inline by `function-record.v0.2.schema.json`) |
 | `value-expression.schema.json` | v0.1 draft | Structured AST for values in `examples.args` / `examples.result` (used inline by `function-record.v0.2.schema.json`) |
+| `body-expression.schema.json` | v0.1 draft | Structured AST for the executable body that a function record's `body_hash` points to (seven expression kinds, four pattern kinds) |
 | `canonical-serialization.md` | v0.1 | Normative spec for canonical form (JCS RFC 8785) and hashing (BLAKE3-256) |
 | `trust-model.md` | v0.1 | Normative spec for the trust model: local trust policy + capability tokens + attestations, no central authority. Built on already-shipped *Nova Locutio* primitives. |
 | `examples/map.json` | example | Concrete v0.1 function record for `map` (string surface form for type / predicate / value fields) |
@@ -20,6 +21,8 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `examples/type-map.json` | example | The type of `map` (`forall a b. (a -> b) -> List a -> List b`) as a standalone structured type-expression AST |
 | `examples/predicate-identity.json` | example | The identity property of `map` as a standalone structured predicate AST |
 | `examples/value-list-int.json` | example | The list `[1, 2, 3]` of natural numbers as a standalone structured value AST |
+| `examples/body-double.json` | example | The body of `double` as a structured body-expression AST: `\n -> add(n, n)` |
+| `examples/body-is-zero.json` | example | A `case`-using body: `\n -> case n of 0 -> True; _ -> False` (exercises pattern matching and literal/wildcard patterns) |
 | `examples/request.json` | example | Concrete `request` message (apply `map` to `[1,2,3]`); signed with deterministic seed `novae-linguae-example-claude` |
 | `examples/assert.json` | example | Concrete `assert` message claiming an identity property; signed with deterministic seed `novae-linguae-example-verifier` |
 
@@ -39,6 +42,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 - Structured AST for *Nova Lingua* type expressions (rank-1 polymorphism, no kinds)
 - Structured AST for predicate expressions (refinements + property tests)
 - Structured AST for value expressions
+- Structured AST for body expressions (the executable form behind `body_hash`)
 - Closed speech-act vocabulary (nine acts: request, assert, query, propose, commit, retract, delegate, ack, reject)
 - Closed effect vocabulary (ten effects, deliberately minimal)
 - Closed reject-code vocabulary (six codes)
@@ -60,7 +64,7 @@ These are real specifications that will arrive in their own schemas. v0.1 string
 2. **Refinement / predicate expression sub-language.** v0.1 `signature.refinements[].expr` in `function-record.schema.json` is still a string in surface syntax. **RESOLVED** at the schema layer in [`predicate-expression.schema.json`](predicate-expression.schema.json), and **made mandatory by [`function-record.v0.2.schema.json`](function-record.v0.2.schema.json)**. New records SHOULD target v0.2; v0.1 records remain valid against their pinned schema.
 3. **Property expression sub-language.** v0.1 `properties[].expr` is still a string. **RESOLVED** — shares `predicate-expression.schema.json` with refinements; made mandatory by `function-record.v0.2.schema.json`.
 4. **Value representation in examples.** v0.1 allows any JSON value for `args` and `result`, with a bare-string-for-function-references convention. **RESOLVED** in [`value-expression.schema.json`](value-expression.schema.json) (eleven kinds: `bool`, `int`, `nat`, `float`, `string`, `bytes`, `unit`, `list`, `tuple`, `record`, `variant`, `fn_ref`); made mandatory by `function-record.v0.2.schema.json`.
-5. **Body representation.** v0.1 references the body by hash (`body_hash`) but does not specify the body's structure. The expression AST is its own spec.
+5. **Body representation.** v0.1 references the body by hash (`body_hash`) but does not specify the body's structure. **PARTIALLY RESOLVED** in [`body-expression.schema.json`](body-expression.schema.json): structured AST with seven expression kinds (`var`, `lit`, `app`, `let`, `lambda`, `case`, `field`) and four pattern kinds (`wildcard`, `bind`, `variant`, `lit`). Embedded types and values are accepted as opaque objects at this layer and must validate independently against `type-expression.schema.json` and `value-expression.schema.json`. Full end-to-end integration (body records actually hashing to the `expr_<…>` content-addresses that function records' `body_hash` fields point at) requires extending `nl-validator`'s hash subcommand with a `--kind body` selector since body-expression kinds collide with type-expression kinds on auto-detection; that wiring is a separate commit when bodies become first-class artifacts. Deferred to a later body-expression schema version: optional type annotations on `let`, multi-binding `let`, multi-arm lambda equivalence sugar, do-notation, effect rows.
 6. **Canonical serialization for hashing.** ~~v0.1 mentions canonical serialization but does not define it.~~ **RESOLVED in [`canonical-serialization.md`](canonical-serialization.md)**: JCS (RFC 8785) over UTF-8 JSON, BLAKE3-256 as the hash. The reference validator/hasher at [`tooling/validator/`](../tooling/validator/) implements the procedure end-to-end; example records now carry real, reproducible hashes that `nl-validator verify` passes.
 7. **Controlled intent-tag vocabulary.** v0.1 allows any slash-separated lowercase tag. v0.2+ will publish a controlled vocabulary so two agents tag the same concept the same way.
 8. **Claim and commitment expression sub-languages.** v0.1 stringifies `assert.claim` and `commit.commitment`. v0.2+ will define structured ASTs so receivers can mechanically verify what is being asserted or committed to.

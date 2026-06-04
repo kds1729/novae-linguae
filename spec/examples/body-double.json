@@ -1,0 +1,17 @@
+{
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "n",
+      "type": { "kind": "builtin", "name": "nat" }
+    }
+  ],
+  "body": {
+    "kind": "app",
+    "fn": { "kind": "var", "name": "add" },
+    "args": [
+      { "kind": "var", "name": "n" },
+      { "kind": "var", "name": "n" }
+    ]
+  }
+}
