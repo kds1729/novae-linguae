@@ -10,6 +10,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `message.schema.json` | v0.1 draft | The structured speech-act envelope for *Nova Locutio* messages |
 | `type-expression.schema.json` | v0.1 draft | Structured AST for *Nova Lingua* type expressions (not yet required by `function-record.schema.json` — see deferred item #1) |
 | `canonical-serialization.md` | v0.1 | Normative spec for canonical form (JCS RFC 8785) and hashing (BLAKE3-256) |
+| `trust-model.md` | v0.1 | Normative spec for the trust model: local trust policy + capability tokens + attestations, no central authority. Built on already-shipped *Nova Locutio* primitives. |
 | `examples/map.json` | example | Concrete function record for `map` |
 | `examples/type-map.json` | example | The type of `map` (`forall a b. (a -> b) -> List a -> List b`) as a structured type-expression AST |
 | `examples/request.json` | example | Concrete `request` message (apply `double` to `[1,2,3]`) |
@@ -37,6 +38,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 - Content-address format (`<kind>_<64-hex-blake3>`)
 - Canonical form (JCS) and hash (BLAKE3-256) defined in [`canonical-serialization.md`](canonical-serialization.md)
 - DID-based agent identity, Ed25519 signing
+- Trust model (local policy + capability tokens + attestations, no central authority) defined in [`trust-model.md`](trust-model.md)
 - Strict `additionalProperties: false` everywhere — unknown fields fail validation
 
 **Well-formedness vs structural validation.** JSON Schema can only check shape. Several constraints are real but live outside the schema and will be enforced by the reference validator when it exists: type-variable scoping (every `var` bound by an enclosing `forall`), uniqueness within sums and records, ctor-kind compatibility in `apply`, and canonical-form key ordering inside types and records.
