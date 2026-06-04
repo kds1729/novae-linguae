@@ -34,10 +34,16 @@
     "to": {
       "oneOf": [
         { "$ref": "#/$defs/did" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/did" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
         { "type": "null" }
       ],
       "default": null,
-      "description": "DID of the intended receiver, or null for broadcast. v0.1 is single-receiver-or-broadcast; multicast deferred."
+      "description": "Intended receiver(s). Three valid forms: a single DID (point-to-point), an array of DIDs (multicast — same canonical message to each), or null (broadcast). Multicast is additive to v0.1 — older messages with a single-DID `to` remain valid. Receiver de-duplication is the sender's responsibility (the array MUST have unique entries)."
     },
     "in_reply_to": {
       "oneOf": [
@@ -144,8 +150,8 @@
     },
     "signature": {
       "type": "string",
-      "pattern": "^ed25519:[A-Za-z0-9+/]+={0,2}$",
-      "description": "v0.1: Ed25519 signature, base64-encoded. Format 'ed25519:<base64>'. Multi-algorithm support deferred."
+      "pattern": "^[a-z][a-z0-9-]*:[A-Za-z0-9+/]+={0,2}$",
+      "description": "Signature as '<algo>:<base64>'. v0.1 implementations MUST produce and verify `ed25519:<base64>` and MAY accept other algorithm tags. The pattern is broadened (vs the original ed25519-only) so multi-algorithm signing can be added without a schema break. Algorithm tags are lowercase kebab-case (e.g. 'ed25519', 'ecdsa-p256', 'rsa-pss-sha256'). Unknown algorithms cause `nl-validator verify` to refuse the message; that's fine — a verifier that doesn't recognize an algorithm has no way to trust a signature in it."
     },
     "capability": {
       "type": "string",
@@ -177,7 +183,12 @@
         "deadline_ms": {
           "type": "integer",
           "minimum": 0,
-          "description": "Deadline in milliseconds relative to receipt. Absolute wall-clock deadlines deferred."
+          "description": "Deadline in milliseconds relative to receipt. Use when wall-clock alignment between sender and receiver cannot be assumed (typical for distributed systems). May be combined with `deadline_at`; the receiver SHOULD honor whichever expires first."
+        },
+        "deadline_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Absolute deadline as an ISO 8601 wall-clock instant (e.g. '2026-12-31T23:59:59Z'). Use when sender and receiver share a clock reference. May be combined with `deadline_ms`; the receiver SHOULD honor whichever expires first."
         }
       }
     },
@@ -201,7 +212,7 @@
         },
         "payload": {
           "type": "object",
-          "description": "Inline artifact for 'store' (a function record, a proof, etc.). v0.2+ may cross-reference the appropriate schema for validation."
+          "description": "Inline artifact for `action: \"store\"`. The expected shape depends on the artifact kind being stored:\n  - To store a function record: shape per function-record.schema.json (v0.1) or function-record.v0.2.schema.json.\n  - To store a body expression: shape per body-expression.schema.json.\n  - To store a type / predicate / value sub-tree intended as a standalone commons artifact: shape per the appropriate sub-language schema.\nThe v0.1 message schema only checks that `payload` is an object — full cross-schema validation requires the receiver to invoke the appropriate schema's validator on the payload. A future message-schema major bump will introduce conditional `if/then` validation based on a payload-kind discriminator, paired with cross-file $ref resolution in the validator."
         }
       }
     },
