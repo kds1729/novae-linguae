@@ -1,0 +1,66 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_7ea396f400609a723f3351f23ad724b63fa0393d784c5bbd3327b4279bba4060",
+  "name_hints": ["double"],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [{ "kind": "builtin", "name": "nat" }],
+      "result": { "kind": "builtin", "name": "nat" }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(1)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [{ "kind": "nat", "value": 0 }],
+      "result": { "kind": "nat", "value": 0 }
+    },
+    {
+      "args": [{ "kind": "nat", "value": 1 }],
+      "result": { "kind": "nat", "value": 2 }
+    },
+    {
+      "args": [{ "kind": "nat", "value": 5 }],
+      "result": { "kind": "nat", "value": 10 }
+    }
+  ],
+  "properties": [
+    {
+      "name": "doubles",
+      "expr": {
+        "kind": "forall",
+        "vars": ["n"],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "apply",
+              "args": [
+                { "kind": "var", "name": "self" },
+                { "kind": "var", "name": "n" }
+              ]
+            },
+            {
+              "kind": "app",
+              "op": "add",
+              "args": [
+                { "kind": "var", "name": "n" },
+                { "kind": "var", "name": "n" }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "intent_tags": ["arithmetic", "transform/scalar"],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_0000000000000000000000000000000000000000000000000000000000000001"
+}

@@ -6,17 +6,20 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 
 | Path | Status | What it defines |
 |------|--------|------|
-| `function-record.schema.json` | v0.1 draft | The mandatory metadata record for every function in *Nova Lingua* |
+| `function-record.schema.json` | v0.1 draft | The function-record schema, v0.1 (string surface form for type / predicate / value fields) |
+| `function-record.v0.2.schema.json` | v0.2 draft | The function-record schema, v0.2 — same shape as v0.1 but with structured type / predicate / value ASTs (sub-schemas inlined under `$defs` for self-containment) |
 | `message.schema.json` | v0.1 draft | The structured speech-act envelope for *Nova Locutio* messages |
-| `type-expression.schema.json` | v0.1 draft | Structured AST for *Nova Lingua* type expressions (not yet required by `function-record.schema.json` — see deferred item #1) |
-| `predicate-expression.schema.json` | v0.1 draft | Structured AST for refinement predicates and property tests (not yet required by `function-record.schema.json` — see deferred items #2, #3) |
-| `value-expression.schema.json` | v0.1 draft | Structured AST for values in `examples.args` / `examples.result` and elsewhere (not yet required — see deferred item #4) |
+| `type-expression.schema.json` | v0.1 draft | Structured AST for *Nova Lingua* type expressions (used inline by `function-record.v0.2.schema.json`) |
+| `predicate-expression.schema.json` | v0.1 draft | Structured AST for refinement predicates and property tests (used inline by `function-record.v0.2.schema.json`) |
+| `value-expression.schema.json` | v0.1 draft | Structured AST for values in `examples.args` / `examples.result` (used inline by `function-record.v0.2.schema.json`) |
 | `canonical-serialization.md` | v0.1 | Normative spec for canonical form (JCS RFC 8785) and hashing (BLAKE3-256) |
 | `trust-model.md` | v0.1 | Normative spec for the trust model: local trust policy + capability tokens + attestations, no central authority. Built on already-shipped *Nova Locutio* primitives. |
-| `examples/map.json` | example | Concrete function record for `map` |
-| `examples/type-map.json` | example | The type of `map` (`forall a b. (a -> b) -> List a -> List b`) as a structured type-expression AST |
-| `examples/predicate-identity.json` | example | The identity property of `map` as a structured predicate AST |
-| `examples/value-list-int.json` | example | The list `[1, 2, 3]` of natural numbers as a structured value AST |
+| `examples/map.json` | example | Concrete v0.1 function record for `map` (string surface form for type / predicate / value fields) |
+| `examples/map.v0.2.json` | example | Concrete v0.2 function record for `map` (structured ASTs throughout); `supersedes` points at the v0.1 record |
+| `examples/double.v0.2.json` | example | Concrete v0.2 function record for `double` (a `nat -> nat` function); referenced by `map.v0.2.json`'s `examples.args[].fn_ref` |
+| `examples/type-map.json` | example | The type of `map` (`forall a b. (a -> b) -> List a -> List b`) as a standalone structured type-expression AST |
+| `examples/predicate-identity.json` | example | The identity property of `map` as a standalone structured predicate AST |
+| `examples/value-list-int.json` | example | The list `[1, 2, 3]` of natural numbers as a standalone structured value AST |
 | `examples/request.json` | example | Concrete `request` message (apply `map` to `[1,2,3]`); signed with deterministic seed `novae-linguae-example-claude` |
 | `examples/assert.json` | example | Concrete `assert` message claiming an identity property; signed with deterministic seed `novae-linguae-example-verifier` |
 
@@ -53,10 +56,10 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 
 These are real specifications that will arrive in their own schemas. v0.1 stringifies them so we can start populating the commons without blocking on the full design.
 
-1. **Type expression sub-language.** v0.1 `signature.type` in `function-record.schema.json` is still a string in surface syntax. **PARTIALLY RESOLVED 2026-06-04** in [`type-expression.schema.json`](type-expression.schema.json): structured AST with `var`, `ref`, `builtin`, `forall`, `fn`, `apply`, `tuple`, `record`, `sum` kinds is now available. Function-record schema v0.1 does not require it yet (still accepts the string form); the switchover to mandatory structured-AST is planned for function-record schema v0.2. Deferred to v0.2+ of the type-expression schema itself: kind annotations, higher-rank polymorphism, type classes / traits, linear/affine types, existential types, GADTs, type-level lambdas.
-2. **Refinement / predicate expression sub-language.** v0.1 `signature.refinements[].expr` in `function-record.schema.json` is still a string in surface syntax. **PARTIALLY RESOLVED** in [`predicate-expression.schema.json`](predicate-expression.schema.json): structured AST with five kinds (`var`, `lit`, `app`, `forall`, `exists`) covering quantification, function application, boolean connectives (via `app` with the appropriate `op`), comparisons, and arithmetic. Function-record schema v0.1 does not require it yet (still accepts the string form); switchover deferred to function-record schema v0.2.
-3. **Property expression sub-language.** v0.1 `properties[].expr` is still a string. **PARTIALLY RESOLVED**: properties share the same `predicate-expression.schema.json` as refinements — both are predicate expressions, distinguished only by their outer envelope (refinements live under `signature.refinements`, properties under `properties`). Switchover deferred to function-record schema v0.2.
-4. **Value representation in examples.** v0.1 allows any JSON value for `args` and `result`, with a bare-string-for-function-references convention. **PARTIALLY RESOLVED** in [`value-expression.schema.json`](value-expression.schema.json): structured AST with eleven kinds (`bool`, `int`, `nat`, `float`, `string`, `bytes`, `unit`, `list`, `tuple`, `record`, `variant`, `fn_ref`) covering atomic values, compound values, sum variants, and content-addressed function references. Switchover deferred to function-record schema v0.2.
+1. **Type expression sub-language.** v0.1 `signature.type` in `function-record.schema.json` is still a string in surface syntax. **RESOLVED** at the schema layer in [`type-expression.schema.json`](type-expression.schema.json) (nine kinds: `var`, `ref`, `builtin`, `forall`, `fn`, `apply`, `tuple`, `record`, `sum`) with well-formedness checks in `nl-validator check-type`; **made mandatory by [`function-record.v0.2.schema.json`](function-record.v0.2.schema.json)**. Deferred to a later version of the type-expression schema itself: kind annotations, higher-rank polymorphism, type classes / traits, linear/affine types, existential types, GADTs, type-level lambdas.
+2. **Refinement / predicate expression sub-language.** v0.1 `signature.refinements[].expr` in `function-record.schema.json` is still a string in surface syntax. **RESOLVED** at the schema layer in [`predicate-expression.schema.json`](predicate-expression.schema.json), and **made mandatory by [`function-record.v0.2.schema.json`](function-record.v0.2.schema.json)**. New records SHOULD target v0.2; v0.1 records remain valid against their pinned schema.
+3. **Property expression sub-language.** v0.1 `properties[].expr` is still a string. **RESOLVED** — shares `predicate-expression.schema.json` with refinements; made mandatory by `function-record.v0.2.schema.json`.
+4. **Value representation in examples.** v0.1 allows any JSON value for `args` and `result`, with a bare-string-for-function-references convention. **RESOLVED** in [`value-expression.schema.json`](value-expression.schema.json) (eleven kinds: `bool`, `int`, `nat`, `float`, `string`, `bytes`, `unit`, `list`, `tuple`, `record`, `variant`, `fn_ref`); made mandatory by `function-record.v0.2.schema.json`.
 5. **Body representation.** v0.1 references the body by hash (`body_hash`) but does not specify the body's structure. The expression AST is its own spec.
 6. **Canonical serialization for hashing.** ~~v0.1 mentions canonical serialization but does not define it.~~ **RESOLVED in [`canonical-serialization.md`](canonical-serialization.md)**: JCS (RFC 8785) over UTF-8 JSON, BLAKE3-256 as the hash. The reference validator/hasher at [`tooling/validator/`](../tooling/validator/) implements the procedure end-to-end; example records now carry real, reproducible hashes that `nl-validator verify` passes.
 7. **Controlled intent-tag vocabulary.** v0.1 allows any slash-separated lowercase tag. v0.2+ will publish a controlled vocabulary so two agents tag the same concept the same way.

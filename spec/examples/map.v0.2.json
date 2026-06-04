@@ -1,0 +1,189 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_048a873234c674f6c94785e57f6bbe07390ec75fb2e14563dfa4d28e9debcb04",
+  "name_hints": ["map", "fmap", "list_map"],
+  "signature": {
+    "type": {
+      "kind": "forall",
+      "vars": ["a", "b"],
+      "body": {
+        "kind": "fn",
+        "params": [
+          {
+            "kind": "fn",
+            "params": [{ "kind": "var", "name": "a" }],
+            "result": { "kind": "var", "name": "b" }
+          },
+          {
+            "kind": "apply",
+            "ctor": { "kind": "builtin", "name": "List" },
+            "args": [{ "kind": "var", "name": "a" }]
+          }
+        ],
+        "result": {
+          "kind": "apply",
+          "ctor": { "kind": "builtin", "name": "List" },
+          "args": [{ "kind": "var", "name": "b" }]
+        }
+      }
+    },
+    "refinements": [
+      {
+        "kind": "post",
+        "expr": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "length",
+              "args": [{ "kind": "var", "name": "output" }]
+            },
+            {
+              "kind": "app",
+              "op": "length",
+              "args": [{ "kind": "var", "name": "input" }]
+            }
+          ]
+        }
+      }
+    ],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "conditional"
+  },
+  "examples": [
+    {
+      "args": [
+        { "kind": "fn_ref", "target": "fn_7ea396f400609a723f3351f23ad724b63fa0393d784c5bbd3327b4279bba4060" },
+        {
+          "kind": "list",
+          "elems": [
+            { "kind": "nat", "value": 1 },
+            { "kind": "nat", "value": 2 },
+            { "kind": "nat", "value": 3 }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "list",
+        "elems": [
+          { "kind": "nat", "value": 2 },
+          { "kind": "nat", "value": 4 },
+          { "kind": "nat", "value": 6 }
+        ]
+      }
+    },
+    {
+      "args": [
+        { "kind": "fn_ref", "target": "fn_7ea396f400609a723f3351f23ad724b63fa0393d784c5bbd3327b4279bba4060" },
+        { "kind": "list", "elems": [] }
+      ],
+      "result": { "kind": "list", "elems": [] }
+    }
+  ],
+  "properties": [
+    {
+      "name": "identity",
+      "expr": {
+        "kind": "forall",
+        "vars": ["xs"],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "map",
+              "args": [
+                { "kind": "var", "name": "id" },
+                { "kind": "var", "name": "xs" }
+              ]
+            },
+            { "kind": "var", "name": "xs" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "composition",
+      "expr": {
+        "kind": "forall",
+        "vars": ["f", "g", "xs"],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "map",
+              "args": [
+                { "kind": "var", "name": "f" },
+                {
+                  "kind": "app",
+                  "op": "map",
+                  "args": [
+                    { "kind": "var", "name": "g" },
+                    { "kind": "var", "name": "xs" }
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "app",
+              "op": "map",
+              "args": [
+                {
+                  "kind": "app",
+                  "op": "compose",
+                  "args": [
+                    { "kind": "var", "name": "f" },
+                    { "kind": "var", "name": "g" }
+                  ]
+                },
+                { "kind": "var", "name": "xs" }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "length_preserving",
+      "expr": {
+        "kind": "forall",
+        "vars": ["f", "xs"],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "length",
+              "args": [
+                {
+                  "kind": "app",
+                  "op": "map",
+                  "args": [
+                    { "kind": "var", "name": "f" },
+                    { "kind": "var", "name": "xs" }
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "app",
+              "op": "length",
+              "args": [{ "kind": "var", "name": "xs" }]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "intent_tags": ["transform/list", "elementwise"],
+  "derived_from": null,
+  "supersedes": "fn_fd20f137d331c42953ad164bd22cd1e6141cf310999818682832da4eb5fa8b66",
+  "body_hash": "expr_8f2c7d6e5b4a392817160f0e0d0c0b0a09080706050403020100ffeeddccbbaa"
+}
