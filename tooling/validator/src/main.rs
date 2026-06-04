@@ -64,6 +64,15 @@ enum Commands {
         #[arg(long)]
         in_place: bool,
     },
+    /// Run well-formedness checks on a Nova Lingua type expression. Catches
+    /// what JSON Schema cannot express on its own: type-variable scoping
+    /// (vars bound by an enclosing forall), rank-1 polymorphism (no nested
+    /// forall), uniqueness of record fields and sum variant tags, and
+    /// `apply.ctor` being an actual type constructor.
+    CheckType {
+        /// Path to the type-expression document
+        record: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -78,6 +87,7 @@ fn main() -> ExitCode {
             seed,
             in_place,
         } => (cmd_sign(&record, &seed, in_place), false),
+        Commands::CheckType { record } => (cmd_check_type(&record), true),
     };
 
     match result {
@@ -165,6 +175,11 @@ fn cmd_verify(record: &PathBuf) -> Result<()> {
     } else {
         Err(anyhow::anyhow!("verification failed"))
     }
+}
+
+fn cmd_check_type(record: &PathBuf) -> Result<()> {
+    let value = nl_validator::read_json(record)?;
+    nl_validator::check_type_well_formed(&value)
 }
 
 fn cmd_sign(record: &PathBuf, seed: &str, in_place: bool) -> Result<()> {

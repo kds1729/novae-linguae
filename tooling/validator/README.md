@@ -11,7 +11,7 @@ Reference command-line validator, canonicalizer, and hasher for *Novae Linguae* 
 - [x] BLAKE3-256 hash a canonicalized record (`hash` subcommand; auto-detects function-record vs message).
 - [x] Verify the `hash` field on a record matches its computed hash (`verify` subcommand).
 - [x] Verify Ed25519 signatures on *Nova Locutio* messages (`verify` runs hash + signature for messages; `sign --seed <s>` produces deterministically-keyed signed messages).
-- [ ] Well-formedness checks beyond JSON Schema (type-variable scoping, uniqueness within sums and records, ctor-kind compatibility in `apply`).
+- [x] Well-formedness checks for type expressions beyond JSON Schema (`check-type` subcommand): type-variable scoping, rank-1 polymorphism, uniqueness within sums and records, ctor-kind compatibility in `apply`.
 - [ ] Conformance test suite (record → canonical bytes → hash) suitable for cross-implementation byte-equality testing.
 
 ## Build

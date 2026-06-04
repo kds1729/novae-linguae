@@ -6,9 +6,9 @@
 //! schema/instance pair. A cross-implementation conformance test suite
 //! will pin this once a second implementation exists.
 //!
-//! Subsequent versions of this crate will add:
-//! - Well-formedness checks beyond JSON Schema (type-var scoping, uniqueness,
-//!   ctor-kind compatibility)
+//! Subsequent versions of this crate may add:
+//! - Well-formedness checks for refinement / property / value sub-languages
+//!   (once those sub-schemas exist)
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
@@ -355,4 +355,171 @@ pub fn verify_signature(value: &Value) -> Result<()> {
     pubkey
         .verify(&signed_bytes, &signature)
         .map_err(|e| anyhow!("Ed25519 signature verification failed: {e}"))
+}
+
+// ---- well-formedness checks for type expressions ----
+
+/// Check well-formedness of a Nova Lingua type expression. Validates rules
+/// that JSON Schema cannot express on its own:
+///
+/// - **Type-variable scoping**: every `var` is bound by an enclosing `forall`.
+/// - **Rank-1 polymorphism**: `forall` appears only at the outermost position
+///   of a type, never nested inside function-argument positions or other
+///   inner positions.
+/// - **Uniqueness within `record.fields`**: field names are unique.
+/// - **Uniqueness within `sum.variants`**: variant tags are unique.
+/// - **`apply.ctor` kind compatibility**: the ctor must itself be a `var`,
+///   `ref`, `builtin`, or `apply` (chained partial application). Concrete
+///   types like `fn`, `tuple`, `record`, `sum` are not type constructors and
+///   cannot appear in `ctor` position.
+///
+/// Does NOT re-check anything JSON Schema already enforces. Run `validate`
+/// against `type-expression.schema.json` first; this is the second pass.
+pub fn check_type_well_formed(value: &Value) -> Result<()> {
+    check_type_node(value, &[], true)
+}
+
+fn check_type_node(value: &Value, bound_vars: &[String], allow_forall: bool) -> Result<()> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow!("type expression must be a JSON object"))?;
+    let kind = obj
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("type expression is missing the `kind` field"))?;
+
+    match kind {
+        "var" => {
+            let name = obj
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("`var` is missing `name`"))?;
+            if !bound_vars.iter().any(|v| v == name) {
+                return Err(anyhow!(
+                    "type variable `{name}` is not bound by any enclosing forall (in scope: [{}])",
+                    bound_vars.join(", ")
+                ));
+            }
+        }
+        "ref" | "builtin" => {
+            // Leaves; no recursion needed. JSON Schema has already validated
+            // the shape and any enum constraints.
+        }
+        "forall" => {
+            if !allow_forall {
+                return Err(anyhow!(
+                    "forall is only allowed at the outermost position of a type (rank-1 polymorphism, v0.1)"
+                ));
+            }
+            let vars = obj
+                .get("vars")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`forall` is missing `vars`"))?;
+            let mut new_bound: Vec<String> = bound_vars.to_vec();
+            for v in vars {
+                let name = v
+                    .as_str()
+                    .ok_or_else(|| anyhow!("`forall.vars[]` entries must be strings"))?;
+                new_bound.push(name.to_string());
+            }
+            let body = obj
+                .get("body")
+                .ok_or_else(|| anyhow!("`forall` is missing `body`"))?;
+            // Forall body cannot contain another forall in v0.1.
+            check_type_node(body, &new_bound, false)?;
+        }
+        "fn" => {
+            let params = obj
+                .get("params")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`fn` is missing `params`"))?;
+            for p in params {
+                check_type_node(p, bound_vars, false)?;
+            }
+            let result = obj
+                .get("result")
+                .ok_or_else(|| anyhow!("`fn` is missing `result`"))?;
+            check_type_node(result, bound_vars, false)?;
+        }
+        "apply" => {
+            let ctor = obj
+                .get("ctor")
+                .ok_or_else(|| anyhow!("`apply` is missing `ctor`"))?;
+            let ctor_kind = ctor
+                .as_object()
+                .and_then(|o| o.get("kind"))
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("`apply.ctor` must be a type expression with a `kind`"))?;
+            match ctor_kind {
+                "var" | "ref" | "builtin" | "apply" => {}
+                other => {
+                    return Err(anyhow!(
+                        "`apply.ctor` must be of kind var | ref | builtin | apply; got `{other}` (kind `{other}` is not a type constructor)"
+                    ));
+                }
+            }
+            check_type_node(ctor, bound_vars, false)?;
+            let args = obj
+                .get("args")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`apply` is missing `args`"))?;
+            for a in args {
+                check_type_node(a, bound_vars, false)?;
+            }
+        }
+        "tuple" => {
+            let elems = obj
+                .get("elems")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`tuple` is missing `elems`"))?;
+            for e in elems {
+                check_type_node(e, bound_vars, false)?;
+            }
+        }
+        "record" => {
+            let fields = obj
+                .get("fields")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`record` is missing `fields`"))?;
+            let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for f in fields {
+                let name = f
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("`record.fields[]` entries must have `name`"))?;
+                if !seen.insert(name) {
+                    return Err(anyhow!("record field `{name}` appears more than once"));
+                }
+                let ty = f
+                    .get("type")
+                    .ok_or_else(|| anyhow!("`record.fields[].type` is required"))?;
+                check_type_node(ty, bound_vars, false)?;
+            }
+        }
+        "sum" => {
+            let variants = obj
+                .get("variants")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`sum` is missing `variants`"))?;
+            let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for v in variants {
+                let tag = v
+                    .get("tag")
+                    .and_then(|x| x.as_str())
+                    .ok_or_else(|| anyhow!("`sum.variants[]` entries must have `tag`"))?;
+                if !seen.insert(tag) {
+                    return Err(anyhow!("sum variant tag `{tag}` appears more than once"));
+                }
+                if let Some(t) = v.get("type") {
+                    check_type_node(t, bound_vars, false)?;
+                }
+            }
+        }
+        other => {
+            return Err(anyhow!(
+                "unknown type-expression kind `{other}` (expected one of: var, ref, builtin, forall, fn, apply, tuple, record, sum)"
+            ));
+        }
+    }
+    Ok(())
 }
