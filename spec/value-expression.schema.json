@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/value-expression.schema.json",
+  "title": "Nova Lingua Value Expression",
+  "description": "Structured AST for Nova Lingua values. Used (in v0.2+) for fields like `examples.args[i]`, `examples.result`, and any other position where a concrete value appears in a function record. v0.1 covers eleven kinds: bool, int, nat, float, string, bytes, unit, list, tuple, record, variant, fn_ref. The bare-string convention currently used in examples.args (e.g. `\"double\"` to refer to a function) is a v0.1 informal shortcut; v0.2+ will require this structured form in function-record records and rely on bare strings only as JSON-literal string values inside `string`. Well-formedness (type-correct values, record-field uniqueness, variant tag resolution against a known sum) is the verifier's responsibility.",
+  "$ref": "#/$defs/value",
+  "$defs": {
+    "value": {
+      "oneOf": [
+        { "$ref": "#/$defs/bool" },
+        { "$ref": "#/$defs/int" },
+        { "$ref": "#/$defs/nat" },
+        { "$ref": "#/$defs/float" },
+        { "$ref": "#/$defs/string" },
+        { "$ref": "#/$defs/bytes" },
+        { "$ref": "#/$defs/unit" },
+        { "$ref": "#/$defs/list" },
+        { "$ref": "#/$defs/tuple" },
+        { "$ref": "#/$defs/record" },
+        { "$ref": "#/$defs/variant" },
+        { "$ref": "#/$defs/fn_ref" }
+      ],
+      "description": "Any Nova Lingua value. Discriminated by the 'kind' field."
+    },
+    "bool": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "bool" },
+        "value": { "type": "boolean" }
+      }
+    },
+    "int": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "int" },
+        "value": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)$" }
+          ],
+          "description": "Signed integer. JSON numbers are used when the value fits within IEEE-754 double precision exactly (|value| < 2^53). Larger magnitudes MUST be encoded as decimal-digit strings, per spec/canonical-serialization.md."
+        }
+      }
+    },
+    "nat": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "nat" },
+        "value": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" }
+          ],
+          "description": "Non-negative integer. Same big-int convention as `int`."
+        }
+      }
+    },
+    "float": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "float" },
+        "value": {
+          "type": "number",
+          "description": "IEEE-754 double-precision floating point. JCS canonicalization does NOT permit NaN, +Infinity, or -Infinity; do not use them here."
+        }
+      }
+    },
+    "string": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "string" },
+        "value": { "type": "string" }
+      }
+    },
+    "bytes": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "bytes" },
+        "value": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+          "description": "Raw bytes, base64-encoded (standard alphabet, padded). Other encodings deferred."
+        }
+      }
+    },
+    "unit": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "unit" }
+      },
+      "description": "The single inhabitant of the `unit` type."
+    },
+    "list": {
+      "type": "object",
+      "required": ["kind", "elems"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "list" },
+        "elems": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/value" }
+        }
+      },
+      "description": "Homogeneous list (verifier enforces element-type uniformity)."
+    },
+    "tuple": {
+      "type": "object",
+      "required": ["kind", "elems"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "tuple" },
+        "elems": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/value" },
+          "description": "Tuple elements in positional order. A zero-element tuple is the `unit` value (use `unit` kind, not a 0-elem `tuple`). A one-element value is just the element itself."
+        }
+      }
+    },
+    "record": {
+      "type": "object",
+      "required": ["kind", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "record" },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-zA-Z0-9_]*$",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "value": { "$ref": "#/$defs/value" }
+            }
+          },
+          "description": "Field-value pairs. JSON Schema cannot express 'unique by .name'; the verifier checks. Canonical form sorts fields lexicographically by name."
+        }
+      }
+    },
+    "variant": {
+      "type": "object",
+      "required": ["kind", "tag"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "variant" },
+        "tag": {
+          "type": "string",
+          "pattern": "^[A-Z][a-zA-Z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Variant tag, PascalCase per the sum-type convention in type-expression.schema.json."
+        },
+        "payload": {
+          "$ref": "#/$defs/value",
+          "description": "Variant payload. Omit for nullary variants (e.g. `None`, the constructors of an enum)."
+        }
+      },
+      "description": "One inhabitant of a sum type. The verifier resolves the tag against the expected sum type."
+    },
+    "fn_ref": {
+      "type": "object",
+      "required": ["kind", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "fn_ref" },
+        "target": {
+          "type": "string",
+          "pattern": "^fn_[0-9a-f]{64}$",
+          "description": "Content-address of a function in the commons."
+        }
+      },
+      "description": "A first-class function value, referenced by its commons content-address. Replaces the bare-string-naming-a-function convention used in v0.1 examples (`\"double\"` etc.)."
+    }
+  }
+}

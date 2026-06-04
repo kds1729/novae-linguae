@@ -1,0 +1,19 @@
+{
+  "kind": "forall",
+  "vars": ["xs"],
+  "body": {
+    "kind": "app",
+    "op": "eq",
+    "args": [
+      {
+        "kind": "app",
+        "op": "map",
+        "args": [
+          { "kind": "var", "name": "id" },
+          { "kind": "var", "name": "xs" }
+        ]
+      },
+      { "kind": "var", "name": "xs" }
+    ]
+  }
+}

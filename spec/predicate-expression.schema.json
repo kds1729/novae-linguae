@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/predicate-expression.schema.json",
+  "title": "Nova Lingua Predicate Expression",
+  "description": "Structured AST for predicate expressions in Nova Lingua. Used by both refinements (function-record.signature.refinements[].expr) and property tests (function-record.properties[].expr). v0.1 covers five kinds — `var`, `lit`, `app`, `forall`, `exists` — sufficient to express the predicates that appear in standard-library function records (e.g. `length(output) == length(input)` for a refinement; `map(id, xs) == xs` for an identity property). Boolean connectives (and / or / not / implies / iff), comparisons (eq / neq / lt / le / gt / ge), and arithmetic (add / sub / mul / div / mod) are all expressed as `app` with the appropriate string `op`. Well-formedness (variable scoping, op arity, type compatibility) is enforced by the verifier engine, not by JSON Schema. v0.1 of function-record.schema.json does NOT yet require this AST form for `refinement.expr` or `property.expr` (they still accept the string surface form); switchover is planned for function-record schema v0.2.",
+  "$ref": "#/$defs/predicate",
+  "$defs": {
+    "predicate": {
+      "oneOf": [
+        { "$ref": "#/$defs/var" },
+        { "$ref": "#/$defs/lit" },
+        { "$ref": "#/$defs/app" },
+        { "$ref": "#/$defs/forall" },
+        { "$ref": "#/$defs/exists" }
+      ],
+      "description": "Any predicate expression. Discriminated by the 'kind' field."
+    },
+    "var": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "var" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_][a-zA-Z0-9_']*$",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Name in scope. Three sources: (1) a quantified variable from an enclosing forall/exists, (2) an implicit function-record name like `input` or `output`, (3) a name bound by the verifier environment (e.g. a builtin function reference). The verifier resolves these."
+        }
+      },
+      "description": "Reference to a name in scope."
+    },
+    "lit": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "lit" },
+        "value": {
+          "description": "Literal JSON value. v0.1 allows bool, number, string, and null. For values that require fuller structure (lists, records, variants, function refs), use the value-expression sub-language as the literal payload — v0.2+ will integrate these formally."
+        }
+      },
+      "description": "A literal value. The value sub-language (spec/value-expression.schema.json) is the structured alternative when the literal needs to be a compound value."
+    },
+    "app": {
+      "type": "object",
+      "required": ["kind", "op", "args"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "app" },
+        "op": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Operator. Three forms accepted in v0.1: (a) a built-in name from the closed vocabulary below; (b) a content-address reference like `fn_<hex>` to a function in the commons; (c) a name in the enclosing scope (e.g. a higher-order argument). The verifier resolves the form.\n\nBuilt-in v0.1 vocabulary (closed):\n  - Boolean: and, or, not, implies, iff\n  - Comparison: eq, neq, lt, le, gt, ge\n  - Arithmetic: add, sub, mul, div, mod, neg\n  - List: length, head, tail, nil, cons, map, filter, foldl, foldr\n  - Identity/composition: id, compose\nv0.2+ will expand and formalize this set."
+        },
+        "args": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/predicate" },
+          "description": "Operator arguments in positional order. Arity-checking is the verifier's responsibility (JSON Schema cannot express it)."
+        }
+      },
+      "description": "Function or operator application. All non-quantifier compound expressions go through this single form (principle 7: minimal orthogonal vocabulary). Comparisons, boolean connectives, and arithmetic are NOT separate kinds — they are `app` with the corresponding `op`."
+    },
+    "forall": {
+      "type": "object",
+      "required": ["kind", "vars", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "forall" },
+        "vars": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-zA-Z0-9_']*$",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": "Variables introduced by this quantifier. Property tests instantiate them with random inputs."
+        },
+        "body": {
+          "$ref": "#/$defs/predicate",
+          "description": "Predicate that must hold for every assignment of the variables."
+        }
+      },
+      "description": "Universal quantification — 'for all values of these variables, body holds.' Used heavily by property tests."
+    },
+    "exists": {
+      "type": "object",
+      "required": ["kind", "vars", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "exists" },
+        "vars": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-zA-Z0-9_']*$",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "body": { "$ref": "#/$defs/predicate" }
+      },
+      "description": "Existential quantification — 'there exists an assignment of these variables for which body holds.' Less common than forall in properties; useful in refinements that assert reachability."
+    }
+  }
+}

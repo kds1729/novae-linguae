@@ -1,0 +1,8 @@
+{
+  "kind": "list",
+  "elems": [
+    { "kind": "nat", "value": 1 },
+    { "kind": "nat", "value": 2 },
+    { "kind": "nat", "value": 3 }
+  ]
+}
