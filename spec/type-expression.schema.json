@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/type-expression.schema.json",
+  "title": "Nova Lingua Type Expression",
+  "description": "Structured AST for Nova Lingua type expressions. v0.1 covers the basics: variables, references into the commons, built-in primitives and constructors, universal quantification, function types, type-constructor application, tuples, records, and sum types. Deliberately deferred to v0.2+: kind annotations, higher-rank polymorphism, type classes / traits, linear/affine types, existential types, GADTs, type-level lambdas. This schema validates structural shape only — well-formedness constraints (vars bound by an enclosing forall, ctor in 'apply' being a type-constructor, unique sum tags, unique record field names, canonical-form key ordering) are enforced by a separate validator. v0.1 of the function-record schema does NOT yet require this AST form for 'signature.type' (it still accepts a surface-syntax string); switchover is planned for function-record schema v0.2.",
+  "$ref": "#/$defs/type",
+  "$defs": {
+    "type": {
+      "oneOf": [
+        { "$ref": "#/$defs/var" },
+        { "$ref": "#/$defs/ref" },
+        { "$ref": "#/$defs/builtin" },
+        { "$ref": "#/$defs/forall" },
+        { "$ref": "#/$defs/fn" },
+        { "$ref": "#/$defs/apply" },
+        { "$ref": "#/$defs/tuple" },
+        { "$ref": "#/$defs/record" },
+        { "$ref": "#/$defs/sum" }
+      ],
+      "description": "Any type expression. Discriminated by the 'kind' field."
+    },
+    "var": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "var" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9_']*$",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Type-variable name. Must be bound by an enclosing forall (lexical scoping, enforced by separate well-formedness check)."
+        }
+      },
+      "description": "A type variable, e.g. 'a' in 'forall a. List a -> List a'."
+    },
+    "ref": {
+      "type": "object",
+      "required": ["kind", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "ref" },
+        "target": {
+          "type": "string",
+          "pattern": "^type_[0-9a-f]{64}$",
+          "description": "Content-address of a type artifact in the commons."
+        }
+      },
+      "description": "A reference to a content-addressed type in the commons. Used for user-defined types whose identity is the hash of their definition."
+    },
+    "builtin": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "builtin" },
+        "name": {
+          "type": "string",
+          "enum": [
+            "bool",
+            "int",
+            "nat",
+            "float",
+            "string",
+            "bytes",
+            "unit",
+            "never",
+            "List",
+            "Maybe",
+            "Result",
+            "Map",
+            "Set"
+          ],
+          "description": "v0.1 built-in vocabulary. Atomic types (lowercase: bool, int, nat, float, string, bytes, unit, never) and common type constructors (PascalCase: List, Maybe, Result, Map, Set). Closed enum — adding a builtin requires a schema version bump. v0.2+ will likely fold these into 'ref' once the primitives have stable hashes in the commons."
+        }
+      },
+      "description": "A built-in primitive type (atomic) or built-in type constructor. Distinguished from 'ref' because v0.1 does not yet have commons entries for the standard types; v0.2+ may unify."
+    },
+    "forall": {
+      "type": "object",
+      "required": ["kind", "vars", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "forall" },
+        "vars": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-zA-Z0-9_']*$",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": "Type variables introduced by this forall. Canonical form sorts them lexicographically since 'forall a b. T' and 'forall b a. T' are alpha-equivalent in System F."
+        },
+        "body": { "$ref": "#/$defs/type" }
+      },
+      "description": "Universal quantification. v0.1 supports only rank-1: foralls may appear at the outermost position of a type but not nested inside function-argument positions. Higher-rank polymorphism deferred to v0.2+."
+    },
+    "fn": {
+      "type": "object",
+      "required": ["kind", "params", "result"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "fn" },
+        "params": {
+          "type": "array",
+          "minItems": 0,
+          "items": { "$ref": "#/$defs/type" },
+          "description": "Parameter types in positional order. Order is semantic and is preserved in canonical form."
+        },
+        "result": { "$ref": "#/$defs/type" }
+      },
+      "description": "A function type with explicit multi-arg form (uncurried). 'a -> b' is represented as {params: [a], result: b}. A zero-arg function is {params: [], result: T}; this is distinct from 'unit -> T' though semantically equivalent in many languages."
+    },
+    "apply": {
+      "type": "object",
+      "required": ["kind", "ctor", "args"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "apply" },
+        "ctor": {
+          "$ref": "#/$defs/type",
+          "description": "The type constructor being applied. Typically a 'builtin' (e.g. List), a 'ref' (a user-defined constructor in the commons), or a 'var' (a higher-kinded type variable). v0.1 does not statically check that ctor has an appropriate kind — that is a well-formedness pass."
+        },
+        "args": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/type" },
+          "description": "Type arguments in positional order."
+        }
+      },
+      "description": "Type-constructor application, e.g. 'List a' is {ctor: builtin List, args: [var a]}."
+    },
+    "tuple": {
+      "type": "object",
+      "required": ["kind", "elems"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "tuple" },
+        "elems": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/type" },
+          "description": "Element types in positional order. Order is semantic."
+        }
+      },
+      "description": "An anonymous product type with at least two elements. The empty tuple is the 'unit' builtin (not a 0-element tuple); a 1-element tuple is just the element type."
+    },
+    "record": {
+      "type": "object",
+      "required": ["kind", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "record" },
+        "fields": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-zA-Z0-9_]*$",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "type": { "$ref": "#/$defs/type" }
+            }
+          },
+          "description": "Named fields. JSON Schema cannot easily express 'unique by .name'; uniqueness is checked by the validator. Canonical form sorts fields lexicographically by name."
+        }
+      },
+      "description": "A product type with named fields. Distinct from 'tuple' because fields are addressed by name, not position."
+    },
+    "sum": {
+      "type": "object",
+      "required": ["kind", "variants"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "sum" },
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["tag"],
+            "additionalProperties": false,
+            "properties": {
+              "tag": {
+                "type": "string",
+                "pattern": "^[A-Z][a-zA-Z0-9_]*$",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "Variant tag. PascalCase by convention so tags don't collide with type-variable names."
+              },
+              "type": {
+                "$ref": "#/$defs/type",
+                "description": "Payload type for this variant. Omit for nullary variants (e.g. None, True)."
+              }
+            }
+          },
+          "description": "Sum variants. JSON Schema cannot easily express 'unique by .tag'; uniqueness is checked by the validator. Canonical form sorts variants lexicographically by tag."
+        }
+      },
+      "description": "A tagged sum / variant type. Standard ADT form: each variant has a unique tag and an optional payload type."
+    }
+  }
+}

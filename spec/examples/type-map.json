@@ -1,0 +1,24 @@
+{
+  "kind": "forall",
+  "vars": ["a", "b"],
+  "body": {
+    "kind": "fn",
+    "params": [
+      {
+        "kind": "fn",
+        "params": [{ "kind": "var", "name": "a" }],
+        "result": { "kind": "var", "name": "b" }
+      },
+      {
+        "kind": "apply",
+        "ctor": { "kind": "builtin", "name": "List" },
+        "args": [{ "kind": "var", "name": "a" }]
+      }
+    ],
+    "result": {
+      "kind": "apply",
+      "ctor": { "kind": "builtin", "name": "List" },
+      "args": [{ "kind": "var", "name": "b" }]
+    }
+  }
+}

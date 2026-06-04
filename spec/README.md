@@ -8,8 +8,10 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 |------|--------|------|
 | `function-record.schema.json` | v0.1 draft | The mandatory metadata record for every function in *Nova Lingua* |
 | `message.schema.json` | v0.1 draft | The structured speech-act envelope for *Nova Locutio* messages |
+| `type-expression.schema.json` | v0.1 draft | Structured AST for *Nova Lingua* type expressions (not yet required by `function-record.schema.json` — see deferred item #1) |
 | `canonical-serialization.md` | v0.1 | Normative spec for canonical form (JCS RFC 8785) and hashing (BLAKE3-256) |
 | `examples/map.json` | example | Concrete function record for `map` |
+| `examples/type-map.json` | example | The type of `map` (`forall a b. (a -> b) -> List a -> List b`) as a structured type-expression AST |
 | `examples/request.json` | example | Concrete `request` message (apply `double` to `[1,2,3]`) |
 | `examples/assert.json` | example | Concrete `assert` message claiming an identity property |
 
@@ -26,19 +28,24 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 
 - Full structural shape of a function record
 - Full structural shape of a *Nova Locutio* message envelope
+- Structured AST for *Nova Lingua* type expressions (rank-1 polymorphism, no kinds)
 - Closed speech-act vocabulary (nine acts: request, assert, query, propose, commit, retract, delegate, ack, reject)
 - Closed effect vocabulary (ten effects, deliberately minimal)
 - Closed reject-code vocabulary (six codes)
+- Closed type-builtin vocabulary (eight atoms, five constructors)
 - Open capability token format (`cap:path/segment`)
 - Content-address format (`<kind>_<64-hex-blake3>`)
+- Canonical form (JCS) and hash (BLAKE3-256) defined in [`canonical-serialization.md`](canonical-serialization.md)
 - DID-based agent identity, Ed25519 signing
 - Strict `additionalProperties: false` everywhere — unknown fields fail validation
+
+**Well-formedness vs structural validation.** JSON Schema can only check shape. Several constraints are real but live outside the schema and will be enforced by the reference validator when it exists: type-variable scoping (every `var` bound by an enclosing `forall`), uniqueness within sums and records, ctor-kind compatibility in `apply`, and canonical-form key ordering inside types and records.
 
 ## What v0.1 deliberately defers
 
 These are real specifications that will arrive in their own schemas. v0.1 stringifies them so we can start populating the commons without blocking on the full design.
 
-1. **Type expression sub-language.** v0.1 `signature.type` is a string in surface syntax. v0.2+ will define a structured type AST (type variables, foralls, type constructors, kinds).
+1. **Type expression sub-language.** v0.1 `signature.type` in `function-record.schema.json` is still a string in surface syntax. **PARTIALLY RESOLVED 2026-06-04** in [`type-expression.schema.json`](type-expression.schema.json): structured AST with `var`, `ref`, `builtin`, `forall`, `fn`, `apply`, `tuple`, `record`, `sum` kinds is now available. Function-record schema v0.1 does not require it yet (still accepts the string form); the switchover to mandatory structured-AST is planned for function-record schema v0.2. Deferred to v0.2+ of the type-expression schema itself: kind annotations, higher-rank polymorphism, type classes / traits, linear/affine types, existential types, GADTs, type-level lambdas.
 2. **Refinement / predicate expression sub-language.** v0.1 stringifies refinement predicates. v0.2+ will define a structured predicate AST evaluable by the verification engine.
 3. **Property expression sub-language.** Same — v0.1 stringifies; v0.2+ will define an AST executable by a property-based testing engine.
 4. **Value representation in examples.** v0.1 allows any JSON value for `args` and `result`. As a v0.1 convention, function references in argument positions are written as bare strings naming the function (e.g. `"double"`) — informal and ambiguous with string literals, accepted only because the value sub-language is not yet defined. v0.2+ will define a canonical value representation including function references, opaque handles, and structured constants.
