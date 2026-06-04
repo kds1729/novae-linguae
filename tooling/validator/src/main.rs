@@ -40,11 +40,29 @@ enum Commands {
         /// Path to the artifact (function record or Nova Locutio message)
         record: PathBuf,
     },
-    /// Verify that the `hash` field on an artifact equals its recomputed
-    /// content-hash. Exit code 0 on PASS, 1 on FAIL (mismatch or missing).
+    /// Verify an artifact end-to-end. For function records: hash check only.
+    /// For Nova Locutio messages: hash check AND Ed25519 signature check.
+    /// Exit code 0 on PASS, 1 on FAIL.
     Verify {
         /// Path to the artifact (function record or Nova Locutio message)
         record: PathBuf,
+    },
+    /// Sign a Nova Locutio message with a deterministic Ed25519 key derived
+    /// from the given seed. Sets `from` to the resulting did:nova: DID,
+    /// recomputes `hash`, and writes a real Ed25519 signature into the
+    /// `signature` field. Writes the signed message to stdout, or back to
+    /// the input file when `--in-place` is given.
+    Sign {
+        /// Path to the message to sign
+        record: PathBuf,
+        /// Seed string used to derive the signing key deterministically.
+        /// Same seed = same key = same signature.
+        #[arg(long)]
+        seed: String,
+        /// Write the signed message back to the input file rather than to
+        /// stdout.
+        #[arg(long)]
+        in_place: bool,
     },
 }
 
@@ -55,6 +73,11 @@ fn main() -> ExitCode {
         Commands::Canonicalize { record } => (cmd_canonicalize(&record), false),
         Commands::Hash { record } => (cmd_hash(&record), false),
         Commands::Verify { record } => (cmd_verify(&record), false),
+        Commands::Sign {
+            record,
+            seed,
+            in_place,
+        } => (cmd_sign(&record, &seed, in_place), false),
     };
 
     match result {
@@ -96,24 +119,78 @@ fn cmd_hash(record: &PathBuf) -> Result<()> {
 
 fn cmd_verify(record: &PathBuf) -> Result<()> {
     let value = nl_validator::read_json(record)?;
+    let kind = nl_validator::ArtifactKind::detect(&value)?;
     let v = nl_validator::verify_artifact_hash(&value)?;
-    match v.stored {
-        Some(stored) if v.matches => {
-            println!("PASS  {stored}");
-            Ok(())
+
+    // Hash check (both artifact kinds have a `hash` field).
+    let (hash_pass, hash_line) = match (&v.stored, v.matches) {
+        (Some(stored), true) => (true, format!("hash      PASS  {stored}")),
+        (Some(stored), false) => (
+            false,
+            format!(
+                "hash      FAIL  mismatch\n  stored:   {stored}\n  computed: {}",
+                v.computed
+            ),
+        ),
+        (None, _) => (
+            false,
+            format!(
+                "hash      FAIL  no `hash` field on artifact\n  computed: {}",
+                v.computed
+            ),
+        ),
+    };
+    println!("{hash_line}");
+
+    // Signature check (messages only).
+    let sig_pass = match kind {
+        nl_validator::ArtifactKind::FunctionRecord => {
+            println!("signature N/A   function records have no signature");
+            true
         }
-        Some(stored) => {
-            println!("FAIL  hash mismatch");
-            println!("  stored:   {stored}");
-            println!("  computed: {}", v.computed);
-            Err(anyhow::anyhow!("stored hash does not match computed hash"))
-        }
-        None => {
-            println!("FAIL  no `hash` field on artifact");
-            println!("  computed: {}", v.computed);
-            Err(anyhow::anyhow!(
-                "artifact has no stored `hash` field; nothing to verify against"
-            ))
+        nl_validator::ArtifactKind::Message => match nl_validator::verify_signature(&value) {
+            Ok(()) => {
+                println!("signature PASS");
+                true
+            }
+            Err(e) => {
+                println!("signature FAIL  {e:#}");
+                false
+            }
+        },
+    };
+
+    if hash_pass && sig_pass {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("verification failed"))
+    }
+}
+
+fn cmd_sign(record: &PathBuf, seed: &str, in_place: bool) -> Result<()> {
+    use std::io::Write;
+    let mut value = nl_validator::read_json(record)?;
+    // Refuse to sign anything that isn't a Nova Locutio message — signing a
+    // function record makes no sense in v0.1.
+    match nl_validator::ArtifactKind::detect(&value)? {
+        nl_validator::ArtifactKind::Message => {}
+        nl_validator::ArtifactKind::FunctionRecord => {
+            return Err(anyhow::anyhow!(
+                "`sign` only applies to Nova Locutio messages; got a function record"
+            ));
         }
     }
+    let key = nl_validator::signing_key_from_seed(seed);
+    nl_validator::sign_message(&mut value, &key)?;
+    let pretty = serde_json::to_string_pretty(&value)
+        .map_err(|e| anyhow::anyhow!("serializing signed message: {e}"))?;
+    if in_place {
+        std::fs::write(record, format!("{pretty}\n"))
+            .map_err(|e| anyhow::anyhow!("writing {}: {e}", record.display()))?;
+        eprintln!("signed in place: {}", record.display());
+    } else {
+        std::io::stdout().write_all(pretty.as_bytes())?;
+        std::io::stdout().write_all(b"\n")?;
+    }
+    Ok(())
 }

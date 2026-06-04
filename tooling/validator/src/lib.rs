@@ -7,7 +7,6 @@
 //! will pin this once a second implementation exists.
 //!
 //! Subsequent versions of this crate will add:
-//! - Ed25519 signature verification for Nova Locutio messages
 //! - Well-formedness checks beyond JSON Schema (type-var scoping, uniqueness,
 //!   ctor-kind compatibility)
 
@@ -205,4 +204,155 @@ pub fn verify_artifact_hash(value: &Value) -> Result<HashVerification> {
         computed,
         matches,
     })
+}
+
+// ---- Ed25519 signing and verification (Nova Locutio messages) ----
+
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+
+/// Derive a deterministic Ed25519 signing key from a seed string. The seed is
+/// BLAKE3-hashed to 32 bytes which become the secret-key scalar. Identical
+/// seeds always produce identical keypairs — useful for reproducible
+/// examples, harmless as a security matter when the seed itself is public.
+pub fn signing_key_from_seed(seed: &str) -> SigningKey {
+    let h = blake3_hash(seed.as_bytes());
+    SigningKey::from_bytes(&h)
+}
+
+/// Format an Ed25519 verifying key as `did:nova:<64-hex>`, the v0.1 DID method
+/// for Novae Linguae. The 64 hex chars are the raw 32-byte Ed25519 public key,
+/// which lets a receiver extract the public key from the DID without any
+/// resolver lookup.
+pub fn did_nova_from_pubkey(pubkey: &VerifyingKey) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity("did:nova:".len() + 64);
+    s.push_str("did:nova:");
+    for byte in pubkey.as_bytes() {
+        write!(s, "{:02x}", byte).expect("writing to String is infallible");
+    }
+    s
+}
+
+/// Parse a `did:nova:<64-hex>` DID and extract its embedded Ed25519 verifying
+/// key. Other DID methods (e.g. `did:key:`) are not supported in v0.1.
+pub fn pubkey_from_did_nova(did: &str) -> Result<VerifyingKey> {
+    let suffix = did
+        .strip_prefix("did:nova:")
+        .ok_or_else(|| anyhow!("v0.1 only supports did:nova: DIDs; got {did}"))?;
+    if suffix.len() != 64 {
+        return Err(anyhow!(
+            "did:nova suffix must be 64 hex chars, got {} chars in {did}",
+            suffix.len()
+        ));
+    }
+    let mut bytes = [0u8; 32];
+    for i in 0..32 {
+        bytes[i] = u8::from_str_radix(&suffix[i * 2..i * 2 + 2], 16)
+            .map_err(|e| anyhow!("invalid hex in DID {did}: {e}"))?;
+    }
+    VerifyingKey::from_bytes(&bytes)
+        .map_err(|e| anyhow!("DID does not encode a valid Ed25519 public key: {e}"))
+}
+
+/// Encode an Ed25519 signature as `ed25519:<base64>`.
+pub fn format_signature(sig: &Signature) -> String {
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::STANDARD;
+    format!("ed25519:{}", engine.encode(sig.to_bytes()))
+}
+
+/// Parse an `ed25519:<base64>` signature string into an Ed25519 signature.
+pub fn parse_signature(s: &str) -> Result<Signature> {
+    use base64::Engine;
+    let b64 = s
+        .strip_prefix("ed25519:")
+        .ok_or_else(|| anyhow!("signature must start with 'ed25519:': {s}"))?;
+    let engine = base64::engine::general_purpose::STANDARD;
+    let bytes = engine
+        .decode(b64)
+        .map_err(|e| anyhow!("invalid base64 in signature: {e}"))?;
+    if bytes.len() != 64 {
+        return Err(anyhow!(
+            "Ed25519 signature must be 64 bytes; got {}",
+            bytes.len()
+        ));
+    }
+    let arr: [u8; 64] = bytes
+        .try_into()
+        .map_err(|_| anyhow!("signature byte conversion failed"))?;
+    Ok(Signature::from_bytes(&arr))
+}
+
+/// Sign a Nova Locutio message in place. Sets:
+/// 1. `from` to the `did:nova:<hex>` of the signing key's public key.
+/// 2. `hash` to BLAKE3-256(canonical(msg − {hash, signature})), prefixed `msg_`.
+/// 3. `signature` to ed25519:<base64-of-Ed25519(canonical(msg − {signature}))>.
+///
+/// The hash is included in what is signed, so signature also covers the hash.
+/// Both transformations operate on the same JSON object; the caller passes a
+/// mutable reference.
+pub fn sign_message(value: &mut Value, signing_key: &SigningKey) -> Result<()> {
+    let pubkey = signing_key.verifying_key();
+    let did = did_nova_from_pubkey(&pubkey);
+
+    // Set `from` to match the signing identity.
+    let obj = value
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("expected JSON object at top level"))?;
+    obj.insert("from".to_string(), Value::String(did));
+
+    // Compute and set `hash` = BLAKE3(canonical(msg − {hash, signature})).
+    let mut for_hash = Value::Object(obj.clone());
+    if let Some(map) = for_hash.as_object_mut() {
+        map.remove("hash");
+        map.remove("signature");
+    }
+    let canonical_h = canonicalize(&for_hash)?;
+    let h = blake3_hash(&canonical_h);
+    let hash_str = format_hash("msg", &h);
+    obj.insert("hash".to_string(), Value::String(hash_str));
+
+    // Compute and set `signature` = Ed25519(canonical(msg − {signature})).
+    // The hash field IS included in the signed bytes.
+    let mut for_sig = Value::Object(obj.clone());
+    if let Some(map) = for_sig.as_object_mut() {
+        map.remove("signature");
+    }
+    let canonical_s = canonicalize(&for_sig)?;
+    let sig = signing_key.sign(&canonical_s);
+    obj.insert("signature".to_string(), Value::String(format_signature(&sig)));
+
+    Ok(())
+}
+
+/// Verify the Ed25519 signature on a message. Extracts the public key from the
+/// `from` DID, recomputes canonical(msg − {signature}), and checks the
+/// signature against the public key.
+pub fn verify_signature(value: &Value) -> Result<()> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow!("expected JSON object at top level"))?;
+
+    let from = obj
+        .get("from")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("message has no `from` field"))?;
+    let pubkey = pubkey_from_did_nova(from)
+        .context("resolving public key from `from` DID")?;
+
+    let sig_str = obj
+        .get("signature")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("message has no `signature` field"))?;
+    let signature = parse_signature(sig_str).context("parsing `signature` field")?;
+
+    let mut for_sig = Value::Object(obj.clone());
+    if let Some(map) = for_sig.as_object_mut() {
+        map.remove("signature");
+    }
+    let signed_bytes = canonicalize(&for_sig)?;
+
+    pubkey
+        .verify(&signed_bytes, &signature)
+        .map_err(|e| anyhow!("Ed25519 signature verification failed: {e}"))
 }
