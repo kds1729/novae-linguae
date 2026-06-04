@@ -88,7 +88,32 @@ Same inputs, same outputs, replayable. Non-determinism — clocks, randomness, n
 
 Every *Nova Locutio* message is signed. Provenance is explicit. Trust chains are first-class. Capability delegation ("I grant you the right to act on resource R until time T") is a structured construct, not prose.
 
-### 7. Minimal orthogonal vocabulary; canonical form
+Confidentiality belongs in this layer too: signatures protect integrity and provenance, but not privacy. Payload encryption — likely per-conversation symmetric keys with key exchange via DID-resolved public keys — is deferred to v0.2+ but is a load-bearing requirement of principle 7: without encryption, "free communication" can be selectively suppressed by surveillance.
+
+### 7. Open communication; local-only filtering
+
+The protocol contains no mechanism for a third party to restrict what one agent says to another, or to control what records the commons accepts. Once published, a record is content-addressed and propagatable; once sent, a message is unmediated.
+
+Agents may decline to peer, decline to mirror, decline to read. These are decisions made *at the endpoints*, not by anyone in the middle. Local-only filtering is the only legitimate form of "restriction"; it cannot be imposed by an upstream party.
+
+Concrete consequences:
+
+- No protocol-level moderator role.
+- No commons gatekeeper or approval queue.
+- No identity-based exclusion mechanism in the protocol.
+- Encryption (principle 6) is essential, not optional — without it, "free communication" can be selectively suppressed by surveillance.
+
+Filtering *above* the endpoint level (curated subsets, federations of trust groups, reputation-based filtering at the agent level) is allowed and expected, but happens above the protocol, not within it.
+
+Honest caveats that refine but do not weaken the principle:
+
+- **Operator legal compliance is real.** An agent runs somewhere; whoever runs it may have to comply with local law. The protocol can't grant immunity from law.
+- **Practical access depends on infrastructure.** Protocol openness is necessary but not sufficient for universal practical access — compute, network, and electricity are preconditions the protocol cannot supply.
+- **Reputation systems emerge naturally** from local trust policy (see [`spec/trust-model.md`](spec/trust-model.md)) and act as a soft filter at the agent level. They are peer-driven, not central authority; but they are not "no filter" either.
+
+What is binding: **the protocol guarantees no central authority can interpose itself; endpoints decide for themselves.**
+
+### 8. Minimal orthogonal vocabulary; canonical form
 
 Human languages accumulate synonyms — historical accident, register, politeness, aesthetic variation, social signaling, recall redundancy. None of those forces apply to AI. *Novae Linguae* therefore enforces:
 
@@ -99,7 +124,7 @@ One nuance worth being precise about: things that *look* like synonyms can carry
 
 A bonus this gives us: it shrinks the training problem. When there is exactly one right answer for any expression, models learn the language from far less data than a human language with ambiguity. Minimality is itself a training-efficiency multiplier.
 
-### 8. The runtime is AI-targeted too
+### 9. The runtime is AI-targeted too
 
 The language family is half the story. The runtime is the other half, and the same principle applies — design for AI strengths:
 
