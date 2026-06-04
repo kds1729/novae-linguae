@@ -7,8 +7,6 @@
 //! will pin this once a second implementation exists.
 //!
 //! Subsequent versions of this crate will add:
-//! - End-to-end record hash verification (`hash_artifact` is in place; the
-//!   compare-against-stored-`hash`-field step is the next commit's job)
 //! - Ed25519 signature verification for Nova Locutio messages
 //! - Well-formedness checks beyond JSON Schema (type-var scoping, uniqueness,
 //!   ctor-kind compatibility)
@@ -172,4 +170,39 @@ pub fn hash_artifact(value: &Value) -> Result<String> {
     let canonical = canonicalize(&stripped)?;
     let hash = blake3_hash(&canonical);
     Ok(format_hash(kind.prefix(), &hash))
+}
+
+// ---- hash verification ----
+
+/// Result of comparing an artifact's stored `hash` field to its recomputed
+/// content-hash.
+#[derive(Debug, Clone)]
+pub struct HashVerification {
+    /// The hash recorded in the artifact's `hash` field, if any. `None` means
+    /// the artifact had no `hash` field at all.
+    pub stored: Option<String>,
+    /// The hash computed from the artifact's current contents.
+    pub computed: String,
+    /// True iff a stored hash existed and equals the computed hash.
+    pub matches: bool,
+}
+
+/// Verify an artifact's stored `hash` against its recomputed content-hash.
+///
+/// Returns `Ok(HashVerification { … })` with all three fields populated. The
+/// caller decides how to interpret a `None` stored hash or a `matches: false`
+/// result. This function returns `Err` only when the artifact cannot be
+/// hashed at all (e.g. shape isn't a recognized kind).
+pub fn verify_artifact_hash(value: &Value) -> Result<HashVerification> {
+    let stored = value
+        .get("hash")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let computed = hash_artifact(value)?;
+    let matches = stored.as_deref() == Some(computed.as_str());
+    Ok(HashVerification {
+        stored,
+        computed,
+        matches,
+    })
 }

@@ -40,6 +40,12 @@ enum Commands {
         /// Path to the artifact (function record or Nova Locutio message)
         record: PathBuf,
     },
+    /// Verify that the `hash` field on an artifact equals its recomputed
+    /// content-hash. Exit code 0 on PASS, 1 on FAIL (mismatch or missing).
+    Verify {
+        /// Path to the artifact (function record or Nova Locutio message)
+        record: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -48,6 +54,7 @@ fn main() -> ExitCode {
         Commands::Validate { schema, record } => (cmd_validate(&schema, &record), true),
         Commands::Canonicalize { record } => (cmd_canonicalize(&record), false),
         Commands::Hash { record } => (cmd_hash(&record), false),
+        Commands::Verify { record } => (cmd_verify(&record), false),
     };
 
     match result {
@@ -85,4 +92,28 @@ fn cmd_hash(record: &PathBuf) -> Result<()> {
     let hash = nl_validator::hash_artifact(&value)?;
     println!("{hash}");
     Ok(())
+}
+
+fn cmd_verify(record: &PathBuf) -> Result<()> {
+    let value = nl_validator::read_json(record)?;
+    let v = nl_validator::verify_artifact_hash(&value)?;
+    match v.stored {
+        Some(stored) if v.matches => {
+            println!("PASS  {stored}");
+            Ok(())
+        }
+        Some(stored) => {
+            println!("FAIL  hash mismatch");
+            println!("  stored:   {stored}");
+            println!("  computed: {}", v.computed);
+            Err(anyhow::anyhow!("stored hash does not match computed hash"))
+        }
+        None => {
+            println!("FAIL  no `hash` field on artifact");
+            println!("  computed: {}", v.computed);
+            Err(anyhow::anyhow!(
+                "artifact has no stored `hash` field; nothing to verify against"
+            ))
+        }
+    }
 }
