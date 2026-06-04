@@ -1,6 +1,6 @@
 {
   "schema_version": "0.2.0",
-  "hash": "fn_048a873234c674f6c94785e57f6bbe07390ec75fb2e14563dfa4d28e9debcb04",
+  "hash": "fn_c81d8dbfa3c91e953d911cca506f6980da5281f63c4541f340771f4b61a7d6eb",
   "name_hints": ["map", "fmap", "list_map"],
   "signature": {
     "type": {
@@ -56,7 +56,7 @@
   "examples": [
     {
       "args": [
-        { "kind": "fn_ref", "target": "fn_7ea396f400609a723f3351f23ad724b63fa0393d784c5bbd3327b4279bba4060" },
+        { "kind": "fn_ref", "target": "fn_0d7bd32d7d3ff63299e4139b051ffcc6e18a0ef23b670feb186dd0262c511c8e" },
         {
           "kind": "list",
           "elems": [
@@ -77,7 +77,7 @@
     },
     {
       "args": [
-        { "kind": "fn_ref", "target": "fn_7ea396f400609a723f3351f23ad724b63fa0393d784c5bbd3327b4279bba4060" },
+        { "kind": "fn_ref", "target": "fn_0d7bd32d7d3ff63299e4139b051ffcc6e18a0ef23b670feb186dd0262c511c8e" },
         { "kind": "list", "elems": [] }
       ],
       "result": { "kind": "list", "elems": [] }

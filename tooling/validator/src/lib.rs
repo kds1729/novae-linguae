@@ -74,15 +74,18 @@ pub fn canonicalize(value: &Value) -> Result<Vec<u8>> {
 pub enum ArtifactKind {
     FunctionRecord,
     Message,
+    BodyExpression,
 }
 
 impl ArtifactKind {
     /// Fields stripped from the artifact before JCS-canonicalizing and hashing,
-    /// per `spec/canonical-serialization.md`.
+    /// per `spec/canonical-serialization.md`. Body expressions have no embedded
+    /// `hash` field — the whole expression IS what gets hashed.
     fn strip_fields(self) -> &'static [&'static str] {
         match self {
             ArtifactKind::FunctionRecord => &["hash"],
             ArtifactKind::Message => &["hash", "signature"],
+            ArtifactKind::BodyExpression => &[],
         }
     }
 
@@ -91,16 +94,25 @@ impl ArtifactKind {
         match self {
             ArtifactKind::FunctionRecord => "fn",
             ArtifactKind::Message => "msg",
+            ArtifactKind::BodyExpression => "expr",
         }
     }
 
     /// Auto-detect the artifact kind from the JSON shape.
     ///
-    /// A *Nova Locutio* message has a top-level `kind` field whose value is
-    /// one of the v0.1 speech acts. A function record does not have a `kind`
-    /// field but has both `signature` and `body_hash`. v0.1 supports these
-    /// two independently-hashable artifact kinds; type expressions are
-    /// embedded sub-values and are not hashed at the top level.
+    /// - A *Nova Locutio* message has a top-level `kind` field whose value is
+    ///   one of the v0.1 speech acts.
+    /// - A body expression has a top-level `kind` field whose value is one of
+    ///   the v0.1 body-expression kinds (`var`, `lit`, `app`, `let`, `lambda`,
+    ///   `case`, `field`).
+    /// - A function record does not have a `kind` field but has both
+    ///   `signature` and `body_hash`.
+    ///
+    /// Type expressions and predicate expressions overlap with body-expression
+    /// on some kind names (e.g. `var`, `app`) but are not independently
+    /// hashable in v0.1 — they live as embedded sub-trees of function records.
+    /// At this layer, those kinds are assumed to be body expressions; pass an
+    /// explicit kind to `hash_artifact_with_kind` if you need otherwise.
     pub fn detect(value: &Value) -> Result<Self> {
         let obj = value
             .as_object()
@@ -114,6 +126,15 @@ impl ArtifactKind {
             if SPEECH_ACTS.contains(&kind_str) {
                 return Ok(ArtifactKind::Message);
             }
+            const BODY_KINDS: &[&str] = &[
+                "var", "lit", "app", "let", "lambda", "case", "field",
+            ];
+            if BODY_KINDS.contains(&kind_str) {
+                return Ok(ArtifactKind::BodyExpression);
+            }
+            return Err(anyhow!(
+                "cannot auto-detect artifact kind from top-level `kind` = `{kind_str}`. Not a Nova Locutio speech act and not a body-expression kind. Type expressions and predicate expressions are not independently hashable at this layer in v0.1."
+            ));
         }
 
         if obj.contains_key("signature") && obj.contains_key("body_hash") {
@@ -121,7 +142,7 @@ impl ArtifactKind {
         }
 
         Err(anyhow!(
-            "could not detect artifact kind from JSON shape — expected a function record (has 'signature' and 'body_hash') or a Nova Locutio message (has 'kind' with a v0.1 speech-act value)"
+            "could not detect artifact kind from JSON shape — expected a function record (has 'signature' and 'body_hash'), a Nova Locutio message (top-level `kind` is a speech act), or a body expression (top-level `kind` is one of var/lit/app/let/lambda/case/field)"
         ))
     }
 }
@@ -160,15 +181,21 @@ pub fn format_hash(prefix: &str, hash: &[u8; 32]) -> String {
     out
 }
 
-/// Compute the content-hash of an artifact end-to-end:
-/// detect kind, strip the appropriate fields, JCS-canonicalize, BLAKE3-256,
-/// and format with the kind's prefix. Returns e.g. `fn_<hex>` or `msg_<hex>`.
-pub fn hash_artifact(value: &Value) -> Result<String> {
-    let kind = ArtifactKind::detect(value)?;
+/// Compute the content-hash of an artifact end-to-end, with the given kind:
+/// strip the kind-appropriate fields, JCS-canonicalize, BLAKE3-256, and format
+/// with the kind's prefix. Returns e.g. `fn_<hex>`, `msg_<hex>`, `expr_<hex>`.
+pub fn hash_artifact_with_kind(value: &Value, kind: ArtifactKind) -> Result<String> {
     let stripped = strip_for_hash(value, kind);
     let canonical = canonicalize(&stripped)?;
     let hash = blake3_hash(&canonical);
     Ok(format_hash(kind.prefix(), &hash))
+}
+
+/// Compute the content-hash of an artifact, auto-detecting its kind from the
+/// JSON shape. See `ArtifactKind::detect` for the detection rules.
+pub fn hash_artifact(value: &Value) -> Result<String> {
+    let kind = ArtifactKind::detect(value)?;
+    hash_artifact_with_kind(value, kind)
 }
 
 // ---- hash verification ----
@@ -186,24 +213,30 @@ pub struct HashVerification {
     pub matches: bool,
 }
 
-/// Verify an artifact's stored `hash` against its recomputed content-hash.
-///
-/// Returns `Ok(HashVerification { … })` with all three fields populated. The
-/// caller decides how to interpret a `None` stored hash or a `matches: false`
-/// result. This function returns `Err` only when the artifact cannot be
-/// hashed at all (e.g. shape isn't a recognized kind).
-pub fn verify_artifact_hash(value: &Value) -> Result<HashVerification> {
+/// Verify an artifact's stored `hash` against its recomputed content-hash,
+/// using the supplied kind.
+pub fn verify_artifact_hash_with_kind(
+    value: &Value,
+    kind: ArtifactKind,
+) -> Result<HashVerification> {
     let stored = value
         .get("hash")
         .and_then(|v| v.as_str())
         .map(String::from);
-    let computed = hash_artifact(value)?;
+    let computed = hash_artifact_with_kind(value, kind)?;
     let matches = stored.as_deref() == Some(computed.as_str());
     Ok(HashVerification {
         stored,
         computed,
         matches,
     })
+}
+
+/// Verify an artifact's stored `hash` against its recomputed content-hash,
+/// auto-detecting the kind from the JSON shape.
+pub fn verify_artifact_hash(value: &Value) -> Result<HashVerification> {
+    let kind = ArtifactKind::detect(value)?;
+    verify_artifact_hash_with_kind(value, kind)
 }
 
 // ---- Ed25519 signing and verification (Nova Locutio messages) ----
