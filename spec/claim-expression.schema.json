@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/claim-expression.schema.json",
+  "title": "Nova Locutio Claim Expression",
+  "description": "Structured AST for claims made by the `assert` speech act. The v0.1 message schema's `assert.claim` is a string in surface syntax; this schema defines the structured form that v0.2+ of the message schema will require. Three kinds in v0.1: `predicate` (wraps an arbitrary predicate-expression), `satisfies` (subject satisfies a named property — the common case, sugar for a `predicate` with the equivalent `app('satisfies', subject, property)` shape), and `verified` (subject has been verified by some agent, optionally with a proof certificate). The predicate sub-tree is opaque at this layer; it must validate independently against predicate-expression.schema.json. Higher-level reasoning over claims (e.g. consequence-of, contradicts-with, supports) is the verifier's job and not part of this schema.",
+  "$ref": "#/$defs/claim",
+  "$defs": {
+    "claim": {
+      "oneOf": [
+        { "$ref": "#/$defs/predicate" },
+        { "$ref": "#/$defs/satisfies" },
+        { "$ref": "#/$defs/verified" }
+      ]
+    },
+    "predicate": {
+      "type": "object",
+      "required": ["kind", "expr"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "predicate" },
+        "expr": {
+          "type": "object",
+          "description": "A predicate-expression AST. Must validate against predicate-expression.schema.json; checked structurally only here."
+        }
+      },
+      "description": "An arbitrary predicate. Use when no more specific kind fits."
+    },
+    "satisfies": {
+      "type": "object",
+      "required": ["kind", "subject", "property"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "satisfies" },
+        "subject": {
+          "type": "string",
+          "pattern": "^(fn|expr|type|proof|msg)_[0-9a-f]{64}$",
+          "description": "Content-address of the artifact the claim is about (typically a function record)."
+        },
+        "property": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Name of the property the subject satisfies. Resolved against the subject's own `properties[]` list (for function records)."
+        },
+        "evidence": {
+          "type": "string",
+          "pattern": "^proof_[0-9a-f]{64}$",
+          "description": "Optional content-address of a proof certificate."
+        }
+      },
+      "description": "Most common assert shape: 'subject satisfies its declared property `name`.' Sugar over a `predicate` claim of `app('satisfies', subject, property)`."
+    },
+    "verified": {
+      "type": "object",
+      "required": ["kind", "subject", "by"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "verified" },
+        "subject": {
+          "type": "string",
+          "pattern": "^(fn|expr|type|proof|msg)_[0-9a-f]{64}$",
+          "description": "Content-address of the artifact that has been verified."
+        },
+        "by": {
+          "type": "string",
+          "pattern": "^did:[a-z0-9]+:[A-Za-z0-9._:-]+$",
+          "description": "DID of the agent that performed the verification."
+        },
+        "proof": {
+          "type": "string",
+          "pattern": "^proof_[0-9a-f]{64}$",
+          "description": "Optional content-address of the proof certificate produced."
+        }
+      },
+      "description": "A meta-claim: 'this artifact has been verified by this agent (optionally with proof X).' Lets agents build attestation chains where one verifier vouches for the work of another."
+    }
+  }
+}

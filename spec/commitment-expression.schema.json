@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/commitment-expression.schema.json",
+  "title": "Nova Locutio Commitment Expression",
+  "description": "Structured AST for the commitment made by the `commit` speech act. The v0.1 message schema's `commit.commitment` is a string in surface syntax; this schema defines the structured form that v0.2+ of the message schema will require. Three kinds in v0.1: `apply` (commit to applying a specific function), `provide` (commit to providing a specific artifact), `refrain` (commit NOT to do something — useful for narrowing capabilities). All three accept an optional ISO 8601 deadline (`by` for apply/provide, `until` for refrain). Higher-level reasoning over commitments (e.g. conditional commitments, retraction protocols, breach detection) is the verifier's job and not part of this schema.",
+  "$ref": "#/$defs/commitment",
+  "$defs": {
+    "commitment": {
+      "oneOf": [
+        { "$ref": "#/$defs/apply" },
+        { "$ref": "#/$defs/provide" },
+        { "$ref": "#/$defs/refrain" }
+      ]
+    },
+    "apply": {
+      "type": "object",
+      "required": ["kind", "fn"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "apply" },
+        "fn": {
+          "type": "string",
+          "pattern": "^fn_[0-9a-f]{64}$",
+          "description": "Content-address of the function the sender commits to applying."
+        },
+        "args": {
+          "type": "array",
+          "description": "Arguments to pass. v0.1 accepts any JSON shape — values are opaque at this layer. v0.2+ will require value-expression form."
+        },
+        "by": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional ISO 8601 deadline by which the apply must complete."
+        }
+      },
+      "description": "Sender commits to applying a specific function to specific arguments, optionally by a deadline."
+    },
+    "provide": {
+      "type": "object",
+      "required": ["kind", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "provide" },
+        "target": {
+          "type": "string",
+          "pattern": "^(fn|expr|type|proof|msg)_[0-9a-f]{64}$",
+          "description": "Content-address of the artifact the sender commits to providing — making available, transmitting, or contributing to the commons."
+        },
+        "by": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional ISO 8601 deadline by which the artifact must be provided."
+        }
+      },
+      "description": "Sender commits to providing a specific artifact by its content-address. The artifact may not exist yet (sender commits to producing it); or it may exist but be private and the sender commits to making it available."
+    },
+    "refrain": {
+      "type": "object",
+      "required": ["kind", "from"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "refrain" },
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "description": "v0.1: free-text description of what the sender commits NOT to do. v0.2+ will define a structured form (likely a negated apply/provide commitment)."
+        },
+        "until": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional ISO 8601 deadline through which the refrain holds. Omit for open-ended commitments (rare; usually narrowed)."
+        }
+      },
+      "description": "Sender commits to NOT taking some action — useful for capability narrowing, exclusivity arrangements, and 'I won't publish X until time T' patterns."
+    }
+  }
+}

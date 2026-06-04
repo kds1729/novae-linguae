@@ -1,0 +1,6 @@
+{
+  "kind": "apply",
+  "fn": "fn_0d7bd32d7d3ff63299e4139b051ffcc6e18a0ef23b670feb186dd0262c511c8e",
+  "args": [{ "kind": "nat", "value": 42 }],
+  "by": "2026-12-31T23:59:59Z"
+}
