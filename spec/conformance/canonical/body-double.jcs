@@ -1,0 +1,1 @@
+{"body":{"args":[{"kind":"var","name":"n"},{"kind":"var","name":"n"}],"fn":{"kind":"var","name":"add"},"kind":"app"},"kind":"lambda","params":[{"name":"n","type":{"kind":"builtin","name":"nat"}}]}

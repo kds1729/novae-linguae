@@ -1,0 +1,280 @@
+{
+  "conformance_version": "0.1.0",
+  "description": "Language-neutral conformance vectors for Novae Linguae v0.1. Any implementation of the canonicalize -> BLAKE3 -> sign pipeline (and the type well-formedness and JSON Schema checks) must agree with every vector below. Paths are relative to this manifest file. Each vector supplies its input as either `input` (a file path) or `input_inline` (an embedded JSON value); implementations read whichever is present.",
+  "hash_vectors": {
+    "description": "Strip the listed fields, JCS-canonicalize (RFC 8785), BLAKE3-256, prefix. `canonical_preimage` is the exact byte sequence that gets hashed; reproducing it AND `expected_hash` is the core byte-equality contract.",
+    "vectors": [
+      {
+        "name": "map-function-record",
+        "input": "../examples/map.json",
+        "kind": "function-record",
+        "stripped_fields": ["hash"],
+        "canonical_preimage": "canonical/map.jcs",
+        "expected_hash": "fn_fd20f137d331c42953ad164bd22cd1e6141cf310999818682832da4eb5fa8b66"
+      },
+      {
+        "name": "double-function-record-v0.2",
+        "input": "../examples/double.v0.2.json",
+        "kind": "function-record",
+        "stripped_fields": ["hash"],
+        "canonical_preimage": "canonical/double.v0.2.jcs",
+        "expected_hash": "fn_0d7bd32d7d3ff63299e4139b051ffcc6e18a0ef23b670feb186dd0262c511c8e"
+      },
+      {
+        "name": "request-message",
+        "input": "../examples/request.json",
+        "kind": "message",
+        "stripped_fields": ["hash", "signature"],
+        "canonical_preimage": "canonical/request.jcs",
+        "expected_hash": "msg_a0574c9cc7d77722a66a9ba85b876aee086dcb0a9dc6dd6b3a12b78a4d56df8c"
+      },
+      {
+        "name": "assert-message",
+        "input": "../examples/assert.json",
+        "kind": "message",
+        "stripped_fields": ["hash", "signature"],
+        "canonical_preimage": "canonical/assert.jcs",
+        "expected_hash": "msg_9293dcd42306e2f176d39346385035a85c9530d8217888ea41973852c84a53ca"
+      },
+      {
+        "name": "store-request-message",
+        "input": "../examples/store-request.json",
+        "kind": "message",
+        "stripped_fields": ["hash", "signature"],
+        "canonical_preimage": "canonical/store-request.jcs",
+        "expected_hash": "msg_9c0e85085eb34bee84d241a5970ec206e14016abfe9696b3108d6a684ed45b09"
+      },
+      {
+        "name": "body-double-expression",
+        "input": "../examples/body-double.json",
+        "kind": "body",
+        "stripped_fields": [],
+        "canonical_preimage": "canonical/body-double.jcs",
+        "expected_hash": "expr_44a3b191a348d31b392d74e0325fa589cc0344ea22618af39d361cf3f9c0e37b"
+      }
+    ]
+  },
+  "cross_reference_vectors": {
+    "description": "A function record's body_hash must equal the independently-computed content-hash of the body expression it points at.",
+    "vectors": [
+      {
+        "name": "double-body-hash-links",
+        "record": "../examples/double.v0.2.json",
+        "field": "body_hash",
+        "must_equal_hash_vector": "body-double-expression"
+      }
+    ]
+  },
+  "signing_vectors": {
+    "description": "Deterministic signing. Derive the Ed25519 key as BLAKE3-256(seed); set `from` to did:nova:<pubkey-hex>; recompute `hash`; sign canonical(message - {signature}). The procedure MUST reproduce these exact values byte-for-byte.",
+    "vectors": [
+      {
+        "name": "request-deterministic",
+        "input": "../examples/request.json",
+        "seed": "novae-linguae-example-claude",
+        "expected_from": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+        "expected_hash": "msg_a0574c9cc7d77722a66a9ba85b876aee086dcb0a9dc6dd6b3a12b78a4d56df8c",
+        "expected_signature": "ed25519:rb8X892iv5UY0c4E3HUnhXvMND6tmLRGUeEmEgC5N2lVcqTRbtG1CtW7wX4kyahipnKvaP3o5PjNvYWH3FKKBg=="
+      },
+      {
+        "name": "assert-deterministic",
+        "input": "../examples/assert.json",
+        "seed": "novae-linguae-example-verifier",
+        "expected_from": "did:nova:896a2e2c0578ec83132584d629abaef1a6eefdbec326c803a9a62c1f1fc1e054",
+        "expected_hash": "msg_9293dcd42306e2f176d39346385035a85c9530d8217888ea41973852c84a53ca",
+        "expected_signature": "ed25519:rlOqe5ADH/8twB3CEdlve3k39XBqDB+MXyKw8a7+F3Puvdv1SbBTm+IQNG7g+KaDa/76A9pvh/R6bIwI5iHUBQ=="
+      },
+      {
+        "name": "store-deterministic",
+        "input": "../examples/store-request.json",
+        "seed": "novae-linguae-example-store",
+        "expected_from": "did:nova:13b8924713cbcd7904aa47d769427cb788bc4e579991705a4284d4f62f2a514d",
+        "expected_hash": "msg_9c0e85085eb34bee84d241a5970ec206e14016abfe9696b3108d6a684ed45b09",
+        "expected_signature": "ed25519:ntkfiIZgbpXsczgp1lSvxR8HPtthRt6IgRlNE3reMnMMKGIJRgh3HgedM2nYQGdUxwTxX4vGc3odqEDLPk4fDA=="
+      }
+    ]
+  },
+  "signature_verification_vectors": {
+    "description": "Extract the public key from the `from` DID, recompute canonical(message - {signature}), verify the Ed25519 signature. `valid` must verify; `invalid` must NOT.",
+    "vectors": [
+      {
+        "name": "request-signature-valid",
+        "input": "../examples/request.json",
+        "expected": "valid"
+      },
+      {
+        "name": "assert-signature-valid",
+        "input": "../examples/assert.json",
+        "expected": "valid"
+      },
+      {
+        "name": "store-signature-valid",
+        "input": "../examples/store-request.json",
+        "expected": "valid"
+      },
+      {
+        "name": "tampered-body-invalid",
+        "description": "request.json with body.action changed after signing; the signature must no longer verify.",
+        "input_inline": {
+          "schema_version": "0.1.0",
+          "kind": "request",
+          "hash": "msg_a0574c9cc7d77722a66a9ba85b876aee086dcb0a9dc6dd6b3a12b78a4d56df8c",
+          "from": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+          "to": "did:nova:9b22c1d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9b",
+          "in_reply_to": null,
+          "timestamp": "2026-06-04T18:00:00Z",
+          "body": {
+            "action": "delete",
+            "target": "fn_fd20f137d331c42953ad164bd22cd1e6141cf310999818682832da4eb5fa8b66",
+            "args": ["double", [1, 2, 3]]
+          },
+          "constraints": {
+            "budget_tokens": 1000,
+            "deadline_ms": 5000,
+            "capabilities": []
+          },
+          "signature": "ed25519:rb8X892iv5UY0c4E3HUnhXvMND6tmLRGUeEmEgC5N2lVcqTRbtG1CtW7wX4kyahipnKvaP3o5PjNvYWH3FKKBg=="
+        },
+        "expected": "invalid"
+      }
+    ]
+  },
+  "type_wellformedness_vectors": {
+    "description": "Type-expression well-formedness beyond JSON Schema: variable scoping, rank-1 polymorphism (no nested forall), uniqueness within records and sums, and apply.ctor being an actual type constructor (var | ref | builtin | apply).",
+    "vectors": [
+      {
+        "name": "map-type-well-formed",
+        "input": "../examples/type-map.json",
+        "expected": "well-formed"
+      },
+      {
+        "name": "bound-var-under-forall",
+        "input_inline": { "kind": "forall", "vars": ["a"], "body": { "kind": "var", "name": "a" } },
+        "expected": "well-formed"
+      },
+      {
+        "name": "apply-builtin-ctor",
+        "input_inline": {
+          "kind": "apply",
+          "ctor": { "kind": "builtin", "name": "List" },
+          "args": [{ "kind": "builtin", "name": "int" }]
+        },
+        "expected": "well-formed"
+      },
+      {
+        "name": "unbound-var",
+        "input_inline": { "kind": "var", "name": "a" },
+        "expected": "ill-formed"
+      },
+      {
+        "name": "nested-forall-rank1-violation",
+        "input_inline": {
+          "kind": "forall",
+          "vars": ["a"],
+          "body": { "kind": "forall", "vars": ["b"], "body": { "kind": "var", "name": "b" } }
+        },
+        "expected": "ill-formed"
+      },
+      {
+        "name": "duplicate-record-field",
+        "input_inline": {
+          "kind": "record",
+          "fields": [
+            { "name": "x", "type": { "kind": "builtin", "name": "int" } },
+            { "name": "x", "type": { "kind": "builtin", "name": "bool" } }
+          ]
+        },
+        "expected": "ill-formed"
+      },
+      {
+        "name": "apply-concrete-ctor",
+        "input_inline": {
+          "kind": "apply",
+          "ctor": {
+            "kind": "fn",
+            "params": [{ "kind": "builtin", "name": "int" }],
+            "result": { "kind": "builtin", "name": "int" }
+          },
+          "args": [{ "kind": "builtin", "name": "int" }]
+        },
+        "expected": "ill-formed"
+      }
+    ]
+  },
+  "schema_validation_vectors": {
+    "description": "JSON Schema (draft 2020-12) structural validation. `valid` instances must validate against the named schema; `invalid` instances must fail.",
+    "vectors": [
+      {
+        "name": "map-against-function-record",
+        "schema": "../function-record.schema.json",
+        "input": "../examples/map.json",
+        "expected": "valid"
+      },
+      {
+        "name": "double-against-function-record-v0.2",
+        "schema": "../function-record.v0.2.schema.json",
+        "input": "../examples/double.v0.2.json",
+        "expected": "valid"
+      },
+      {
+        "name": "request-against-message",
+        "schema": "../message.schema.json",
+        "input": "../examples/request.json",
+        "expected": "valid"
+      },
+      {
+        "name": "type-map-against-type-expression",
+        "schema": "../type-expression.schema.json",
+        "input": "../examples/type-map.json",
+        "expected": "valid"
+      },
+      {
+        "name": "body-is-zero-against-body-expression",
+        "schema": "../body-expression.schema.json",
+        "input": "../examples/body-is-zero.json",
+        "expected": "valid"
+      },
+      {
+        "name": "var-missing-name-invalid",
+        "schema": "../type-expression.schema.json",
+        "input_inline": { "kind": "var" },
+        "expected": "invalid"
+      },
+      {
+        "name": "value-bad-kind-invalid",
+        "schema": "../value-expression.schema.json",
+        "input_inline": { "kind": "not_a_value_kind" },
+        "expected": "invalid"
+      },
+      {
+        "name": "store-payload-cross-file-valid",
+        "description": "Exercises cross-file $ref resolution: with payload_kind=function-record, the store payload is validated against function-record.schema.json (a sibling file).",
+        "schema": "../message.schema.json",
+        "input": "../examples/store-request.json",
+        "expected": "valid"
+      },
+      {
+        "name": "store-payload-cross-file-invalid",
+        "description": "payload_kind=function-record but the payload is not a valid function record. The message is otherwise well-formed; only the cross-file payload check fails. An implementation that does not resolve the $ref would wrongly accept this.",
+        "schema": "../message.schema.json",
+        "input_inline": {
+          "schema_version": "0.1.0",
+          "kind": "request",
+          "hash": "msg_0000000000000000000000000000000000000000000000000000000000000000",
+          "from": "did:nova:0000000000000000000000000000000000000000000000000000000000000000",
+          "to": null,
+          "in_reply_to": null,
+          "timestamp": "2026-06-04T18:10:00Z",
+          "body": {
+            "action": "store",
+            "payload_kind": "function-record",
+            "payload": { "not": "a function record" }
+          },
+          "constraints": null,
+          "signature": "ed25519:AA=="
+        },
+        "expected": "invalid"
+      }
+    ]
+  }
+}
