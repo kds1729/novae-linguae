@@ -285,16 +285,17 @@ What is done:
 - Function-record schema at v0.1 (string fields) and v0.2 (structured ASTs mandatory throughout)
 - *Nova Locutio* message schema: nine speech acts, multicast addressing, multi-algorithm signatures, absolute deadlines, and conditional `store`-payload validation by cross-file `$ref`
 - Eight sub-language schemas: type, predicate, value, body, claim, and commitment expressions; plus canonical-serialization spec, trust model, and intent-tag vocabulary
-- Reference validator (`nl-validator`) with nine subcommands: `validate`, `canonicalize`, `hash`, `verify`, `sign`, `check-type`, `check-predicate`, `check-value`, `check-body` — `validate` resolves cross-file schema references against the local `spec/` tree
+- Reference validator (`nl-validator`) with nine core subcommands: `validate`, `canonicalize`, `hash`, `verify`, `sign`, `check-type`, `check-predicate`, `check-value`, `check-body` — `validate` resolves cross-file schema references against the local `spec/` tree
+- Surface syntax for Nova Lingua: parsers and pretty-printers for all four expression sub-languages (type, predicate, value, body), with a bidirectional surface-string ↔ JSON-AST mapping and round-trip contract, exposed as eight `parse-*`/`unparse-*` subcommands (per [`spec/surface-syntax.md`](spec/surface-syntax.md))
 - Well-formedness checks for predicate, value, and body expressions (`check-predicate`, `check-value`, `check-body`), matching the existing `check-type` for types
 - *Nova Locutio* message schema v0.2: mandatory structured claim/commitment ASTs (`assert_body.claim` → `claim-expression.schema.json`, `commit_body.commitment` → `commitment-expression.schema.json`) enforced by cross-file `$ref`; v0.1 schema retained unchanged
 - Ingestion tool (`nl-ingest`): parses public Rust functions via `syn` and emits valid v0.1 function records as JSONL
 - All twelve original v0.1 deferred items resolved
-- Language-neutral conformance vectors (`spec/conformance/`) plus a reference test suite (`cargo test`, 119 tests) that replays them
+- Language-neutral conformance vectors (`spec/conformance/`) plus a reference test suite (`cargo test`, 164 tests) that replays them
 
 What is next:
-- Surface syntax for Nova Lingua: parser/pretty-printer for the v0.1 string forms (type, predicate, value, body surface syntax)
 - Ingestion adapters for Python, Haskell, and npm ecosystems (community contributions welcome)
+- Payload encryption for *Nova Locutio* (per-conversation symmetric keys, key exchange via DID-resolved public keys) — deferred to v0.2, load-bearing for principle 7
 
 Looking for collaborators on all of the above.
 
