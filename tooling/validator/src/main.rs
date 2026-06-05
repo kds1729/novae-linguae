@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// CLI-facing artifact-kind selector for `--kind` flags. Mirrors
@@ -137,9 +137,12 @@ fn main() -> ExitCode {
 }
 
 fn cmd_validate(schema: &PathBuf, record: &PathBuf) -> Result<()> {
-    let schema = nl_validator::read_json(schema)?;
+    let schema_value = nl_validator::read_json(schema)?;
     let instance = nl_validator::read_json(record)?;
-    nl_validator::validate(&schema, &instance)
+    // Cross-file `$ref`s resolve against sibling schema files in the schema's
+    // own directory. Schemas with only same-document refs are unaffected.
+    let spec_dir = schema.parent().unwrap_or_else(|| Path::new("."));
+    nl_validator::validate_with_refs(&schema_value, &instance, spec_dir)
 }
 
 fn cmd_canonicalize(record: &PathBuf) -> Result<()> {

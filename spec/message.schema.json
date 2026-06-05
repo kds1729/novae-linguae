@@ -210,11 +210,49 @@
           "type": "array",
           "description": "Arguments for 'apply'. v0.1 uses the same bare-string-for-function-reference convention as function-record examples."
         },
+        "payload_kind": {
+          "type": "string",
+          "enum": [
+            "function-record",
+            "function-record-v0.2",
+            "body-expression",
+            "type-expression",
+            "predicate-expression",
+            "value-expression"
+          ],
+          "description": "Discriminator for `action: \"store\"`: declares which schema `payload` must satisfy. When present, the `allOf` branches below validate `payload` against that schema by cross-file $ref (resolved by nl-validator against the sibling schema file). Optional and additive: messages that omit it — apply/validate requests, and any message predating this check — are unaffected and only get the bare object constraint on `payload`."
+        },
         "payload": {
           "type": "object",
-          "description": "Inline artifact for `action: \"store\"`. The expected shape depends on the artifact kind being stored:\n  - To store a function record: shape per function-record.schema.json (v0.1) or function-record.v0.2.schema.json.\n  - To store a body expression: shape per body-expression.schema.json.\n  - To store a type / predicate / value sub-tree intended as a standalone commons artifact: shape per the appropriate sub-language schema.\nThe v0.1 message schema only checks that `payload` is an object — full cross-schema validation requires the receiver to invoke the appropriate schema's validator on the payload. A future message-schema major bump will introduce conditional `if/then` validation based on a payload-kind discriminator, paired with cross-file $ref resolution in the validator."
+          "description": "Inline artifact for `action: \"store\"`. Its shape is selected by `payload_kind` and validated against the referenced schema. Absent a `payload_kind`, only the object constraint applies."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "function-record" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.1/function-record.schema.json" } } }
+        },
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "function-record-v0.2" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.2/function-record.schema.json" } } }
+        },
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "body-expression" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.1/body-expression.schema.json" } } }
+        },
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "type-expression" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.1/type-expression.schema.json" } } }
+        },
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "predicate-expression" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.1/predicate-expression.schema.json" } } }
+        },
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "value-expression" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.1/value-expression.schema.json" } } }
+        }
+      ]
     },
     "assert_body": {
       "type": "object",

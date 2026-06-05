@@ -3,16 +3,18 @@
 //!
 //! This is the reference implementation. Other implementations of the
 //! validator MUST produce identical pass/fail decisions for any valid
-//! schema/instance pair. A cross-implementation conformance test suite
-//! will pin this once a second implementation exists.
+//! schema/instance pair; the conformance vectors at `spec/conformance/` are
+//! the contract that pins this across implementations.
 //!
 //! Subsequent versions of this crate may add:
-//! - Well-formedness checks for refinement / property / value sub-languages
-//!   (once those sub-schemas exist)
+//! - Well-formedness checks for the refinement / property / value sub-languages
+//!   (their schemas already exist; the checks await the verifier engine, as
+//!   `check_type_well_formed` already does for type expressions).
 
 use anyhow::{anyhow, Context, Result};
+use jsonschema::{Retrieve, Uri};
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {
@@ -24,13 +26,39 @@ pub fn read_json(path: &Path) -> Result<Value> {
 
 /// Validate a JSON instance against a JSON Schema 2020-12 schema.
 ///
+/// Resolves only same-document (`#/...`) references. For schemas that reference
+/// sibling schema files (cross-file `$ref`), use [`validate_with_refs`].
+///
 /// Returns `Ok(())` on success. On failure, returns an error whose display
 /// form contains every validation error, one per line, with instance-path
 /// pointers.
 pub fn validate(schema: &Value, instance: &Value) -> Result<()> {
     let validator = jsonschema::draft202012::new(schema)
         .map_err(|e| anyhow!("compiling schema: {e}"))?;
+    collect_errors(&validator, instance)
+}
 
+/// Validate against a schema that may contain cross-file `$ref`s into the
+/// Novae Linguae schema namespace (`https://novae-linguae.org/spec/...`).
+///
+/// References are resolved by [`LocalSchemaRetriever`] against `spec_dir`: the
+/// logical schema identifier's filename component is looked up as a sibling
+/// file there. Schemas without external references validate identically to
+/// [`validate`] — the retriever is simply never consulted.
+pub fn validate_with_refs(schema: &Value, instance: &Value, spec_dir: &Path) -> Result<()> {
+    let validator = jsonschema::options()
+        .with_draft(jsonschema::Draft::Draft202012)
+        .with_retriever(LocalSchemaRetriever {
+            spec_dir: spec_dir.to_path_buf(),
+        })
+        .build(schema)
+        .map_err(|e| anyhow!("compiling schema: {e}"))?;
+    collect_errors(&validator, instance)
+}
+
+/// Run a built validator over an instance and fold any errors into a single
+/// human-readable `anyhow` error.
+fn collect_errors(validator: &jsonschema::Validator, instance: &Value) -> Result<()> {
     let errors: Vec<String> = validator
         .iter_errors(instance)
         .map(|e| format!("  - at {}: {}", e.instance_path, e))
@@ -46,6 +74,47 @@ pub fn validate(schema: &Value, instance: &Value) -> Result<()> {
             if count == 1 { "" } else { "s" },
             errors.join("\n")
         ))
+    }
+}
+
+/// Logical base of every Novae Linguae schema `$id` — e.g.
+/// `https://novae-linguae.org/spec/v0.1/type-expression.schema.json`. Schemas
+/// identify themselves by this stable namespace rather than by filesystem path,
+/// so the commons stays location-independent; cross-file `$ref`s resolve
+/// against the referring schema's `$id` into this same namespace.
+const SCHEMA_ID_BASE: &str = "https://novae-linguae.org/spec/";
+
+/// Resolves cross-file schema `$ref`s from a local `spec/` directory.
+///
+/// A reference resolves to a URI like
+/// `https://novae-linguae.org/spec/v0.1/function-record.schema.json`; this
+/// retriever maps it to `<spec_dir>/function-record.schema.json`. The version
+/// path segment (`v0.1`, `v0.2`) is logical only — all schema files live flat
+/// in `spec/`, and the schema's own `$id` carries the version it speaks for.
+struct LocalSchemaRetriever {
+    spec_dir: PathBuf,
+}
+
+impl Retrieve for LocalSchemaRetriever {
+    fn retrieve(
+        &self,
+        uri: &Uri<&str>,
+    ) -> std::result::Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        let s = uri.as_str();
+        let rest = s.strip_prefix(SCHEMA_ID_BASE).ok_or_else(|| {
+            format!(
+                "cannot resolve external $ref `{s}`: only Novae Linguae schema URIs under `{SCHEMA_ID_BASE}` resolve locally"
+            )
+        })?;
+        let file = rest.rsplit('/').next().filter(|f| !f.is_empty()).ok_or_else(|| {
+            format!("cannot resolve external $ref `{s}`: no schema filename in the URI")
+        })?;
+        let path = self.spec_dir.join(file);
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("resolving $ref `{s}` -> {}: {e}", path.display()))?;
+        let value = serde_json::from_str(&text)
+            .map_err(|e| format!("parsing referenced schema {}: {e}", path.display()))?;
+        Ok(value)
     }
 }
 
