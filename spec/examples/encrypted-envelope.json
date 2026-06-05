@@ -1,0 +1,17 @@
+{
+  "v": "0.2",
+  "enc": "xchacha20poly1305",
+  "kdf": "hkdf-sha256",
+  "kex": "x25519-ed25519",
+  "epk": "/h+3mi7QiZfr70ObKKI/annorbOFpzxERop3HV5nPQg=",
+  "nonce": "XtKu5R8JA7d/qgfbDKjk0EN/HKHL8JxL",
+  "ciphertext": "h8ZIRWNBatpB95wB0qjIFquSJKJJANPEvmgkEzsTKufwtHSp+8VHhTJY8q7EIXmjkReZJRu9IKU=",
+  "recipients": [
+    {
+      "to": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+      "wrap_nonce": "xmMYbb+dF4jL849tsOoWtiv2hQKyrpEF",
+      "wrapped_key": "CtVmKTyfGhd5Bls2AQNXW+fJCWlG4RE4vCGxGuRWKDzaeCTs+FPwX0I64kvgYSvc"
+    }
+  ],
+  "aad": "bm92YWUtbGluZ3VhZS9leGFtcGxl"
+}

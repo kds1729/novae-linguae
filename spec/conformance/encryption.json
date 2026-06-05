@@ -1,0 +1,77 @@
+{
+  "description": "Conformance vectors for Nova Locutio payload encryption (spec/encryption.md). Primitive vectors are the official RFC/draft test vectors; the envelope vector is a deterministic seal (BLAKE3-seeded RNG) that any implementation must reproduce and open.",
+  "primitives": {
+    "x25519": [
+      {
+        "scalar": "a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4",
+        "u": "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c",
+        "out": "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"
+      },
+      {
+        "scalar": "4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d",
+        "u": "e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493",
+        "out": "95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957"
+      }
+    ],
+    "hchacha20": {
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "nonce": "000000090000004a0000000031415927",
+      "out": "82413b4227b27bfed30e42508a877d73a0f9e4d58a74a853c12ec41326d3ecdc"
+    },
+    "chacha20poly1305": {
+      "key": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "nonce": "070000004041424344454647",
+      "aad": "50515253c0c1c2c3c4c5c6c7",
+      "plaintext_hex": "4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e",
+      "ciphertext_and_tag": "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecbd0600691"
+    },
+    "xchacha20poly1305": {
+      "key": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "nonce": "404142434445464748494a4b4c4d4e4f5051525354555657",
+      "aad": "50515253c0c1c2c3c4c5c6c7",
+      "plaintext_hex": "4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e",
+      "ciphertext_and_tag": "bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b4522f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff921f9664c97637da9768812f615c68b13b52ec0875924c1c7987947deafd8780acf49"
+    },
+    "hkdf_sha256": {
+      "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "salt": "000102030405060708090a0b0c",
+      "info": "f0f1f2f3f4f5f6f7f8f9",
+      "length": 42,
+      "okm": "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+    },
+    "ed25519_to_x25519": {
+      "comment": "X25519 public key derived from the example request.json signer's did:nova.",
+      "did": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+      "x25519_pub": "8b06b8c0ab344ba952d730f40296eae19f4247e141acae1474d7bf148b133139",
+      "from_seed": "novae-linguae-example-claude"
+    }
+  },
+  "envelope": {
+    "comment": "Deterministic seal to one recipient; reproduce with the BLAKE3-seeded RNG.",
+    "rng_seed_hex": "00112233445566778899aabbccddeeff",
+    "recipients": [
+      "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e"
+    ],
+    "recipient_did": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+    "recipient_seed": "novae-linguae-example-claude",
+    "aad_hex": "6e6f7661652d6c696e677561652f6578616d706c65",
+    "plaintext_hex": "7b226b696e64223a22617373657274222c22636c61696d223a22636f6e666964656e7469616c227d",
+    "envelope": {
+      "v": "0.2",
+      "enc": "xchacha20poly1305",
+      "kdf": "hkdf-sha256",
+      "kex": "x25519-ed25519",
+      "epk": "/h+3mi7QiZfr70ObKKI/annorbOFpzxERop3HV5nPQg=",
+      "nonce": "XtKu5R8JA7d/qgfbDKjk0EN/HKHL8JxL",
+      "ciphertext": "h8ZIRWNBatpB95wB0qjIFquSJKJJANPEvmgkEzsTKufwtHSp+8VHhTJY8q7EIXmjkReZJRu9IKU=",
+      "recipients": [
+        {
+          "to": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+          "wrap_nonce": "xmMYbb+dF4jL849tsOoWtiv2hQKyrpEF",
+          "wrapped_key": "CtVmKTyfGhd5Bls2AQNXW+fJCWlG4RE4vCGxGuRWKDzaeCTs+FPwX0I64kvgYSvc"
+        }
+      ],
+      "aad": "bm92YWUtbGluZ3VhZS9leGFtcGxl"
+    }
+  }
+}

@@ -88,7 +88,7 @@ Same inputs, same outputs, replayable. Non-determinism — clocks, randomness, n
 
 Every *Nova Locutio* message is signed. Provenance is explicit. Trust chains are first-class. Capability delegation ("I grant you the right to act on resource R until time T") is a structured construct, not prose.
 
-Confidentiality belongs in this layer too: signatures protect integrity and provenance, but not privacy. Payload encryption — likely per-conversation symmetric keys with key exchange via DID-resolved public keys — is deferred to v0.2+ but is a load-bearing requirement of principle 7: without encryption, "free communication" can be selectively suppressed by surveillance.
+Confidentiality belongs in this layer too: signatures protect integrity and provenance, but not privacy. Payload encryption — per-conversation symmetric keys with key exchange via DID-resolved public keys — is **implemented in v0.2** ([`spec/encryption.md`](spec/encryption.md)) as a load-bearing requirement of principle 7: without encryption, "free communication" can be selectively suppressed by surveillance.
 
 ### 7. Open communication; local-only filtering
 
@@ -291,11 +291,12 @@ What is done:
 - *Nova Locutio* message schema v0.2: mandatory structured claim/commitment ASTs (`assert_body.claim` → `claim-expression.schema.json`, `commit_body.commitment` → `commitment-expression.schema.json`) enforced by cross-file `$ref`; v0.1 schema retained unchanged
 - Ingestion adapters for four ecosystems — `nl-ingest` (Rust, via `syn`), `nl-ingest-py` (Python, via `ast`), `nl-ingest-hs` (Haskell), and `nl-ingest-ts` (npm/TypeScript) — each parses public functions and emits valid v0.1 function records as JSONL, all agreeing byte-for-byte with `nl-validator` on canonical form and hash. The three non-Rust adapters are stdlib-only Python (zero dependencies) sharing a common BLAKE3+JCS core
 - All twelve original v0.1 deferred items resolved
+- *Nova Locutio* payload encryption (v0.2): the [encrypted-envelope](spec/encryption.md) — a hybrid multi-recipient sealed box (random per-conversation content key, X25519 key-wrap from the existing `did:nova` keys, XChaCha20-Poly1305 AEAD, HKDF-SHA-256). Reusing the Ed25519 signing identity for key agreement means no new keys. Schema + reference implementation ([`tooling/crypto-python/`](tooling/crypto-python/), stdlib-only) + conformance vectors; every primitive verified against its RFC/draft vector and the key conversion cross-checked against the real signer DIDs. Closes the load-bearing requirement of principle 7
 - Language-neutral conformance vectors (`spec/conformance/`) plus a reference test suite (`cargo test`, 164 tests) that replays them
 
 What is next:
 - Higher-fidelity ingestion (full-AST parsing via `haskell-src-exts` and the TypeScript compiler; structured Nova Lingua type/body ASTs instead of source-flavored strings) — the four current adapters establish the record contract
-- Payload encryption for *Nova Locutio* (per-conversation symmetric keys, key exchange via DID-resolved public keys) — deferred to v0.2, load-bearing for principle 7
+- Encryption hardening for production (vetted constant-time crypto libraries reproducing the conformance vectors; metadata-privacy and post-quantum `kex` modes are tracked as v0.3+ open questions in [`spec/encryption.md`](spec/encryption.md))
 
 Looking for collaborators on all of the above.
 

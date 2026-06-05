@@ -20,6 +20,8 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `canonical-serialization.md` | v0.1 | Normative spec for canonical form (JCS RFC 8785) and hashing (BLAKE3-256) |
 | `trust-model.md` | v0.1 | Normative spec for the trust model: local trust policy + capability tokens + attestations, no central authority. Built on already-shipped *Nova Locutio* primitives. |
 | `intent-tag-vocabulary.md` | v0.1 | Controlled vocabulary for `intent_tags`: 16 top-level categories (`transform`, `predicate`, `aggregate`, `filter`, `query`, `parse`, `serialize`, `io`, `arithmetic`, `math`, `logical`, `string`, `concurrent`, `crypto`, `time`, `coll`) plus property-modifier tags (`pure`, `elementwise`, `idempotent`, …). Non-vocab tags still validate; cross-agent agreement is the benefit. |
+| `encrypted-envelope.schema.json` | v0.2 draft | The *Nova Locutio* encrypted-envelope schema: a hybrid multi-recipient sealed box (X25519 key-wrap from `did:nova` keys, XChaCha20-Poly1305 AEAD, HKDF-SHA-256). A transport artifact — not content-addressed. |
+| `encryption.md` | v0.2 | Normative spec for payload encryption: identity reuse (Ed25519→X25519), the seal/open construction, algorithm rationale, and security considerations. Load-bearing for principle 7. Reference implementation at [`tooling/crypto-python/`](../tooling/crypto-python/). |
 | `examples/map.json` | example | Concrete v0.1 function record for `map` (string surface form for type / predicate / value fields) |
 | `examples/map.v0.2.json` | example | Concrete v0.2 function record for `map` (structured ASTs throughout); `supersedes` points at the v0.1 record |
 | `examples/double.v0.2.json` | example | Concrete v0.2 function record for `double` (a `nat -> nat` function); referenced by `map.v0.2.json`'s `examples.args[].fn_ref` |
@@ -35,7 +37,8 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `examples/assert.v0.2.json` | example | Concrete `assert` message (v0.2 — structured `satisfies` claim against `map.json`); signed with deterministic seed `test-agent-v02` |
 | `examples/commit.v0.2.json` | example | Concrete `commit` message (v0.2 — structured `apply` commitment to run `map` on `[1,2,3]` by end of 2026); signed with deterministic seed `test-agent-v02` |
 | `examples/store-request.json` | example | Concrete `store` request whose `payload` is an inline function record; `payload_kind` drives cross-file `$ref` validation of the payload against `function-record.schema.json`. Signed with deterministic seed `novae-linguae-example-store` |
-| `conformance/` | v0.1 | Language-neutral cross-implementation conformance vectors: [`manifest.json`](conformance/manifest.json) (the contract) plus golden JCS canonical-byte preimages under `conformance/canonical/`. Covers hashing, signing, signature verification, type well-formedness, and schema validation. See [`conformance/README.md`](conformance/README.md). |
+| `examples/encrypted-envelope.json` | example | A v0.2 encrypted envelope sealing a payload to the `request.json` signer; opens with seed `novae-linguae-example-claude`. Validates against `encrypted-envelope.schema.json`. |
+| `conformance/` | v0.1–v0.2 | Language-neutral cross-implementation conformance vectors: [`manifest.json`](conformance/manifest.json) (hashing, signing, signature verification, type well-formedness, schema validation, surface-syntax round-trips) plus golden JCS preimages under `conformance/canonical/`; and [`encryption.json`](conformance/encryption.json) (X25519, (X)ChaCha20-Poly1305, HKDF, Ed25519→X25519, and a deterministic envelope) for v0.2 payload encryption. See [`conformance/README.md`](conformance/README.md). |
 
 ## Versioning policy
 

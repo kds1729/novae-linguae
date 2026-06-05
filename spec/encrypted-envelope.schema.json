@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.2/encrypted-envelope.schema.json",
+  "title": "Nova Locutio Encrypted Envelope",
+  "description": "A confidentiality wrapper for a Nova Locutio payload (v0.2). A hybrid multi-recipient sealed box: the payload is encrypted once under a random content-encryption key (CEK), and the CEK is wrapped for each recipient via X25519 ECDH against the recipient's did:nova key. The envelope is a transport artifact, not a commons artifact: it is NOT content-addressed and carries no hash of its own. Confidentiality is layered over — not instead of — signing: the cleartext payload is normally a fully-signed inner message, so decrypting yields verifiable provenance. See spec/encryption.md.",
+  "type": "object",
+  "required": ["v", "enc", "kdf", "kex", "epk", "nonce", "ciphertext", "recipients"],
+  "additionalProperties": false,
+  "properties": {
+    "v": {
+      "const": "0.2",
+      "description": "Envelope format version."
+    },
+    "enc": {
+      "type": "string",
+      "enum": ["xchacha20poly1305"],
+      "description": "AEAD used for the payload and for key wrapping. v0.2 fixes XChaCha20-Poly1305 (24-byte nonce, 16-byte tag). Closed enum; new algorithms require a version bump."
+    },
+    "kdf": {
+      "type": "string",
+      "enum": ["hkdf-sha256"],
+      "description": "KDF deriving the per-recipient key-encryption key from the ECDH shared secret. v0.2 fixes HKDF-SHA-256 (RFC 5869)."
+    },
+    "kex": {
+      "type": "string",
+      "enum": ["x25519-ed25519"],
+      "description": "Key agreement: X25519 ECDH with public keys obtained by mapping each party's did:nova Ed25519 key to Curve25519 (the standard birational map). No key material beyond the signing DID is required."
+    },
+    "epk": {
+      "$ref": "#/$defs/b64_32",
+      "description": "Sender's ephemeral X25519 public key (32 bytes, base64). Fresh per envelope, giving forward secrecy for the key-wrap step."
+    },
+    "nonce": {
+      "$ref": "#/$defs/b64_24",
+      "description": "XChaCha20-Poly1305 nonce for the payload (24 bytes, base64)."
+    },
+    "ciphertext": {
+      "$ref": "#/$defs/b64",
+      "description": "AEAD ciphertext of the payload, with the 16-byte Poly1305 tag appended (base64). Bound to 'aad' if present."
+    },
+    "recipients": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/recipient" },
+      "description": "One entry per recipient. Each carries the CEK wrapped to that recipient. The list is plaintext metadata: who can read the envelope is not itself hidden."
+    },
+    "aad": {
+      "$ref": "#/$defs/b64",
+      "description": "Optional additional authenticated data bound to the payload ciphertext (e.g. a routing label or the hash of the inner message). Not encrypted; authenticated."
+    }
+  },
+  "$defs": {
+    "recipient": {
+      "type": "object",
+      "required": ["to", "wrap_nonce", "wrapped_key"],
+      "additionalProperties": false,
+      "properties": {
+        "to": {
+          "type": "string",
+          "pattern": "^did:[a-z0-9]+:.+$",
+          "description": "Recipient DID. v0.2 key agreement requires a did:nova:<64-hex> Ed25519 key; the field accepts any DID syntactically."
+        },
+        "wrap_nonce": {
+          "$ref": "#/$defs/b64_24",
+          "description": "XChaCha20-Poly1305 nonce for wrapping the CEK to this recipient (24 bytes, base64)."
+        },
+        "wrapped_key": {
+          "$ref": "#/$defs/b64",
+          "description": "The 32-byte CEK encrypted under this recipient's key-encryption key, with the 16-byte tag appended (base64). AAD is the recipient DID, binding the wrap to the recipient."
+        }
+      }
+    },
+    "b64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+      "minLength": 1,
+      "description": "Standard base64 (RFC 4648), with padding."
+    },
+    "b64_24": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{32}$",
+      "description": "Base64 of exactly 24 bytes (32 base64 chars, no padding needed since 24 is divisible by 3)."
+    },
+    "b64_32": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{43}=$",
+      "description": "Base64 of exactly 32 bytes (44 chars including one '=' pad)."
+    }
+  }
+}
