@@ -105,6 +105,27 @@ enum Commands {
         /// Path to the type-expression document
         record: PathBuf,
     },
+    /// Run well-formedness checks on a Nova Lingua predicate expression.
+    /// Catches what JSON Schema cannot express: arity of known built-in
+    /// operators (not/1, and/2, eq/2, foldl/3, …). Unknown ops (content-
+    /// address refs, scope variables) are not checked here.
+    CheckPredicate {
+        /// Path to the predicate-expression document
+        record: PathBuf,
+    },
+    /// Run well-formedness checks on a Nova Lingua value expression. Catches
+    /// what JSON Schema cannot express: record field name uniqueness.
+    CheckValue {
+        /// Path to the value-expression document
+        record: PathBuf,
+    },
+    /// Run well-formedness checks on a Nova Lingua body expression. Catches
+    /// what JSON Schema cannot express: lambda parameter name uniqueness, and
+    /// literal value well-formedness (`lit.value` must satisfy check-value).
+    CheckBody {
+        /// Path to the body-expression document
+        record: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -120,6 +141,9 @@ fn main() -> ExitCode {
             in_place,
         } => (cmd_sign(&record, &seed, in_place), false),
         Commands::CheckType { record } => (cmd_check_type(&record), true),
+        Commands::CheckPredicate { record } => (cmd_check_predicate(&record), true),
+        Commands::CheckValue { record } => (cmd_check_value(&record), true),
+        Commands::CheckBody { record } => (cmd_check_body(&record), true),
     };
 
     match result {
@@ -232,6 +256,21 @@ fn cmd_verify(record: &PathBuf, kind_override: Option<nl_validator::ArtifactKind
 fn cmd_check_type(record: &PathBuf) -> Result<()> {
     let value = nl_validator::read_json(record)?;
     nl_validator::check_type_well_formed(&value)
+}
+
+fn cmd_check_predicate(record: &PathBuf) -> Result<()> {
+    let value = nl_validator::read_json(record)?;
+    nl_validator::check_predicate_well_formed(&value)
+}
+
+fn cmd_check_value(record: &PathBuf) -> Result<()> {
+    let value = nl_validator::read_json(record)?;
+    nl_validator::check_value_well_formed(&value)
+}
+
+fn cmd_check_body(record: &PathBuf) -> Result<()> {
+    let value = nl_validator::read_json(record)?;
+    nl_validator::check_body_well_formed(&value)
 }
 
 fn cmd_sign(record: &PathBuf, seed: &str, in_place: bool) -> Result<()> {

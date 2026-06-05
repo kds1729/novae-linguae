@@ -6,10 +6,10 @@
 //! schema/instance pair; the conformance vectors at `spec/conformance/` are
 //! the contract that pins this across implementations.
 //!
-//! Subsequent versions of this crate may add:
-//! - Well-formedness checks for the refinement / property / value sub-languages
-//!   (their schemas already exist; the checks await the verifier engine, as
-//!   `check_type_well_formed` already does for type expressions).
+//! This crate provides well-formedness checks for all four expression
+//! sub-languages: type (`check_type_well_formed`), predicate
+//! (`check_predicate_well_formed`), value (`check_value_well_formed`), and body
+//! (`check_body_well_formed`).
 
 use anyhow::{anyhow, Context, Result};
 use jsonschema::{Retrieve, Uri};
@@ -620,6 +620,337 @@ fn check_type_node(value: &Value, bound_vars: &[String], allow_forall: bool) -> 
         other => {
             return Err(anyhow!(
                 "unknown type-expression kind `{other}` (expected one of: var, ref, builtin, forall, fn, apply, tuple, record, sum)"
+            ));
+        }
+    }
+    Ok(())
+}
+
+// ---- well-formedness checks for predicate expressions ----
+
+/// Check well-formedness of a Nova Lingua predicate expression. Validates
+/// rules that JSON Schema cannot express on its own:
+///
+/// - **Arity of known built-in operators**: each operator in the closed v0.1
+///   vocabulary (`not`, `and`, `eq`, `length`, `foldl`, etc.) must be applied
+///   to the expected number of arguments. Unknown ops — content-address
+///   references like `fn_<hex>` and names resolved from the enclosing scope —
+///   are not checked here; their arity is the verifier's responsibility.
+/// - **Structural recursion**: nested predicate nodes must themselves be
+///   well-formed.
+///
+/// Does NOT re-check anything JSON Schema already enforces (field presence,
+/// type constraints, `uniqueItems` on `forall`/`exists` vars). Run `validate`
+/// against `predicate-expression.schema.json` first; this is the second pass.
+pub fn check_predicate_well_formed(value: &Value) -> Result<()> {
+    check_predicate_node(value)
+}
+
+/// v0.1 closed built-in operator vocabulary with expected arities.
+/// Ops absent from this table (content-address refs, scope vars) skip the
+/// arity check.
+static PREDICATE_OP_ARITIES: &[(&str, usize)] = &[
+    ("nil", 0),
+    ("not", 1),
+    ("neg", 1),
+    ("length", 1),
+    ("head", 1),
+    ("tail", 1),
+    ("id", 1),
+    ("and", 2),
+    ("or", 2),
+    ("implies", 2),
+    ("iff", 2),
+    ("eq", 2),
+    ("neq", 2),
+    ("lt", 2),
+    ("le", 2),
+    ("gt", 2),
+    ("ge", 2),
+    ("add", 2),
+    ("sub", 2),
+    ("mul", 2),
+    ("div", 2),
+    ("mod", 2),
+    ("cons", 2),
+    ("map", 2),
+    ("filter", 2),
+    ("compose", 2),
+    ("foldl", 3),
+    ("foldr", 3),
+];
+
+fn check_predicate_node(value: &Value) -> Result<()> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow!("predicate expression must be a JSON object"))?;
+    let kind = obj
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("predicate expression missing `kind` field"))?;
+
+    match kind {
+        "var" | "lit" => {}
+        "app" => {
+            let op = obj
+                .get("op")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("`app` missing `op`"))?;
+            let args = obj
+                .get("args")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`app` missing `args`"))?;
+            if let Some(&(_, expected)) =
+                PREDICATE_OP_ARITIES.iter().find(|(name, _)| *name == op)
+            {
+                if args.len() != expected {
+                    return Err(anyhow!(
+                        "built-in op `{op}` expects {expected} argument(s), got {}",
+                        args.len()
+                    ));
+                }
+            }
+            for arg in args {
+                check_predicate_node(arg)?;
+            }
+        }
+        "forall" | "exists" => {
+            let body = obj
+                .get("body")
+                .ok_or_else(|| anyhow!("`{kind}` missing `body`"))?;
+            check_predicate_node(body)?;
+        }
+        other => {
+            return Err(anyhow!(
+                "unknown predicate-expression kind `{other}` (expected: var, lit, app, forall, exists)"
+            ));
+        }
+    }
+    Ok(())
+}
+
+// ---- well-formedness checks for value expressions ----
+
+/// Check well-formedness of a Nova Lingua value expression. Validates rules
+/// that JSON Schema cannot express on its own:
+///
+/// - **Record field name uniqueness**: `record.fields[*].name` values must be
+///   unique within a single record (JSON Schema `uniqueItems` cannot enforce
+///   uniqueness across a sub-key).
+/// - **Structural recursion**: nested value nodes (list/tuple elements,
+///   record field values, variant payloads) must themselves be well-formed.
+///
+/// Does NOT re-check anything JSON Schema already enforces. Run `validate`
+/// against `value-expression.schema.json` first; this is the second pass.
+pub fn check_value_well_formed(value: &Value) -> Result<()> {
+    check_value_node(value)
+}
+
+fn check_value_node(value: &Value) -> Result<()> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow!("value expression must be a JSON object"))?;
+    let kind = obj
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("value expression missing `kind` field"))?;
+
+    match kind {
+        "bool" | "int" | "nat" | "float" | "string" | "bytes" | "unit" | "fn_ref" => {}
+        "list" => {
+            let elems = obj
+                .get("elems")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`list` missing `elems`"))?;
+            for elem in elems {
+                check_value_node(elem)?;
+            }
+        }
+        "tuple" => {
+            let elems = obj
+                .get("elems")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`tuple` missing `elems`"))?;
+            for elem in elems {
+                check_value_node(elem)?;
+            }
+        }
+        "record" => {
+            let fields = obj
+                .get("fields")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`record` missing `fields`"))?;
+            let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for field in fields {
+                let name = field
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("`record.fields[]` entry missing `name`"))?;
+                if !seen.insert(name) {
+                    return Err(anyhow!("record field `{name}` appears more than once"));
+                }
+                let val = field
+                    .get("value")
+                    .ok_or_else(|| anyhow!("`record.fields[].value` is required"))?;
+                check_value_node(val)?;
+            }
+        }
+        "variant" => {
+            if let Some(payload) = obj.get("payload") {
+                check_value_node(payload)?;
+            }
+        }
+        other => {
+            return Err(anyhow!(
+                "unknown value-expression kind `{other}` (expected: bool, int, nat, float, string, bytes, unit, list, tuple, record, variant, fn_ref)"
+            ));
+        }
+    }
+    Ok(())
+}
+
+// ---- well-formedness checks for body expressions ----
+
+/// Check well-formedness of a Nova Lingua body expression. Validates rules
+/// that JSON Schema cannot express on its own:
+///
+/// - **Lambda parameter name uniqueness**: `lambda.params[*].name` values must
+///   be unique within a single lambda (JSON Schema cannot enforce key-uniqueness
+///   across array elements).
+/// - **Structural recursion into sub-expressions**: `app.fn`, `app.args[]`,
+///   `let.value`, `let.body`, `lambda.body`, `case.scrutinee`, case arm bodies
+///   and patterns, and `field.record` must themselves be well-formed.
+/// - **Literal value well-formedness**: `lit.value` and `pat_lit.value` must
+///   satisfy `check_value_well_formed`.
+///
+/// Does NOT check variable scoping (that requires the enclosing function's
+/// parameter list) or pattern exhaustiveness (that requires the scrutinee's
+/// type). Run `validate` against `body-expression.schema.json` first; this is
+/// the second pass.
+pub fn check_body_well_formed(value: &Value) -> Result<()> {
+    check_body_node(value)
+}
+
+fn check_body_node(value: &Value) -> Result<()> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow!("body expression must be a JSON object"))?;
+    let kind = obj
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("body expression missing `kind` field"))?;
+
+    match kind {
+        "var" => {}
+        "lit" => {
+            let val = obj
+                .get("value")
+                .ok_or_else(|| anyhow!("`lit` missing `value`"))?;
+            check_value_well_formed(val)?;
+        }
+        "app" => {
+            let fn_expr = obj
+                .get("fn")
+                .ok_or_else(|| anyhow!("`app` missing `fn`"))?;
+            check_body_node(fn_expr)?;
+            let args = obj
+                .get("args")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`app` missing `args`"))?;
+            for arg in args {
+                check_body_node(arg)?;
+            }
+        }
+        "let" => {
+            let value_expr = obj
+                .get("value")
+                .ok_or_else(|| anyhow!("`let` missing `value`"))?;
+            check_body_node(value_expr)?;
+            let body_expr = obj
+                .get("body")
+                .ok_or_else(|| anyhow!("`let` missing `body`"))?;
+            check_body_node(body_expr)?;
+        }
+        "lambda" => {
+            let params = obj
+                .get("params")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`lambda` missing `params`"))?;
+            let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for param in params {
+                let name = param
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("`lambda.params[]` entry missing `name`"))?;
+                if !seen.insert(name) {
+                    return Err(anyhow!("lambda parameter `{name}` appears more than once"));
+                }
+            }
+            let body_expr = obj
+                .get("body")
+                .ok_or_else(|| anyhow!("`lambda` missing `body`"))?;
+            check_body_node(body_expr)?;
+        }
+        "case" => {
+            let scrutinee = obj
+                .get("scrutinee")
+                .ok_or_else(|| anyhow!("`case` missing `scrutinee`"))?;
+            check_body_node(scrutinee)?;
+            let arms = obj
+                .get("arms")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`case` missing `arms`"))?;
+            for arm in arms {
+                let pattern = arm
+                    .get("pattern")
+                    .ok_or_else(|| anyhow!("`case` arm missing `pattern`"))?;
+                check_pattern_node(pattern)?;
+                let arm_body = arm
+                    .get("body")
+                    .ok_or_else(|| anyhow!("`case` arm missing `body`"))?;
+                check_body_node(arm_body)?;
+            }
+        }
+        "field" => {
+            let record = obj
+                .get("record")
+                .ok_or_else(|| anyhow!("`field` missing `record`"))?;
+            check_body_node(record)?;
+        }
+        other => {
+            return Err(anyhow!(
+                "unknown body-expression kind `{other}` (expected: var, lit, app, let, lambda, case, field)"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_pattern_node(value: &Value) -> Result<()> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow!("pattern must be a JSON object"))?;
+    let kind = obj
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("pattern missing `kind` field"))?;
+
+    match kind {
+        "wildcard" | "bind" => {}
+        "variant" => {
+            if let Some(payload) = obj.get("payload") {
+                check_pattern_node(payload)?;
+            }
+        }
+        "lit" => {
+            let val = obj
+                .get("value")
+                .ok_or_else(|| anyhow!("`lit` pattern missing `value`"))?;
+            check_value_well_formed(val)?;
+        }
+        other => {
+            return Err(anyhow!(
+                "unknown pattern kind `{other}` (expected: wildcard, bind, variant, lit)"
             ));
         }
     }
