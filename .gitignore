@@ -29,5 +29,9 @@
 .pytest_cache/
 .venv/
 
+# SQLite (commons-node local dev database)
+*.sqlite3
+*.sqlite3-journal
+
 # AI tool configuration (local-only)
 .qwen/
