@@ -22,5 +22,12 @@
 **/dist/
 **/build/
 
+# Python build / cache artifacts
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+
 # AI tool configuration (local-only)
 .qwen/
