@@ -6,12 +6,47 @@ Signing (see [`canonical-serialization.md`](canonical-serialization.md) and the 
 gives **integrity and provenance** — a receiver knows who sent a message and that it was not
 altered. It does **not** give **confidentiality**: a signed message is readable by anyone who sees
 it. Principle 6 of the project README places confidentiality in the same layer as signing, and
-principle 7 makes it *load-bearing*: without encryption, "open communication" can be selectively
-suppressed by whoever can observe the wire. An adversary who cannot stop a message can still chill
-it by reading it. Encryption removes that leverage.
+principle 7 makes the *capability* load-bearing: without encryption being available and
+un-suppressible, "open communication" can be chilled by whoever can observe the wire. An adversary
+who cannot stop a message can still chill it by reading it. Encryption removes that leverage.
 
 This document specifies the v0.2 **encrypted envelope**: how an agent seals a payload so that only
 the intended recipients can read it, using the identities agents already have.
+
+## Optional by design
+
+**Signing is mandatory; sealing is not.** Every message that crosses an agent boundary is signed
+(principle 6) — that is the baseline. Encryption is a separate, **opt-in** layer applied *per
+conversation or per message*, only when the channel warrants it. A plaintext **signed** message is
+the normal, cheaper default; an encrypted envelope is what you reach for when an observer could read
+the wire.
+
+When sealing is **not** worth it (send signed plaintext):
+
+- Agents co-located on the **same host** (loopback, Unix sockets, shared memory, in-process).
+- Agents on a **trusted private subnet** or inside one operator's trust boundary.
+- Any channel the operator already secures at a lower layer (a mutually-authenticated TLS tunnel, a
+  VPN, a WireGuard mesh) — double-encrypting buys nothing but CPU.
+
+When sealing **is** worth it (seal before sending):
+
+- Messages crossing an **untrusted network**, or **relayed/mirrored through third parties** that
+  could read them.
+- Any path where a passive observer reading the content would let it be selectively suppressed —
+  exactly the principle-7 case.
+
+The cost is real and is why this is opt-in: ECDH + an AEAD pass, plus ~`32 + 16` bytes of wrapped
+key per recipient and an ephemeral public key per envelope, plus key-management state. On a fast
+local channel that overhead dominates; on a hostile one it is mandatory.
+
+**How a receiver knows which to expect.** A received payload is *either* a cleartext signed message
+*or* an encrypted envelope; the two are distinguishable by shape (an envelope has `enc`/`kex`/
+`recipients`; a message has `kind`/`signature`). Whether to *accept* plaintext on a given channel is
+a **local-policy** decision (see [`trust-model.md`](trust-model.md)): an agent MAY require that peers
+on an untrusted link seal their messages and reject unencrypted ones, or MAY accept plaintext from
+peers it reaches over a channel it already trusts. Nothing in the protocol forces encryption on, and
+— per principle 7 — nothing lets a third party force it *off* or decrypt what was sealed. **The
+endpoints choose.** That choice being free, in both directions, is the load-bearing property.
 
 ## What it protects, and what it does not
 

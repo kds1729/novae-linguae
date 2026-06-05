@@ -2,8 +2,11 @@
 
 Reference implementation of the Nova Locutio **encrypted envelope** ([`spec/encryption.md`](../../spec/encryption.md)):
 a hybrid, multi-recipient sealed box that gives payloads **confidentiality** to complement the
-integrity/provenance that signing already provides. This is the load-bearing piece of principle 7 —
-without it, "open communication" can be selectively suppressed by anyone who can read the wire.
+integrity/provenance that signing already provides. Signing is mandatory; sealing is **opt-in per
+conversation** — agents on a shared host or trusted subnet send signed plaintext, and seal only when
+the channel is untrusted (see [`spec/encryption.md` §"Optional by design"](../../spec/encryption.md)).
+What is load-bearing for principle 7 is that the capability is always available and un-suppressible —
+no third party can force it off or decrypt what was sealed.
 
 - **`nl_crypto.py`** — the library: X25519, ChaCha20/HChaCha20/XChaCha20-Poly1305, HKDF-SHA-256, the
   Ed25519↔X25519 conversion, and the envelope `seal`/`open`.
