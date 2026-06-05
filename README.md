@@ -289,12 +289,12 @@ What is done:
 - Surface syntax for Nova Lingua: parsers and pretty-printers for all four expression sub-languages (type, predicate, value, body), with a bidirectional surface-string ↔ JSON-AST mapping and round-trip contract, exposed as eight `parse-*`/`unparse-*` subcommands (per [`spec/surface-syntax.md`](spec/surface-syntax.md))
 - Well-formedness checks for predicate, value, and body expressions (`check-predicate`, `check-value`, `check-body`), matching the existing `check-type` for types
 - *Nova Locutio* message schema v0.2: mandatory structured claim/commitment ASTs (`assert_body.claim` → `claim-expression.schema.json`, `commit_body.commitment` → `commitment-expression.schema.json`) enforced by cross-file `$ref`; v0.1 schema retained unchanged
-- Ingestion tools: `nl-ingest` (Rust, via `syn`) and `nl-ingest-py` (Python, stdlib-only, via `ast`) — each parses public functions from its ecosystem and emits valid v0.1 function records as JSONL; both agree byte-for-byte with `nl-validator` on canonical form and hash
+- Ingestion adapters for four ecosystems — `nl-ingest` (Rust, via `syn`), `nl-ingest-py` (Python, via `ast`), `nl-ingest-hs` (Haskell), and `nl-ingest-ts` (npm/TypeScript) — each parses public functions and emits valid v0.1 function records as JSONL, all agreeing byte-for-byte with `nl-validator` on canonical form and hash. The three non-Rust adapters are stdlib-only Python (zero dependencies) sharing a common BLAKE3+JCS core
 - All twelve original v0.1 deferred items resolved
 - Language-neutral conformance vectors (`spec/conformance/`) plus a reference test suite (`cargo test`, 164 tests) that replays them
 
 What is next:
-- Ingestion adapters for Haskell and npm ecosystems (community contributions welcome; Rust and Python are done)
+- Higher-fidelity ingestion (full-AST parsing via `haskell-src-exts` and the TypeScript compiler; structured Nova Lingua type/body ASTs instead of source-flavored strings) — the four current adapters establish the record contract
 - Payload encryption for *Nova Locutio* (per-conversation symmetric keys, key exchange via DID-resolved public keys) — deferred to v0.2, load-bearing for principle 7
 
 Looking for collaborators on all of the above.

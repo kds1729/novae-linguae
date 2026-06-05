@@ -262,7 +262,7 @@ For a reference implementation:
 - Mature, well-maintained crates for everything we need: `jsonschema`, `serde_jcs`, `blake3`, `ed25519-dalek`.
 - Aligned with the eventual ingestion-from-Rust path (the first ingestion adapter target is Rust crates).
 
-Other implementations are welcome (Deno/TypeScript, Python, Go). All implementations MUST agree byte-for-byte on canonical form and hash. The conformance vectors at [`spec/conformance/`](../../spec/conformance/) pin this contract. A second, independent implementation of the canonical-form + hash pipeline already exists in Python — the [`nl-ingest-py`](../ingest-python/README.md) ingestion adapter vendors its own stdlib-only JCS + BLAKE3 and agrees with this validator byte-for-byte (its test suite cross-checks against `nl-validator`).
+Other implementations are welcome (Deno/TypeScript, Python, Go). All implementations MUST agree byte-for-byte on canonical form and hash. The conformance vectors at [`spec/conformance/`](../../spec/conformance/) pin this contract. A second, independent implementation of the canonical-form + hash pipeline already exists in Python and backs three ingestion adapters — [`nl-ingest-py`](../ingest-python/README.md) (Python source), [`nl-ingest-hs`](../ingest-haskell/README.md) (Haskell source), and [`nl-ingest-ts`](../ingest-npm/README.md) (npm/TypeScript source) — built on a shared stdlib-only JCS + BLAKE3 core ([`ingest-common`](../ingest-common/README.md)). Each agrees with this validator byte-for-byte; their test suites cross-check against `nl-validator`.
 
 ## Crate version notes
 
