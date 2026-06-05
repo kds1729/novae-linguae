@@ -16,6 +16,7 @@ Reference command-line validator, canonicalizer, and hasher for *Novae Linguae* 
 - [x] In-crate test suite (`cargo test`, 119 tests) covering canonicalization, hashing, kind detection, signing/verification, type well-formedness, predicate/value/body well-formedness, schema validation, and cross-file `$ref` resolution.
 - [x] Cross-file `$ref` resolution: schemas may reference sibling schemas by their `https://novae-linguae.org/spec/...` identifier; `validate` resolves these against the local `spec/` tree (`validate_with_refs`). Used by the message schema for conditional `store`-payload validation.
 - [x] Language-neutral conformance **vectors** (record → canonical bytes → hash, plus signing, signature, type well-formedness, and schema cases) exported as portable fixtures under [`spec/conformance/`](../../spec/conformance/) for cross-implementation byte-equality testing. The reference implementation replays them via `cargo test --test conformance`.
+- [x] Ingestion tool (`nl-ingest`): parses public Rust functions via `syn` and emits Nova Lingua v0.1 function records as JSONL; all emitted records pass `nl-validator validate`.
 
 ## Build
 
@@ -26,7 +27,12 @@ cd tooling/validator
 cargo build --release
 ```
 
-The compiled binary is at `target/release/nl-validator`.
+Two binaries are built:
+
+| Binary | Purpose |
+|--------|---------|
+| `target/release/nl-validator` | Validate, hash, sign, verify, and well-formedness-check artifacts |
+| `target/release/nl-ingest` | Parse Rust source files and emit Nova Lingua function records |
 
 ## Tests
 
@@ -186,6 +192,66 @@ Writes the JCS-canonical form of a record to stdout (no trailing newline). Usefu
 ```bash
 target/release/nl-validator canonicalize ../../spec/examples/map.json | xxd | head
 ```
+
+---
+
+## nl-ingest — Rust source → function records
+
+`nl-ingest` reads one or more `.rs` files, finds every public top-level `pub fn`, and emits one Nova Lingua v0.1 function record per function as compact JSON (JSONL — one object per line).
+
+### Basic usage
+
+```bash
+# Ingest a single file; print compact JSONL to stdout
+target/release/nl-ingest path/to/lib.rs
+
+# Pretty-print for human review
+target/release/nl-ingest --pretty path/to/lib.rs
+
+# Tag name_hints with the crate name (emits "mycrate_fn_name" alongside "fn_name")
+target/release/nl-ingest --crate-name mycrate path/to/lib.rs
+
+# Ingest multiple files at once
+target/release/nl-ingest --crate-name mylib src/lib.rs src/utils.rs
+```
+
+### Post-ingestion workflow
+
+Each emitted record is schema-valid but has placeholder values that should be filled in:
+
+```bash
+# 1. Ingest into a staging file
+target/release/nl-ingest --pretty --crate-name mylib src/lib.rs > /tmp/draft-records.jsonl
+
+# 2. Validate each record structurally
+while IFS= read -r record; do
+    echo "$record" > /tmp/rec.json
+    target/release/nl-validator validate ../../spec/function-record.schema.json /tmp/rec.json
+done < /tmp/draft-records.jsonl
+
+# 3. Edit draft records: fill in examples, effects, properties, intent_tags, terminates
+# 4. Re-validate and then verify hash integrity after any edits
+target/release/nl-validator verify /tmp/edited-record.json
+```
+
+### What nl-ingest populates
+
+| Field | How populated |
+|-------|---------------|
+| `hash` | Real `fn_` BLAKE3 content-address computed from the record itself |
+| `name_hints` | Bare function name; `crate_fn` form if `--crate-name` given |
+| `signature.type` | Rust type string: `forall T U. (Param1, Param2) -> RetType` (lifetimes stripped) |
+| `body_hash` | Synthetic `expr_` BLAKE3 of the function body token stream — changes when body changes; not a Nova Lingua body AST |
+| `examples` | One placeholder per function: `args` = `[null, …]` (correct arity), `result` = `null` |
+| `signature.effects` | `[]` (conservative; fill in after review) |
+| `signature.terminates` | `"unknown"` (fill in after analysis) |
+| `properties`, `intent_tags` | `[]` (fill in after review) |
+
+### Known limitations
+
+- Only top-level `pub fn` items are ingested; methods inside `impl` blocks are skipped.
+- Generic constraints (`where T: Fn(…)`) are included in the type string verbatim but not parsed into the type-expression AST.
+- `body_hash` is a synthetic address from Rust token stream bytes, not a proper Nova Lingua body-expression hash. A future iteration will translate the `syn` AST to a body-expression AST and hash that instead.
 
 ## Why Rust
 
