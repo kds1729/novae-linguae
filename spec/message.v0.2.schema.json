@@ -1,0 +1,413 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.2/message.schema.json",
+  "title": "Nova Locutio Message (v0.2)",
+  "description": "v0.2 of the Nova Locutio message schema. The only breaking change from v0.1 is in two body shapes: `assert_body.claim` and `commit_body.commitment` are now required to be structured AST objects (validated against claim-expression.schema.json and commitment-expression.schema.json respectively via cross-file $ref) rather than free-form strings. All other fields, body shapes, and schema semantics are identical to v0.1. v0.1 messages remain valid against the v0.1 schema; this schema accepts v0.2 messages only (schema_version pinned to 0.2.0). The cross-file $refs are resolved by nl-validator against sibling files in spec/ — the same mechanism already used for store-payload validation in the v0.1 request body.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "hash",
+    "from",
+    "body",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.2.0",
+      "description": "Schema version pinned per message — old messages remain readable as the schema evolves."
+    },
+    "kind": {
+      "$ref": "#/$defs/speech_act",
+      "description": "The speech act this message performs. Discriminates the body shape."
+    },
+    "hash": {
+      "$ref": "#/$defs/message_address",
+      "description": "Content-hash of the canonical serialization of this message with 'hash' and 'signature' fields removed. The message's global identity."
+    },
+    "from": {
+      "$ref": "#/$defs/did",
+      "description": "DID of the sending agent."
+    },
+    "to": {
+      "oneOf": [
+        { "$ref": "#/$defs/did" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/did" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "Intended receiver(s). Three valid forms: a single DID (point-to-point), an array of DIDs (multicast), or null (broadcast)."
+    },
+    "in_reply_to": {
+      "oneOf": [
+        { "$ref": "#/$defs/message_address" },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "Loose conversational threading — the prior message this is responding to."
+    },
+    "timestamp": {
+      "oneOf": [
+        { "type": "string", "format": "date-time" },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "Optional ISO 8601 timestamp. Advisory only."
+    },
+    "constraints": {
+      "oneOf": [
+        { "$ref": "#/$defs/constraints" },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "Optional constraints (capabilities, budget, deadline)."
+    },
+    "body": {
+      "description": "Body shape is discriminated by 'kind' — see allOf branches and $defs/*_body."
+    },
+    "signature": {
+      "$ref": "#/$defs/signature",
+      "description": "Cryptographic signature from 'from' over the canonical serialization of this message with the 'signature' field removed."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "request" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/request_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "assert" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/assert_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "query" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/query_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "propose" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/propose_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "commit" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/commit_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "retract" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/retract_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "delegate" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/delegate_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "ack" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/ack_body" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "reject" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/reject_body" } } }
+    }
+  ],
+  "$defs": {
+    "speech_act": {
+      "type": "string",
+      "enum": [
+        "request",
+        "assert",
+        "query",
+        "propose",
+        "commit",
+        "retract",
+        "delegate",
+        "ack",
+        "reject"
+      ]
+    },
+    "content_address": {
+      "type": "string",
+      "pattern": "^(fn|expr|type|proof|msg)_[0-9a-f]{64}$"
+    },
+    "message_address": {
+      "type": "string",
+      "pattern": "^msg_[0-9a-f]{64}$"
+    },
+    "did": {
+      "type": "string",
+      "pattern": "^did:[a-z0-9]+:[A-Za-z0-9._:-]+$",
+      "minLength": 8,
+      "maxLength": 256
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*:[A-Za-z0-9+/]+={0,2}$"
+    },
+    "capability": {
+      "type": "string",
+      "pattern": "^cap:[a-z][a-z0-9_-]*(/[a-z][a-z0-9_-]*)*$",
+      "minLength": 5,
+      "maxLength": 128
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/capability" },
+          "uniqueItems": true
+        },
+        "budget_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget_compute_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deadline_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deadline_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "request_body": {
+      "type": "object",
+      "required": ["action"],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["apply", "store", "validate"]
+        },
+        "target": {
+          "$ref": "#/$defs/content_address"
+        },
+        "args": {
+          "type": "array"
+        },
+        "payload_kind": {
+          "type": "string",
+          "enum": [
+            "function-record",
+            "function-record-v0.2",
+            "body-expression",
+            "type-expression",
+            "predicate-expression",
+            "value-expression"
+          ]
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "function-record" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.1/function-record.schema.json" } } }
+        },
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "function-record-v0.2" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.2/function-record.schema.json" } } }
+        },
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "body-expression" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.1/body-expression.schema.json" } } }
+        },
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "type-expression" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.1/type-expression.schema.json" } } }
+        },
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "predicate-expression" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.1/predicate-expression.schema.json" } } }
+        },
+        {
+          "if": { "required": ["payload_kind"], "properties": { "payload_kind": { "const": "value-expression" } } },
+          "then": { "properties": { "payload": { "$ref": "https://novae-linguae.org/spec/v0.1/value-expression.schema.json" } } }
+        }
+      ]
+    },
+    "assert_body": {
+      "type": "object",
+      "required": ["subject", "claim"],
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "$ref": "#/$defs/content_address",
+          "description": "What the assertion is about."
+        },
+        "claim": {
+          "$ref": "https://novae-linguae.org/spec/v0.1/claim-expression.schema.json",
+          "description": "The claim being made. v0.2: structured claim AST (claim-expression.schema.json). v0.1 string form is no longer accepted."
+        },
+        "evidence": {
+          "oneOf": [
+            { "$ref": "#/$defs/content_address" },
+            { "type": "null" }
+          ],
+          "default": null,
+          "description": "Optional content-address of a proof certificate or supporting artifact."
+        }
+      }
+    },
+    "query_body": {
+      "type": "object",
+      "required": ["pattern"],
+      "additionalProperties": false,
+      "properties": {
+        "pattern": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "signature_type": {
+              "type": "string"
+            },
+            "intent_tags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)*$"
+              },
+              "uniqueItems": true
+            },
+            "effects": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "fs.read", "fs.write", "net.read", "net.write",
+                  "alloc", "time", "random",
+                  "io.console", "process.spawn", "panic"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "terminates": {
+              "type": "string",
+              "enum": ["always", "conditional", "never", "unknown"]
+            }
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 50
+        },
+        "cursor": {
+          "type": "string"
+        }
+      }
+    },
+    "propose_body": {
+      "$ref": "#/$defs/request_body"
+    },
+    "commit_body": {
+      "type": "object",
+      "required": ["commitment"],
+      "additionalProperties": false,
+      "properties": {
+        "commitment": {
+          "$ref": "https://novae-linguae.org/spec/v0.1/commitment-expression.schema.json",
+          "description": "What the sender is binding themselves to. v0.2: structured commitment AST (commitment-expression.schema.json). v0.1 string form is no longer accepted."
+        },
+        "conditions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": [],
+          "description": "Preconditions that release the sender from the commitment. v0.1 stringified; structured form deferred to a later bump."
+        },
+        "expires_at": {
+          "oneOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ],
+          "default": null
+        }
+      }
+    },
+    "retract_body": {
+      "type": "object",
+      "required": ["retracts", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "retracts": {
+          "$ref": "#/$defs/message_address"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "delegate_body": {
+      "type": "object",
+      "required": ["capability"],
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/capability"
+        },
+        "expires_at": {
+          "oneOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ],
+          "default": null
+        },
+        "conditions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        }
+      }
+    },
+    "ack_body": {
+      "type": "object",
+      "required": ["acks"],
+      "additionalProperties": false,
+      "properties": {
+        "acks": {
+          "$ref": "#/$defs/message_address"
+        },
+        "result": {}
+      }
+    },
+    "reject_body": {
+      "type": "object",
+      "required": ["rejects", "code"],
+      "additionalProperties": false,
+      "properties": {
+        "rejects": {
+          "$ref": "#/$defs/message_address"
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "not_authorized",
+            "constraint_violated",
+            "unknown_target",
+            "malformed",
+            "refused",
+            "timeout"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "default": ""
+        }
+      }
+    }
+  }
+}

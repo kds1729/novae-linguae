@@ -12,7 +12,8 @@ Reference command-line validator, canonicalizer, and hasher for *Novae Linguae* 
 - [x] Verify the `hash` field on a record matches its computed hash (`verify` subcommand; refused for body-expressions since they have no stored `hash` field — use `hash` and compare externally to whichever `body_hash` references the body).
 - [x] Verify Ed25519 signatures on *Nova Locutio* messages (`verify` runs hash + signature for messages; `sign --seed <s>` produces deterministically-keyed signed messages).
 - [x] Well-formedness checks for type expressions beyond JSON Schema (`check-type` subcommand): type-variable scoping, rank-1 polymorphism, uniqueness within sums and records, ctor-kind compatibility in `apply`.
-- [x] In-crate test suite (`cargo test`, 58 tests) covering canonicalization, hashing, kind detection, signing/verification, type well-formedness, schema validation, and cross-file `$ref` resolution.
+- [x] Well-formedness checks for predicate, value, and body expressions (`check-predicate`, `check-value`, `check-body` subcommands): predicate op arity, value record field uniqueness, body lambda param uniqueness, and literal value soundness.
+- [x] In-crate test suite (`cargo test`, 119 tests) covering canonicalization, hashing, kind detection, signing/verification, type well-formedness, predicate/value/body well-formedness, schema validation, and cross-file `$ref` resolution.
 - [x] Cross-file `$ref` resolution: schemas may reference sibling schemas by their `https://novae-linguae.org/spec/...` identifier; `validate` resolves these against the local `spec/` tree (`validate_with_refs`). Used by the message schema for conditional `store`-payload validation.
 - [x] Language-neutral conformance **vectors** (record → canonical bytes → hash, plus signing, signature, type well-formedness, and schema cases) exported as portable fixtures under [`spec/conformance/`](../../spec/conformance/) for cross-implementation byte-equality testing. The reference implementation replays them via `cargo test --test conformance`.
 
@@ -62,7 +63,7 @@ target/release/nl-validator validate \
     ../../spec/function-record.v0.2.schema.json \
     ../../spec/examples/map.v0.2.json
 
-# Messages
+# Messages — v0.1 (string claim/commitment)
 target/release/nl-validator validate \
     ../../spec/message.schema.json \
     ../../spec/examples/request.json
@@ -70,6 +71,15 @@ target/release/nl-validator validate \
 target/release/nl-validator validate \
     ../../spec/message.schema.json \
     ../../spec/examples/assert.json
+
+# Messages — v0.2 (structured claim/commitment ASTs)
+target/release/nl-validator validate \
+    ../../spec/message.v0.2.schema.json \
+    ../../spec/examples/assert.v0.2.json
+
+target/release/nl-validator validate \
+    ../../spec/message.v0.2.schema.json \
+    ../../spec/examples/commit.v0.2.json
 
 # Sub-language expressions
 target/release/nl-validator validate \
@@ -120,6 +130,8 @@ Body expressions have no stored `hash`; use `hash` and compare against `body_has
 target/release/nl-validator verify ../../spec/examples/map.json
 target/release/nl-validator verify ../../spec/examples/request.json
 target/release/nl-validator verify ../../spec/examples/assert.json
+target/release/nl-validator verify ../../spec/examples/assert.v0.2.json
+target/release/nl-validator verify ../../spec/examples/commit.v0.2.json
 ```
 
 ### sign — produce a signed message
@@ -140,6 +152,31 @@ Checks beyond JSON Schema: type-variable scoping, rank-1 polymorphism, uniquenes
 
 ```bash
 target/release/nl-validator check-type ../../spec/examples/type-map.json
+```
+
+### check-predicate — predicate-expression well-formedness
+
+Checks arity of known built-in operators (`not/1`, `and/2`, `or/2`, `eq/2`, `foldl/3`, …). Unknown ops (content-address refs, scope variables) are not checked.
+
+```bash
+target/release/nl-validator check-predicate ../../spec/examples/predicate-identity.json
+```
+
+### check-value — value-expression well-formedness
+
+Checks record field name uniqueness (not expressible in JSON Schema).
+
+```bash
+target/release/nl-validator check-value ../../spec/examples/value-list-int.json
+```
+
+### check-body — body-expression well-formedness
+
+Checks lambda parameter name uniqueness and that `lit.value` is a well-formed value expression.
+
+```bash
+target/release/nl-validator check-body ../../spec/examples/body-double.json
+target/release/nl-validator check-body ../../spec/examples/body-is-zero.json
 ```
 
 ### canonicalize — JCS canonical bytes

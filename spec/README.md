@@ -9,6 +9,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `function-record.schema.json` | v0.1 draft | The function-record schema, v0.1 (string surface form for type / predicate / value fields) |
 | `function-record.v0.2.schema.json` | v0.2 draft | The function-record schema, v0.2 — same shape as v0.1 but with structured type / predicate / value ASTs (sub-schemas inlined under `$defs` for self-containment) |
 | `message.schema.json` | v0.1 draft | The structured speech-act envelope for *Nova Locutio* messages |
+| `message.v0.2.schema.json` | v0.2 draft | *Nova Locutio* message envelope v0.2 — only breaking change: `assert_body.claim` and `commit_body.commitment` are now required structured ASTs (`claim-expression.schema.json` / `commitment-expression.schema.json`) instead of free-form strings |
 | `type-expression.schema.json` | v0.1 draft | Structured AST for *Nova Lingua* type expressions (used inline by `function-record.v0.2.schema.json`) |
 | `predicate-expression.schema.json` | v0.1 draft | Structured AST for refinement predicates and property tests (used inline by `function-record.v0.2.schema.json`) |
 | `value-expression.schema.json` | v0.1 draft | Structured AST for values in `examples.args` / `examples.result` (used inline by `function-record.v0.2.schema.json`) |
@@ -29,7 +30,9 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `examples/claim-satisfies-identity.json` | example | A `satisfies` claim asserting that the v0.2 map record satisfies its `identity` property |
 | `examples/commitment-apply-double.json` | example | An `apply` commitment to call `double(42)` by end of 2026 |
 | `examples/request.json` | example | Concrete `request` message (apply `map` to `[1,2,3]`); signed with deterministic seed `novae-linguae-example-claude` |
-| `examples/assert.json` | example | Concrete `assert` message claiming an identity property; signed with deterministic seed `novae-linguae-example-verifier` |
+| `examples/assert.json` | example | Concrete `assert` message (v0.1 — string claim) claiming an identity property; signed with deterministic seed `novae-linguae-example-verifier` |
+| `examples/assert.v0.2.json` | example | Concrete `assert` message (v0.2 — structured `satisfies` claim against `map.json`); signed with deterministic seed `test-agent-v02` |
+| `examples/commit.v0.2.json` | example | Concrete `commit` message (v0.2 — structured `apply` commitment to run `map` on `[1,2,3]` by end of 2026); signed with deterministic seed `test-agent-v02` |
 | `examples/store-request.json` | example | Concrete `store` request whose `payload` is an inline function record; `payload_kind` drives cross-file `$ref` validation of the payload against `function-record.schema.json`. Signed with deterministic seed `novae-linguae-example-store` |
 | `conformance/` | v0.1 | Language-neutral cross-implementation conformance vectors: [`manifest.json`](conformance/manifest.json) (the contract) plus golden JCS canonical-byte preimages under `conformance/canonical/`. Covers hashing, signing, signature verification, type well-formedness, and schema validation. See [`conformance/README.md`](conformance/README.md). |
 
@@ -75,7 +78,7 @@ These are real specifications that will arrive in their own schemas. v0.1 string
 5. **Body representation.** v0.1 references the body by hash (`body_hash`) but does not specify the body's structure. **RESOLVED** end-to-end in [`body-expression.schema.json`](body-expression.schema.json): structured AST with seven expression kinds (`var`, `lit`, `app`, `let`, `lambda`, `case`, `field`) and four pattern kinds (`wildcard`, `bind`, `variant`, `lit`). Embedded types and values are accepted as opaque objects at this layer and must validate independently against `type-expression.schema.json` and `value-expression.schema.json`. The reference validator `nl-validator hash` auto-detects body expressions from the top-level `kind` field; `--kind body` is available as an override. Example function records (`double.v0.2.json`) now point at the real `expr_<…>` content-address of their body (`body-double.json`), and `verify` confirms the chain end-to-end. Deferred to a later body-expression schema version: optional type annotations on `let`, multi-binding `let`, multi-arm lambda equivalence sugar, do-notation, effect rows.
 6. **Canonical serialization for hashing.** ~~v0.1 mentions canonical serialization but does not define it.~~ **RESOLVED in [`canonical-serialization.md`](canonical-serialization.md)**: JCS (RFC 8785) over UTF-8 JSON, BLAKE3-256 as the hash. The reference validator/hasher at [`tooling/validator/`](../tooling/validator/) implements the procedure end-to-end; example records now carry real, reproducible hashes that `nl-validator verify` passes.
 7. **Controlled intent-tag vocabulary.** **RESOLVED** in [`intent-tag-vocabulary.md`](intent-tag-vocabulary.md): sixteen top-level categories and a set of property-modifier tags, with an extension policy. The schema continues to accept any tag matching the path pattern; the vocabulary is the convention for cross-agent agreement.
-8. **Claim and commitment expression sub-languages.** **RESOLVED** at the schema layer in [`claim-expression.schema.json`](claim-expression.schema.json) (three kinds: `predicate`, `satisfies`, `verified`) and [`commitment-expression.schema.json`](commitment-expression.schema.json) (three kinds: `apply`, `provide`, `refrain`). The v0.1 message schema continues to accept the string form for `assert.claim` and `commit.commitment`; switchover to mandatory structured form is the one remaining piece queued for the next message-schema major bump. (Cross-file `$ref` resolution in the validator — once bundled with this — has already landed independently; see item 12.)
+8. **Claim and commitment expression sub-languages.** **FULLY RESOLVED.** Structured ASTs defined in [`claim-expression.schema.json`](claim-expression.schema.json) (three kinds: `predicate`, `satisfies`, `verified`) and [`commitment-expression.schema.json`](commitment-expression.schema.json) (three kinds: `apply`, `provide`, `refrain`). **Made mandatory** in [`message.v0.2.schema.json`](message.v0.2.schema.json): `assert_body.claim` and `commit_body.commitment` are now required structured AST objects validated by cross-file `$ref`. The v0.1 message schema retains the string form unchanged; v0.2 messages must use the structured form. Worked examples: [`examples/assert.v0.2.json`](examples/assert.v0.2.json) (`satisfies` claim) and [`examples/commit.v0.2.json`](examples/commit.v0.2.json) (`apply` commitment). Both carry real hashes and Ed25519 signatures that `nl-validator verify` passes.
 9. **Multicast addressing.** **RESOLVED** additively in `message.schema.json`: the `to` field now accepts a single DID, an array of DIDs (multicast), or null (broadcast). Existing single-DID messages remain valid.
 10. **Multi-algorithm signatures.** **RESOLVED** additively in `message.schema.json`: the `signature` pattern broadened to `<algo>:<base64>` with `algo` matching lowercase kebab-case. v0.1 implementations MUST produce and verify `ed25519:<base64>` and MAY accept other algorithm tags. Existing ed25519 signatures still match.
 11. **Absolute deadlines.** **RESOLVED** additively in `message.schema.json`: `constraints` gains an optional `deadline_at` field carrying an ISO 8601 wall-clock instant, alongside the existing relative `deadline_ms`. May be combined; receiver honors whichever expires first.
@@ -107,7 +110,7 @@ Function records and messages both have a `hash` field that identifies the artif
 - **Message hash**: BLAKE3-256 of the JCS-canonical serialization of the message with the `hash` and `signature` fields removed.
 - **Message signature**: Ed25519 over the JCS-canonical serialization of the message with only the `signature` field removed (so the `hash` is included in what is signed — tampering with the hash is detectable).
 
-All three example records (`map.json`, `request.json`, `assert.json`) carry real hashes and (for messages) real Ed25519 signatures, reproducible via `nl-validator hash` / `nl-validator sign --seed <s>`. They PASS `nl-validator verify`.
+All example records (`map.json`, `request.json`, `assert.json`, `assert.v0.2.json`, `commit.v0.2.json`, and the v0.2 function records) carry real hashes and (for messages) real Ed25519 signatures, reproducible via `nl-validator hash` / `nl-validator sign --seed <s>`. They PASS `nl-validator verify`.
 
 ## Validating a record or message
 
@@ -126,10 +129,16 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 # function-record.schema.json (a sibling file) via the payload_kind discriminator
 ./tooling/validator/target/release/nl-validator validate spec/message.schema.json         spec/examples/store-request.json
 
+# v0.2 message schema — structured claim/commitment ASTs
+./tooling/validator/target/release/nl-validator validate spec/message.v0.2.schema.json spec/examples/assert.v0.2.json
+./tooling/validator/target/release/nl-validator validate spec/message.v0.2.schema.json spec/examples/commit.v0.2.json
+
 # End-to-end hash + signature verify (messages get both)
 ./tooling/validator/target/release/nl-validator verify spec/examples/map.json
 ./tooling/validator/target/release/nl-validator verify spec/examples/request.json
 ./tooling/validator/target/release/nl-validator verify spec/examples/assert.json
+./tooling/validator/target/release/nl-validator verify spec/examples/assert.v0.2.json
+./tooling/validator/target/release/nl-validator verify spec/examples/commit.v0.2.json
 
 # Type-expression well-formedness (beyond JSON Schema)
 ./tooling/validator/target/release/nl-validator check-type spec/examples/type-map.json

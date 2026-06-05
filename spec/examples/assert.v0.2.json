@@ -1,0 +1,20 @@
+{
+  "body": {
+    "claim": {
+      "kind": "satisfies",
+      "property": "identity",
+      "subject": "fn_fd20f137d331c42953ad164bd22cd1e6141cf310999818682832da4eb5fa8b66"
+    },
+    "evidence": null,
+    "subject": "fn_fd20f137d331c42953ad164bd22cd1e6141cf310999818682832da4eb5fa8b66"
+  },
+  "constraints": null,
+  "from": "did:nova:7c8fa806f31cc9181fc8da4c4fd38fbc372cb82aa82fd2cb9673babac46f3f0b",
+  "hash": "msg_f1e730004582943c30ac5596a115424f9bcfdaf1d94b2ae8b6ca40a19f8829ba",
+  "in_reply_to": null,
+  "kind": "assert",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:1Iogt7vOWtqP5PSzNn/DWwthQuc4EiFasjVdsSgk+SFleLqIV147NqWvloX5GwQZm/RADRS3i2L9aSuQir/PCg==",
+  "timestamp": "2026-06-05T00:00:00Z",
+  "to": null
+}

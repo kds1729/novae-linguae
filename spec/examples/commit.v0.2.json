@@ -1,0 +1,39 @@
+{
+  "body": {
+    "commitment": {
+      "args": [
+        {
+          "elems": [
+            {
+              "kind": "nat",
+              "value": 1
+            },
+            {
+              "kind": "nat",
+              "value": 2
+            },
+            {
+              "kind": "nat",
+              "value": 3
+            }
+          ],
+          "kind": "list"
+        }
+      ],
+      "by": "2026-12-31T23:59:59Z",
+      "fn": "fn_fd20f137d331c42953ad164bd22cd1e6141cf310999818682832da4eb5fa8b66",
+      "kind": "apply"
+    },
+    "conditions": [],
+    "expires_at": null
+  },
+  "constraints": null,
+  "from": "did:nova:7c8fa806f31cc9181fc8da4c4fd38fbc372cb82aa82fd2cb9673babac46f3f0b",
+  "hash": "msg_80bff25d978aaba629e2576313e1ea31df92eb77628437c804473b482f9ebfc0",
+  "in_reply_to": null,
+  "kind": "commit",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:3HoCnIgm3eC9P547xeo2sqjYgTI5KnBm2JZL+yIysCm7w/M3iD4NMbFu6gv+VQGmIaBEu8f2PfGLXWAuUG3ZBQ==",
+  "timestamp": "2026-06-05T00:00:00Z",
+  "to": null
+}
