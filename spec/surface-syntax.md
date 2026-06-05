@@ -4,11 +4,11 @@ This document defines the concrete surface syntax for the four Nova Lingua expre
 
 ## Purpose and scope
 
-v0.1 records store type, predicate, and body fields as free-form strings. v0.2 made those structured ASTs mandatory, but humans still need a readable way to write and read them. This document defines:
+v0.1 records store type, predicate, and body fields as free-form strings; v0.2 made the structured ASTs mandatory. The surface form is a compact textual encoding of those ASTs: an agent emits it in far fewer tokens than the equivalent JSON AST (e.g. `forall a b. (a -> b) -> List a -> List b` is roughly a fifth the token count of its AST), and the validator parses it into the canonical AST that carries identity for hashing and signing. The two layers are complementary — surface for cheap generation and transmission, AST for canonical identity. This document defines:
 
 1. A concrete grammar for each sub-language
 2. The bidirectional mapping between surface strings and JSON ASTs
-3. A canonical pretty-print form (AST → surface string, used for display and round-trip testing)
+3. A canonical pretty-print form (AST → surface string), the basis of the round-trip contract
 4. How the parser is exposed via `nl-validator`
 
 **Not in scope:** execution semantics, type-checking, or evaluation. The surface syntax is purely about notation.
@@ -93,7 +93,7 @@ Whitespace and `--`-to-end-of-line comments are skipped between tokens.
 type      ::= "forall" ident+ "." type          -- forall (binder)
             | fn_type
 
-fn_type   ::= app_type ("->" fn_type)?          -- right-associative
+fn_type   ::= app_type ("->" fn_type)?          -- parsed right-assoc, then collapsed (see below)
 
 app_type  ::= atom_type+                        -- left-associative juxtaposition
 
@@ -120,7 +120,7 @@ Lowercase builtins (parsed as `ident`, resolved to `builtin` kind):
 
 Uppercase shorthands for common constructors — parsed as `tag`, resolved to an `apply` node with the named constructor:
 
-`List`, `Option`, `Result`, `Map`, `Set`, `IO`
+`List`, `Maybe`, `Result`, `Map`, `Set`
 
 Any other `Tag` token in a type position is a type variable that happens to start uppercase — currently an error (type variables are lowercase per the schema). Reserved for future higher-kinded work.
 
@@ -138,18 +138,20 @@ Any other `Tag` token in a type position is a type variable that happens to star
 | `int` | `{"kind":"builtin","name":"int"}` |
 | `a` | `{"kind":"var","name":"a"}` |
 | `List a` | `{"kind":"apply","ctor":{"kind":"builtin","name":"List"},"args":[{"kind":"var","name":"a"}]}` |
-| `a -> b` | `{"kind":"fn","param":{"kind":"var","name":"a"},"ret":{"kind":"var","name":"b"}}` |
-| `(a -> b) -> List a -> List b` | fn with fn-param, right-associative |
+| `a -> b` | `{"kind":"fn","params":[{"kind":"var","name":"a"}],"result":{"kind":"var","name":"b"}}` |
+| `a -> b -> c` | `{"kind":"fn","params":[…a…,…b…],"result":…c…}` (bare arrow chain collapses into one uncurried `fn`) |
+| `a -> (b -> c)` | `{"kind":"fn","params":[…a…],"result":{"kind":"fn","params":[…b…],"result":…c…}}` (parens force a nested `fn` in `result`) |
+| `(a -> b) -> List a -> List b` | `fn` with `params` `[(a -> b), List a]` and `result` `List b` (the parenthesised `a -> b` stays nested as a param) |
 | `forall a b. (a -> b) -> List a -> List b` | `{"kind":"forall","vars":["a","b"],"body":{…fn…}}` |
 | `(int, bool)` | `{"kind":"tuple","elems":[…int…,…bool…]}` |
 | `{name: string, age: nat}` | `{"kind":"record","fields":[…]}` |
-| `[Some(a) \| None]` | `{"kind":"sum","variants":[{"tag":"Some","payload":{…}},{"tag":"None"}]}` |
+| `[Some(a) \| None]` | `{"kind":"sum","variants":[{"tag":"Some","type":{…}},{"tag":"None"}]}` |
 
 ### Canonical pretty-print rules
 
 - Builtins: lowercase name
 - `forall`: `forall <vars joined by space>. <body>`
-- `fn`: `<param> -> <ret>`; parenthesise `param` if it is itself a `fn` type: `(a -> b) -> c`
+- `fn`: schema shape is uncurried — `{params: [...], result}`. Print as `params` joined by ` -> `, then ` -> `, then `result` (so `{params:[a,b],result:c}` → `a -> b -> c`). Parenthesise any param that is itself a `fn` (`(a -> b) -> c`), and parenthesise the `result` when it is itself a `fn` (`a -> (b -> c)`) so the printed chain does not re-collapse on parse. A surface arrow chain `a -> b -> c` therefore round-trips to the flat `{params:[a,b],result:c}`; the canonical form never leaves a bare `fn` in `result` position. (Zero-arg `{params:[]}` function types have no surface form in v0.1 — write them as JSON AST directly.)
 - `apply`: ctor followed by space-separated args; parenthesise each arg that is `fn` or `apply`
 - `tuple`: `(<elem>, <elem>, …)`
 - `record`: `{<name>: <type>, …}` sorted by field name
@@ -174,7 +176,7 @@ pred     ::= "forall" ident+ "." pred           -- forall
 or_pred  ::= and_pred ("||" and_pred)*          -- app {op:"or"}
 and_pred ::= eq_pred  ("&&" eq_pred)*           -- app {op:"and"}
 eq_pred  ::= cmp_pred (("==" | "!=") cmp_pred)? -- app {op:"eq"/"neq"}
-cmp_pred ::= add_pred (("<" | "<=" | ">" | ">=") add_pred)? -- app {op:"lt"/"lte"/"gt"/"gte"}
+cmp_pred ::= add_pred (("<" | "<=" | ">" | ">=") add_pred)? -- app {op:"lt"/"le"/"gt"/"ge"}
 add_pred ::= mul_pred (("+" | "-") mul_pred)*   -- app {op:"add"/"sub"}
 mul_pred ::= unary    (("*" | "/" | "%") unary)* -- app {op:"mul"/"div"/"mod"}
 unary    ::= "!" unary                           -- app {op:"not"}
@@ -199,9 +201,9 @@ atom_pred ::= ident                              -- var
 | `==` | `eq` |
 | `!=` | `neq` |
 | `<` | `lt` |
-| `<=` | `lte` |
+| `<=` | `le` |
 | `>` | `gt` |
-| `>=` | `gte` |
+| `>=` | `ge` |
 | `&&` | `and` |
 | `\|\|` | `or` |
 | `+` | `add` |
@@ -315,7 +317,7 @@ case_expr   ::= "case" expr "of" "{" arm (";" arm)* ";"? "}"
 
 arm         ::= pattern "=>" expr
 
-param       ::= ident                            -- untyped param
+param       ::= ident                            -- untyped param (type omitted → inferred)
               | "(" ident ":" type ")"          -- typed param (type per §1)
 
 pattern     ::= "_"                              -- wildcard
@@ -335,7 +337,9 @@ atom_expr   ::= ident                            -- var
               | "(" expr ")"
 ```
 
-Infix operators in body expressions have the same precedence table as predicate expressions (§2) and map to `app` nodes with the same `op` names.
+Infix operators in body expressions have the same precedence table as predicate expressions (§2). Unlike predicate `app` (which carries an `op` string), body `app` has no `op` field: an infix operator desugars to an `app` whose `fn` is a `var` naming the operator, e.g. `a + b` → `{"kind":"app","fn":{"kind":"var","name":"add"},"args":[…a…,…b…]}`. The operator names reused from §2 are the same.
+
+Lambda parameter types are optional: `\x -> …` (inferred) and `\(x: int) -> …` (annotated) are both valid and both schema-conformant — `body-expression.schema.json` requires only `name` on each param. Omit the annotation when the type is inferable to keep the encoding compact; supply it when an explicit type aids verification.
 
 ### Ambiguity: `ident` as var vs value
 

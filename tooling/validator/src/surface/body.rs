@@ -23,13 +23,13 @@
 //! committed example bodies. Juxtaposition is curried: `f x y` →
 //! `app{fn: app{fn: f, args:[x]}, args:[y]}`.
 //!
-//! ## Where this diverges from / narrows `spec/surface-syntax.md`
+//! ## Where this narrows `spec/surface-syntax.md`
 //!
-//! * `body-expression.schema.json` **requires** a `type` on every lambda
-//!   parameter, but the spec's §4 example shows an untyped `\x -> …` producing
-//!   `params:[{"name":"x"}]` — which does not validate. The parser accepts both
-//!   forms, but only typed params (`\(x: T) -> …`) yield a schema-valid AST;
-//!   the canonical form is therefore always typed. (Flagged for reconciliation.)
+//! * Lambda parameter types are optional. `body-expression.schema.json` requires
+//!   only `name` on each param, so both `\x -> …` (`params:[{"name":"x"}]`,
+//!   inferred) and `\(x: T) -> …` (`params:[{"name":"x","type":…}]`) parse and
+//!   validate. The pretty-printer preserves whichever form the AST carries, so
+//!   each round-trips. (Reconciled: schema relaxed to make `type` optional.)
 //! * Embedded literals in v0.1 cover scalars (`nat`/`int`/`float`/`string`/
 //!   `bytes`/`bool`), `unit` (`()`), and `fn_ref` (a `fn_…` content address).
 //!   Compound value literals (lists, tuples, records, variants) inside a body
@@ -160,8 +160,9 @@ impl Parser {
                 self.expect(TokKind::Rparen, "`)` to close typed parameter")?;
                 params.push(json!({ "name": name.text, "type": ty }));
             } else if matches!(self.kind(), TokKind::Ident) && !is_keyword(&self.peek().text) {
-                // Untyped parameter — accepted, but does not validate against the
-                // schema (which requires a `type`). Canonical form is typed.
+                // Untyped parameter — the schema requires only `name`, so this
+                // is schema-valid; the type is inferred. The printer renders it
+                // back as a bare `name`, so it round-trips.
                 let name = self.bump();
                 params.push(json!({ "name": name.text }));
             } else {
@@ -765,6 +766,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_untyped_lambda() {
+        // Untyped params carry only `name` (type inferred) and are schema-valid
+        // since body-expression.schema.json requires only `name`.
+        parses_to(
+            "\\x -> x",
+            json!({
+                "kind": "lambda",
+                "params": [{"name": "x"}],
+                "body": {"kind": "var", "name": "x"}
+            }),
+        );
+    }
+
+    #[test]
     fn parse_case() {
         parses_to(
             "case n of { 0 => true; _ => false }",
@@ -829,6 +844,7 @@ mod tests {
             "rec.name",
             "!p",
             "let y = 0 in y",
+            "\\x -> x",
             "\\(n: nat) -> n + n",
             "\\(f: a -> b) (x: a) -> f x",
             "case n of { 0 => true; _ => false }",

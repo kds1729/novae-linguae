@@ -64,6 +64,33 @@ fn out_of_vocabulary_speech_act_is_rejected() {
 }
 
 #[test]
+fn lambda_param_type_is_optional() {
+    // Reconciled with surface-syntax.md §4: a lambda param needs only `name`;
+    // the type is optional (inferred when omitted). Both forms must validate.
+    let untyped = json!({
+        "kind": "lambda",
+        "params": [{"name": "x"}],
+        "body": {"kind": "var", "name": "x"}
+    });
+    assert!(check("body-expression.schema.json", &untyped).is_ok());
+
+    let typed = json!({
+        "kind": "lambda",
+        "params": [{"name": "x", "type": {"kind": "builtin", "name": "int"}}],
+        "body": {"kind": "var", "name": "x"}
+    });
+    assert!(check("body-expression.schema.json", &typed).is_ok());
+
+    // `name` is still required — a param without it must fail.
+    let nameless = json!({
+        "kind": "lambda",
+        "params": [{"type": {"kind": "builtin", "name": "int"}}],
+        "body": {"kind": "var", "name": "x"}
+    });
+    assert!(check("body-expression.schema.json", &nameless).is_err());
+}
+
+#[test]
 fn wrong_typed_field_is_rejected() {
     // `name_hints` is an array of strings; a scalar must fail structural checks.
     let mut v = example("map.json");

@@ -11,23 +11,22 @@
 //! self-contained proof of the round-trip contract. Predicate, value, and body
 //! follow, reusing [`lexer`].
 //!
-//! ## Where this diverges from `spec/surface-syntax.md`
+//! ## Canonical AST choices (schema is authoritative)
 //!
-//! The prose in `surface-syntax.md` predates the committed schemas in a few
-//! places; where they conflict, the **schema wins** (the AST must validate and
-//! interoperate with the existing validator). Concretely, for type expressions:
+//! `surface-syntax.md` and the committed schemas agree on AST shape; where a
+//! choice could go either way, the **schema wins** (the AST must validate and
+//! interoperate with the existing validator). For type expressions:
 //!
 //! * **`fn`** uses the schema's `{kind:"fn", params:[..], result}` (uncurried,
-//!   multi-arg) shape, not the `{param, ret}` shape shown in the spec's mapping
-//!   table — the latter would not validate against `type-expression.schema.json`.
-//!   A surface arrow chain `a -> b -> c` parses to the flat
+//!   multi-arg) shape. A surface arrow chain `a -> b -> c` parses to the flat
 //!   `{params:[a,b], result:c}`; the canonical form never nests a `fn` in
 //!   `result` position (any result-position arrow is absorbed into `params`).
+//!   Parenthesise to force nesting: `a -> (b -> c)`.
 //! * **Constructors** `List`, `Maybe`, `Result`, `Map`, `Set` are schema
 //!   `builtin`s (PascalCase), so `List a` is
-//!   `{kind:"apply", ctor:{builtin "List"}, args:[..]}`. The spec mentions
-//!   `Option`/`IO`; the schema has neither (`Maybe` replaces `Option`), so those
-//!   names are not recognised here.
+//!   `{kind:"apply", ctor:{builtin "List"}, args:[..]}`. `Option`/`IO` are not
+//!   in the v0.1 `builtin` enum (`Maybe` is the option-type name) and are not
+//!   recognised here.
 //!
 //! ## Round-trip contract
 //!

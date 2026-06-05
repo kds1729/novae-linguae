@@ -88,7 +88,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "type"],
+            "required": ["name"],
             "additionalProperties": false,
             "properties": {
               "name": {
@@ -99,7 +99,7 @@
               },
               "type": {
                 "type": "object",
-                "description": "Parameter type. Must validate against type-expression.schema.json; checked structurally only here."
+                "description": "Parameter type. OPTIONAL in v0.1: omit it to let the type be inferred (consistent with let-binding inference), or supply it when an explicit annotation aids verification. When present it must validate against type-expression.schema.json; checked structurally only here."
               }
             }
           },
