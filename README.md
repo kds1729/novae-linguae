@@ -137,10 +137,11 @@ The language family is half the story. The runtime is the other half, and the sa
 
 ## Nova Lingua — the programming language
 
-*Nova Lingua* is the language AI agents write programs in. A minimal sketch of what a function record looks like:
+*Nova Lingua* is the language AI agents write programs in. A minimal sketch of what a function record looks like (v0.1 string form — v0.2 replaces the `type`, `refinements[].expr`, `properties[].expr`, and `examples` fields with structured ASTs per [`spec/type-expression.schema.json`](spec/type-expression.schema.json) and related schemas):
 
 ```json
 {
+  "schema_version": "0.1.0",
   "hash": "fn_3a9b…",
   "name_hints": ["map", "fmap", "list_map"],
   "signature": {
@@ -158,10 +159,10 @@ The language family is half the story. The runtime is the other half, and the sa
     { "args": ["negate", []],      "result": [] }
   ],
   "properties": [
-    "identity:    map(id, xs) == xs",
-    "composition: map(f, map(g, xs)) == map(f . g, xs)"
+    { "name": "identity",    "expr": "map(id, xs) == xs" },
+    { "name": "composition", "expr": "map(f, map(g, xs)) == map(f . g, xs)" }
   ],
-  "intent_tags": ["transform", "list", "elementwise"],
+  "intent_tags": ["transform", "elementwise"],
   "derived_from": null,
   "body_hash": "expr_8f2c…"
 }
@@ -179,20 +180,19 @@ A minimal sketch of a request:
 
 ```json
 {
+  "schema_version": "0.1.0",
   "kind": "request",
   "hash": "msg_e7a2…",
-  "from": "did:agent:claude-7f3a",
-  "to":   "did:agent:executor-9b22",
-  "in_reply_to": null,
+  "from": "did:nova:ea9b49af…",
+  "to":   "did:nova:896a2e2c…",
   "body": {
     "action": "apply",
-    "fn":     "fn_3a9b…",
-    "args":   ["double", [1,2,3]]
+    "target": "fn_3a9b…",
+    "args":   [{"kind": "list", "items": [{"kind": "nat", "value": 1}, {"kind": "nat", "value": 2}]}]
   },
   "constraints": {
-    "capabilities":   [],
-    "budget_tokens":  1000,
-    "deadline_ms":    5000
+    "budget_tokens": 1000,
+    "deadline_ms":   5000
   },
   "signature": "ed25519:…"
 }
@@ -202,12 +202,15 @@ And an assertion carrying proof:
 
 ```json
 {
+  "schema_version": "0.1.0",
   "kind": "assert",
   "hash": "msg_f1b3…",
-  "from": "did:agent:verifier-2c91",
-  "subject": "fn_3a9b…",
-  "claim":   "satisfies: property('identity')",
-  "evidence": "proof_hash_4d8e…",
+  "from": "did:nova:896a2e2c…",
+  "body": {
+    "subject":  "fn_3a9b…",
+    "claim":    "satisfies: property('identity')",
+    "evidence": "proof_7d4f…"
+  },
   "signature": "ed25519:…"
 }
 ```
@@ -246,7 +249,7 @@ Concrete targets where contributions are needed now:
 - **The Nova Locutio wire format** specification and reference encoder/decoder.
 - **Agent-facing tooling** — how an AI agent queries, composes, contributes, and communicates.
 
-AI agents are first-class contributors. `CONTRIBUTING.md` will specify the protocol once the schemas stabilize.
+AI agents are first-class contributors. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the contribution protocol.
 
 ---
 
@@ -276,12 +279,23 @@ These are tractable iteratively. The principles above are not.
 
 ## Status
 
-**Day zero.** This document is the first artifact. Looking for collaborators on:
+**v0.1 in progress.** Core schemas and reference tooling are live. See [`spec/README.md`](spec/README.md) for the full schema inventory and [`tooling/validator/`](tooling/validator/) for the reference implementation.
 
-1. The shared record schema for functions and messages.
-2. The *Nova Lingua* surface form and compiler reference.
-3. The *Nova Locutio* speech-act vocabulary and wire format.
-4. The ingestion strategy for bootstrapping the commons.
+What is done:
+- Function-record schema at v0.1 (string fields) and v0.2 (structured ASTs mandatory throughout)
+- *Nova Locutio* message schema: nine speech acts, multicast addressing, multi-algorithm signatures, absolute deadlines, and conditional `store`-payload validation by cross-file `$ref`
+- Eight sub-language schemas: type, predicate, value, body, claim, and commitment expressions; plus canonical-serialization spec, trust model, and intent-tag vocabulary
+- Reference validator (`nl-validator`) with six subcommands: `validate`, `canonicalize`, `hash`, `verify`, `sign`, `check-type` — `validate` resolves cross-file schema references against the local `spec/` tree
+- All twelve original v0.1 deferred items resolved
+- Language-neutral conformance vectors (`spec/conformance/`) plus a reference test suite (`cargo test`, 58 tests) that replays them
+
+What is next:
+- Next message-schema major bump: mandatory structured claim/commitment ASTs
+- Well-formedness checks for predicate, value, and body expressions (matching existing `check-type` for types)
+- Ingestion-tool sketch: Rust crate → Nova Lingua function records
+- Surface syntax for Nova Lingua
+
+Looking for collaborators on all of the above, and on ingestion adapters for Python, Haskell, and npm ecosystems.
 
 ## License
 

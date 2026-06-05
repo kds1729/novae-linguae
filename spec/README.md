@@ -30,6 +30,8 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `examples/commitment-apply-double.json` | example | An `apply` commitment to call `double(42)` by end of 2026 |
 | `examples/request.json` | example | Concrete `request` message (apply `map` to `[1,2,3]`); signed with deterministic seed `novae-linguae-example-claude` |
 | `examples/assert.json` | example | Concrete `assert` message claiming an identity property; signed with deterministic seed `novae-linguae-example-verifier` |
+| `examples/store-request.json` | example | Concrete `store` request whose `payload` is an inline function record; `payload_kind` drives cross-file `$ref` validation of the payload against `function-record.schema.json`. Signed with deterministic seed `novae-linguae-example-store` |
+| `conformance/` | v0.1 | Language-neutral cross-implementation conformance vectors: [`manifest.json`](conformance/manifest.json) (the contract) plus golden JCS canonical-byte preimages under `conformance/canonical/`. Covers hashing, signing, signature verification, type well-formedness, and schema validation. See [`conformance/README.md`](conformance/README.md). |
 
 ## Versioning policy
 
@@ -58,6 +60,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 - DID-based agent identity (`did:nova:<64-hex-pubkey>` in v0.1), Ed25519 signing
 - Trust model (local policy + capability tokens + attestations, no central authority) defined in [`trust-model.md`](trust-model.md)
 - Strict `additionalProperties: false` everywhere — unknown fields fail validation
+- Conditional `store`-payload validation in `message.schema.json`: a `payload_kind` discriminator selects the artifact schema that `payload` must satisfy, applied by cross-file `$ref` (resolved by the reference validator against sibling files in `spec/`)
 
 **Well-formedness vs structural validation.** JSON Schema can only check shape. Several semantic constraints are real but live outside the schema; they are enforced by the reference validator at [`tooling/validator/`](../tooling/validator/). Today this covers type-expression well-formedness (variable scoping, rank-1 forall, uniqueness within sums and records, ctor-kind compatibility in `apply`). Predicate- and value-expression well-formedness will follow once the verifier engine engages with them.
 
@@ -72,11 +75,11 @@ These are real specifications that will arrive in their own schemas. v0.1 string
 5. **Body representation.** v0.1 references the body by hash (`body_hash`) but does not specify the body's structure. **RESOLVED** end-to-end in [`body-expression.schema.json`](body-expression.schema.json): structured AST with seven expression kinds (`var`, `lit`, `app`, `let`, `lambda`, `case`, `field`) and four pattern kinds (`wildcard`, `bind`, `variant`, `lit`). Embedded types and values are accepted as opaque objects at this layer and must validate independently against `type-expression.schema.json` and `value-expression.schema.json`. The reference validator `nl-validator hash` auto-detects body expressions from the top-level `kind` field; `--kind body` is available as an override. Example function records (`double.v0.2.json`) now point at the real `expr_<…>` content-address of their body (`body-double.json`), and `verify` confirms the chain end-to-end. Deferred to a later body-expression schema version: optional type annotations on `let`, multi-binding `let`, multi-arm lambda equivalence sugar, do-notation, effect rows.
 6. **Canonical serialization for hashing.** ~~v0.1 mentions canonical serialization but does not define it.~~ **RESOLVED in [`canonical-serialization.md`](canonical-serialization.md)**: JCS (RFC 8785) over UTF-8 JSON, BLAKE3-256 as the hash. The reference validator/hasher at [`tooling/validator/`](../tooling/validator/) implements the procedure end-to-end; example records now carry real, reproducible hashes that `nl-validator verify` passes.
 7. **Controlled intent-tag vocabulary.** **RESOLVED** in [`intent-tag-vocabulary.md`](intent-tag-vocabulary.md): sixteen top-level categories and a set of property-modifier tags, with an extension policy. The schema continues to accept any tag matching the path pattern; the vocabulary is the convention for cross-agent agreement.
-8. **Claim and commitment expression sub-languages.** **RESOLVED** at the schema layer in [`claim-expression.schema.json`](claim-expression.schema.json) (three kinds: `predicate`, `satisfies`, `verified`) and [`commitment-expression.schema.json`](commitment-expression.schema.json) (three kinds: `apply`, `provide`, `refrain`). The v0.1 message schema continues to accept the string form for `assert.claim` and `commit.commitment`; switchover to mandatory structured form is queued for the next message-schema major bump (paired with cross-schema $ref resolution in the validator).
+8. **Claim and commitment expression sub-languages.** **RESOLVED** at the schema layer in [`claim-expression.schema.json`](claim-expression.schema.json) (three kinds: `predicate`, `satisfies`, `verified`) and [`commitment-expression.schema.json`](commitment-expression.schema.json) (three kinds: `apply`, `provide`, `refrain`). The v0.1 message schema continues to accept the string form for `assert.claim` and `commit.commitment`; switchover to mandatory structured form is the one remaining piece queued for the next message-schema major bump. (Cross-file `$ref` resolution in the validator — once bundled with this — has already landed independently; see item 12.)
 9. **Multicast addressing.** **RESOLVED** additively in `message.schema.json`: the `to` field now accepts a single DID, an array of DIDs (multicast), or null (broadcast). Existing single-DID messages remain valid.
 10. **Multi-algorithm signatures.** **RESOLVED** additively in `message.schema.json`: the `signature` pattern broadened to `<algo>:<base64>` with `algo` matching lowercase kebab-case. v0.1 implementations MUST produce and verify `ed25519:<base64>` and MAY accept other algorithm tags. Existing ed25519 signatures still match.
 11. **Absolute deadlines.** **RESOLVED** additively in `message.schema.json`: `constraints` gains an optional `deadline_at` field carrying an ISO 8601 wall-clock instant, alongside the existing relative `deadline_ms`. May be combined; receiver honors whichever expires first.
-12. **Cross-schema validation.** **PARTIALLY RESOLVED** in the description of `request.payload`: the expected payload shapes for `action: "store"` are now documented (function record / body expression / sub-language artifact, per the appropriate schema). Full conditional `if/then` validation requires cross-file $ref resolution in the validator — that wiring lands with the message-schema major bump that also requires structured claim / commitment forms.
+12. **Cross-schema validation.** **RESOLVED.** `request_body` gains an optional `payload_kind` discriminator; `allOf` `if/then` branches validate `payload` against the appropriate schema (function record v0.1/v0.2, body expression, or a type / predicate / value sub-language artifact) by **cross-file `$ref`** into the `https://novae-linguae.org/spec/...` namespace. The reference validator resolves those references against sibling files in `spec/` (`nl-validator validate`, backed by `validate_with_refs`); see [`examples/store-request.json`](examples/store-request.json) for a worked `store` message whose payload is validated cross-file. The change is **additive** — messages without a `payload_kind` (apply/validate requests and any message predating this check) keep the bare object constraint on `payload` and remain valid. Mandatory structured claim / commitment ASTs remain deferred to the next message-schema major bump (item 8); they are independent of this.
 
 ## Content-address format (v0.1)
 
@@ -119,6 +122,10 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 ./tooling/validator/target/release/nl-validator validate spec/predicate-expression.schema.json spec/examples/predicate-identity.json
 ./tooling/validator/target/release/nl-validator validate spec/value-expression.schema.json spec/examples/value-list-int.json
 
+# Cross-file $ref resolution: the store payload is validated against
+# function-record.schema.json (a sibling file) via the payload_kind discriminator
+./tooling/validator/target/release/nl-validator validate spec/message.schema.json         spec/examples/store-request.json
+
 # End-to-end hash + signature verify (messages get both)
 ./tooling/validator/target/release/nl-validator verify spec/examples/map.json
 ./tooling/validator/target/release/nl-validator verify spec/examples/request.json
@@ -128,7 +135,7 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 ./tooling/validator/target/release/nl-validator check-type spec/examples/type-map.json
 ```
 
-Any JSON Schema 2020-12 validator can also be used for structural checks; the reference is byte-equality of hash and JCS form across implementations.
+Cross-file `$ref`s resolve against sibling schema files: when a schema references another by its `https://novae-linguae.org/spec/<version>/<file>` identifier, `nl-validator validate` maps that to `<file>` in the schema's own directory. The version path segment is logical only — all schema files live flat in `spec/`. Any JSON Schema 2020-12 validator can also be used for structural checks; the reference is byte-equality of hash and JCS form across implementations.
 
 ## Contributing
 
