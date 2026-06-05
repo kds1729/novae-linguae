@@ -137,3 +137,91 @@ fn schema_validation_vectors_hold() {
         }
     }
 }
+
+/// Surface-syntax vectors: parse to the expected AST, validate that AST against
+/// the authoritative sub-language schema, and exercise the round-trip contract.
+/// Ties `spec/surface-syntax.md` to the committed schemas so parser drift fails
+/// CI. v0.1 covers the `type` sub-language.
+#[cfg(feature = "surface")]
+#[test]
+fn surface_vectors_parse_unparse_and_validate() {
+    let m = manifest();
+
+    // Map a sub-language to its JSON Schema file under spec/.
+    fn schema_file(sub: &str) -> &'static str {
+        match sub {
+            "type" => "type-expression.schema.json",
+            "value" => "value-expression.schema.json",
+            "predicate" => "predicate-expression.schema.json",
+            "body" => "body-expression.schema.json",
+            other => panic!("surface vector: unsupported sub_language `{other}`"),
+        }
+    }
+    // Parse a surface string for the given sub-language.
+    fn parse(sub: &str, src: &str) -> serde_json::Value {
+        match sub {
+            "type" => nl_validator::surface::parse_type(src)
+                .unwrap_or_else(|e| panic!("parse_type({src:?}): {e}")),
+            "value" => nl_validator::surface::parse_value(src)
+                .unwrap_or_else(|e| panic!("parse_value({src:?}): {e}")),
+            "predicate" => nl_validator::surface::parse_predicate(src)
+                .unwrap_or_else(|e| panic!("parse_predicate({src:?}): {e}")),
+            "body" => nl_validator::surface::parse_body(src)
+                .unwrap_or_else(|e| panic!("parse_body({src:?}): {e}")),
+            other => panic!("surface vector: unsupported sub_language `{other}`"),
+        }
+    }
+    // Pretty-print an AST for the given sub-language.
+    fn unparse(sub: &str, ast: &serde_json::Value) -> String {
+        match sub {
+            "type" => nl_validator::surface::unparse_type(ast)
+                .unwrap_or_else(|e| panic!("unparse_type: {e}")),
+            "value" => nl_validator::surface::unparse_value(ast)
+                .unwrap_or_else(|e| panic!("unparse_value: {e}")),
+            "predicate" => nl_validator::surface::unparse_predicate(ast)
+                .unwrap_or_else(|e| panic!("unparse_predicate: {e}")),
+            "body" => nl_validator::surface::unparse_body(ast)
+                .unwrap_or_else(|e| panic!("unparse_body: {e}")),
+            other => panic!("surface vector: unsupported sub_language `{other}`"),
+        }
+    }
+
+    for v in section(&m, "surface_vectors") {
+        let name = vname(v);
+        let sub = v["sub_language"].as_str().unwrap();
+        let surface = v["surface"].as_str().unwrap();
+        let expected = &v["expected_ast"];
+        let canonical = v["canonical"].as_bool().unwrap_or(false);
+
+        // 1. parse(surface) == expected_ast
+        let ast = parse(sub, surface);
+        assert_eq!(&ast, expected, "{name}: parsed AST differs from expected_ast");
+
+        // 2. The AST validates against the authoritative schema.
+        let schema = common::schema(schema_file(sub));
+        validate_with_refs(&schema, &ast, &spec_dir()).unwrap_or_else(|e| {
+            panic!(
+                "{name}: parsed AST does not validate against {}: {e:#}",
+                schema_file(sub)
+            )
+        });
+
+        // 3. unparse is canonical: when the input is flagged canonical it must
+        //    be reproduced byte-for-byte; either way unparse is a fixed point.
+        let printed = unparse(sub, &ast);
+        if canonical {
+            assert_eq!(printed, surface, "{name}: unparse is not the canonical string");
+        }
+        let reparsed = parse(sub, &printed);
+        if canonical {
+            // Round-trip identity holds for canonical ASTs.
+            assert_eq!(reparsed, ast, "{name}: parse(unparse(ast)) != ast");
+        }
+        // Canonical form is idempotent for every vector, canonical or not.
+        assert_eq!(
+            unparse(sub, &reparsed),
+            printed,
+            "{name}: unparse is not idempotent"
+        );
+    }
+}

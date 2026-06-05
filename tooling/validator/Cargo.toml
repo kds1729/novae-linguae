@@ -18,6 +18,14 @@ path = "src/bin/nl_ingest.rs"
 name = "nl_validator"
 path = "src/lib.rs"
 
+[features]
+# `surface` adds the surface-syntax parsers/pretty-printers and their CLI
+# subcommands (parse-type/unparse-type, …). On by default so the `nl-validator`
+# binary always has them; build with `--no-default-features` for the lean core
+# validator. The parsers are pure Rust (no extra dependencies).
+default = ["surface"]
+surface = []
+
 [dependencies]
 anyhow = "1"
 base64 = "0.22"

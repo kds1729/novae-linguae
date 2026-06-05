@@ -126,6 +126,78 @@ enum Commands {
         /// Path to the body-expression document
         record: PathBuf,
     },
+    /// Parse a Nova Lingua type-expression surface string into its JSON AST.
+    /// Reads the surface string from the `input` argument, or from stdin when
+    /// omitted. Writes the AST as pretty JSON to stdout. See
+    /// `spec/surface-syntax.md` §1.
+    #[cfg(feature = "surface")]
+    ParseType {
+        /// The surface string (e.g. "forall a. List a -> List a"). If omitted,
+        /// the surface string is read from stdin.
+        input: Option<String>,
+    },
+    /// Pretty-print a Nova Lingua type-expression JSON AST back to its canonical
+    /// surface string. Reads the AST from a JSON file, or from stdin when the
+    /// path is `-`. Writes the surface string to stdout.
+    #[cfg(feature = "surface")]
+    UnparseType {
+        /// Path to the type-expression JSON AST, or `-` for stdin.
+        file: PathBuf,
+    },
+    /// Parse a Nova Lingua value-expression surface string into its JSON AST.
+    /// Reads the surface string from the `input` argument, or from stdin when
+    /// omitted. Writes the AST as pretty JSON to stdout. See
+    /// `spec/surface-syntax.md` §3.
+    #[cfg(feature = "surface")]
+    ParseValue {
+        /// The surface string (e.g. "[1, 2, 3]" or "Some(42)"). If omitted, the
+        /// surface string is read from stdin.
+        input: Option<String>,
+    },
+    /// Pretty-print a Nova Lingua value-expression JSON AST back to its canonical
+    /// surface string. Reads the AST from a JSON file, or from stdin when the
+    /// path is `-`. Writes the surface string to stdout.
+    #[cfg(feature = "surface")]
+    UnparseValue {
+        /// Path to the value-expression JSON AST, or `-` for stdin.
+        file: PathBuf,
+    },
+    /// Parse a Nova Lingua predicate-expression surface string into its JSON
+    /// AST. Reads the surface string from the `input` argument, or from stdin
+    /// when omitted. Writes the AST as pretty JSON to stdout. See
+    /// `spec/surface-syntax.md` §2.
+    #[cfg(feature = "surface")]
+    ParsePredicate {
+        /// The surface string (e.g. "forall xs. length(xs) >= 0"). If omitted,
+        /// the surface string is read from stdin.
+        input: Option<String>,
+    },
+    /// Pretty-print a Nova Lingua predicate-expression JSON AST back to its
+    /// canonical surface string. Reads the AST from a JSON file, or from stdin
+    /// when the path is `-`. Writes the surface string to stdout.
+    #[cfg(feature = "surface")]
+    UnparsePredicate {
+        /// Path to the predicate-expression JSON AST, or `-` for stdin.
+        file: PathBuf,
+    },
+    /// Parse a Nova Lingua body-expression surface string into its JSON AST.
+    /// Reads the surface string from the `input` argument, or from stdin when
+    /// omitted. Writes the AST as pretty JSON to stdout. See
+    /// `spec/surface-syntax.md` §4.
+    #[cfg(feature = "surface")]
+    ParseBody {
+        /// The surface string (e.g. "\\(n: nat) -> n + n"). If omitted, the
+        /// surface string is read from stdin.
+        input: Option<String>,
+    },
+    /// Pretty-print a Nova Lingua body-expression JSON AST back to its canonical
+    /// surface string. Reads the AST from a JSON file, or from stdin when the
+    /// path is `-`. Writes the surface string to stdout.
+    #[cfg(feature = "surface")]
+    UnparseBody {
+        /// Path to the body-expression JSON AST, or `-` for stdin.
+        file: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -144,6 +216,22 @@ fn main() -> ExitCode {
         Commands::CheckPredicate { record } => (cmd_check_predicate(&record), true),
         Commands::CheckValue { record } => (cmd_check_value(&record), true),
         Commands::CheckBody { record } => (cmd_check_body(&record), true),
+        #[cfg(feature = "surface")]
+        Commands::ParseType { input } => (cmd_parse_type(input), false),
+        #[cfg(feature = "surface")]
+        Commands::UnparseType { file } => (cmd_unparse_type(&file), false),
+        #[cfg(feature = "surface")]
+        Commands::ParseValue { input } => (cmd_parse_value(input), false),
+        #[cfg(feature = "surface")]
+        Commands::UnparseValue { file } => (cmd_unparse_value(&file), false),
+        #[cfg(feature = "surface")]
+        Commands::ParsePredicate { input } => (cmd_parse_predicate(input), false),
+        #[cfg(feature = "surface")]
+        Commands::UnparsePredicate { file } => (cmd_unparse_predicate(&file), false),
+        #[cfg(feature = "surface")]
+        Commands::ParseBody { input } => (cmd_parse_body(input), false),
+        #[cfg(feature = "surface")]
+        Commands::UnparseBody { file } => (cmd_unparse_body(&file), false),
     };
 
     match result {
@@ -271,6 +359,112 @@ fn cmd_check_value(record: &PathBuf) -> Result<()> {
 fn cmd_check_body(record: &PathBuf) -> Result<()> {
     let value = nl_validator::read_json(record)?;
     nl_validator::check_body_well_formed(&value)
+}
+
+/// Read a raw surface string from the `input` argument, or from stdin when it is
+/// `None`. Used by the `parse-*` subcommands, whose input is a surface string,
+/// not a JSON file.
+#[cfg(feature = "surface")]
+fn read_surface_input(input: Option<String>) -> Result<String> {
+    match input {
+        Some(s) => Ok(s),
+        None => {
+            use std::io::Read;
+            let mut s = String::new();
+            std::io::stdin()
+                .read_to_string(&mut s)
+                .map_err(|e| anyhow::anyhow!("reading surface string from stdin: {e}"))?;
+            Ok(s)
+        }
+    }
+}
+
+/// Read a JSON AST from a file path, or from stdin when the path is `-`. Used by
+/// the `unparse-*` subcommands.
+#[cfg(feature = "surface")]
+fn read_ast_input(file: &Path) -> Result<serde_json::Value> {
+    if file.as_os_str() == "-" {
+        use std::io::Read;
+        let mut s = String::new();
+        std::io::stdin()
+            .read_to_string(&mut s)
+            .map_err(|e| anyhow::anyhow!("reading JSON AST from stdin: {e}"))?;
+        serde_json::from_str(&s).map_err(|e| anyhow::anyhow!("parsing JSON AST from stdin: {e}"))
+    } else {
+        nl_validator::read_json(file)
+    }
+}
+
+#[cfg(feature = "surface")]
+fn cmd_parse_type(input: Option<String>) -> Result<()> {
+    let src = read_surface_input(input)?;
+    let ast = nl_validator::surface::parse_type(&src).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let pretty = serde_json::to_string_pretty(&ast)
+        .map_err(|e| anyhow::anyhow!("serializing type AST: {e}"))?;
+    println!("{pretty}");
+    Ok(())
+}
+
+#[cfg(feature = "surface")]
+fn cmd_unparse_type(file: &Path) -> Result<()> {
+    let value = read_ast_input(file)?;
+    let s = nl_validator::surface::unparse_type(&value).map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("{s}");
+    Ok(())
+}
+
+#[cfg(feature = "surface")]
+fn cmd_parse_value(input: Option<String>) -> Result<()> {
+    let src = read_surface_input(input)?;
+    let ast = nl_validator::surface::parse_value(&src).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let pretty = serde_json::to_string_pretty(&ast)
+        .map_err(|e| anyhow::anyhow!("serializing value AST: {e}"))?;
+    println!("{pretty}");
+    Ok(())
+}
+
+#[cfg(feature = "surface")]
+fn cmd_unparse_value(file: &Path) -> Result<()> {
+    let value = read_ast_input(file)?;
+    let s = nl_validator::surface::unparse_value(&value).map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("{s}");
+    Ok(())
+}
+
+#[cfg(feature = "surface")]
+fn cmd_parse_predicate(input: Option<String>) -> Result<()> {
+    let src = read_surface_input(input)?;
+    let ast = nl_validator::surface::parse_predicate(&src).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let pretty = serde_json::to_string_pretty(&ast)
+        .map_err(|e| anyhow::anyhow!("serializing predicate AST: {e}"))?;
+    println!("{pretty}");
+    Ok(())
+}
+
+#[cfg(feature = "surface")]
+fn cmd_unparse_predicate(file: &Path) -> Result<()> {
+    let value = read_ast_input(file)?;
+    let s = nl_validator::surface::unparse_predicate(&value).map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("{s}");
+    Ok(())
+}
+
+#[cfg(feature = "surface")]
+fn cmd_parse_body(input: Option<String>) -> Result<()> {
+    let src = read_surface_input(input)?;
+    let ast = nl_validator::surface::parse_body(&src).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let pretty =
+        serde_json::to_string_pretty(&ast).map_err(|e| anyhow::anyhow!("serializing body AST: {e}"))?;
+    println!("{pretty}");
+    Ok(())
+}
+
+#[cfg(feature = "surface")]
+fn cmd_unparse_body(file: &Path) -> Result<()> {
+    let value = read_ast_input(file)?;
+    let s = nl_validator::surface::unparse_body(&value).map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("{s}");
+    Ok(())
 }
 
 fn cmd_sign(record: &PathBuf, seed: &str, in_place: bool) -> Result<()> {

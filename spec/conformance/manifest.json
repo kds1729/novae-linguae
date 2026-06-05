@@ -276,5 +276,581 @@
         "expected": "invalid"
       }
     ]
+  },
+  "surface_vectors": {
+    "description": "Surface-syntax round-trip vectors per spec/surface-syntax.md. For each vector: parse(surface) must equal expected_ast; the resulting AST must validate against the sub-language's JSON Schema; parse(unparse(ast)) must equal ast; and when canonical=true, unparse(parse(surface)) must reproduce surface byte-for-byte. v0.1 covers the `type` sub-language; predicate, value, and body follow as they are implemented.",
+    "vectors": [
+      {
+        "name": "type-builtin-int",
+        "sub_language": "type",
+        "surface": "int",
+        "canonical": true,
+        "expected_ast": { "kind": "builtin", "name": "int" }
+      },
+      {
+        "name": "type-var",
+        "sub_language": "type",
+        "surface": "a",
+        "canonical": true,
+        "expected_ast": { "kind": "var", "name": "a" }
+      },
+      {
+        "name": "type-apply-list",
+        "sub_language": "type",
+        "surface": "List a",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "apply",
+          "ctor": { "kind": "builtin", "name": "List" },
+          "args": [{ "kind": "var", "name": "a" }]
+        }
+      },
+      {
+        "name": "type-apply-map-two-args",
+        "sub_language": "type",
+        "surface": "Map k v",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "apply",
+          "ctor": { "kind": "builtin", "name": "Map" },
+          "args": [
+            { "kind": "var", "name": "k" },
+            { "kind": "var", "name": "v" }
+          ]
+        }
+      },
+      {
+        "name": "type-fn-curried-flattens",
+        "sub_language": "type",
+        "surface": "a -> b -> c",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "fn",
+          "params": [
+            { "kind": "var", "name": "a" },
+            { "kind": "var", "name": "b" }
+          ],
+          "result": { "kind": "var", "name": "c" }
+        }
+      },
+      {
+        "name": "type-higher-order-param",
+        "sub_language": "type",
+        "surface": "(a -> b) -> c",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "fn",
+          "params": [
+            {
+              "kind": "fn",
+              "params": [{ "kind": "var", "name": "a" }],
+              "result": { "kind": "var", "name": "b" }
+            }
+          ],
+          "result": { "kind": "var", "name": "c" }
+        }
+      },
+      {
+        "name": "type-forall-map-signature",
+        "sub_language": "type",
+        "surface": "forall a b. (a -> b) -> List a -> List b",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "forall",
+          "vars": ["a", "b"],
+          "body": {
+            "kind": "fn",
+            "params": [
+              {
+                "kind": "fn",
+                "params": [{ "kind": "var", "name": "a" }],
+                "result": { "kind": "var", "name": "b" }
+              },
+              {
+                "kind": "apply",
+                "ctor": { "kind": "builtin", "name": "List" },
+                "args": [{ "kind": "var", "name": "a" }]
+              }
+            ],
+            "result": {
+              "kind": "apply",
+              "ctor": { "kind": "builtin", "name": "List" },
+              "args": [{ "kind": "var", "name": "b" }]
+            }
+          }
+        }
+      },
+      {
+        "name": "type-tuple",
+        "sub_language": "type",
+        "surface": "(int, bool)",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "tuple",
+          "elems": [
+            { "kind": "builtin", "name": "int" },
+            { "kind": "builtin", "name": "bool" }
+          ]
+        }
+      },
+      {
+        "name": "type-record-sorted-is-canonical",
+        "sub_language": "type",
+        "surface": "{age: nat, name: string}",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "record",
+          "fields": [
+            { "name": "age", "type": { "kind": "builtin", "name": "nat" } },
+            { "name": "name", "type": { "kind": "builtin", "name": "string" } }
+          ]
+        }
+      },
+      {
+        "name": "type-record-unsorted-canonicalizes",
+        "description": "Non-canonical input field order. parse preserves source order (so expected_ast keeps name-before-age), but unparse sorts fields, so canonical=false: unparse(parse(surface)) yields the sorted form, not the input string.",
+        "sub_language": "type",
+        "surface": "{name: string, age: nat}",
+        "canonical": false,
+        "expected_ast": {
+          "kind": "record",
+          "fields": [
+            { "name": "name", "type": { "kind": "builtin", "name": "string" } },
+            { "name": "age", "type": { "kind": "builtin", "name": "nat" } }
+          ]
+        }
+      },
+      {
+        "name": "type-sum-option-like",
+        "sub_language": "type",
+        "surface": "[None | Some(a)]",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "sum",
+          "variants": [
+            { "tag": "None" },
+            { "tag": "Some", "type": { "kind": "var", "name": "a" } }
+          ]
+        }
+      },
+      {
+        "name": "value-bool",
+        "sub_language": "value",
+        "surface": "true",
+        "canonical": true,
+        "expected_ast": { "kind": "bool", "value": true }
+      },
+      {
+        "name": "value-nat",
+        "sub_language": "value",
+        "surface": "42",
+        "canonical": true,
+        "expected_ast": { "kind": "nat", "value": 42 }
+      },
+      {
+        "name": "value-int-negative",
+        "sub_language": "value",
+        "surface": "-7",
+        "canonical": true,
+        "expected_ast": { "kind": "int", "value": -7 }
+      },
+      {
+        "name": "value-int-explicit-nonnegative",
+        "description": "A non-negative int must render as int(N) so its kind survives the round trip (a bare 5 would parse back as nat).",
+        "sub_language": "value",
+        "surface": "int(5)",
+        "canonical": true,
+        "expected_ast": { "kind": "int", "value": 5 }
+      },
+      {
+        "name": "value-float",
+        "sub_language": "value",
+        "surface": "3.14",
+        "canonical": true,
+        "expected_ast": { "kind": "float", "value": 3.14 }
+      },
+      {
+        "name": "value-float-whole-keeps-point",
+        "sub_language": "value",
+        "surface": "1.0",
+        "canonical": true,
+        "expected_ast": { "kind": "float", "value": 1.0 }
+      },
+      {
+        "name": "value-string",
+        "sub_language": "value",
+        "surface": "\"hello\"",
+        "canonical": true,
+        "expected_ast": { "kind": "string", "value": "hello" }
+      },
+      {
+        "name": "value-bytes-hex-to-base64",
+        "description": "Surface is lowercase hex b\"deadbeef\"; the AST stores standard base64 per value-expression.schema.json.",
+        "sub_language": "value",
+        "surface": "b\"deadbeef\"",
+        "canonical": true,
+        "expected_ast": { "kind": "bytes", "value": "3q2+7w==" }
+      },
+      {
+        "name": "value-unit",
+        "sub_language": "value",
+        "surface": "()",
+        "canonical": true,
+        "expected_ast": { "kind": "unit" }
+      },
+      {
+        "name": "value-list",
+        "sub_language": "value",
+        "surface": "[1, 2, 3]",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "list",
+          "elems": [
+            { "kind": "nat", "value": 1 },
+            { "kind": "nat", "value": 2 },
+            { "kind": "nat", "value": 3 }
+          ]
+        }
+      },
+      {
+        "name": "value-tuple",
+        "sub_language": "value",
+        "surface": "(true, 42)",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "tuple",
+          "elems": [
+            { "kind": "bool", "value": true },
+            { "kind": "nat", "value": 42 }
+          ]
+        }
+      },
+      {
+        "name": "value-record-sorted-is-canonical",
+        "sub_language": "value",
+        "surface": "{x = 1, y = 2}",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "record",
+          "fields": [
+            { "name": "x", "value": { "kind": "nat", "value": 1 } },
+            { "name": "y", "value": { "kind": "nat", "value": 2 } }
+          ]
+        }
+      },
+      {
+        "name": "value-record-unsorted-canonicalizes",
+        "sub_language": "value",
+        "surface": "{y = 2, x = 1}",
+        "canonical": false,
+        "expected_ast": {
+          "kind": "record",
+          "fields": [
+            { "name": "y", "value": { "kind": "nat", "value": 2 } },
+            { "name": "x", "value": { "kind": "nat", "value": 1 } }
+          ]
+        }
+      },
+      {
+        "name": "value-variant-with-payload",
+        "sub_language": "value",
+        "surface": "Some(42)",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "variant",
+          "tag": "Some",
+          "payload": { "kind": "nat", "value": 42 }
+        }
+      },
+      {
+        "name": "value-variant-nullary",
+        "sub_language": "value",
+        "surface": "None",
+        "canonical": true,
+        "expected_ast": { "kind": "variant", "tag": "None" }
+      },
+      {
+        "name": "value-fn-ref",
+        "sub_language": "value",
+        "surface": "fn_0000000000000000000000000000000000000000000000000000000000000000",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "fn_ref",
+          "target": "fn_0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      },
+      {
+        "name": "predicate-var",
+        "sub_language": "predicate",
+        "surface": "x",
+        "canonical": true,
+        "expected_ast": { "kind": "var", "name": "x" }
+      },
+      {
+        "name": "predicate-lit",
+        "sub_language": "predicate",
+        "surface": "42",
+        "canonical": true,
+        "expected_ast": { "kind": "lit", "value": 42 }
+      },
+      {
+        "name": "predicate-eq-call",
+        "sub_language": "predicate",
+        "surface": "length(xs) == 0",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "xs" }] },
+            { "kind": "lit", "value": 0 }
+          ]
+        }
+      },
+      {
+        "name": "predicate-and-binds-tighter-than-or",
+        "sub_language": "predicate",
+        "surface": "p || q && r",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "app",
+          "op": "or",
+          "args": [
+            { "kind": "var", "name": "p" },
+            {
+              "kind": "app",
+              "op": "and",
+              "args": [{ "kind": "var", "name": "q" }, { "kind": "var", "name": "r" }]
+            }
+          ]
+        }
+      },
+      {
+        "name": "predicate-mul-binds-tighter-than-add",
+        "sub_language": "predicate",
+        "surface": "a + b * c",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "app",
+          "op": "add",
+          "args": [
+            { "kind": "var", "name": "a" },
+            {
+              "kind": "app",
+              "op": "mul",
+              "args": [{ "kind": "var", "name": "b" }, { "kind": "var", "name": "c" }]
+            }
+          ]
+        }
+      },
+      {
+        "name": "predicate-parens-override-precedence",
+        "sub_language": "predicate",
+        "surface": "(a + b) * c",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "app",
+          "op": "mul",
+          "args": [
+            {
+              "kind": "app",
+              "op": "add",
+              "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }]
+            },
+            { "kind": "var", "name": "c" }
+          ]
+        }
+      },
+      {
+        "name": "predicate-unary-not",
+        "sub_language": "predicate",
+        "surface": "!p && q",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "app",
+          "op": "and",
+          "args": [
+            { "kind": "app", "op": "not", "args": [{ "kind": "var", "name": "p" }] },
+            { "kind": "var", "name": "q" }
+          ]
+        }
+      },
+      {
+        "name": "predicate-comparison-le",
+        "description": "<= maps to op `le` (schema vocabulary), not `lte` as the surface-syntax.md table shows.",
+        "sub_language": "predicate",
+        "surface": "a <= b",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "app",
+          "op": "le",
+          "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }]
+        }
+      },
+      {
+        "name": "predicate-forall-map-identity",
+        "sub_language": "predicate",
+        "surface": "forall xs. length(map(f, xs)) == length(xs)",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "forall",
+          "vars": ["xs"],
+          "body": {
+            "kind": "app",
+            "op": "eq",
+            "args": [
+              {
+                "kind": "app",
+                "op": "length",
+                "args": [
+                  {
+                    "kind": "app",
+                    "op": "map",
+                    "args": [{ "kind": "var", "name": "f" }, { "kind": "var", "name": "xs" }]
+                  }
+                ]
+              },
+              { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "xs" }] }
+            ]
+          }
+        }
+      },
+      {
+        "name": "predicate-noninfix-op-call-syntax",
+        "description": "`implies` is in the op vocabulary but has no infix symbol, so it renders as a call.",
+        "sub_language": "predicate",
+        "surface": "implies(p, q)",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "app",
+          "op": "implies",
+          "args": [{ "kind": "var", "name": "p" }, { "kind": "var", "name": "q" }]
+        }
+      },
+      {
+        "name": "body-var",
+        "sub_language": "body",
+        "surface": "x",
+        "canonical": true,
+        "expected_ast": { "kind": "var", "name": "x" }
+      },
+      {
+        "name": "body-lit",
+        "sub_language": "body",
+        "surface": "42",
+        "canonical": true,
+        "expected_ast": { "kind": "lit", "value": { "kind": "nat", "value": 42 } }
+      },
+      {
+        "name": "body-infix-is-named-app",
+        "description": "Infix operators desugar to an app whose fn is a var naming the operator; add(n,n) renders as the infix n + n.",
+        "sub_language": "body",
+        "surface": "n + n",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "app",
+          "fn": { "kind": "var", "name": "add" },
+          "args": [{ "kind": "var", "name": "n" }, { "kind": "var", "name": "n" }]
+        }
+      },
+      {
+        "name": "body-juxtaposition-curried",
+        "sub_language": "body",
+        "surface": "f x y",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "app",
+          "fn": {
+            "kind": "app",
+            "fn": { "kind": "var", "name": "f" },
+            "args": [{ "kind": "var", "name": "x" }]
+          },
+          "args": [{ "kind": "var", "name": "y" }]
+        }
+      },
+      {
+        "name": "body-field-access",
+        "sub_language": "body",
+        "surface": "rec.name",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "field",
+          "record": { "kind": "var", "name": "rec" },
+          "name": "name"
+        }
+      },
+      {
+        "name": "body-let",
+        "sub_language": "body",
+        "surface": "let y = 0 in y",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "let",
+          "name": "y",
+          "value": { "kind": "lit", "value": { "kind": "nat", "value": 0 } },
+          "body": { "kind": "var", "name": "y" }
+        }
+      },
+      {
+        "name": "body-typed-lambda",
+        "description": "Lambda params require a type per body-expression.schema.json, so the canonical form is always typed: \\(n: nat) -> ...",
+        "sub_language": "body",
+        "surface": "\\(n: nat) -> n + n",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "lambda",
+          "params": [{ "name": "n", "type": { "kind": "builtin", "name": "nat" } }],
+          "body": {
+            "kind": "app",
+            "fn": { "kind": "var", "name": "add" },
+            "args": [{ "kind": "var", "name": "n" }, { "kind": "var", "name": "n" }]
+          }
+        }
+      },
+      {
+        "name": "body-case-lit-and-wildcard",
+        "sub_language": "body",
+        "surface": "case n of { 0 => true; _ => false }",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "case",
+          "scrutinee": { "kind": "var", "name": "n" },
+          "arms": [
+            {
+              "pattern": { "kind": "lit", "value": { "kind": "nat", "value": 0 } },
+              "body": { "kind": "lit", "value": { "kind": "bool", "value": true } }
+            },
+            {
+              "pattern": { "kind": "wildcard" },
+              "body": { "kind": "lit", "value": { "kind": "bool", "value": false } }
+            }
+          ]
+        }
+      },
+      {
+        "name": "body-case-variant-patterns",
+        "sub_language": "body",
+        "surface": "case opt of { Some(x) => x; None => 0 }",
+        "canonical": true,
+        "expected_ast": {
+          "kind": "case",
+          "scrutinee": { "kind": "var", "name": "opt" },
+          "arms": [
+            {
+              "pattern": {
+                "kind": "variant",
+                "tag": "Some",
+                "payload": { "kind": "bind", "name": "x" }
+              },
+              "body": { "kind": "var", "name": "x" }
+            },
+            {
+              "pattern": { "kind": "variant", "tag": "None" },
+              "body": { "kind": "lit", "value": { "kind": "nat", "value": 0 } }
+            }
+          ]
+        }
+      }
+    ]
   }
 }

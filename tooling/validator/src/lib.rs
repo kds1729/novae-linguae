@@ -16,6 +16,12 @@ use jsonschema::{Retrieve, Uri};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+/// Surface syntax: parsers and pretty-printers for the Nova Lingua expression
+/// sub-languages (see `spec/surface-syntax.md`). Gated behind the `surface`
+/// feature (on by default).
+#[cfg(feature = "surface")]
+pub mod surface;
+
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {
     let text = std::fs::read_to_string(path)
