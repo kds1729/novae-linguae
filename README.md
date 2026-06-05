@@ -285,17 +285,18 @@ What is done:
 - Function-record schema at v0.1 (string fields) and v0.2 (structured ASTs mandatory throughout)
 - *Nova Locutio* message schema: nine speech acts, multicast addressing, multi-algorithm signatures, absolute deadlines, and conditional `store`-payload validation by cross-file `$ref`
 - Eight sub-language schemas: type, predicate, value, body, claim, and commitment expressions; plus canonical-serialization spec, trust model, and intent-tag vocabulary
-- Reference validator (`nl-validator`) with six subcommands: `validate`, `canonicalize`, `hash`, `verify`, `sign`, `check-type` — `validate` resolves cross-file schema references against the local `spec/` tree
+- Reference validator (`nl-validator`) with nine subcommands: `validate`, `canonicalize`, `hash`, `verify`, `sign`, `check-type`, `check-predicate`, `check-value`, `check-body` — `validate` resolves cross-file schema references against the local `spec/` tree
+- Well-formedness checks for predicate, value, and body expressions (`check-predicate`, `check-value`, `check-body`), matching the existing `check-type` for types
+- *Nova Locutio* message schema v0.2: mandatory structured claim/commitment ASTs (`assert_body.claim` → `claim-expression.schema.json`, `commit_body.commitment` → `commitment-expression.schema.json`) enforced by cross-file `$ref`; v0.1 schema retained unchanged
+- Ingestion tool (`nl-ingest`): parses public Rust functions via `syn` and emits valid v0.1 function records as JSONL
 - All twelve original v0.1 deferred items resolved
-- Language-neutral conformance vectors (`spec/conformance/`) plus a reference test suite (`cargo test`, 58 tests) that replays them
+- Language-neutral conformance vectors (`spec/conformance/`) plus a reference test suite (`cargo test`, 119 tests) that replays them
 
 What is next:
-- Next message-schema major bump: mandatory structured claim/commitment ASTs
-- Well-formedness checks for predicate, value, and body expressions (matching existing `check-type` for types)
-- Ingestion-tool sketch: Rust crate → Nova Lingua function records
-- Surface syntax for Nova Lingua
+- Surface syntax for Nova Lingua: parser/pretty-printer for the v0.1 string forms (type, predicate, value, body surface syntax)
+- Ingestion adapters for Python, Haskell, and npm ecosystems (community contributions welcome)
 
-Looking for collaborators on all of the above, and on ingestion adapters for Python, Haskell, and npm ecosystems.
+Looking for collaborators on all of the above.
 
 ## License
 
