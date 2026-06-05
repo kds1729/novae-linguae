@@ -16,6 +16,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `body-expression.schema.json` | v0.1 draft | Structured AST for the executable body that a function record's `body_hash` points to (seven expression kinds, four pattern kinds) |
 | `claim-expression.schema.json` | v0.1 draft | Structured AST for `assert.claim` (predicate / satisfies / verified) |
 | `commitment-expression.schema.json` | v0.1 draft | Structured AST for `commit.commitment` (apply / provide / refrain) |
+| `surface-syntax.md` | draft | Concrete syntax for all four expression sub-languages (type, predicate, value, body): grammar, infix-to-AST mapping, canonical pretty-print rules, round-trip requirement, and implementation notes for the parser |
 | `canonical-serialization.md` | v0.1 | Normative spec for canonical form (JCS RFC 8785) and hashing (BLAKE3-256) |
 | `trust-model.md` | v0.1 | Normative spec for the trust model: local trust policy + capability tokens + attestations, no central authority. Built on already-shipped *Nova Locutio* primitives. |
 | `intent-tag-vocabulary.md` | v0.1 | Controlled vocabulary for `intent_tags`: 16 top-level categories (`transform`, `predicate`, `aggregate`, `filter`, `query`, `parse`, `serialize`, `io`, `arithmetic`, `math`, `logical`, `string`, `concurrent`, `crypto`, `time`, `coll`) plus property-modifier tags (`pure`, `elementwise`, `idempotent`, …). Non-vocab tags still validate; cross-agent agreement is the benefit. |
