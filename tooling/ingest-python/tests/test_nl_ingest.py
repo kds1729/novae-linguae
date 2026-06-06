@@ -287,6 +287,27 @@ class TestV2Records(unittest.TestCase):
         self.assertEqual(self._run("verify", path).returncode, 0)
         self.assertEqual(self._run("validate", str(self.FR_V2), path).returncode, 0)
 
+    def test_v2_precondition_refinement(self):
+        # A leading `assert` becomes a refinement precondition (predicate AST).
+        src = ('def safe_div(a: int, b: int) -> float:\n'
+               '    """Divide.\n\n    >>> safe_div(6, 2)\n    3.0\n    """\n'
+               '    assert b != 0\n'
+               '    return a / b\n')
+        rec = n.records_from_source(src, None, False, v2=True)[0]
+        self.assertEqual(rec["signature"]["refinements"], [{
+            "kind": "pre",
+            "expr": {"kind": "app", "op": "neq",
+                     "args": [{"kind": "var", "name": "b"}, {"kind": "lit", "value": 0}]}}])
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(rec, f)
+            path = f.name
+        self.assertEqual(self._run("validate", str(self.FR_V2), path).returncode, 0)
+        self.assertEqual(self._run("verify", path).returncode, 0)
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(rec["signature"]["refinements"][0]["expr"], f)
+            pp = f.name
+        self.assertEqual(self._run("check-predicate", pp).returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

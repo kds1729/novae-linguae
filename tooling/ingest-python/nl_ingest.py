@@ -45,6 +45,7 @@ from pathlib import Path
 # examples extracted from doctests. Imported only for --v2; the v0.1 path stays self-contained.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest-common"))
 from nl_examples import examples_from_docstring  # noqa: E402
+from nl_predicates import PredicateError, predicate_from_py  # noqa: E402
 from nl_types import python_function_type  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -587,6 +588,25 @@ def _fn_param_result_types(type_ast: dict):
     return [], None
 
 
+def _preconditions(func) -> list:
+    """Leading `assert <cond>` statements (before any real logic) become refinement preconditions
+    {kind: 'pre', expr: <predicate AST>}. Asserts whose condition isn't an expressible predicate are
+    skipped. The assert *message* is ignored."""
+    body = func.body
+    start = 1 if (body and isinstance(body[0], ast.Expr)
+                  and isinstance(body[0].value, ast.Constant)
+                  and isinstance(body[0].value.value, str)) else 0   # skip a docstring
+    refs = []
+    for stmt in body[start:]:
+        if not isinstance(stmt, ast.Assert):
+            break                                                    # only a leading run of asserts
+        try:
+            refs.append({"kind": "pre", "expr": predicate_from_py(stmt.test)})
+        except PredicateError:
+            continue
+    return refs
+
+
 def build_v2_record(func, module_name: str | None) -> dict | None:
     """Build a v0.2 record: a STRUCTURED type AST (nl_types) + REAL examples from the function's
     doctests (nl_examples). Returns None when there are no usable doctest examples — v0.2 requires
@@ -602,7 +622,7 @@ def build_v2_record(func, module_name: str | None) -> dict | None:
         "name_hints": _name_hints(func.name, module_name),
         "signature": {
             "type": type_ast,
-            "refinements": [],
+            "refinements": _preconditions(func),
             "effects": [],
             "capabilities": [],
             "terminates": "unknown",

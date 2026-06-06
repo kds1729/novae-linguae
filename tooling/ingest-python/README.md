@@ -53,6 +53,10 @@ With `--v2`, a function that has **usable doctests** is emitted as a **v0.2** re
 - `examples` are **real** input/output pairs extracted from the function's Python **doctests** (via
   [`ingest-common/nl_examples.py`](../ingest-common/nl_examples.py)), encoded as value ASTs — never
   fabricated or executed.
+- `signature.refinements` gains a **precondition** (`{kind: "pre", expr}`) for each leading `assert`
+  statement whose condition is an expressible predicate (via
+  [`ingest-common/nl_predicates.py`](../ingest-common/nl_predicates.py)); e.g. `assert b != 0` →
+  `app neq [var b, lit 0]`. (Algebraic *properties* aren't inferred — those are agent-authored.)
 
 Functions without usable doctests fall back to a **v0.1** record (so none are dropped); a single run
 can emit a mix. Float example values are canonicalized per JCS / ECMAScript Number-to-String (matching

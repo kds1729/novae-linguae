@@ -13,7 +13,7 @@ adapters. It is **stdlib-only** (zero third-party dependencies) and provides:
 - **Bracket-aware string helpers** (`split_top`, `count_top`, `find_matching`, `sanitize_hint`)
   used by the per-language parsers.
 
-Three more modules support **higher-fidelity, structured-AST ingestion** (toward v0.2 records):
+Four more modules support **higher-fidelity, structured-AST ingestion** (toward v0.2 records):
 
 - **`nl_types.py`** — `python_function_type(func_ast)` maps a Python `def`'s annotations to the
   structured Nova Lingua **type-expression AST** ([`spec/type-expression.schema.json`](../../spec/type-expression.schema.json))
@@ -39,6 +39,14 @@ Three more modules support **higher-fidelity, structured-AST ingestion** (toward
   from becoming complete v0.2 records (which require ≥1 worked example as value ASTs). Execution-based
   generation (synthesise inputs from a type, run pure functions, capture outputs) is a planned
   follow-on for functions that lack doctests.
+- **`nl_predicates.py`** — `predicate_from_py(expr_ast)` maps a Python boolean/comparison/arithmetic
+  expression to the structured Nova Lingua **predicate-expression AST**
+  ([`spec/predicate-expression.schema.json`](../../spec/predicate-expression.schema.json)) used for
+  `signature.refinements[].expr` and `properties[].expr`: comparisons/`and`/`or`/`not`/arithmetic/`len`
+  become `app` nodes with the closed-vocabulary `op` (chained and variadic forms expand to nested
+  binaries so op-arity holds). The Python adapter uses it in `--v2` to turn a function's leading
+  `assert` statements into refinement **preconditions** (`{kind: "pre", expr}`). Unsupported forms
+  raise so they're skipped; *properties* (algebraic laws) remain agent-authored.
 
 A language adapter supplies only the *front end*: parse the source, extract each public function's
 name, type string, arity, and a body text to hash, then call `build_record`. Everything produced
