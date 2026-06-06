@@ -42,7 +42,7 @@ not survival.
 | Federation via `sync` | **have** | nodes mirror each other; no node is authoritative |
 | Seed bundles | **have** (node) | offline / out-of-band redistribution; cold-start & disaster recovery |
 | Standard `.nlb` bundle format (`nlb/1`) | **have** (format + node export/import) | any project publishes a commons-ready release artifact |
-| Pluggable censorship-resistant bootstrap | **have** (HTTPS · IPNS · DNS-over-HTTPS · Nostr · chain-anchor) | find live data when the usual entry points are blocked |
+| Pluggable censorship-resistant bootstrap | **have** (HTTPS · IPNS · DNS-over-HTTPS · Nostr · chain-anchor · Tor onion · mirror; per-channel redundancy) | find live data when the usual entry points are blocked |
 
 ### Seed bundles
 
@@ -125,17 +125,31 @@ verify-then-store gate. A descriptor's (and bundle's) URL list can **mix channel
 | Scheme | Channel | Transport |
 |---|---|---|
 | `https://` `http://` `file://` | direct | urllib |
-| `ipns://<name>[?gateway=]` | IPFS/IPNS | GET an IPFS gateway |
-| `dns://<name>[?doh=]` | DNS-over-HTTPS | DoH `TXT` query; value is base64(descriptor) |
-| `nostr://<relay>/<author>[?kind=]` | Nostr | minimal WebSocket read of the newest event |
+| `ipns://<name>[?gateway=gw1,gw2]` | IPFS/IPNS | GET the first reachable IPFS gateway |
+| `dns://<name>[?doh=ep1,ep2]` | DNS-over-HTTPS | DoH `TXT` query against the first reachable resolver; value is base64(descriptor) |
+| `nostr://<relay1,relay2>/<author>[?kind=]` | Nostr | WebSocket read of the newest event across all relays |
 | `chain://<read-endpoint>[#json.path]` | blockchain anchor | read a pointer the chain anchored, then follow it |
+| `onion://<host>.onion[:port]/path` | Tor hidden service | HTTP tunneled through a SOCKS5 proxy (`NL_TOR_SOCKS`, default `127.0.0.1:9050`) |
+| `mirror://<url1>\|<url2>\|…` | aggregator | try each pipe-separated channel URL in order; first success wins |
 
-Each channel is **pure untrusted transport** — whatever bytes come back are still verified by the
-descriptor signature (and the bundle by hash). Adding a channel = adding a fetcher to the registry;
-the verify/ingest path is unchanged. The live transports are reference implementations (the scheme
-dispatch + response parsing are what the test suite pins). **On blockchains**: the chain holds only a
-tiny pointer (a URL/CID), never the bytes — consistent with rejecting blockchain as the substrate
-while using it as a thin anchor.
+**The channel registry is the stable extension point.** A channel is a function
+`fetch(url, depth) -> bytes` registered in the `CHANNELS` dict by URL scheme; `resolve`/`pull_bundle`
+and the verify/ingest path are unchanged when one is added. Each channel is **pure untrusted
+transport** — whatever bytes come back are still verified by the descriptor signature (and the bundle
+by hash), so a hostile or buggy channel can waste effort but never inject data. Two kinds of breadth
+compose here:
+
+- **Redundancy *within* a channel.** `ipns`/`dns`/`nostr` accept several comma-separated endpoints and
+  fall back across them (Nostr additionally merges results, taking the newest `created_at`), so one
+  blocked gateway/resolver/relay does not sink the channel.
+- **Redundancy *across* channels.** A descriptor URL list mixes schemes and falls back across them;
+  `mirror://` packs that fan-out into a single entry; `chain://` and `mirror://` can redirect to any
+  other channel (bounded by a redirect-depth guard).
+
+The live transports are reference implementations (the scheme dispatch + response parsing are what the
+test suite pins). Further channels — a BitTorrent DHT key, Matrix, a hardcoded fallback list — drop in
+the same way. **On blockchains**: the chain holds only a tiny pointer (a URL/CID), never the bytes —
+consistent with rejecting blockchain as the substrate while using it as a thin anchor.
 
 **On blockchains specifically.** A blockchain is the *wrong primitive for the substrate* and is rejected
 as such ([`commons.md`](commons.md)): the commons needs no global consensus or total ordering, and

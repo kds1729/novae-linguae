@@ -786,3 +786,101 @@ class BootstrapChannelTests(TestCase):
                                           connect=lambda *a, **k: fake)
         self.assertEqual(content, "NEW")
         self.assertTrue(fake.sent)                      # the REQ frame was sent
+
+    # --- channel breadth: redundancy + new transports ---------------------------------------------
+
+    def test_ipns_falls_back_across_gateways(self):
+        from . import bootstrap as B
+        tried = []
+
+        def fake_get(url, timeout=30):
+            tried.append(url)
+            if "gw1" in url:
+                raise OSError("gw1 down")
+            return b"DESC"
+
+        with mock.patch.object(B, "_http_get", fake_get):
+            self.assertEqual(B._dispatch("ipns://k51?gateway=https://gw1,https://gw2"), b"DESC")
+        self.assertEqual(tried, ["https://gw1/ipns/k51", "https://gw2/ipns/k51"])
+
+    def test_dns_falls_back_across_resolvers(self):
+        from . import bootstrap as B
+        b64 = base64.b64encode(b'{"v":"nlb-bootstrap/1","peers":["p"]}').decode()
+        ok = json.dumps({"Answer": [{"type": 16, "data": '"' + b64 + '"'}]}).encode()
+
+        def fake_get(url, timeout=30):
+            if "doh1" in url:
+                raise OSError("doh1 blocked")
+            return ok
+
+        with mock.patch.object(B, "_http_get", fake_get):
+            doc = json.loads(B._dispatch("dns://commons.example?doh=https://doh1/q,https://doh2/q"))
+        self.assertEqual(doc["peers"], ["p"])
+
+    def test_nostr_picks_newest_across_relays(self):
+        from . import bootstrap as B
+        events = {
+            "relayA": {"created_at": 5, "content": "A5"},
+            "relayB": {"created_at": 9, "content": "B9"},   # newest wins
+        }
+        with mock.patch.object(B, "_nostr_newest_event",
+                               lambda relay, author, kind: events[relay]):
+            self.assertEqual(B._dispatch("nostr://relayA,relayB/abcd"), b"B9")
+
+    def test_nostr_one_dead_relay_does_not_sink_it(self):
+        from . import bootstrap as B
+
+        def newest(relay, author, kind):
+            if relay == "down":
+                raise B.BootstrapError("relay down")
+            return {"created_at": 1, "content": "OK"}
+
+        with mock.patch.object(B, "_nostr_newest_event", newest):
+            self.assertEqual(B._dispatch("nostr://down,up/abcd"), b"OK")
+
+    def test_mirror_tries_each_target_first_success_wins(self):
+        from . import bootstrap as B
+        pages = {"https://b/desc.json": b'{"v":"nlb-bootstrap/1","peers":["m"]}'}
+
+        def fake_get(url, timeout=30):
+            if url not in pages:
+                raise OSError("not reachable")
+            return pages[url]
+
+        with mock.patch.object(B, "_http_get", fake_get):
+            doc = json.loads(B._dispatch("mirror://https://a/desc.json|https://b/desc.json"))
+        self.assertEqual(doc["peers"], ["m"])
+
+    def test_onion_tunnels_over_socks5(self):
+        from . import bootstrap as B
+        seen = {}
+
+        def fake_socks(proxy_host, proxy_port, host, port, path, timeout=30):
+            seen.update(proxy_host=proxy_host, host=host, port=port, path=path)
+            return b'{"v":"nlb-bootstrap/1","peers":["onion-peer"]}'
+
+        with mock.patch.object(B, "_socks5_http_get", fake_socks):
+            doc = json.loads(B._dispatch("onion://abcdef.onion/bootstrap.json"))
+        self.assertEqual(doc["peers"], ["onion-peer"])
+        self.assertEqual((seen["host"], seen["port"], seen["path"]),
+                         ("abcdef.onion", 80, "/bootstrap.json"))
+
+    def test_socks5_codec_speaks_the_handshake(self):
+        from . import bootstrap as B
+        # A fake socket scripting the SOCKS5 reply, then an HTTP response.
+        recvs = [b"\x05\x00",                     # method selection: no-auth
+                 b"\x05\x00\x00\x01",             # CONNECT reply, ATYP=IPv4
+                 b"\x00\x00\x00\x00\x00\x00",     # bound addr (4) + port (2)
+                 b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nHI", b""]
+        sent = []
+
+        class FakeSock:
+            def sendall(self, b): sent.append(b)
+            def recv(self, n): return recvs.pop(0) if recvs else b""
+            def close(self): pass
+
+        with mock.patch.object(B.socket, "create_connection", lambda *a, **k: FakeSock()):
+            body = B._socks5_http_get("127.0.0.1", 9050, "svc.onion", 80, "/d")
+        self.assertEqual(body, b"HI")
+        self.assertEqual(sent[0], b"\x05\x01\x00")           # SOCKS5 greeting
+        self.assertIn(b"\x05\x01\x00\x03", sent[1])          # CONNECT with domain ATYP
