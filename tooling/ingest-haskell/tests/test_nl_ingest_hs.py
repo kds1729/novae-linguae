@@ -149,5 +149,52 @@ class TestCrossValidation(unittest.TestCase):
         self.assertEqual(out.stdout.strip(), rec["hash"])
 
 
+class TestV2TypeMapping(unittest.TestCase):
+    def test_containers_and_arrows(self):
+        self.assertEqual(
+            h.hs_type_ast("[Int] -> Maybe Bool"),
+            {"kind": "fn",
+             "params": [{"kind": "apply", "ctor": {"kind": "builtin", "name": "List"},
+                         "args": [{"kind": "builtin", "name": "int"}]}],
+             "result": {"kind": "apply", "ctor": {"kind": "builtin", "name": "Maybe"},
+                        "args": [{"kind": "builtin", "name": "bool"}]}})
+
+    def test_type_vars_quantified(self):
+        t = h.hs_type_ast("a -> [a] -> [a]")
+        self.assertEqual(t["kind"], "forall")
+        self.assertEqual(t["vars"], ["a"])
+
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class TestV2Records(unittest.TestCase):
+    FR_V2 = SPEC_DIR / "function-record.v0.2.schema.json"
+    SRC = (
+        "module Demo (double, noex) where\n\n"
+        "-- | Doubles.\n--\n-- >>> double 5\n-- 10\n-- >>> double 0\n-- 0\n"
+        "double :: Int -> Int\ndouble n = n * 2\n\n"
+        "-- | No doctest.\nnoex :: Int -> Int\nnoex x = x\n"
+    )
+
+    def _run(self, *a):
+        return subprocess.run([str(VALIDATOR), *a], capture_output=True, text=True)
+
+    def test_v2_from_haddock_doctest_and_fallback(self):
+        recs = {r["name_hints"][0]: r for r in h.records_from_source(self.SRC, "demo", False, v2=True)}
+        d = recs["double"]
+        self.assertEqual(d["schema_version"], "0.2.0")
+        self.assertEqual(d["signature"]["type"],
+                         {"kind": "fn", "params": [{"kind": "builtin", "name": "int"}],
+                          "result": {"kind": "builtin", "name": "int"}})
+        self.assertEqual(d["examples"][0],
+                         {"args": [{"kind": "int", "value": 5}], "result": {"kind": "int", "value": 10}})
+        self.assertEqual(recs["noex"]["schema_version"], "0.1.0")   # no doctest -> v0.1 fallback
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(d, f)
+            path = f.name
+        self.assertEqual(self._run("validate", str(self.FR_V2), path).returncode, 0)
+        self.assertEqual(self._run("verify", path).returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

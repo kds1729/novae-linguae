@@ -21,7 +21,17 @@ python3 nl_ingest_hs.py path/to/Module.hs          # compact JSONL to stdout
 python3 nl_ingest_hs.py --pretty path/to/Module.hs # readable
 python3 nl_ingest_hs.py --module Data.Foo Foo.hs    # override the <module>_<fn> hint
 python3 nl_ingest_hs.py --include-private Foo.hs     # ignore the export list; ingest every signature
+python3 nl_ingest_hs.py --v2 Foo.hs                  # v0.2: structured type AST + haddock-doctest examples
 ```
+
+With `--v2`, a function that has usable haddock doc-tests (`-- >>> expr` followed by the expected
+result on the next `--` line) is emitted as a **v0.2** record: `signature.type` is a structured
+type-expression AST built from the Haskell type (`[T]`→`List`, `Maybe`/`Either`→`Maybe`/`Result`,
+`Map`/`Set`, tuples, arrows; type variables become a `forall`; unknown constructors become fresh
+forall-bound vars), and `examples` are **real** value ASTs parsed from the doc-tests' literal
+arguments and expected results (nothing is executed). Functions without usable doc-tests fall back to
+a v0.1 record. The type-AST builder is shared (`ingest-common/nl_types.py`), values via `nl_values.py`;
+every record passes `nl-validator validate` (against `function-record.v0.2.schema.json`) and `verify`.
 
 The file is executable, so `./nl_ingest_hs.py …` also works.
 

@@ -314,6 +314,26 @@ def sanitize_hint(name: str) -> str:
     return "".join(out).lstrip("_0123456789")
 
 
+def name_hints(name: str, module_name: str | None = None, extra_hints=()) -> list:
+    """name_hints for a record: the sanitized bare name, an optional '<module>_<name>', and any
+    extra surface names. (name_hints carry no semantic weight — identity is the hash.)"""
+    hints: list = []
+    bare = sanitize_hint(name)
+    if bare:
+        hints.append(bare)
+        # Only add a module-qualified hint when the bare name is itself a valid hint.
+        if module_name:
+            mh = sanitize_hint(module_name)
+            combined = f"{mh}_{bare}" if mh else bare
+            if combined not in hints:
+                hints.append(combined)
+    for h in extra_hints:
+        s = sanitize_hint(h)
+        if s and s not in hints:
+            hints.append(s)
+    return hints
+
+
 def build_record(name: str, type_str: str, arity: int, body_text: str,
                  module_name: str | None = None, extra_hints=()) -> dict:
     """Assemble a Nova Lingua v0.1 function record from language-neutral inputs.
@@ -326,22 +346,7 @@ def build_record(name: str, type_str: str, arity: int, body_text: str,
     ``module_name`` if given, adds a '<module>_<name>' name_hint alongside the bare name.
     ``extra_hints`` additional surface names to include as hints.
     """
-    hints: list = []
-    bare = sanitize_hint(name)
-    if bare:
-        hints.append(bare)
-        # Only add a module-qualified hint when the bare name is itself a valid hint;
-        # '<module>_<operator-garbage>' would be useless.
-        if module_name:
-            mh = sanitize_hint(module_name)
-            combined = f"{mh}_{bare}" if mh else bare
-            if combined not in hints:
-                hints.append(combined)
-    for h in extra_hints:
-        s = sanitize_hint(h)
-        if s and s not in hints:
-            hints.append(s)
-
+    hints = name_hints(name, module_name, extra_hints)
     body_hash = format_hash("expr", blake3_256(body_text.encode("utf-8")))
 
     record = {
@@ -361,6 +366,32 @@ def build_record(name: str, type_str: str, arity: int, body_text: str,
         "derived_from": None,
         "supersedes": None,
         "body_hash": body_hash,
+    }
+    record["hash"] = content_hash(record, "fn", strip=("hash",))
+    return record
+
+
+def build_v2_record(name: str, type_ast: dict, examples: list, body_text: str,
+                    module_name: str | None = None, extra_hints=()) -> dict:
+    """Assemble a Nova Lingua v0.2 function record: a structured ``signature.type`` AST and real
+    value-AST ``examples`` (must be non-empty — v0.2 requires >=1). Same name_hints / body_hash as
+    build_record. Callers (the string-based adapters) build the type AST and examples per language."""
+    record = {
+        "schema_version": "0.2.0",
+        "hash": "fn_" + "0" * 64,
+        "name_hints": name_hints(name, module_name, extra_hints),
+        "signature": {
+            "type": type_ast,
+            "refinements": [],
+            "effects": [],
+            "capabilities": [],
+            "terminates": "unknown",
+        },
+        "examples": examples,
+        "intent_tags": [],
+        "derived_from": None,
+        "supersedes": None,
+        "body_hash": format_hash("expr", blake3_256(body_text.encode("utf-8"))),
     }
     record["hash"] = content_hash(record, "fn", strip=("hash",))
     return record

@@ -37,7 +37,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingest-common"))
-from nl_core import build_record, find_matching, split_top, count_top  # noqa: E402
+from nl_core import build_record, build_v2_record, find_matching, split_top, count_top  # noqa: E402
+from nl_types import VarCtx, apply, builtin, fn, quantify, tuple_, var  # noqa: E402
+from nl_values import ValueEncodeError, to_value_ast  # noqa: E402
 
 _IDENT = r"[a-z_][A-Za-z0-9_']*"
 _SYMBOL_CHARS = set("!#$%&*+./<=>?@\\^|~-:")
@@ -257,14 +259,202 @@ def equations_for(name: str, lines) -> str:
 
 
 # ---------------------------------------------------------------------------
+# v0.2: structured type AST (from the Haskell type string) + examples from haddock `-- >>>` doctests.
+# ---------------------------------------------------------------------------
+
+_HS_ATOMIC = {
+    "Int": "int", "Integer": "int", "Int8": "int", "Int16": "int", "Int32": "int", "Int64": "int",
+    "Word": "nat", "Word8": "nat", "Word16": "nat", "Word32": "nat", "Word64": "nat", "Natural": "nat",
+    "Double": "float", "Float": "float", "Bool": "bool", "Char": "string", "String": "string",
+    "Text": "string",
+}
+_HS_VAR = re.compile(r"[a-z_][A-Za-z0-9_']*")
+
+
+def _applyc(ctor_name, args):
+    return apply(builtin(ctor_name), args)
+
+
+def _hs_atoms(s):
+    """Top-level space-separated atoms of a Haskell type/expression; (), [], parens stay whole."""
+    atoms, depth, start = [], 0, 0
+    for i, c in enumerate(s):
+        if c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif c == " " and depth == 0:
+            if i > start:
+                atoms.append(s[start:i])
+            start = i + 1
+    if start < len(s):
+        atoms.append(s[start:])
+    return [a for a in (x.strip() for x in atoms) if a]
+
+
+def hs_type_ast(type_str):
+    """Map a Haskell type signature string to a Nova Lingua type AST (unknowns -> fresh forall vars)."""
+    ctx = VarCtx()
+    return quantify(_hs_type(type_str, ctx), ctx.used)
+
+
+def _hs_type(s, ctx):
+    s = s.strip()
+    if s.startswith("forall"):
+        dot = _top_index(s, ".")
+        if dot is not None:
+            s = s[dot + 1:].strip()
+    ctxs = split_top(s, "=>")          # drop a typeclass context
+    if len(ctxs) > 1:
+        s = ctxs[-1].strip()
+    parts = [p.strip() for p in split_top(s, "->")]
+    types = [_hs_app(p, ctx) for p in parts]
+    return types[0] if len(types) == 1 else fn(types[:-1], types[-1])
+
+
+def _hs_app(s, ctx):
+    atoms = _hs_atoms(s.strip())
+    if len(atoms) == 1:
+        return _hs_atom(atoms[0], ctx)
+    head, args = atoms[0], [_hs_atom(a, ctx) for a in atoms[1:]]
+    base = head.split(".")[-1]
+    if base == "Maybe" and args:
+        return _applyc("Maybe", [args[0]])
+    if base == "Either" and len(args) >= 2:
+        return _applyc("Result", [args[0], args[1]])
+    if base in ("Map", "HashMap", "IntMap") and len(args) >= 2:
+        return _applyc("Map", [args[0], args[1]])
+    if base in ("Set", "HashSet", "IntSet") and args:
+        return _applyc("Set", [args[0]])
+    return var(ctx.fresh_var())            # unknown / higher-kinded application -> a fresh variable
+
+
+def _hs_atom(a, ctx):
+    a = a.strip()
+    if a.startswith("[") and a.endswith("]"):
+        inner = a[1:-1].strip()
+        return _applyc("List", [_hs_type(inner, ctx)]) if inner else var(ctx.fresh_var())
+    if a.startswith("(") and a.endswith(")"):
+        inner = a[1:-1].strip()
+        if not inner:
+            return builtin("unit")
+        elems = [e.strip() for e in split_top(inner, ",")]
+        if len(elems) == 1:
+            return _hs_type(elems[0], ctx)
+        return tuple_([_hs_type(e, ctx) for e in elems])
+    if _HS_VAR.fullmatch(a):
+        return var(ctx.named_var(a))
+    base = a.split(".")[-1]
+    if base in _HS_ATOMIC:
+        return builtin(_HS_ATOMIC[base])
+    return var(ctx.fresh_var())            # unknown nullary constructor / user type
+
+
+def _split_fn(type_ast):
+    body = type_ast["body"] if type_ast.get("kind") == "forall" else type_ast
+    if body.get("kind") == "fn":
+        return body.get("params", []), body.get("result")
+    return [], None
+
+
+def haddock_doctests(source):
+    """{fn_name: [(call_expr, expected), ...]} from `-- >>>` haddock doctests in the ORIGINAL source.
+
+    Grouped by the leading identifier of the `>>>` expression (the function demonstrated)."""
+    out = {}
+    lines = source.split("\n")
+    i, n = 0, len(lines)
+    while i < n:
+        m = re.match(r"\s*--\s*>>>\s*(.*)", lines[i])
+        if not m:
+            i += 1
+            continue
+        expr = m.group(1).strip()
+        res, j = [], i + 1
+        while j < n:
+            rm = re.match(r"\s*--\s?(.*)", lines[j])
+            if not rm:
+                break
+            content = rm.group(1).strip()
+            if content == "" or content.startswith(">>>"):
+                break
+            res.append(content)
+            j += 1
+        expected = " ".join(res).strip()
+        head = re.match(r"[A-Za-z_][A-Za-z0-9_']*", expr)
+        if head and expected:
+            out.setdefault(head.group(0), []).append((expr, expected))
+        i = j
+    return out
+
+
+def _hs_lit_py(s):
+    """Parse a Haskell literal expression into a Python value (then reuse nl_values.to_value_ast).
+    Raises ValueError for anything that is not a plain literal — so that example is skipped."""
+    s = s.strip()
+    if s in ("True", "False"):
+        return s == "True"
+    if s == "()":
+        return None
+    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        return bytes(s[1:-1], "utf-8").decode("unicode_escape")
+    if len(s) == 3 and s[0] == "'" and s[-1] == "'":
+        return s[1]
+    if s.startswith("[") and s.endswith("]"):
+        inner = s[1:-1].strip()
+        return [] if not inner else [_hs_lit_py(e.strip()) for e in split_top(inner, ",")]
+    if s.startswith("(") and s.endswith(")"):
+        inner = s[1:-1].strip()
+        if not inner:
+            return None
+        elems = [e.strip() for e in split_top(inner, ",")]
+        return _hs_lit_py(elems[0]) if len(elems) == 1 else tuple(_hs_lit_py(e) for e in elems)
+    if re.fullmatch(r"-?\d+", s):
+        return int(s)
+    if re.fullmatch(r"-?\d+\.\d+([eE][+-]?\d+)?", s) or re.fullmatch(r"-?\d+[eE][+-]?\d+", s):
+        return float(s)
+    raise ValueError(f"unparseable Haskell literal: {s!r}")
+
+
+def hs_examples(name, doctests, param_types, result_type):
+    """Turn `(>>> name args, expected)` doctests into {args, result} value-AST examples."""
+    out = []
+    for expr, expected in doctests:
+        atoms = _hs_atoms(expr)
+        if not atoms or atoms[0] != name:
+            continue
+        try:
+            args = []
+            for i, a in enumerate(atoms[1:]):
+                hint = param_types[i] if i < len(param_types) else None
+                args.append(to_value_ast(_hs_lit_py(a), hint))
+            result = to_value_ast(_hs_lit_py(expected), result_type)
+        except (ValueError, ValueEncodeError):
+            continue
+        out.append({"args": args, "result": result})
+    return out
+
+
+def _build_v2(name, type_str, doctests, body, module_name):
+    type_ast = hs_type_ast(type_str)
+    param_types, result_type = _split_fn(type_ast)
+    examples = hs_examples(name, doctests, param_types, result_type)
+    if not examples:
+        return None
+    return build_v2_record(name, type_ast, examples, body, module_name=module_name)
+
+
+# ---------------------------------------------------------------------------
 # Record assembly.
 # ---------------------------------------------------------------------------
 
-def records_from_source(source: str, module_override: str | None, include_private: bool):
+def records_from_source(source: str, module_override: str | None, include_private: bool,
+                        v2: bool = False):
     src = strip_comments(source)
     module_name, exports = parse_module(src)
     mod_hint = module_override or module_name
     lines = src.split("\n")
+    doctests = haddock_doctests(source) if v2 else {}   # from the original source (comments intact)
 
     records = []
     for names, type_str in parse_signatures(src):
@@ -272,7 +462,10 @@ def records_from_source(source: str, module_override: str | None, include_privat
             if not include_private and exports is not None and name not in exports:
                 continue
             body = equations_for(name, lines) or type_str
-            records.append(build_record(name, type_str, arity_of(type_str), body, module_name=mod_hint))
+            rec = _build_v2(name, type_str, doctests.get(name, []), body, mod_hint) if v2 else None
+            if rec is None:
+                rec = build_record(name, type_str, arity_of(type_str), body, module_name=mod_hint)
+            records.append(rec)
     return records
 
 
@@ -291,6 +484,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pretty", action="store_true", help="pretty-print each record")
     p.add_argument("--include-private", action="store_true",
                    help="ingest every top-level signature, ignoring the module export list")
+    p.add_argument("--v2", action="store_true",
+                   help="higher fidelity: emit v0.2 records (structured type AST + real examples from "
+                        "haddock `-- >>>` doctests) for functions with usable doctests; v0.1 otherwise")
     return p
 
 
@@ -307,7 +503,7 @@ def main(argv=None) -> int:
             print(f"nl-ingest-hs: reading {path}: {e}", file=sys.stderr)
             exit_code = 1
             continue
-        for record in records_from_source(source, args.module, args.include_private):
+        for record in records_from_source(source, args.module, args.include_private, v2=args.v2):
             if args.pretty:
                 print(json.dumps(record, indent=2, ensure_ascii=False))
             else:
