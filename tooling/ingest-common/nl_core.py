@@ -373,7 +373,8 @@ def build_record(name: str, type_str: str, arity: int, body_text: str,
 
 def build_v2_record(name: str, type_ast: dict, examples: list, body_text: str,
                     module_name: str | None = None, extra_hints=(),
-                    effects=None, terminates=None, refinements=None) -> dict:
+                    effects=None, terminates=None, refinements=None,
+                    properties=None, intent_tags=None) -> dict:
     """Assemble a Nova Lingua v0.2 function record: a structured ``signature.type`` AST and real
     value-AST ``examples`` (must be non-empty — v0.2 requires >=1). Same name_hints / body_hash as
     build_record. Callers (the string-based adapters) build the type AST and examples per language.
@@ -393,7 +394,7 @@ def build_v2_record(name: str, type_ast: dict, examples: list, body_text: str,
             "terminates": terminates if terminates is not None else "unknown",
         },
         "examples": examples,
-        "intent_tags": [],
+        "intent_tags": intent_tags if intent_tags is not None else [],
         "derived_from": None,
         "supersedes": None,
         # ``body_text`` may be a synthetic source string (hash its UTF-8 bytes — IDENTICAL to before)
@@ -402,6 +403,10 @@ def build_v2_record(name: str, type_ast: dict, examples: list, body_text: str,
                       if isinstance(body_text, dict)
                       else format_hash("expr", blake3_256(body_text.encode("utf-8")))),
     }
+    # `properties` (algebraic laws) is OPTIONAL in v0.2; include it only when present, so a record
+    # with no laws hashes exactly as before (JCS sorts keys, so position is irrelevant).
+    if properties:
+        record["properties"] = properties
     record["hash"] = content_hash(record, "fn", strip=("hash",))
     return record
 

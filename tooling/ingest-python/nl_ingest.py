@@ -47,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest-common")
 from nl_body import body_ast_from_py  # noqa: E402
 from nl_examples import examples_from_docstring  # noqa: E402
 from nl_effects import effects_from_py, terminates_from_py  # noqa: E402
+from property_catalog import match_catalog  # noqa: E402
 from nl_predicates import PredicateError, predicate_from_py  # noqa: E402
 from nl_types import python_function_type  # noqa: E402
 
@@ -613,21 +614,24 @@ def _preconditions(func) -> list:
     return refs
 
 
-def build_v2_record(func, module_name: str | None, imports=None) -> dict | None:
+def build_v2_record(func, module_name: str | None, imports=None, with_properties=False) -> dict | None:
     """Build a v0.2 record: a STRUCTURED type AST (nl_types) + REAL examples from the function's
     doctests (nl_examples). Returns None when there are no usable doctest examples — v0.2 requires
     >=1 — so the caller falls back to a v0.1 record. ``imports`` is the (alias, fromimp) module-map
-    pair (see nl_effects) used to classify qualified calls when inferring effects."""
+    pair (see nl_effects) used to classify qualified calls when inferring effects. When
+    ``with_properties`` is set, well-known functions get curated algebraic laws from the catalog."""
     type_ast = python_function_type(func)
     param_types, result_type = _fn_param_result_types(type_ast)
     examples = examples_from_docstring(func.name, ast.get_docstring(func), param_types, result_type)
     if not examples:
         return None
     alias, fromimp = imports if imports else ({}, {})
+    hints = _name_hints(func.name, module_name)
+    properties, tags = match_catalog(hints, len(param_types)) if with_properties else ([], [])
     record = {
         "schema_version": "0.2.0",
         "hash": "fn_" + "0" * 64,
-        "name_hints": _name_hints(func.name, module_name),
+        "name_hints": hints,
         "signature": {
             "type": type_ast,
             "refinements": _preconditions(func),
@@ -636,11 +640,15 @@ def build_v2_record(func, module_name: str | None, imports=None) -> dict | None:
             "terminates": terminates_from_py(func),
         },
         "examples": examples,
-        "intent_tags": [],
+        "intent_tags": tags,
         "derived_from": None,
         "supersedes": None,
         "body_hash": _body_hash(func),
     }
+    # `properties` is optional in v0.2; include it only when laws were attached, so records without
+    # laws hash exactly as before.
+    if properties:
+        record["properties"] = properties
     record["hash"] = content_hash(record, "fn", strip=("hash",))
     return record
 
@@ -715,7 +723,7 @@ def iter_functions(tree: ast.Module, include_private: bool):
 
 
 def records_from_source(source: str, module_name: str | None, include_private: bool,
-                        v2: bool = False) -> list:
+                        v2: bool = False, with_properties: bool = False) -> list:
     tree = ast.parse(source)
     module_tvars = _module_typevars(tree)
     imports = _module_imports(tree) if v2 else None
@@ -723,7 +731,7 @@ def records_from_source(source: str, module_name: str | None, include_private: b
     for fn in iter_functions(tree, include_private):
         # In --v2 mode, emit a structured v0.2 record when the function has usable doctest examples;
         # otherwise fall back to a v0.1 record so no function is dropped.
-        rec = build_v2_record(fn, module_name, imports) if v2 else None
+        rec = build_v2_record(fn, module_name, imports, with_properties) if v2 else None
         if rec is None:
             rec = build_record(fn, module_name, module_tvars)
         out.append(rec)
@@ -749,6 +757,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--v2", action="store_true",
                    help="higher fidelity: emit v0.2 records (structured type AST + real examples from "
                         "doctests) for functions that have usable doctests; v0.1 otherwise")
+    p.add_argument("--properties", action="store_true",
+                   help="attach curated algebraic laws (property_catalog.json) to recognised functions "
+                        "(map/filter/sort/reverse/id, ...) — implies --v2. Verify with "
+                        "`nl-validator check-properties`")
     return p
 
 
@@ -767,7 +779,9 @@ def main(argv=None) -> int:
             exit_code = 1
             continue
         try:
-            records = records_from_source(source, args.module, args.include_private, v2=args.v2)
+            v2 = args.v2 or args.properties  # --properties implies --v2
+            records = records_from_source(source, args.module, args.include_private, v2=v2,
+                                          with_properties=args.properties)
         except SyntaxError as e:
             print(f"nl-ingest-py: parsing {path}: {e}", file=sys.stderr)
             exit_code = 1

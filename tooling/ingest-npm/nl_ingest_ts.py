@@ -41,10 +41,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingest-common"))
-from nl_core import build_record, build_v2_record  # noqa: E402
+from nl_core import build_record, build_v2_record, name_hints as _name_hints  # noqa: E402
 from nl_effects import effects_from_tokens, terminates_from_tokens  # noqa: E402
 from nl_body import body_ast_from_ts  # noqa: E402
 from nl_toolchain import run_enricher, tool_on_path  # noqa: E402
+from property_catalog import match_catalog  # noqa: E402
 
 _TS_ENRICH_JS = Path(__file__).resolve().parent / "ts_enrich.js"
 
@@ -544,15 +545,19 @@ def ts_examples(name, pairs, param_types, result_type):
     return out
 
 
-def _build_ts_record(name, typevars, params, rettype, slice_text, module_name, v2, examples_map):
+def _build_ts_record(name, typevars, params, rettype, slice_text, module_name, v2, examples_map,
+                     with_properties=False):
     if v2:
         type_ast, param_types, result_type = ts_function_type(typevars, params, rettype)
         examples = ts_examples(name, examples_map.get(name, []), param_types, result_type)
         if examples:
             body_repr = body_ast_from_ts(name, slice_text) or slice_text
+            props, tags = (match_catalog(_name_hints(name, module_name), len(params))
+                           if with_properties else ([], []))
             return build_v2_record(name, type_ast, examples, body_repr, module_name=module_name,
                                    effects=effects_from_tokens(slice_text, "ts"),
-                                   terminates=terminates_from_tokens(name, slice_text, "ts"))
+                                   terminates=terminates_from_tokens(name, slice_text, "ts"),
+                                   properties=props, intent_tags=tags)
     return build_record(name, _make_type(typevars, params, rettype),
                         _param_types(params)[1], slice_text, module_name=module_name)
 
@@ -717,7 +722,8 @@ def _scan_to_assign(s: str, i: int):
     return None
 
 
-def _parse_export(s: str, export_start: int, module_name, v2=False, examples_map=None):
+def _parse_export(s: str, export_start: int, module_name, v2=False, examples_map=None,
+                  with_properties=False):
     """export_start points at 'export'. Returns (record | None, end_index)."""
     examples_map = examples_map or {}
     i = _skip_ws(s, export_start + len("export"))
@@ -736,7 +742,7 @@ def _parse_export(s: str, export_start: int, module_name, v2=False, examples_map
             return None, i
         name, typevars, params, rettype, end = parsed
         rec = _build_ts_record(name, typevars, params, rettype, s[export_start:end],
-                               module_name, v2, examples_map)
+                               module_name, v2, examples_map, with_properties)
         return rec, end
 
     for word in ("const", "let", "var"):
@@ -764,14 +770,14 @@ def _parse_export(s: str, export_start: int, module_name, v2=False, examples_map
             return None, j
         typevars, params, rettype, end = parsed
         rec = _build_ts_record(name, typevars, params, rettype, s[export_start:end],
-                               module_name, v2, examples_map)
+                               module_name, v2, examples_map, with_properties)
         return rec, end
 
     return None, i
 
 
 def records_from_source(source: str, module_name: str | None = None, v2: bool = False,
-                        enrich=None):
+                        enrich=None, with_properties: bool = False):
     """``enrich``: an optional source -> source transform applied before scanning (the toolchain
     seam, see nl_toolchain). None = scanner only — the deterministic, zero-dependency default."""
     if enrich is not None:
@@ -783,7 +789,7 @@ def records_from_source(source: str, module_name: str | None = None, v2: bool = 
     while i < n:
         if (s[i] == "e" and (i == 0 or not _IDENT_CHAR.match(s[i - 1]))
                 and _kw(s, i, "export") is not None):
-            rec, end = _parse_export(s, i, module_name, v2, examples_map)
+            rec, end = _parse_export(s, i, module_name, v2, examples_map, with_properties)
             if rec is not None:
                 records.append(rec)
             i = max(end, i + 1)
@@ -812,6 +818,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="opt in to the TypeScript-compiler backend (node + typescript) to resolve "
                         "signatures before scanning; falls back to the scanner if unavailable. "
                         "Non-deterministic across compiler versions — off by default (principle 5)")
+    p.add_argument("--properties", action="store_true",
+                   help="attach curated algebraic laws (property_catalog.json) to recognised functions; "
+                        "implies --v2. Verify with `nl-validator check-properties`")
     return p
 
 
@@ -829,7 +838,9 @@ def main(argv=None) -> int:
             exit_code = 1
             continue
         enrich = ts_enrich if args.toolchain else None
-        for record in records_from_source(source, args.module, v2=args.v2, enrich=enrich):
+        v2 = args.v2 or args.properties  # --properties implies --v2
+        for record in records_from_source(source, args.module, v2=v2, enrich=enrich,
+                                          with_properties=args.properties):
             if args.pretty:
                 print(json.dumps(record, indent=2, ensure_ascii=False))
             else:

@@ -1,0 +1,61 @@
+{
+  "catalog_version": "0.1",
+  "_comment": "Curated algebraic laws keyed by canonical name-hint + arity. Attached opt-in via the adapters' --properties flag (ingestion cannot DERIVE laws, only recognise well-known functions). Each emitted law is then checkable by `nl-validator check-properties` against the record's worked examples, so a mis-match that contradicts an example is caught. Property exprs use the predicate-expression vocabulary with the reserved bindings result / arg0..argN. Where possible the law is in the evaluator's DECIDABLE subset (length/eq/le) so consistency can actually be confirmed from examples; involution / functor laws are valid but report UNVERIFIABLE.",
+  "laws": [
+    {
+      "id": "law.identity",
+      "match": { "name_hints": ["id", "identity"], "arity": 1 },
+      "intent_tag": "idempotent",
+      "property": {
+        "name": "identity",
+        "expr": { "kind": "app", "op": "eq", "args": [
+          { "kind": "var", "name": "result" },
+          { "kind": "var", "name": "arg0" } ] }
+      }
+    },
+    {
+      "id": "law.reverse_length_preserving",
+      "match": { "name_hints": ["reverse", "rev"], "arity": 1 },
+      "intent_tag": "lossless",
+      "property": {
+        "name": "length_preserving",
+        "expr": { "kind": "app", "op": "eq", "args": [
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "result" }] },
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg0" }] } ] }
+      }
+    },
+    {
+      "id": "law.sort_length_preserving",
+      "match": { "name_hints": ["sort", "sorted"], "arity": 1 },
+      "intent_tag": "idempotent",
+      "property": {
+        "name": "length_preserving",
+        "expr": { "kind": "app", "op": "eq", "args": [
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "result" }] },
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg0" }] } ] }
+      }
+    },
+    {
+      "id": "law.map_length_preserving",
+      "match": { "name_hints": ["map", "fmap"], "arity": 2 },
+      "intent_tag": "elementwise",
+      "property": {
+        "name": "length_preserving",
+        "expr": { "kind": "app", "op": "eq", "args": [
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "result" }] },
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg1" }] } ] }
+      }
+    },
+    {
+      "id": "law.filter_length_bounded",
+      "match": { "name_hints": ["filter"], "arity": 2 },
+      "intent_tag": "idempotent",
+      "property": {
+        "name": "length_bounded",
+        "expr": { "kind": "app", "op": "le", "args": [
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "result" }] },
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg1" }] } ] }
+      }
+    }
+  ]
+}

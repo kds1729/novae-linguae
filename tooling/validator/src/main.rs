@@ -126,6 +126,17 @@ enum Commands {
         /// Path to the body-expression document
         record: PathBuf,
     },
+    /// Evaluate a function record's algebraic `properties[]` against its worked
+    /// `examples[]`. Binds `result` and `arg0..argN` from each example and
+    /// evaluates each property's predicate three-valued: CONTRADICTED (false on
+    /// some example — exit 1), UNVERIFIABLE (needs runtime / re-applying an
+    /// unknown function, e.g. map/filter/fold/compose, or a quantifier), or
+    /// CONSISTENT (true on ≥1, false on none — not a proof). Exit 0 unless a
+    /// property is contradicted.
+    CheckProperties {
+        /// Path to the function record
+        record: PathBuf,
+    },
     /// Parse a Nova Lingua type-expression surface string into its JSON AST.
     /// Reads the surface string from the `input` argument, or from stdin when
     /// omitted. Writes the AST as pretty JSON to stdout. See
@@ -216,6 +227,7 @@ fn main() -> ExitCode {
         Commands::CheckPredicate { record } => (cmd_check_predicate(&record), true),
         Commands::CheckValue { record } => (cmd_check_value(&record), true),
         Commands::CheckBody { record } => (cmd_check_body(&record), true),
+        Commands::CheckProperties { record } => (cmd_check_properties(&record), true),
         #[cfg(feature = "surface")]
         Commands::ParseType { input } => (cmd_parse_type(input), false),
         #[cfg(feature = "surface")]
@@ -359,6 +371,11 @@ fn cmd_check_value(record: &PathBuf) -> Result<()> {
 fn cmd_check_body(record: &PathBuf) -> Result<()> {
     let value = nl_validator::read_json(record)?;
     nl_validator::check_body_well_formed(&value)
+}
+
+fn cmd_check_properties(record: &PathBuf) -> Result<()> {
+    let value = nl_validator::read_json(record)?;
+    nl_validator::check_properties(&value)
 }
 
 /// Read a raw surface string from the `input` argument, or from stdin when it is

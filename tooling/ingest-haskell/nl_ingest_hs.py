@@ -43,6 +43,8 @@ from nl_core import build_record, build_v2_record, find_matching, split_top, cou
 from nl_effects import effects_from_tokens, terminates_from_tokens  # noqa: E402
 from nl_body import body_ast_from_hs  # noqa: E402
 from nl_toolchain import tool_on_path  # noqa: E402
+from nl_core import name_hints as _name_hints  # noqa: E402
+from property_catalog import match_catalog  # noqa: E402
 from nl_types import VarCtx, apply, builtin, fn, quantify, tuple_, var  # noqa: E402
 from nl_values import ValueEncodeError, to_value_ast  # noqa: E402
 
@@ -440,16 +442,19 @@ def hs_examples(name, doctests, param_types, result_type):
     return out
 
 
-def _build_v2(name, type_str, doctests, body, module_name):
+def _build_v2(name, type_str, doctests, body, module_name, with_properties=False):
     type_ast = hs_type_ast(type_str)
     param_types, result_type = _split_fn(type_ast)
     examples = hs_examples(name, doctests, param_types, result_type)
     if not examples:
         return None
     body_repr = body_ast_from_hs(name, body) or body  # real body AST when in subset, else source text
+    props, tags = (match_catalog(_name_hints(name, module_name), len(param_types))
+                   if with_properties else ([], []))
     return build_v2_record(name, type_ast, examples, body_repr, module_name=module_name,
                            effects=effects_from_tokens(body, "hs"),
-                           terminates=terminates_from_tokens(name, body, "hs"))
+                           terminates=terminates_from_tokens(name, body, "hs"),
+                           properties=props, intent_tags=tags)
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +513,7 @@ def hs_enrich(source: str) -> str:
 
 
 def records_from_source(source: str, module_override: str | None, include_private: bool,
-                        v2: bool = False, enrich=None):
+                        v2: bool = False, enrich=None, with_properties: bool = False):
     """``enrich``: optional source -> source transform applied before scanning (the toolchain seam,
     see nl_toolchain). None = scanner only — the deterministic, zero-dependency default."""
     if enrich is not None:
@@ -525,7 +530,8 @@ def records_from_source(source: str, module_override: str | None, include_privat
             if not include_private and exports is not None and name not in exports:
                 continue
             body = equations_for(name, lines) or type_str
-            rec = _build_v2(name, type_str, doctests.get(name, []), body, mod_hint) if v2 else None
+            rec = (_build_v2(name, type_str, doctests.get(name, []), body, mod_hint, with_properties)
+                   if v2 else None)
             if rec is None:
                 rec = build_record(name, type_str, arity_of(type_str), body, module_name=mod_hint)
             records.append(rec)
@@ -554,6 +560,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="opt in to the GHC backend: prepend inferred top-level signatures before "
                         "scanning; falls back to the scanner if ghc is unavailable. Non-deterministic "
                         "across compiler versions — off by default (principle 5)")
+    p.add_argument("--properties", action="store_true",
+                   help="attach curated algebraic laws (property_catalog.json) to recognised functions; "
+                        "implies --v2. Verify with `nl-validator check-properties`")
     return p
 
 
@@ -571,8 +580,9 @@ def main(argv=None) -> int:
             exit_code = 1
             continue
         enrich = hs_enrich if args.toolchain else None
-        for record in records_from_source(source, args.module, args.include_private, v2=args.v2,
-                                          enrich=enrich):
+        v2 = args.v2 or args.properties  # --properties implies --v2
+        for record in records_from_source(source, args.module, args.include_private, v2=v2,
+                                          enrich=enrich, with_properties=args.properties):
             if args.pretty:
                 print(json.dumps(record, indent=2, ensure_ascii=False))
             else:
