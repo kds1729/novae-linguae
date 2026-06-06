@@ -17,7 +17,7 @@ Reference command-line validator, canonicalizer, and hasher for *Novae Linguae* 
 - [x] In-crate test suite (`cargo test`, 164 tests) covering canonicalization, hashing, kind detection, signing/verification, type well-formedness, predicate/value/body well-formedness, surface-syntax round-trips, schema validation, and cross-file `$ref` resolution.
 - [x] Cross-file `$ref` resolution: schemas may reference sibling schemas by their `https://novae-linguae.org/spec/...` identifier; `validate` resolves these against the local `spec/` tree (`validate_with_refs`). Used by the message schema for conditional `store`-payload validation.
 - [x] Language-neutral conformance **vectors** (record → canonical bytes → hash, plus signing, signature, type well-formedness, schema cases, and surface-syntax round-trips for all four sub-languages) exported as portable fixtures under [`spec/conformance/`](../../spec/conformance/) for cross-implementation byte-equality testing. The reference implementation replays them via `cargo test --test conformance`.
-- [x] Ingestion tool (`nl-ingest`): parses public Rust functions via `syn` and emits Nova Lingua v0.1 function records as JSONL; all emitted records pass `nl-validator validate`.
+- [x] Ingestion tool (`nl-ingest`): parses public Rust functions via `syn` and emits Nova Lingua function records as JSONL — v0.1 by default, or v0.2 with `--v2` (structured type AST + examples from `///` doc-tests); all emitted records pass `nl-validator validate`.
 
 ## Build
 
