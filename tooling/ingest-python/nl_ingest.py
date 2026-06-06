@@ -45,6 +45,7 @@ from pathlib import Path
 # examples extracted from doctests. Imported only for --v2; the v0.1 path stays self-contained.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest-common"))
 from nl_examples import examples_from_docstring  # noqa: E402
+from nl_effects import effects_from_py, terminates_from_py  # noqa: E402
 from nl_predicates import PredicateError, predicate_from_py  # noqa: E402
 from nl_types import python_function_type  # noqa: E402
 
@@ -607,15 +608,17 @@ def _preconditions(func) -> list:
     return refs
 
 
-def build_v2_record(func, module_name: str | None) -> dict | None:
+def build_v2_record(func, module_name: str | None, imports=None) -> dict | None:
     """Build a v0.2 record: a STRUCTURED type AST (nl_types) + REAL examples from the function's
     doctests (nl_examples). Returns None when there are no usable doctest examples — v0.2 requires
-    >=1 — so the caller falls back to a v0.1 record."""
+    >=1 — so the caller falls back to a v0.1 record. ``imports`` is the (alias, fromimp) module-map
+    pair (see nl_effects) used to classify qualified calls when inferring effects."""
     type_ast = python_function_type(func)
     param_types, result_type = _fn_param_result_types(type_ast)
     examples = examples_from_docstring(func.name, ast.get_docstring(func), param_types, result_type)
     if not examples:
         return None
+    alias, fromimp = imports if imports else ({}, {})
     record = {
         "schema_version": "0.2.0",
         "hash": "fn_" + "0" * 64,
@@ -623,9 +626,9 @@ def build_v2_record(func, module_name: str | None) -> dict | None:
         "signature": {
             "type": type_ast,
             "refinements": _preconditions(func),
-            "effects": [],
+            "effects": effects_from_py(func, alias, fromimp),
             "capabilities": [],
-            "terminates": "unknown",
+            "terminates": terminates_from_py(func),
         },
         "examples": examples,
         "intent_tags": [],
@@ -672,6 +675,25 @@ def _module_typevars(tree: ast.Module) -> set:
     return names
 
 
+def _module_imports(tree: ast.Module):
+    """(alias, fromimp) maps for effect inference: ``alias`` maps an ``import x [as y]`` local root
+    to its dotted module; ``fromimp`` maps a ``from m import n [as a]`` bound name to module m."""
+    alias: dict = {}
+    fromimp: dict = {}
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for n in node.names:
+                if n.asname:
+                    alias[n.asname] = n.name
+                else:
+                    root = n.name.split(".")[0]
+                    alias[root] = root
+        elif isinstance(node, ast.ImportFrom) and node.module and (node.level or 0) == 0:
+            for n in node.names:
+                fromimp[n.asname or n.name] = node.module
+    return alias, fromimp
+
+
 def iter_functions(tree: ast.Module, include_private: bool):
     """Yield top-level function defs that count as public."""
     explicit = _public_names(tree)
@@ -691,11 +713,12 @@ def records_from_source(source: str, module_name: str | None, include_private: b
                         v2: bool = False) -> list:
     tree = ast.parse(source)
     module_tvars = _module_typevars(tree)
+    imports = _module_imports(tree) if v2 else None
     out = []
     for fn in iter_functions(tree, include_private):
         # In --v2 mode, emit a structured v0.2 record when the function has usable doctest examples;
         # otherwise fall back to a v0.1 record so no function is dropped.
-        rec = build_v2_record(fn, module_name) if v2 else None
+        rec = build_v2_record(fn, module_name, imports) if v2 else None
         if rec is None:
             rec = build_record(fn, module_name, module_tvars)
         out.append(rec)

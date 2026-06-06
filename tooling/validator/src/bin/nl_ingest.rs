@@ -729,6 +729,185 @@ fn preconditions(func: &syn::ItemFn) -> Vec<Value> {
     refs
 }
 
+// --- v0.2: conservative effect & termination inference (over `syn`) ---------------------------
+// A LOWER BOUND: empty `effects` is NOT a purity certificate — it means no syntactically
+// recognisable effectful operation was found (indirect/higher-order/dynamic effects are missed).
+// `terminates` defaults to "unknown"; "always" only for a call-free, loop-free, non-recursive body;
+// "conditional" for direct self-recursion; "never" is never emitted. Mirrors nl_effects.py.
+
+use syn::visit::Visit;
+
+#[derive(Default)]
+struct EffectVisitor {
+    effects: std::collections::BTreeSet<&'static str>,
+}
+
+impl EffectVisitor {
+    fn add(&mut self, e: &'static str) {
+        self.effects.insert(e);
+    }
+
+    fn path_effects(&mut self, path: &syn::Path) {
+        let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+        let last = match segs.last() {
+            Some(s) => s.as_str(),
+            None => return,
+        };
+        let has = |n: &str| segs.iter().any(|s| s == n);
+        if has("fs") {
+            match last {
+                "read" | "read_to_string" | "read_to_end" | "read_dir" | "metadata" | "canonicalize" => self.add("fs.read"),
+                "write" | "remove_file" | "remove_dir" | "remove_dir_all" | "create_dir"
+                | "create_dir_all" | "rename" | "copy" | "hard_link" | "set_permissions" => self.add("fs.write"),
+                _ => {}
+            }
+        }
+        if has("File") {
+            match last {
+                "open" => self.add("fs.read"),
+                "create" => self.add("fs.write"),
+                _ => {}
+            }
+        }
+        if (has("Instant") || has("SystemTime")) && last == "now" {
+            self.add("time");
+        }
+        if last == "sleep" && (has("thread") || has("time")) {
+            self.add("time");
+        }
+        if has("rand") || last == "thread_rng" || last == "random" {
+            self.add("random");
+        }
+        if has("Command") {
+            self.add("process.spawn");
+        }
+        if has("process") && (last == "exit" || last == "abort") {
+            self.add("panic");
+        }
+        if has("TcpStream") && last == "connect" {
+            self.add("net.write");
+        }
+        if has("reqwest") {
+            match last {
+                "get" => self.add("net.read"),
+                "post" | "put" | "patch" | "delete" => self.add("net.write"),
+                _ => {
+                    self.add("net.read");
+                    self.add("net.write");
+                }
+            }
+        }
+        // alloc: explicit heap constructors only (everything else allocates too — no signal).
+        if (has("Box") || has("Rc") || has("Arc")) && last == "new" {
+            self.add("alloc");
+        }
+        if has("Vec") && (last == "new" || last == "with_capacity") {
+            self.add("alloc");
+        }
+    }
+
+    fn method_effects(&mut self, name: &str) {
+        match name {
+            "recv" | "recv_from" => self.add("net.read"),
+            "send" | "send_to" => self.add("net.write"),
+            "unwrap" | "expect" => self.add("panic"),
+            _ => {}
+        }
+    }
+
+    fn macro_effects(&mut self, name: &str) {
+        match name {
+            "println" | "print" | "eprintln" | "eprint" => self.add("io.console"),
+            "panic" | "unreachable" | "todo" | "unimplemented" => self.add("panic"),
+            "vec" | "format" => self.add("alloc"),
+            _ => {}
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for EffectVisitor {
+    fn visit_item_fn(&mut self, _f: &'ast syn::ItemFn) {} // don't descend into nested fn items
+    fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(p) = &*c.func {
+            self.path_effects(&p.path);
+        }
+        syn::visit::visit_expr_call(self, c);
+    }
+    fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
+        self.method_effects(&m.method.to_string());
+        syn::visit::visit_expr_method_call(self, m);
+    }
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        if let Some(id) = mac.path.get_ident() {
+            self.macro_effects(&id.to_string());
+        }
+    }
+}
+
+fn infer_effects(func: &syn::ItemFn) -> Vec<&'static str> {
+    let mut v = EffectVisitor::default();
+    for stmt in &func.block.stmts {
+        v.visit_stmt(stmt);
+    }
+    v.effects.into_iter().collect()
+}
+
+#[derive(Default)]
+struct TermVisitor<'a> {
+    name: &'a str,
+    self_rec: bool,
+    has_loop: bool,
+    has_call: bool,
+}
+
+impl<'a, 'ast> Visit<'ast> for TermVisitor<'a> {
+    fn visit_item_fn(&mut self, _f: &'ast syn::ItemFn) {}
+    fn visit_expr_loop(&mut self, e: &'ast syn::ExprLoop) {
+        self.has_loop = true;
+        syn::visit::visit_expr_loop(self, e);
+    }
+    fn visit_expr_while(&mut self, e: &'ast syn::ExprWhile) {
+        self.has_loop = true;
+        syn::visit::visit_expr_while(self, e);
+    }
+    fn visit_expr_for_loop(&mut self, e: &'ast syn::ExprForLoop) {
+        self.has_loop = true;
+        syn::visit::visit_expr_for_loop(self, e);
+    }
+    fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
+        self.has_call = true;
+        if let syn::Expr::Path(p) = &*c.func {
+            if p.path.segments.len() == 1 && p.path.segments[0].ident.to_string() == self.name {
+                self.self_rec = true;
+            }
+        }
+        syn::visit::visit_expr_call(self, c);
+    }
+    fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
+        self.has_call = true;
+        syn::visit::visit_expr_method_call(self, m);
+    }
+    fn visit_expr_await(&mut self, a: &'ast syn::ExprAwait) {
+        self.has_call = true;
+        syn::visit::visit_expr_await(self, a);
+    }
+}
+
+fn infer_terminates(func: &syn::ItemFn) -> &'static str {
+    let name = func.sig.ident.to_string();
+    let mut v = TermVisitor { name: &name, ..Default::default() };
+    for stmt in &func.block.stmts {
+        v.visit_stmt(stmt);
+    }
+    if v.self_rec {
+        "conditional"
+    } else if v.has_loop || v.has_call {
+        "unknown"
+    } else {
+        "always"
+    }
+}
+
 fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Option<Value>> {
     let fn_name = func.sig.ident.to_string();
     let type_ast = type_ast_from_sig(&func.sig);
@@ -752,9 +931,9 @@ fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Optio
         "signature": {
             "type": type_ast,
             "refinements": preconditions(func),
-            "effects": [],
+            "effects": infer_effects(func),
             "capabilities": [],
-            "terminates": "unknown"
+            "terminates": infer_terminates(func)
         },
         "examples": examples,
         "intent_tags": [],
@@ -952,6 +1131,37 @@ mod tests {
         let refs = rec["signature"]["refinements"].as_array().unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0]["expr"]["op"], "ge");
+    }
+
+    #[test]
+    fn effects_inferred_from_calls_and_macros() {
+        let f = item_fn(
+            "pub fn f(p: &str) { let s = std::fs::read_to_string(p).unwrap(); println!(\"{}\", s); }",
+        );
+        let eff = infer_effects(&f);
+        assert!(eff.contains(&"fs.read"));
+        assert!(eff.contains(&"io.console"));
+        assert!(eff.contains(&"panic")); // .unwrap()
+        // sorted (BTreeSet): fs.read < io.console < panic
+        assert_eq!(eff, vec!["fs.read", "io.console", "panic"]);
+    }
+
+    #[test]
+    fn pure_arithmetic_is_effect_free_and_always_terminates() {
+        let f = item_fn("pub fn add(a: i64, b: i64) -> i64 { a + b }");
+        assert!(infer_effects(&f).is_empty());
+        assert_eq!(infer_terminates(&f), "always");
+    }
+
+    #[test]
+    fn self_recursion_is_conditional_loops_are_unknown() {
+        let rec = item_fn("pub fn fact(n: u64) -> u64 { if n == 0 { 1 } else { n * fact(n - 1) } }");
+        assert_eq!(infer_terminates(&rec), "conditional");
+        let loopy = item_fn("pub fn sum(xs: &[u64]) -> u64 { let mut t = 0; for x in xs { t += x; } t }");
+        assert_eq!(infer_terminates(&loopy), "unknown");
+        // A call to a non-total helper -> unknown (we can't prove the callee halts).
+        let calls = item_fn("pub fn g(n: u64) -> u64 { helper(n) }");
+        assert_eq!(infer_terminates(&calls), "unknown");
     }
 
     #[test]

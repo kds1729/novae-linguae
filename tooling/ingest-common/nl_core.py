@@ -372,20 +372,25 @@ def build_record(name: str, type_str: str, arity: int, body_text: str,
 
 
 def build_v2_record(name: str, type_ast: dict, examples: list, body_text: str,
-                    module_name: str | None = None, extra_hints=()) -> dict:
+                    module_name: str | None = None, extra_hints=(),
+                    effects=None, terminates=None, refinements=None) -> dict:
     """Assemble a Nova Lingua v0.2 function record: a structured ``signature.type`` AST and real
     value-AST ``examples`` (must be non-empty — v0.2 requires >=1). Same name_hints / body_hash as
-    build_record. Callers (the string-based adapters) build the type AST and examples per language."""
+    build_record. Callers (the string-based adapters) build the type AST and examples per language.
+
+    ``effects`` / ``terminates`` / ``refinements`` are best-effort inferred fields; when omitted they
+    default to the conservative ``[]`` / ``"unknown"`` / ``[]`` (see nl_effects for the caveats —
+    inferred effects are a LOWER BOUND, not a purity certificate)."""
     record = {
         "schema_version": "0.2.0",
         "hash": "fn_" + "0" * 64,
         "name_hints": name_hints(name, module_name, extra_hints),
         "signature": {
             "type": type_ast,
-            "refinements": [],
-            "effects": [],
+            "refinements": refinements if refinements is not None else [],
+            "effects": effects if effects is not None else [],
             "capabilities": [],
-            "terminates": "unknown",
+            "terminates": terminates if terminates is not None else "unknown",
         },
         "examples": examples,
         "intent_tags": [],
