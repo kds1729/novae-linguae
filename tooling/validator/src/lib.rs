@@ -25,6 +25,8 @@ pub mod surface;
 mod eval;
 pub use eval::{check_properties, evaluate_property};
 
+pub mod seal;
+
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {
     let text = std::fs::read_to_string(path)
