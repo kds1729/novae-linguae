@@ -1,0 +1,8 @@
+# Python dependencies for the commons reference node.
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+Django>=6.0,<7.0
+
+# Production stack (Docker with Postgres + Redis); not needed for local SQLite/locmem dev.
+psycopg[binary]>=3.2
+redis>=5.0
+gunicorn>=23.0
