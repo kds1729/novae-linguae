@@ -154,8 +154,13 @@ python3 manage.py bootstrap --from https://a.example.org/.well-known/nlb-bootstr
 `--from` URLs are tried in order (fallback). `--trust` requires a valid signature by a trusted
 `did:nova`; otherwise provenance is reported but advisory. `--pull` verifies the fetched bundle's
 digest against the signed descriptor, then ingests through the normal verify-then-store gate — so the
-whole chain is verified end to end. A future Nostr / IPNS / blockchain-anchor / DNS channel plugs into
-the same resolver by supplying a different fetch.
+whole chain is verified end to end.
+
+A descriptor/bundle URL list can **mix channels** (blocking one doesn't sever bootstrap), chosen by
+scheme — `https://`/`file://`, `ipns://<name>` (IPFS gateway), `dns://<name>` (DNS-over-HTTPS TXT,
+base64 descriptor), `nostr://<relay>/<author>` (newest event), `chain://<read-endpoint>[#json.path]`
+(read an on-chain pointer, then follow it). Each channel is untrusted transport — the descriptor
+signature and bundle hash are the real checks.
 
 ## Configuration (env vars)
 

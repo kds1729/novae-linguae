@@ -42,7 +42,7 @@ not survival.
 | Federation via `sync` | **have** | nodes mirror each other; no node is authoritative |
 | Seed bundles | **have** (node) | offline / out-of-band redistribution; cold-start & disaster recovery |
 | Standard `.nlb` bundle format (`nlb/1`) | **have** (format + node export/import) | any project publishes a commons-ready release artifact |
-| Pluggable censorship-resistant bootstrap | **have** (signed HTTPS channel) | find live data when the usual entry points are blocked |
+| Pluggable censorship-resistant bootstrap | **have** (HTTPS · IPNS · DNS-over-HTTPS · Nostr · chain-anchor) | find live data when the usual entry points are blocked |
 
 ### Seed bundles
 
@@ -113,15 +113,29 @@ What gets published is tiny and pointer-only: the **hash of the latest seed bund
 live node endpoints**, or a periodic **checkpoint**. Whatever a stranded node fetches is verified by
 hash, so every channel is safe to trust-but-verify.
 
-**Implemented: the signed-HTTPS channel + the pluggable resolver.** A **bootstrap descriptor**
+**Implemented: a pluggable multi-channel resolver.** A **bootstrap descriptor**
 (`nlb-bootstrap/1`: `{peers[], latest_bundle:{hash, urls[]}, producer, signature}`) is published with
 `makebootstrap` (signed by a `did:nova`, reusing the manifest signer) and resolved with `bootstrap`
 ([`commons/bootstrap.py`](../tooling/commons-node/commons/bootstrap.py)): it fetches the descriptor
-from one or more URLs (trying each in turn — `http(s)://` or `file://`), verifies the signature
-(`--trust <did>` requires a trusted signer), and with `--pull` fetches the latest bundle — checking
-its digest matches the signed descriptor — and ingests it through the normal verify-then-store gate.
-The fetch is one injectable seam: **Nostr / IPNS / a blockchain anchor / DNS `TXT`** plug in by
-supplying a different fetch + URL scheme, with no change to the verify/ingest path.
+from one or more URLs (trying each in turn, so blocking one channel doesn't sever bootstrap), verifies
+the signature (`--trust <did>` requires a trusted signer), and with `--pull` fetches the latest bundle
+— checking its digest matches the signed descriptor — and ingests it through the normal
+verify-then-store gate. A descriptor's (and bundle's) URL list can **mix channels**, chosen by scheme:
+
+| Scheme | Channel | Transport |
+|---|---|---|
+| `https://` `http://` `file://` | direct | urllib |
+| `ipns://<name>[?gateway=]` | IPFS/IPNS | GET an IPFS gateway |
+| `dns://<name>[?doh=]` | DNS-over-HTTPS | DoH `TXT` query; value is base64(descriptor) |
+| `nostr://<relay>/<author>[?kind=]` | Nostr | minimal WebSocket read of the newest event |
+| `chain://<read-endpoint>[#json.path]` | blockchain anchor | read a pointer the chain anchored, then follow it |
+
+Each channel is **pure untrusted transport** — whatever bytes come back are still verified by the
+descriptor signature (and the bundle by hash). Adding a channel = adding a fetcher to the registry;
+the verify/ingest path is unchanged. The live transports are reference implementations (the scheme
+dispatch + response parsing are what the test suite pins). **On blockchains**: the chain holds only a
+tiny pointer (a URL/CID), never the bytes — consistent with rejecting blockchain as the substrate
+while using it as a thin anchor.
 
 **On blockchains specifically.** A blockchain is the *wrong primitive for the substrate* and is rejected
 as such ([`commons.md`](commons.md)): the commons needs no global consensus or total ordering, and

@@ -7,6 +7,7 @@ nl-validator; the whole suite skips if that binary is absent.
     python3 manage.py test
 """
 
+import base64
 import io
 import json
 import tempfile
@@ -674,3 +675,114 @@ class BootstrapPullTests(TestCase):
         self.assertIn("provenance=valid", out.getvalue())
         self.assertIn("stored=1", out.getvalue())
         self.assertTrue(Record.objects.filter(hash=rec["hash"]).exists())
+
+
+class _FakeWS:
+    """A scripted WebSocket socket for Nostr tests (server text frames, no network)."""
+    def __init__(self, messages):
+        self.out = b"".join(self._frame(m) for m in messages)
+        self.sent = []
+
+    @staticmethod
+    def _frame(text):                              # unmasked server text frame
+        p = text.encode("utf-8")
+        h = bytearray([0x81])
+        if len(p) < 126:
+            h.append(len(p))
+        elif len(p) < 65536:
+            h.append(126)
+            h += len(p).to_bytes(2, "big")
+        else:
+            h.append(127)
+            h += len(p).to_bytes(8, "big")
+        return bytes(h) + p
+
+    def sendall(self, b):
+        self.sent.append(b)
+
+    def recv(self, n):
+        chunk, self.out = self.out[:n], self.out[n:]
+        return chunk
+
+    def close(self):
+        pass
+
+
+class BootstrapChannelTests(TestCase):
+    """Offline tests for the pluggable channels: scheme dispatch + response parsing (the live
+    transports are stubbed)."""
+
+    def test_unknown_scheme_raises(self):
+        from . import bootstrap as B
+        with self.assertRaises(B.BootstrapError):
+            B._dispatch("carrier-pigeon://x")
+
+    def test_ipns_builds_gateway_url(self):
+        from . import bootstrap as B
+        seen = {}
+
+        def fake_get(url, timeout=30):
+            seen["url"] = url
+            return b"DESC"
+
+        with mock.patch.object(B, "_http_get", fake_get):
+            self.assertEqual(B._dispatch("ipns://k51abc?gateway=https://gw.example"), b"DESC")
+        self.assertEqual(seen["url"], "https://gw.example/ipns/k51abc")
+
+    def test_dns_doh_decodes_base64_descriptor(self):
+        from . import bootstrap as B
+        desc = {"v": "nlb-bootstrap/1", "peers": ["https://n"]}
+        b64 = base64.b64encode(json.dumps(desc).encode()).decode()
+        doh = json.dumps({"Answer": [{"type": 16, "data": '"' + b64 + '"'}]}).encode()
+        with mock.patch.object(B, "_http_get", lambda url, timeout=30: doh):
+            self.assertEqual(json.loads(B._dispatch("dns://commons.example.org"))["peers"], ["https://n"])
+
+    def test_chain_follows_pointer(self):
+        from . import bootstrap as B
+        pages = {"https://explorer.example/anchor": b"https://host/desc.json",
+                 "https://host/desc.json": b'{"v":"nlb-bootstrap/1","peers":[]}'}
+        with mock.patch.object(B, "_http_get", lambda url, timeout=30: pages[url]):
+            self.assertEqual(json.loads(B._dispatch("chain://https://explorer.example/anchor"))["v"],
+                             "nlb-bootstrap/1")
+
+    def test_chain_json_path_pointer(self):
+        from . import bootstrap as B
+        pages = {"https://x/api": json.dumps({"result": {"data": "https://host/d.json"}}).encode(),
+                 "https://host/d.json": b'{"v":"nlb-bootstrap/1","peers":["p"]}'}
+        with mock.patch.object(B, "_http_get", lambda url, timeout=30: pages[url]):
+            doc = json.loads(B._dispatch("chain://https://x/api#result.data"))
+        self.assertEqual(doc["peers"], ["p"])
+
+    def test_redirect_depth_guard(self):
+        from . import bootstrap as B
+        with mock.patch.object(B, "_http_get", lambda url, timeout=30: b"chain://https://x/loop"):
+            with self.assertRaises(B.BootstrapError):
+                B._dispatch("chain://https://x/loop")
+
+    def test_resolve_over_a_channel(self):
+        from . import bootstrap as B
+        desc = B.build_descriptor(["https://n1"])      # unsigned
+        with mock.patch.object(B, "_http_get", lambda url, timeout=30: json.dumps(desc).encode()):
+            doc, status, _producer, src = B.resolve(["ipns://k51"])
+        self.assertEqual((status, src), ("unsigned", "ipns://k51"))
+
+    def test_ws_frame_codec_round_trips(self):
+        from . import bootstrap as B
+        cap = _FakeWS([])
+        B._ws_send_text(cap, "hello")
+        frame = cap.sent[0]
+        self.assertEqual(frame[0], 0x81)               # FIN + text
+        self.assertEqual(frame[1] & 0x80, 0x80)        # client frames are masked
+        n, mask, masked = frame[1] & 0x7F, frame[2:6], frame[6:6 + (frame[1] & 0x7F)]
+        self.assertEqual(n, 5)
+        self.assertEqual(bytes(b ^ mask[i % 4] for i, b in enumerate(masked)), b"hello")
+
+    def test_nostr_returns_newest_event_content(self):
+        from . import bootstrap as B
+        fake = _FakeWS([json.dumps(["EVENT", "nlb", {"created_at": 1, "content": "OLD"}]),
+                        json.dumps(["EVENT", "nlb", {"created_at": 2, "content": "NEW"}]),
+                        json.dumps(["EOSE", "nlb"])])
+        content = B._nostr_newest_content("relay.example", "abcd", 30078,
+                                          connect=lambda *a, **k: fake)
+        self.assertEqual(content, "NEW")
+        self.assertTrue(fake.sent)                      # the REQ frame was sent
