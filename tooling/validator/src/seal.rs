@@ -24,6 +24,9 @@ const ENC_ALG: &str = "xchacha20poly1305";
 const KDF_ALG: &str = "hkdf-sha256";
 const KEX_ALG: &str = "x25519-ed25519";
 const KEYWRAP_INFO: &[u8] = b"novae-linguae/v0.2/xchacha20poly1305/key-wrap";
+// Stealth addressing (v0.3): wrap bound to a fixed label instead of the recipient DID, so the
+// recipient set can be omitted and recovered by trial-decryption.
+const STEALTH_WRAP_AAD: &[u8] = b"novae-linguae/v0.3/stealth/key-wrap";
 
 fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
@@ -138,7 +141,13 @@ fn derive_kek(shared: &[u8; 32], epk: &[u8; 32], rxpub: &[u8; 32]) -> [u8; 32] {
 /// encrypted-envelope.schema.json. `rng` is the byte source (use `Rng::Os` for real use; `Rng::seeded`
 /// reproduces conformance vectors). The RNG draw order — cek, esk, nonce, then each wrap_nonce — is
 /// part of the byte-for-byte contract.
-pub fn seal(plaintext: &[u8], recipient_dids: &[String], aad: &[u8], rng: &mut Rng) -> Result<Value> {
+pub fn seal(
+    plaintext: &[u8],
+    recipient_dids: &[String],
+    aad: &[u8],
+    rng: &mut Rng,
+    stealth: bool,
+) -> Result<Value> {
     if recipient_dids.is_empty() {
         return Err(anyhow!("at least one recipient DID is required"));
     }
@@ -155,12 +164,13 @@ pub fn seal(plaintext: &[u8], recipient_dids: &[String], aad: &[u8], rng: &mut R
         let shared = esk_secret.diffie_hellman(&PublicKey::from(rxpub)).to_bytes();
         let kek = derive_kek(&shared, &epk, &rxpub);
         let wrap_nonce = rng.fill(24);
-        let wrapped = xchacha_seal(&kek, &wrap_nonce, &cek, did.as_bytes())?;
-        recipients.push(json!({
-            "to": did,
-            "wrap_nonce": b64(&wrap_nonce),
-            "wrapped_key": b64(&wrapped),
-        }));
+        let wrap_aad: &[u8] = if stealth { STEALTH_WRAP_AAD } else { did.as_bytes() };
+        let wrapped = xchacha_seal(&kek, &wrap_nonce, &cek, wrap_aad)?;
+        recipients.push(if stealth {
+            json!({ "wrap_nonce": b64(&wrap_nonce), "wrapped_key": b64(&wrapped) })
+        } else {
+            json!({ "to": did, "wrap_nonce": b64(&wrap_nonce), "wrapped_key": b64(&wrapped) })
+        });
     }
 
     let mut envelope = json!({
@@ -173,6 +183,9 @@ pub fn seal(plaintext: &[u8], recipient_dids: &[String], aad: &[u8], rng: &mut R
         "ciphertext": b64(&ciphertext),
         "recipients": recipients,
     });
+    if stealth {
+        envelope["addressing"] = json!("stealth");
+    }
     if !aad.is_empty() {
         envelope["aad"] = json!(b64(aad));
     }
@@ -191,10 +204,6 @@ pub fn open(envelope: &Value, recipient_did: &str, x25519_secret: &[u8; 32]) -> 
         .get("recipients")
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow!("envelope missing recipients"))?;
-    let entry = recipients
-        .iter()
-        .find(|r| r.get("to").and_then(|v| v.as_str()) == Some(recipient_did))
-        .ok_or_else(|| anyhow!("envelope is not addressed to {recipient_did}"))?;
 
     let epk = to_arr32(&unb64(envelope["epk"].as_str().context("epk")?)?)?;
     let aad = match envelope.get("aad").and_then(|v| v.as_str()) {
@@ -205,6 +214,28 @@ pub fn open(envelope: &Value, recipient_did: &str, x25519_secret: &[u8; 32]) -> 
     let rxpub = PublicKey::from(&secret).to_bytes();
     let shared = secret.diffie_hellman(&PublicKey::from(epk)).to_bytes();
     let kek = derive_kek(&shared, &epk, &rxpub);
+    let payload_nonce = unb64(envelope["nonce"].as_str().context("nonce")?)?;
+    let payload_ct = unb64(envelope["ciphertext"].as_str().context("ciphertext")?)?;
+
+    let stealth = envelope.get("addressing").and_then(|v| v.as_str()) == Some("stealth");
+    if stealth {
+        // The recipient set is hidden: trial-decrypt each entry's wrap with our KEK and the fixed
+        // stealth label; the one that authenticates yields the CEK.
+        for entry in recipients {
+            let wn = unb64(entry["wrap_nonce"].as_str().context("wrap_nonce")?)?;
+            let wk = unb64(entry["wrapped_key"].as_str().context("wrapped_key")?)?;
+            if let Ok(cek_vec) = xchacha_open(&kek, &wn, &wk, STEALTH_WRAP_AAD) {
+                let cek = to_arr32(&cek_vec)?;
+                return xchacha_open(&cek, &payload_nonce, &payload_ct, &aad);
+            }
+        }
+        return Err(anyhow!("envelope is not addressed to this recipient (stealth)"));
+    }
+
+    let entry = recipients
+        .iter()
+        .find(|r| r.get("to").and_then(|v| v.as_str()) == Some(recipient_did))
+        .ok_or_else(|| anyhow!("envelope is not addressed to {recipient_did}"))?;
     let cek_vec = xchacha_open(
         &kek,
         &unb64(entry["wrap_nonce"].as_str().context("wrap_nonce")?)?,
@@ -212,12 +243,7 @@ pub fn open(envelope: &Value, recipient_did: &str, x25519_secret: &[u8; 32]) -> 
         recipient_did.as_bytes(),
     )?;
     let cek = to_arr32(&cek_vec)?;
-    xchacha_open(
-        &cek,
-        &unb64(envelope["nonce"].as_str().context("nonce")?)?,
-        &unb64(envelope["ciphertext"].as_str().context("ciphertext")?)?,
-        &aad,
-    )
+    xchacha_open(&cek, &payload_nonce, &payload_ct, &aad)
 }
 
 // ---- portable conformance harness -------------------------------------------------------------
@@ -307,16 +333,37 @@ pub fn run_conformance(vectors: &Value) -> Result<()> {
         let expected = env.get("envelope").ok_or_else(|| anyhow!("no expected envelope"))?;
 
         let mut rng = Rng::seeded(seed);
-        let resealed = seal(&plaintext, &[did.clone()], &aad, &mut rng)?;
+        let resealed = seal(&plaintext, &[did.clone()], &aad, &mut rng, false)?;
         if &resealed != expected {
             return Err(anyhow!(
                 "envelope reseal mismatch:\n got: {resealed}\nwant: {expected}"
             ));
         }
         let xsk = x25519_secret_from_user_seed(field(env, "recipient_seed")?);
-        let recovered = open(expected, &did, &xsk)?;
-        if recovered != plaintext {
+        if open(expected, &did, &xsk)? != plaintext {
             return Err(anyhow!("opening the vector envelope did not recover the plaintext"));
+        }
+    }
+
+    // Stealth-addressing envelope (v0.3): reseal byte-for-byte, confirm no cleartext recipient, open.
+    if let Some(env) = vectors.get("stealth_envelope") {
+        let seed = hex(field(env, "rng_seed_hex")?)?;
+        let aad = hex(field(env, "aad_hex")?)?;
+        let plaintext = hex(field(env, "plaintext_hex")?)?;
+        let did = field(env, "recipient_did")?.to_string();
+        let expected = env.get("envelope").ok_or_else(|| anyhow!("no expected stealth envelope"))?;
+
+        let mut rng = Rng::seeded(seed);
+        let resealed = seal(&plaintext, &[did.clone()], &aad, &mut rng, true)?;
+        if &resealed != expected {
+            return Err(anyhow!("stealth envelope reseal mismatch:\n got: {resealed}\nwant: {expected}"));
+        }
+        if expected["recipients"].as_array().map_or(false, |rs| rs.iter().any(|r| r.get("to").is_some())) {
+            return Err(anyhow!("stealth envelope leaks a cleartext recipient `to`"));
+        }
+        let xsk = x25519_secret_from_user_seed(field(env, "recipient_seed")?);
+        if open(expected, "", &xsk)? != plaintext {
+            return Err(anyhow!("opening the stealth vector envelope did not recover the plaintext"));
         }
     }
     Ok(())
@@ -345,11 +392,28 @@ mod tests {
         let xsk = x25519_secret_from_user_seed(v["envelope"]["recipient_seed"].as_str().unwrap());
 
         let mut rng = Rng::Os; // real OS randomness
-        let env = seal(b"hello nova", &[did.clone()], b"label", &mut rng).unwrap();
+        let env = seal(b"hello nova", &[did.clone()], b"label", &mut rng, false).unwrap();
         assert_eq!(open(&env, &did, &xsk).unwrap(), b"hello nova");
 
         // A wrong secret fails authentication.
         let wrong = x25519_secret_from_user_seed("not-the-recipient");
         assert!(open(&env, &did, &wrong).is_err());
+    }
+
+    #[test]
+    fn stealth_hides_recipient_and_round_trips() {
+        let v = vectors();
+        let did = v["envelope"]["recipient_did"].as_str().unwrap().to_string();
+        let xsk = x25519_secret_from_user_seed(v["envelope"]["recipient_seed"].as_str().unwrap());
+
+        let mut rng = Rng::Os;
+        let env = seal(b"secret", &[did.clone()], b"", &mut rng, true).unwrap();
+        // No cleartext recipient is present.
+        assert_eq!(env["addressing"], "stealth");
+        assert!(env["recipients"].as_array().unwrap().iter().all(|r| r.get("to").is_none()));
+        // The true recipient still opens it (by trial-decryption; recipient_did is ignored).
+        assert_eq!(open(&env, "", &xsk).unwrap(), b"secret");
+        // A non-recipient cannot.
+        assert!(open(&env, "", &x25519_secret_from_user_seed("nope")).is_err());
     }
 }

@@ -173,6 +173,21 @@ class TestEnvelope(unittest.TestCase):
         self.assertEqual(e1, e2)
         self.assertEqual(x.open_with_seed(e1, self.did_a, self.seed_a), b"deterministic")
 
+    def test_stealth_hides_recipients_and_round_trips(self):
+        env = x.seal(b"who can read this?", [self.did_a, self.did_b], stealth=True)
+        # No cleartext recipient identities leak.
+        self.assertEqual(env["addressing"], "stealth")
+        self.assertTrue(all("to" not in r for r in env["recipients"]))
+        # Each true recipient recovers the plaintext by trial-decryption (recipient_did ignored).
+        self.assertEqual(x.open_with_seed(env, None, self.seed_a), b"who can read this?")
+        self.assertEqual(x.open_with_seed(env, None, self.seed_b), b"who can read this?")
+
+    def test_stealth_non_recipient_cannot_open(self):
+        env = x.seal(b"secret", [self.did_a], stealth=True)
+        wrong, _ = x.x25519_keypair_from_user_seed("not-a-recipient")
+        with self.assertRaises(ValueError):
+            x.open_envelope(env, None, wrong)
+
 
 class TestCLI(unittest.TestCase):
     """End-to-end CLI round-trip via subprocess."""
@@ -218,6 +233,18 @@ class TestConformance(unittest.TestCase):
         env = x.seal(bytes.fromhex(v["plaintext_hex"]), v["recipients"],
                      aad=bytes.fromhex(v["aad_hex"]) if v.get("aad_hex") else b"", rng=rng)
         self.assertEqual(env, v["envelope"])
+
+    def test_stealth_envelope_vector_reseals_and_opens(self):
+        v = self.vectors.get("stealth_envelope")
+        self.assertIsNotNone(v, "stealth_envelope vector missing")
+        rng = x.seeded_rng(bytes.fromhex(v["rng_seed_hex"]))
+        env = x.seal(bytes.fromhex(v["plaintext_hex"]), [v["recipient_did"]],
+                     aad=bytes.fromhex(v["aad_hex"]) if v.get("aad_hex") else b"",
+                     rng=rng, stealth=True)
+        self.assertEqual(env, v["envelope"])
+        self.assertTrue(all("to" not in r for r in v["envelope"]["recipients"]))
+        opened = x.open_with_seed(v["envelope"], None, v["recipient_seed"])
+        self.assertEqual(opened, bytes.fromhex(v["plaintext_hex"]))
 
 
 if __name__ == "__main__":

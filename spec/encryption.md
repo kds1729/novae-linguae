@@ -174,18 +174,75 @@ Each primitive is pinned by official RFC/draft test vectors and an end-to-end en
 - **Forward secrecy** applies to the *key-wrap* (ephemeral sender key per envelope), not to the CEK
   if a sender deliberately reuses it across a conversation — that is the explicit cost of the
   per-conversation-key convenience. Mint fresh CEKs when forward secrecy of the payload matters.
-- **Metadata.** The recipient list is visible (§"What it protects"). Treat it as public.
+- **Metadata.** In **direct** addressing the recipient list is visible — treat it as public. **Stealth**
+  addressing (below) hides it; the entry *count* still leaks unless padded with decoys.
 - **Key compromise.** Because signing and key-agreement share a key, compromise of an agent's seed
   breaks both its signatures and its confidentiality. Rotate by minting a new DID; old envelopes
   remain decryptable by the old key (content-addressing means nothing is rewritten).
 - **No sender authentication from the envelope alone.** The wrap authenticates *to* a recipient but
   does not prove *who sealed it* — that is the inner signature's job (sign-then-seal).
 
+## Stealth addressing — metadata privacy (v0.3, implemented)
+
+Direct addressing publishes who can read an envelope: every recipient entry carries its cleartext
+`to` DID. **Stealth addressing** hides the recipient set. It is opt-in per envelope and changes
+nothing about the cryptographic core — the format version `v` stays `"0.2"`; only an `addressing`
+field and the per-recipient wrap binding differ.
+
+Construction:
+
+- The envelope sets `"addressing": "stealth"` and **omits** every `to` field.
+- Each recipient's CEK wrap is bound to a fixed domain-separation label
+  `novae-linguae/v0.3/stealth/key-wrap` as its AEAD AAD, instead of the recipient's DID.
+- Everything else is identical: the KEK is still `HKDF(ECDH(esk, rxpub), salt = epk ‖ rxpub, info)`,
+  where `rxpub` is the recipient's X25519 key. The sender still knows each recipient at seal time
+  (to derive `rxpub`); it simply does not write the DID into the envelope.
+
+Opening is by **trial decryption**: a recipient derives its own KEK from `(its x25519 secret, epk)`
+and attempts the wrap-open against each entry with the fixed label; the entry that authenticates
+yields the CEK. This is O(entries) work and reveals nothing about which entry (if any) is the
+reader's. The schema forbids a `to` field whenever `addressing` is `stealth`
+([`encrypted-envelope.schema.json`](encrypted-envelope.schema.json) `allOf`/`if`).
+
+Reference implementation: `seal(..., stealth=True)` / `open_envelope` in
+[`tooling/crypto-python/`](../tooling/crypto-python/) and the hardened
+[`nl-seal --stealth`](../tooling/validator/src/seal.rs); a deterministic `stealth_envelope` vector is
+in [`conformance/encryption.json`](conformance/encryption.json). **Residual leak:** the number of
+recipients is still visible; pad with decoy entries (random wraps no key opens) when even the count
+is sensitive. This is metadata-hiding, not a full anonymity system — a network observer still sees
+traffic; stealth addressing only removes recipient identities from the artifact itself.
+
+## Post-quantum key agreement (v0.3, specified — implementation deferred)
+
+X25519 is not post-quantum secure: a future quantum adversary that records envelopes today could
+recover the per-recipient KEK later ("harvest now, decrypt later"). The forward path is a **hybrid**
+key agreement that stays secure as long as *either* component holds.
+
+Planned construction (a new `kex` value, gated behind a format-version bump so it is unambiguous on
+the wire):
+
+- `kex: "x25519-mlkem768"` — run X25519 ECDH **and** an ML-KEM-768 (FIPS 203) encapsulation against
+  the recipient. The recipient's ML-KEM public key is published in its DID document (this depends on
+  open question 1, a separate key-agreement key — an Ed25519→Curve25519 map cannot yield an ML-KEM
+  key).
+- The wire gains a per-recipient ML-KEM ciphertext (~1 KB) alongside the existing `epk`.
+- The KEK is `HKDF( ecdh_shared ‖ mlkem_shared, salt, info' )` — concatenating both shared secrets so
+  the KEK is secure if either KEM is. `info'` carries the new `kex` label for domain separation.
+
+Why deferred, not implemented now: ML-KEM adds ~1 KB per recipient (a large fraction of a typical
+token-compact message) and needs the DID-document key-publication mechanism first. The envelope
+format is intentionally `kex`-pluggable so this drops in as an additive version without touching the
+XChaCha20-Poly1305 / HKDF payload path. Until then, agents needing PQ confidentiality should rely on
+a PQ-secure transport beneath the protocol.
+
 ## Open questions (v0.3+, not blockers)
 
-1. **Separate encryption key in a DID document** — decouple signing from key agreement.
-2. **Metadata privacy** — stealth/anonymous recipient addressing so the recipient set is hidden.
-3. **Post-quantum** — a hybrid X25519 + ML-KEM `kex` once the wire cost is justified.
+1. **Separate encryption key in a DID document** — decouple signing from key agreement (also the
+   prerequisite for the post-quantum `kex` above).
+2. ~~**Metadata privacy** — stealth/anonymous recipient addressing.~~ **Implemented** (above); the
+   open remainder is decoy-padding to also hide the recipient *count*.
+3. **Post-quantum** — the hybrid X25519 + ML-KEM `kex` is **specified** (above); implementation is
+   deferred behind the DID-document key and a wire-cost decision.
 4. **Sender authentication / deniability** — an authenticated-but-deniable mode (e.g. a sender-static
    ECDH variant) for agents that want sender binding without a non-repudiable signature.
 5. **Group/conversation key management** — rekeying, membership changes, and forward secrecy for

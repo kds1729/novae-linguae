@@ -500,6 +500,10 @@ ENC_ALG = "xchacha20poly1305"
 KDF_ALG = "hkdf-sha256"
 KEX_ALG = "x25519-ed25519"
 _KEYWRAP_INFO = b"novae-linguae/v0.2/xchacha20poly1305/key-wrap"
+# Stealth addressing (v0.3, spec/encryption.md): hide the recipient set. Recipient DIDs are omitted
+# from the envelope and the per-recipient wrap is bound to a fixed domain-separation label instead of
+# the DID, so a recipient recovers the CEK by trial-decrypting entries with its own derived KEK.
+_STEALTH_WRAP_AAD = b"novae-linguae/v0.3/stealth/key-wrap"
 
 
 def _b64(b: bytes) -> str:
@@ -515,12 +519,18 @@ def _derive_kek(shared: bytes, epk: bytes, recipient_xpub: bytes) -> bytes:
 
 
 def seal(plaintext: bytes, recipient_dids, aad: bytes = b"", *, rng=random_bytes,
-         cek: bytes | None = None, ephemeral_secret: bytes | None = None) -> dict:
+         cek: bytes | None = None, ephemeral_secret: bytes | None = None,
+         stealth: bool = False) -> dict:
     """Seal ``plaintext`` to one or more ``did:nova`` recipients. Returns an envelope dict.
 
     ``cek`` (content-encryption key) may be supplied to reuse a per-conversation symmetric key
     across messages; otherwise a fresh random one is generated. ``rng`` and ``ephemeral_secret``
     are injection points for deterministic vectors; real use leaves them at their random defaults.
+
+    With ``stealth=True`` the recipient set is hidden: the ``to`` DID is omitted from each entry and
+    the wrap is bound to a fixed label instead of the DID, so a recipient recovers the CEK by trial-
+    decrypting entries. The recipient DIDs are still required here (to derive each KEK) but never
+    appear in the output. Order: cek, esk, nonce, then each wrap_nonce (a byte-for-byte contract).
     """
     dids = list(recipient_dids)
     if not dids:
@@ -536,12 +546,12 @@ def seal(plaintext: bytes, recipient_dids, aad: bytes = b"", *, rng=random_bytes
         rxpub = x25519_pub_from_did(did)
         kek = _derive_kek(x25519(esk, rxpub), epk, rxpub)
         wrap_nonce = rng(24)
-        wrapped = xchacha20poly1305_seal(kek, wrap_nonce, cek, did.encode("utf-8"))
-        recipients.append({
-            "to": did,
-            "wrap_nonce": _b64(wrap_nonce),
-            "wrapped_key": _b64(wrapped),
-        })
+        wrap_aad = _STEALTH_WRAP_AAD if stealth else did.encode("utf-8")
+        wrapped = xchacha20poly1305_seal(kek, wrap_nonce, cek, wrap_aad)
+        if stealth:
+            recipients.append({"wrap_nonce": _b64(wrap_nonce), "wrapped_key": _b64(wrapped)})
+        else:
+            recipients.append({"to": did, "wrap_nonce": _b64(wrap_nonce), "wrapped_key": _b64(wrapped)})
 
     envelope = {
         "v": ENVELOPE_VERSION,
@@ -553,22 +563,37 @@ def seal(plaintext: bytes, recipient_dids, aad: bytes = b"", *, rng=random_bytes
         "ciphertext": _b64(ciphertext),
         "recipients": recipients,
     }
+    if stealth:
+        envelope["addressing"] = "stealth"
     if aad:
         envelope["aad"] = _b64(aad)
     return envelope
 
 
-def open_envelope(envelope: dict, recipient_did: str, x25519_secret: bytes) -> bytes:
-    """Recover the plaintext from ``envelope`` for the recipient holding ``x25519_secret``."""
+def open_envelope(envelope: dict, recipient_did: str | None, x25519_secret: bytes) -> bytes:
+    """Recover the plaintext from ``envelope`` for the recipient holding ``x25519_secret``. In stealth
+    mode ``recipient_did`` is ignored (entries are trial-decrypted); in direct mode it selects the
+    recipient entry."""
     if envelope.get("enc") != ENC_ALG or envelope.get("kdf") != KDF_ALG or envelope.get("kex") != KEX_ALG:
         raise ValueError("unsupported envelope algorithms")
-    entry = next((r for r in envelope.get("recipients", []) if r.get("to") == recipient_did), None)
-    if entry is None:
-        raise ValueError(f"envelope is not addressed to {recipient_did}")
     epk = _unb64(envelope["epk"])
     aad = _unb64(envelope["aad"]) if envelope.get("aad") else b""
     rxpub = x25519_base(x25519_secret)
     kek = _derive_kek(x25519(x25519_secret, epk), epk, rxpub)
+
+    if envelope.get("addressing") == "stealth":
+        for entry in envelope.get("recipients", []):
+            try:
+                cek = xchacha20poly1305_open(kek, _unb64(entry["wrap_nonce"]),
+                                             _unb64(entry["wrapped_key"]), _STEALTH_WRAP_AAD)
+            except Exception:
+                continue  # not our entry — trial-decrypt the next
+            return xchacha20poly1305_open(cek, _unb64(envelope["nonce"]), _unb64(envelope["ciphertext"]), aad)
+        raise ValueError("envelope is not addressed to this recipient (stealth)")
+
+    entry = next((r for r in envelope.get("recipients", []) if r.get("to") == recipient_did), None)
+    if entry is None:
+        raise ValueError(f"envelope is not addressed to {recipient_did}")
     cek = xchacha20poly1305_open(kek, _unb64(entry["wrap_nonce"]),
                                  _unb64(entry["wrapped_key"]), recipient_did.encode("utf-8"))
     return xchacha20poly1305_open(cek, _unb64(envelope["nonce"]), _unb64(envelope["ciphertext"]), aad)

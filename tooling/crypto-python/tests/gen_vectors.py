@@ -29,6 +29,9 @@ def main():
     rng_seed = bytes.fromhex("00112233445566778899aabbccddeeff")
     aad = b"novae-linguae/example"
     envelope = x.seal(plaintext, [did_a], aad=aad, rng=x.seeded_rng(rng_seed))
+    # Stealth-addressing vector (v0.3): same recipient, recipient set hidden (no cleartext `to`).
+    stealth_seed = bytes.fromhex("0f0e0d0c0b0a09080706050403020100")
+    stealth_envelope = x.seal(plaintext, [did_a], aad=aad, rng=x.seeded_rng(stealth_seed), stealth=True)
 
     vectors = {
         "description": (
@@ -101,6 +104,17 @@ def main():
             "plaintext_hex": plaintext.hex(),
             "envelope": envelope,
         },
+        "stealth_envelope": {
+            "comment": ("Stealth addressing (v0.3): recipient set hidden — no cleartext `to`, wrap "
+                        "bound to a fixed label, recovered by trial-decryption. Reproduce with the "
+                        "BLAKE3-seeded RNG and stealth=True."),
+            "rng_seed_hex": stealth_seed.hex(),
+            "recipient_did": did_a,
+            "recipient_seed": seed_a,
+            "aad_hex": aad.hex(),
+            "plaintext_hex": plaintext.hex(),
+            "envelope": stealth_envelope,
+        },
     }
 
     OUT.write_text(json.dumps(vectors, indent=2) + "\n")
@@ -114,7 +128,8 @@ def main():
     # Self-check.
     recovered = x.open_with_seed(envelope, did_a, seed_a)
     assert recovered == plaintext, "self-check failed"
-    print("self-check: envelope opens to the expected plaintext")
+    assert x.open_with_seed(stealth_envelope, None, seed_a) == plaintext, "stealth self-check failed"
+    print("self-check: direct and stealth envelopes open to the expected plaintext")
 
 
 if __name__ == "__main__":

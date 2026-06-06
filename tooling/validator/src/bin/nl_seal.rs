@@ -34,6 +34,9 @@ enum Commands {
         /// Deterministic RNG seed (hex). Reproducible — for tests/vectors only; omit for OS randomness.
         #[arg(long)]
         seed: Option<String>,
+        /// Stealth addressing: hide the recipient set (omit cleartext `to`; recover by trial-decrypt).
+        #[arg(long)]
+        stealth: bool,
     },
     /// Open an envelope for a recipient, deriving its X25519 secret from a user seed; prints plaintext.
     Open {
@@ -66,14 +69,14 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<()> {
     use nl_validator::seal as s;
     match cli.command {
-        Commands::Seal { plaintext, to, aad, seed } => {
+        Commands::Seal { plaintext, to, aad, seed, stealth } => {
             let pt = std::fs::read(&plaintext).with_context(|| format!("reading {}", plaintext.display()))?;
             let aad_bytes = aad.unwrap_or_default().into_bytes();
             let mut rng = match seed {
                 Some(h) => s::Rng::seeded(decode_hex(&h)?),
                 None => s::Rng::Os,
             };
-            let env = s::seal(&pt, &to, &aad_bytes, &mut rng)?;
+            let env = s::seal(&pt, &to, &aad_bytes, &mut rng, stealth)?;
             println!("{}", serde_json::to_string_pretty(&env)?);
         }
         Commands::Open { envelope, did, recipient_seed } => {

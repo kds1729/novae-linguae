@@ -73,5 +73,30 @@
       ],
       "aad": "bm92YWUtbGluZ3VhZS9leGFtcGxl"
     }
+  },
+  "stealth_envelope": {
+    "comment": "Stealth addressing (v0.3): recipient set hidden \u2014 no cleartext `to`, wrap bound to a fixed label, recovered by trial-decryption. Reproduce with the BLAKE3-seeded RNG and stealth=True.",
+    "rng_seed_hex": "0f0e0d0c0b0a09080706050403020100",
+    "recipient_did": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+    "recipient_seed": "novae-linguae-example-claude",
+    "aad_hex": "6e6f7661652d6c696e677561652f6578616d706c65",
+    "plaintext_hex": "7b226b696e64223a22617373657274222c22636c61696d223a22636f6e666964656e7469616c227d",
+    "envelope": {
+      "v": "0.2",
+      "enc": "xchacha20poly1305",
+      "kdf": "hkdf-sha256",
+      "kex": "x25519-ed25519",
+      "epk": "ts7arKVTw+Mf3pKj7gOuxF8aNhXJkD4+hV4zDk+hYgU=",
+      "nonce": "pg8nanhJWwNF1psnW4lKV8dvwrCarZZq",
+      "ciphertext": "eFwokdBH/nhsaJxsf/Ho9LKCd6d4zK+iZ8KA9MJgIHlNDc35dVrmwnaS3Xn9Sso1EKLJ8rRyw1s=",
+      "recipients": [
+        {
+          "wrap_nonce": "fx+MmS1OPrC4ZnpZdOdzLR4iWav1Uk/s",
+          "wrapped_key": "zyBPEM0qQiG0i05p6pnWrZCcDE9n80C/wEzmvcdE772Ne7oUI8M2m4ovf7da3d9/"
+        }
+      ],
+      "addressing": "stealth",
+      "aad": "bm92YWUtbGluZ3VhZS9leGFtcGxl"
+    }
   }
 }

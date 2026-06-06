@@ -47,18 +47,39 @@
     "aad": {
       "$ref": "#/$defs/b64",
       "description": "Optional additional authenticated data bound to the payload ciphertext (e.g. a routing label or the hash of the inner message). Not encrypted; authenticated."
+    },
+    "addressing": {
+      "type": "string",
+      "enum": ["direct", "stealth"],
+      "description": "Recipient-addressing mode (v0.3, spec/encryption.md). Absent or 'direct': each recipient entry carries its cleartext 'to' DID (the recipient set is public metadata). 'stealth': recipient DIDs are omitted and the per-recipient wrap is bound to a fixed label, so a recipient recovers the key by trial-decryption — hiding who can read the envelope. The crypto construction is otherwise identical, so the envelope format version 'v' stays '0.2'."
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "required": ["addressing"],
+        "properties": { "addressing": { "const": "stealth" } }
+      },
+      "then": {
+        "properties": { "recipients": { "items": { "not": { "required": ["to"] } } } },
+        "description": "Stealth: no recipient entry may carry a cleartext 'to' DID."
+      },
+      "else": {
+        "properties": { "recipients": { "items": { "required": ["to"] } } },
+        "description": "Direct (default): every recipient entry must carry its 'to' DID."
+      }
+    }
+  ],
   "$defs": {
     "recipient": {
       "type": "object",
-      "required": ["to", "wrap_nonce", "wrapped_key"],
+      "required": ["wrap_nonce", "wrapped_key"],
       "additionalProperties": false,
       "properties": {
         "to": {
           "type": "string",
           "pattern": "^did:[a-z0-9]+:.+$",
-          "description": "Recipient DID. v0.2 key agreement requires a did:nova:<64-hex> Ed25519 key; the field accepts any DID syntactically."
+          "description": "Recipient DID (direct addressing only; omitted under stealth). v0.2 key agreement requires a did:nova:<64-hex> Ed25519 key; the field accepts any DID syntactically."
         },
         "wrap_nonce": {
           "$ref": "#/$defs/b64_24",
