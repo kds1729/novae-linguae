@@ -20,9 +20,20 @@ recognises the common export forms; it does not run `tsc`.
 python3 nl_ingest_ts.py path/to/index.ts            # compact JSONL to stdout
 python3 nl_ingest_ts.py --pretty path/to/types.d.ts # readable
 python3 nl_ingest_ts.py --module mypkg src/*.ts      # add '<module>_<fn>' name_hints
+python3 nl_ingest_ts.py --v2 src/index.ts            # v0.2: structured type AST + JSDoc @example
 ```
 
 The file is executable, so `./nl_ingest_ts.py …` also works.
+
+With `--v2`, a function whose JSDoc carries a usable `@example` is emitted as a **v0.2** record:
+`signature.type` is a structured type-expression AST built from the TS types (`number`→`float`,
+`bigint`→`int`, `T[]`/`Array<T>`→`List`, `Set`/`Map`/`Record`→`Set`/`Map`, `Promise<T>`→`T`,
+`T | null`→`Maybe T`, tuples; type params and unknown/`any`/object/arrow types become fresh
+`forall`-bound vars), and `examples` are **real** value ASTs parsed from common `@example`
+conventions — `f(x) // => r`, `assert.equal(f(x), r)`, and `expect(f(x)).toBe(r)` — with no code
+executed. Functions without a usable `@example` fall back to a v0.1 record. The type-AST builder is
+shared (`ingest-common/nl_types.py`), values via `nl_values.py`; every record passes `nl-validator
+validate` (against `function-record.v0.2.schema.json`) and `verify`.
 
 ### Recognised export forms
 

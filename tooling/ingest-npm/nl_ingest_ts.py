@@ -41,7 +41,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingest-common"))
-from nl_core import build_record  # noqa: E402
+from nl_core import build_record, build_v2_record  # noqa: E402
+from nl_types import VarCtx, apply, builtin, fn, quantify, tuple_, var  # noqa: E402
+from nl_values import ValueEncodeError, to_value_ast  # noqa: E402
 
 _QUOTES = {"'", '"', "`"}
 _IDENT_START = re.compile(r"[A-Za-z_$]")
@@ -358,6 +360,188 @@ def _make_type(typevars, params_text, rettype) -> str:
 
 
 # ---------------------------------------------------------------------------
+# v0.2: structured type AST (from TS type strings) + examples from JSDoc @example.
+# ---------------------------------------------------------------------------
+
+# TS `number` is an IEEE-754 double -> float (and numeric literals are encoded as floats to match).
+_TS_ATOMIC = {"number": "float", "bigint": "int", "string": "string", "boolean": "bool",
+              "void": "unit", "undefined": "unit", "null": "unit", "never": "never"}
+
+
+def _tsapply(name, args):
+    return apply(builtin(name), args)
+
+
+def _ts_type(s, tvset, ctx):
+    """Map a TS type string to a Nova Lingua type AST. Bounded: arrow and object types, and unknown
+    named types, become fresh forall-bound type variables (no `unknown` builtin exists)."""
+    s = s.strip()
+    if not s:
+        return var(ctx.fresh_var())
+    parts = _split_top(s, "|")
+    if len(parts) > 1:                                   # union: T | null -> Maybe T
+        members = [p.strip() for p in parts]
+        rest = [m for m in members if m not in ("null", "undefined")]
+        has_none = len(rest) != len(members)
+        if not rest:
+            return builtin("unit")
+        inner = _ts_type(rest[0], tvset, ctx) if len(rest) == 1 else var(ctx.fresh_var())
+        return _tsapply("Maybe", [inner]) if has_none else inner
+    if _find_top(s, "=>") is not None:
+        return var(ctx.fresh_var())                      # function type (bounded)
+    if s.startswith("(") and s.endswith(")"):
+        return _ts_type(s[1:-1], tvset, ctx)
+    if s.endswith("[]"):
+        return _tsapply("List", [_ts_type(s[:-2], tvset, ctx)])
+    if s.startswith("[") and s.endswith("]"):            # tuple [A, B] (or 1-tuple [T] -> T)
+        inner = s[1:-1].strip()
+        if not inner:
+            return builtin("unit")
+        elems = [e.strip() for e in _split_top(inner, ",")]
+        if len(elems) == 1:
+            return _ts_type(elems[0], tvset, ctx)
+        return tuple_([_ts_type(e, tvset, ctx) for e in elems])
+    if s.startswith("{") and s.endswith("}"):
+        return var(ctx.fresh_var())                      # object type (bounded)
+    lt = _find_top(s, "<")
+    if lt is not None and s.endswith(">"):
+        head = s[:lt].strip().split(".")[-1]
+        args = [_ts_type(a, tvset, ctx) for a in _split_top(s[lt + 1:-1], ",") if a.strip()]
+        if head in ("Array", "ReadonlyArray") and args:
+            return _tsapply("List", [args[0]])
+        if head in ("Set", "ReadonlySet", "WeakSet") and args:
+            return _tsapply("Set", [args[0]])
+        if head in ("Map", "Record", "ReadonlyMap", "WeakMap") and len(args) >= 2:
+            return _tsapply("Map", [args[0], args[1]])
+        if head == "Promise" and args:
+            return args[0]                               # unwrap Promise<T> -> T
+        return var(ctx.named_var(head)) if head in tvset else var(ctx.fresh_var())
+    if re.fullmatch(r"[A-Za-z_$][\w$]*", s):
+        if s in tvset:
+            return var(ctx.named_var(s))
+        if s in _TS_ATOMIC:
+            return builtin(_TS_ATOMIC[s])
+        return var(ctx.fresh_var())                      # any/unknown/object/user type
+    return var(ctx.fresh_var())
+
+
+def ts_function_type(typevars, params_text, rettype):
+    """(type AST, param-type ASTs, result-type AST) for a TS signature."""
+    ctx = VarCtx()
+    tv = set(typevars)
+    ptypes, _ = _param_types(params_text)
+    params = [_ts_type(t, tv, ctx) for t in ptypes]
+    result = _ts_type(rettype, tv, ctx) if rettype.strip() else var(ctx.fresh_var())
+    return quantify(fn(params, result), ctx.used), params, result
+
+
+def _js_lit_py(s):
+    """Parse a JS/TS literal expression into a Python value (then nl_values.to_value_ast). Raises
+    ValueError for anything that is not a plain literal (so that example is skipped). TS numbers are
+    doubles -> Python float."""
+    s = s.strip()
+    if s in ("true", "false"):
+        return s == "true"
+    if s in ("null", "undefined"):
+        return None
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"', "`"):
+        if s[0] == "`" and "${" in s:
+            raise ValueError("template interpolation")
+        return bytes(s[1:-1], "utf-8").decode("unicode_escape")
+    if s.startswith("[") and s.endswith("]"):
+        inner = s[1:-1].strip()
+        return [] if not inner else [_js_lit_py(e) for e in _split_top(inner, ",") if e.strip()]
+    if s.startswith("{") and s.endswith("}"):
+        d = {}
+        for part in _split_top(s[1:-1], ","):
+            part = part.strip()
+            if not part:
+                continue
+            ci = _find_top(part, ":")
+            if ci is None:
+                raise ValueError("bad object entry")
+            d[part[:ci].strip().strip("'\"")] = _js_lit_py(part[ci + 1:].strip())
+        return d
+    if re.fullmatch(r"-?\d+(\.\d+)?([eE][+-]?\d+)?", s) or re.fullmatch(r"-?\.\d+", s):
+        return float(s)
+    raise ValueError(f"unparseable JS literal: {s!r}")
+
+
+def _ts_call_name(call):
+    m = re.match(r"\s*([A-Za-z_$][\w$]*)\s*\(", call)
+    return m.group(1) if m else None
+
+
+def _example_pairs(code):
+    """(call_expr, result_expr) pairs from one @example body, recognising the common conventions:
+    `f(x) // => r`, `assert.equal(f(x), r)`, `expect(f(x)).toBe(r)`."""
+    pairs = []
+    for raw in code.split("\n"):
+        line = raw.strip().rstrip(";").strip()
+        if not line:
+            continue
+        m = re.match(r"(?:chai\.)?assert\.(?:equal|strictEqual|deepEqual|deepStrictEqual)\((.*)\)$", line)
+        if m:
+            parts = _split_top(m.group(1), ",")
+            if len(parts) >= 2:
+                pairs.append((parts[0].strip(), ",".join(parts[1:]).strip()))
+            continue
+        m = re.match(r"expect\((.*)\)\.(?:toBe|toEqual|toStrictEqual)\((.*)\)$", line)
+        if m:
+            pairs.append((m.group(1).strip(), m.group(2).strip()))
+            continue
+        ci = _find_top(line, "//")
+        if ci is not None:
+            call, rest = line[:ci].strip(), line[ci + 2:].strip()
+            rest = re.sub(r"^(?:=>|=|⇒)\s*", "", rest).strip()
+            if call and rest:
+                pairs.append((call, rest))
+    return pairs
+
+
+def jsdoc_examples(source):
+    """{fn_name: [(call_expr, result_expr), ...]} from @example snippets in /** */ JSDoc comments
+    (read from the ORIGINAL source, since comments are stripped before scanning)."""
+    out = {}
+    for block in re.findall(r"/\*\*(.*?)\*/", source, re.S):
+        for m in re.finditer(r"@example\b(.*?)(?=@\w|\Z)", block, re.S):
+            code = "\n".join(re.sub(r"^\s*\*\s?", "", ln) for ln in m.group(1).split("\n"))
+            code = re.sub(r"```[A-Za-z]*", "", code)     # drop code-fence markers
+            for call, result in _example_pairs(code):
+                name = _ts_call_name(call)
+                if name and result:
+                    out.setdefault(name, []).append((call, result))
+    return out
+
+
+def ts_examples(name, pairs, param_types, result_type):
+    out = []
+    for call, result_str in pairs:
+        m = re.match(r"^[A-Za-z_$][\w$]*\s*\((.*)\)\s*$", call)
+        if not m:
+            continue
+        arg_strs = [a for a in _split_top(m.group(1), ",") if a.strip()]
+        try:
+            args = [to_value_ast(_js_lit_py(a), param_types[i] if i < len(param_types) else None)
+                    for i, a in enumerate(arg_strs)]
+            result = to_value_ast(_js_lit_py(result_str), result_type)
+        except (ValueError, ValueEncodeError):
+            continue
+        out.append({"args": args, "result": result})
+    return out
+
+
+def _build_ts_record(name, typevars, params, rettype, slice_text, module_name, v2, examples_map):
+    if v2:
+        type_ast, param_types, result_type = ts_function_type(typevars, params, rettype)
+        examples = ts_examples(name, examples_map.get(name, []), param_types, result_type)
+        if examples:
+            return build_v2_record(name, type_ast, examples, slice_text, module_name=module_name)
+    return build_record(name, _make_type(typevars, params, rettype),
+                        _param_types(params)[1], slice_text, module_name=module_name)
+
+
+# ---------------------------------------------------------------------------
 # Body-end / declaration-slice helpers.
 # ---------------------------------------------------------------------------
 
@@ -517,8 +701,9 @@ def _scan_to_assign(s: str, i: int):
     return None
 
 
-def _parse_export(s: str, export_start: int, module_name):
+def _parse_export(s: str, export_start: int, module_name, v2=False, examples_map=None):
     """export_start points at 'export'. Returns (record | None, end_index)."""
+    examples_map = examples_map or {}
     i = _skip_ws(s, export_start + len("export"))
     for word in ("default", "declare"):
         kk = _kw(s, i, word)
@@ -534,8 +719,8 @@ def _parse_export(s: str, export_start: int, module_name):
         if parsed is None:
             return None, i
         name, typevars, params, rettype, end = parsed
-        rec = build_record(name, _make_type(typevars, params, rettype),
-                           _param_types(params)[1], s[export_start:end], module_name=module_name)
+        rec = _build_ts_record(name, typevars, params, rettype, s[export_start:end],
+                               module_name, v2, examples_map)
         return rec, end
 
     for word in ("const", "let", "var"):
@@ -562,21 +747,22 @@ def _parse_export(s: str, export_start: int, module_name):
         if parsed is None:
             return None, j
         typevars, params, rettype, end = parsed
-        rec = build_record(name, _make_type(typevars, params, rettype),
-                           _param_types(params)[1], s[export_start:end], module_name=module_name)
+        rec = _build_ts_record(name, typevars, params, rettype, s[export_start:end],
+                               module_name, v2, examples_map)
         return rec, end
 
     return None, i
 
 
-def records_from_source(source: str, module_name: str | None = None):
+def records_from_source(source: str, module_name: str | None = None, v2: bool = False):
+    examples_map = jsdoc_examples(source) if v2 else {}   # from original source (JSDoc intact)
     s = strip_comments(source)
     records = []
     i, n = 0, len(s)
     while i < n:
         if (s[i] == "e" and (i == 0 or not _IDENT_CHAR.match(s[i - 1]))
                 and _kw(s, i, "export") is not None):
-            rec, end = _parse_export(s, i, module_name)
+            rec, end = _parse_export(s, i, module_name, v2, examples_map)
             if rec is not None:
                 records.append(rec)
             i = max(end, i + 1)
@@ -598,6 +784,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--module", dest="module", default=None,
                    help="package/module name; adds '<module>_<fn>' to name_hints")
     p.add_argument("--pretty", action="store_true", help="pretty-print each record")
+    p.add_argument("--v2", action="store_true",
+                   help="higher fidelity: emit v0.2 records (structured type AST + real examples from "
+                        "JSDoc @example) for functions with usable examples; v0.1 otherwise")
     return p
 
 
@@ -614,7 +803,7 @@ def main(argv=None) -> int:
             print(f"nl-ingest-ts: reading {path}: {e}", file=sys.stderr)
             exit_code = 1
             continue
-        for record in records_from_source(source, args.module):
+        for record in records_from_source(source, args.module, v2=args.v2):
             if args.pretty:
                 print(json.dumps(record, indent=2, ensure_ascii=False))
             else:

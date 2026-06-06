@@ -140,5 +140,49 @@ class TestCrossValidation(unittest.TestCase):
         self.assertEqual(out.stdout.strip(), rec["hash"])
 
 
+class TestV2TypeMapping(unittest.TestCase):
+    def test_containers_and_atomics(self):
+        _ty, params, result = t.ts_function_type([], "xs: number[]", "string")
+        self.assertEqual(params[0], {"kind": "apply", "ctor": {"kind": "builtin", "name": "List"},
+                                     "args": [{"kind": "builtin", "name": "float"}]})
+        self.assertEqual(result, {"kind": "builtin", "name": "string"})
+
+    def test_optional_union_is_maybe(self):
+        _ty, params, _r = t.ts_function_type([], "x: number | null", "")
+        self.assertEqual(params[0], {"kind": "apply", "ctor": {"kind": "builtin", "name": "Maybe"},
+                                     "args": [{"kind": "builtin", "name": "float"}]})
+
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class TestV2Records(unittest.TestCase):
+    FR_V2 = SPEC_DIR / "function-record.v0.2.schema.json"
+    SRC = (
+        "/**\n * @example\n * double(5) // => 10\n */\n"
+        "export function double(n: number): number { return n * 2; }\n\n"
+        "/** No example. */\nexport function noex(x: number): number { return x; }\n"
+    )
+
+    def _run(self, *a):
+        return subprocess.run([str(VALIDATOR), *a], capture_output=True, text=True)
+
+    def test_v2_from_jsdoc_example_and_fallback(self):
+        recs = {r["name_hints"][0]: r for r in t.records_from_source(self.SRC, "demo", v2=True)}
+        d = recs["double"]
+        self.assertEqual(d["schema_version"], "0.2.0")
+        self.assertEqual(d["signature"]["type"],
+                         {"kind": "fn", "params": [{"kind": "builtin", "name": "float"}],
+                          "result": {"kind": "builtin", "name": "float"}})
+        self.assertEqual(d["examples"][0],
+                         {"args": [{"kind": "float", "value": 5.0}],
+                          "result": {"kind": "float", "value": 10.0}})
+        self.assertEqual(recs["noex"]["schema_version"], "0.1.0")   # no @example -> v0.1 fallback
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(d, f)
+            path = f.name
+        self.assertEqual(self._run("validate", str(self.FR_V2), path).returncode, 0)
+        self.assertEqual(self._run("verify", path).returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
