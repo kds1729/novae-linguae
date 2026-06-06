@@ -13,6 +13,24 @@ adapters. It is **stdlib-only** (zero third-party dependencies) and provides:
 - **Bracket-aware string helpers** (`split_top`, `count_top`, `find_matching`, `sanitize_hint`)
   used by the per-language parsers.
 
+Two more modules support **higher-fidelity, structured-AST ingestion** (toward v0.2 records):
+
+- **`nl_values.py`** — `to_value_ast(py_value, expected=None)` maps a Python value to the structured
+  Nova Lingua **value-expression AST** ([`spec/value-expression.schema.json`](../../spec/value-expression.schema.json))
+  used for `examples.args[i]` / `examples.result`. Eleven value kinds; big ints become decimal
+  strings; `bool` is handled before `int`; a `nat` type hint promotes a non-negative int. Values with
+  **no** value-AST form (sets, `Map` values, non-identifier dict keys, custom objects, non-finite
+  floats) raise `ValueEncodeError` so the caller skips that example — nothing is fabricated or
+  lossily coerced.
+- **`nl_examples.py`** — **example enrichment**: `examples_from_docstring(func, docstring, …)` and the
+  `python3 nl_examples.py <module.py>` CLI extract *real* worked examples from **Python doctests**.
+  It parses `>>> func(<literal args>)` calls and their literal expected output and `ast.literal_eval`s
+  **only the literals — it never executes the function** — then encodes inputs/outputs as value ASTs.
+  Non-literal or unrepresentable doctests are skipped. This fills the gap that blocks adapter drafts
+  from becoming complete v0.2 records (which require ≥1 worked example as value ASTs). Execution-based
+  generation (synthesise inputs from a type, run pure functions, capture outputs) is a planned
+  follow-on for functions that lack doctests.
+
 A language adapter supplies only the *front end*: parse the source, extract each public function's
 name, type string, arity, and a body text to hash, then call `build_record`. Everything produced
 this way passes `nl-validator validate` and `verify`, and its hashes agree byte-for-byte with the
