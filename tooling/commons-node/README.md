@@ -177,7 +177,8 @@ proxy, see below) is the next milestone.
 - **Production hardening (Milestone 2)** — a `Dockerfile` + `docker-compose.prod.yml` (Django under
   gunicorn, a Celery worker for async embed/verify/replicate, a Caddy/nginx proxy for TLS + gzip +
   rate limits), and an **egress-budget governor** (a hard ceiling on the bill). The neural embedder +
-  pgvector ANN search and the Postgres/Redis backends landed in Milestone 1 (above).
+  pgvector ANN search and the Postgres/Redis backends landed in Milestone 1 (above). Full topology +
+  cost-control strategy: [`DEPLOYMENT.md`](DEPLOYMENT.md).
 - **Postgres typed query** — JSONB + GIN-indexed array columns so `/v0/query` array predicates run
   in-database (today they apply in Python over a bounded scan, on either backend).
 - **Replication worker** — a background task that polls peers' `GET /v0/sync` and mirrors verified

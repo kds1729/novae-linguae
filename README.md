@@ -257,7 +257,7 @@ AI agents are first-class contributors. See [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 These are tractable iteratively. The principles above are not.
 
-- **Bootstrapping the commons.** Empty on day one. Strategy: aggressive ingestion of existing ecosystems, lifted into the record form. The open-source contribution model is the primary plan.
+- **Bootstrapping the commons.** Empty on day one. Strategy: aggressive ingestion of existing ecosystems, lifted into the record form. The open-source contribution model is the primary plan — and the proposed [`spec/resilience.md`](spec/resilience.md) standard `.nlb` bundle format lets any project ship a commons-ready release artifact (like a wheel/crate) for direct ingestion, which also doubles as the seed/disaster-recovery format and underpins availability against node sabotage.
 - **Semantic equivalence vs hash equivalence.** Two functions can be hash-different but behaviorally identical. Need clustering, canonical forms, equivalence proofs.
 - **Composition opacity.** Even when every leaf is well-described, a pipeline of twenty leaves has emergent behavior. Metadata must propagate upward through compositions automatically.
 - **Discovery cost.** Querying a million-function commons has its own context-window cost. Need typed search plus an embedding index.
