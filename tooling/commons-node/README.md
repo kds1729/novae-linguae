@@ -116,13 +116,21 @@ python3 manage.py exportbundle fns.nlb --filter '{"kind":"function-record"}'
 python3 manage.py exportbundle delta.nlb --since 1200                # only records newer than cursor 1200
 python3 manage.py exportbundle - --source-repo https://github.com/org/lib > lib.nlb   # to stdout
 
+python3 manage.py exportbundle signed.nlb --sign-seed "$PUBLISHER_SEED"   # advisory provenance
+
 python3 manage.py loadbundle commons.nlb        # verify-then-store each record (same gate as publish)
+python3 manage.py loadbundle --require-signed signed.nlb   # refuse unless a VALID signature
 curl -s https://mirror.example.org/lib.nlb | python3 manage.py loadbundle -
 ```
 
 The producer is **untrusted**: `loadbundle` re-verifies every record by hash (and signature), so a
 bundle can be withheld but not poisoned. Bundles are deterministic (same records → identical bytes),
 and portable across backends — records exported from a Postgres node restore into a fresh SQLite node.
+
+`--sign-seed` signs the manifest with the `did:nova` derived from the seed (Ed25519 over the canonical
+manifest, which carries `bundle_digest`). This is **advisory provenance** — record-level verification
+is still the admission gate — reported by `loadbundle` as `signed by <did> (verified)` and enforceable
+with `--require-signed`.
 
 ## Configuration (env vars)
 

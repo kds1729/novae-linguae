@@ -21,10 +21,22 @@ import io
 import json
 import sys
 import tarfile
+from pathlib import Path
 
 FORMAT_VERSION = "nlb/1"
 MANIFEST_NAME = "manifest.json"
 RECORDS_NAME = "records.jsonl"
+
+
+def _crypto():
+    """Lazily load the shared signing module (tooling/crypto-python/nl_crypto.py). Only needed when
+    --sign-seed is given, so unsigned packaging stays a pure single-file tool."""
+    tool = Path(__file__).resolve().parents[1]            # .../tooling
+    for p in (str(tool / "crypto-python"), str(tool / "ingest-common")):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    import nl_crypto
+    return nl_crypto
 
 
 def bundle_digest(record_hashes):
@@ -65,11 +77,14 @@ def _add(tar, name, data):
     tar.addfile(info, io.BytesIO(data))
 
 
-def write_bundle(dest, records, source=None, producer=None):
-    """Write records (raw dicts) to an `.nlb`. dest is a path or binary file object. Returns the
-    manifest. Byte-identical to commons/bundle.py:write_bundle."""
+def write_bundle(dest, records, source=None, producer=None, sign_seed=None):
+    """Write records (raw dicts) to an `.nlb`. dest is a path or binary file object. If sign_seed is
+    given, the manifest is signed (advisory provenance). Returns the manifest. Byte-identical to
+    commons/bundle.py:write_bundle (the signing path shares the same nl_crypto module)."""
     records = list(records)
     manifest = build_manifest(records, source=source, producer=producer)
+    if sign_seed:
+        manifest = _crypto().sign_manifest(manifest, sign_seed)
     manifest_bytes = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
     lines = _jsonl(records)
     records_bytes = ("\n".join(lines) + ("\n" if lines else "")).encode("utf-8")
@@ -117,16 +132,18 @@ def main(argv=None):
     ap.add_argument("-o", "--output", default="-", help="output .nlb path (default: - for stdout)")
     ap.add_argument("--source-repo", help="provenance: source repository URL")
     ap.add_argument("--source-release", help="provenance: release tag/version")
+    ap.add_argument("--sign-seed", help="sign the manifest with the did:nova derived from this seed")
     args = ap.parse_args(argv)
 
     records = _read_records(args.files)
     source = {k: v for k, v in (("repo", args.source_repo), ("release", args.source_release)) if v} or None
 
     dest = sys.stdout.buffer if args.output == "-" else args.output
-    manifest = write_bundle(dest, records, source=source)
+    manifest = write_bundle(dest, records, source=source, sign_seed=args.sign_seed)
+    signed = f"  signed-by={manifest['producer']}" if manifest.get("signature") else ""
     sys.stderr.write(f"nl-bundle: packaged {manifest['count']} records  "
                      f"schema_versions={manifest['schema_versions']}  "
-                     f"digest={manifest['bundle_digest']}\n")
+                     f"digest={manifest['bundle_digest']}{signed}\n")
 
 
 if __name__ == "__main__":

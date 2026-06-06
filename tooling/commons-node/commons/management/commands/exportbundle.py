@@ -29,6 +29,8 @@ class Command(BaseCommand):
                                  "incremental delta bundles; the next cursor is printed on stderr")
         parser.add_argument("--source-repo", help="provenance: source repository URL")
         parser.add_argument("--source-release", help="provenance: release tag/version")
+        parser.add_argument("--sign-seed", help="sign the manifest with the did:nova derived from "
+                                                "this seed (advisory provenance)")
 
     def handle(self, *args, **options):
         since = options.get("since")
@@ -54,8 +56,9 @@ class Command(BaseCommand):
                                     ("release", options.get("source_release"))) if v} or None
 
         dest = sys.stdout.buffer if options["output"] == "-" else options["output"]
-        manifest = write_bundle(dest, records, source=source)
+        manifest = write_bundle(dest, records, source=source, sign_seed=options.get("sign_seed"))
         # Summary to stderr so stdout stays pure bundle bytes when output is "-".
+        signed = f"  signed-by={manifest['producer']}" if manifest.get("signature") else ""
         self.stderr.write(f"exported {manifest['count']} records  "
                           f"schema_versions={manifest['schema_versions']}  "
-                          f"digest={manifest['bundle_digest']}  next-cursor={next_cursor}")
+                          f"digest={manifest['bundle_digest']}  next-cursor={next_cursor}{signed}")

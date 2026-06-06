@@ -9,7 +9,8 @@ What is load-bearing for principle 7 is that the capability is always available 
 no third party can force it off or decrypt what was sealed.
 
 - **`nl_crypto.py`** — the library: X25519, ChaCha20/HChaCha20/XChaCha20-Poly1305, HKDF-SHA-256, the
-  Ed25519↔X25519 conversion, and the envelope `seal`/`open`.
+  Ed25519↔X25519 conversion, the envelope `seal`/`open`, and **Ed25519 signing/verification (RFC 8032)**
+  with `did:nova` derivation + bundle-manifest sign/verify (`.nlb` provenance, spec/resilience.md).
 - **`nl_encrypt.py`** — the CLI: `seal`, `open`, `pubkey`.
 
 ## Zero dependencies
@@ -56,10 +57,12 @@ then seal the signed message as the envelope payload — decrypting yields a ver
 python3 -m unittest discover -s tests
 ```
 
-20 tests covering: every primitive against its official RFC/draft vector (X25519 RFC 7748,
+24 tests covering: every primitive against its official RFC/draft vector (X25519 RFC 7748,
 ChaCha20/Poly1305/ChaCha20-Poly1305 RFC 8439, XChaCha20-Poly1305 + HChaCha20 draft-irtf-cfrg-xchacha,
-HKDF-SHA-256 RFC 5869); the Ed25519→X25519 conversion checked for **consistency against the real
-`nl-validator` example DIDs** (the X25519 key from a DID equals the one from its seed) plus ECDH
+HKDF-SHA-256 RFC 5869); **Ed25519 signing (RFC 8032) reproducing the repo's signed message vectors
+byte-for-byte** (so it matches ed25519-dalek) plus manifest sign/verify; the Ed25519→X25519 conversion
+checked for **consistency against the real `nl-validator` example DIDs** (the X25519 key from a DID
+equals the one from its seed) plus ECDH
 agreement; envelope round-trips (single/multi-recipient, non-recipient rejection, wrong-key and
 tamper detection, AAD binding, per-conversation CEK reuse, deterministic reproducibility); a CLI
 seal→open round-trip; and replay of the conformance vectors.

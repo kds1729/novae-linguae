@@ -77,8 +77,16 @@ manifest.json     # { format_version, count, schema_versions[], bundle_digest, s
 It is **deterministic** — the same record set always produces identical bytes (sorted records, sorted
 manifest keys, fixed tar mtime, gzip mtime=0) — so bundles dedupe and diff cleanly. `bundle_digest`
 (a blake2b fingerprint of the record set) is a cheap whole-payload integrity pre-check; it is not the
-security boundary (per-record hash verification on ingest is). Manifest *signing* (`producer` +
-signature over the manifest, advisory provenance only) is a planned addition.
+security boundary (per-record hash verification on ingest is).
+
+**Manifest signing (implemented).** `exportbundle`/`nl_bundle --sign-seed <seed>` add a `producer`
+(the signer's `did:nova`) and an Ed25519 `signature` over the canonical manifest (minus the signature
+field). Since the manifest carries `bundle_digest`, the signature transitively attests to the record
+set. It is **advisory provenance, not a trust gate** — a node still re-verifies every record by hash on
+ingest. `loadbundle` reports the provenance (`signed by <did> (verified)` / `unsigned` / an `INVALID`
+warning) and `--require-signed` refuses anything but a valid signature. The Ed25519 signer is a pure-
+Python reference impl ([`tooling/crypto-python/nl_crypto.py`](../tooling/crypto-python/nl_crypto.py))
+that matches `nl-validator` (ed25519-dalek) byte-for-byte, so a stdlib-only publisher can sign.
 
 Properties (all of which fall out of the existing design):
 

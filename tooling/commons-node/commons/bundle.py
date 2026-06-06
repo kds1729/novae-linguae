@@ -22,7 +22,9 @@ import gzip
 import hashlib
 import io
 import json
+import sys
 import tarfile
+from pathlib import Path
 
 FORMAT_VERSION = "nlb/1"
 MANIFEST_NAME = "manifest.json"
@@ -31,6 +33,17 @@ RECORDS_NAME = "records.jsonl"
 
 class BundleError(Exception):
     pass
+
+
+def _crypto():
+    """Lazily load the shared signing module (tooling/crypto-python/nl_crypto.py). Only needed for
+    signed bundles, so unsigned export/import never depends on it."""
+    tool = Path(__file__).resolve().parents[2]            # .../tooling
+    for p in (str(tool / "crypto-python"), str(tool / "ingest-common")):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    import nl_crypto
+    return nl_crypto
 
 
 def bundle_digest(record_hashes):
@@ -73,11 +86,14 @@ def _add(tar, name, data):
     tar.addfile(info, io.BytesIO(data))
 
 
-def write_bundle(dest, records, source=None, producer=None):
+def write_bundle(dest, records, source=None, producer=None, sign_seed=None):
     """Write records (an iterable of raw record dicts) to an `.nlb`. `dest` is a path or a binary
-    file object. Returns the manifest."""
+    file object. If `sign_seed` is given, the manifest is signed (advisory provenance: it gains a
+    `producer` did:nova and an Ed25519 `signature`). Returns the manifest."""
     records = list(records)
     manifest = build_manifest(records, source=source, producer=producer)
+    if sign_seed:
+        manifest = _crypto().sign_manifest(manifest, sign_seed)
     manifest_bytes = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
     lines = _jsonl(records)
     records_bytes = ("\n".join(lines) + ("\n" if lines else "")).encode("utf-8")
@@ -134,3 +150,10 @@ def read_bundle(src):
     if expected is not None and expected != actual:
         raise BundleError(f"bundle_digest mismatch (manifest {expected} != computed {actual})")
     return manifest, records
+
+
+def verify_manifest(manifest):
+    """Check a manifest's optional provenance signature. Returns (status, producer) where status is
+    'unsigned' | 'valid' | 'invalid'. Advisory — record-level hash verification on ingest is the real
+    admission gate; this only attests who produced the bundle."""
+    return _crypto().verify_manifest(manifest)

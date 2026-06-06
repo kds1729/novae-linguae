@@ -32,7 +32,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingest-common"))
-from nl_core import blake3_256  # noqa: E402  (vendored BLAKE3, matches nl-validator seed derivation)
+from nl_core import blake3_256, canonicalize  # noqa: E402  (vendored BLAKE3 + JCS, match nl-validator)
 
 _P25519 = (1 << 255) - 19
 
@@ -298,6 +298,171 @@ def ed25519_pub_from_did(did: str) -> bytes:
 def x25519_pub_from_did(did: str) -> bytes:
     """The X25519 public key for a did:nova identity (its Ed25519 key, mapped to Curve25519)."""
     return ed25519_pub_to_x25519(ed25519_pub_from_did(did))
+
+
+def did_nova_from_pubkey(ed_pub: bytes) -> str:
+    """did:nova:<64-hex> for a 32-byte Ed25519 public key (the key is embedded; no resolution)."""
+    if len(ed_pub) != 32:
+        raise ValueError("Ed25519 public key must be 32 bytes")
+    return _DID_PREFIX + ed_pub.hex()
+
+
+# ---------------------------------------------------------------------------
+# Ed25519 signing (RFC 8032). Reference implementation — matches ed25519-dalek byte-for-byte
+# (validated against the repo's signed message vectors). Same clarity/verifiability caveat as the
+# rest of this module: not constant-time; do not protect real secrets on a hostile host.
+# ---------------------------------------------------------------------------
+
+_L = 2 ** 252 + 27742317777372353535851937790883648493         # Ed25519 group order
+_D = (-121665 * pow(121666, _P25519 - 2, _P25519)) % _P25519   # curve constant d
+_SQRT_M1 = pow(2, (_P25519 - 1) // 4, _P25519)
+
+
+def _ed_xrecover(y):
+    p = _P25519
+    xx = ((y * y - 1) * pow(_D * y * y + 1, p - 2, p)) % p
+    x = pow(xx, (p + 3) // 8, p)
+    if (x * x - xx) % p != 0:
+        x = (x * _SQRT_M1) % p
+    if x % 2 != 0:
+        x = p - x
+    return x
+
+
+_ED_BY = (4 * pow(5, _P25519 - 2, _P25519)) % _P25519          # base point y = 4/5
+_ED_B = (_ed_xrecover(_ED_BY), _ED_BY, 1, (_ed_xrecover(_ED_BY) * _ED_BY) % _P25519)
+
+
+def _ed_add(P, Q):                                             # extended twisted-Edwards add (a=-1)
+    p = _P25519
+    X1, Y1, Z1, T1 = P
+    X2, Y2, Z2, T2 = Q
+    A = ((Y1 - X1) * (Y2 - X2)) % p
+    B = ((Y1 + X1) * (Y2 + X2)) % p
+    C = (T1 * 2 * _D * T2) % p
+    Dd = (2 * Z1 * Z2) % p
+    E, F, G, H = B - A, Dd - C, Dd + C, B + A
+    return ((E * F) % p, (G * H) % p, (F * G) % p, (E * H) % p)
+
+
+def _ed_scalarmult(P, e):
+    Q = (0, 1, 1, 0)                                           # neutral element
+    while e > 0:
+        if e & 1:
+            Q = _ed_add(Q, P)
+        P = _ed_add(P, P)
+        e >>= 1
+    return Q
+
+
+def _ed_encode(P):
+    p = _P25519
+    X, Y, Z, T = P
+    zi = pow(Z, p - 2, p)
+    x, y = (X * zi) % p, (Y * zi) % p
+    b = bytearray(y.to_bytes(32, "little"))
+    b[31] |= (x & 1) << 7
+    return bytes(b)
+
+
+def _ed_decode(s):
+    p = _P25519
+    y = int.from_bytes(s, "little") & ((1 << 255) - 1)
+    x = _ed_xrecover(y)
+    if (x & 1) != ((s[31] >> 7) & 1):
+        x = p - x
+    return (x, y, 1, (x * y) % p)
+
+
+def _ed_expand(seed32: bytes):
+    h = hashlib.sha512(seed32).digest()
+    a = bytearray(h[:32])
+    a[0] &= 248
+    a[31] &= 127
+    a[31] |= 64
+    return int.from_bytes(a, "little"), h[32:]                 # (scalar, prefix)
+
+
+def ed25519_pubkey_from_seed(seed32: bytes) -> bytes:
+    """The 32-byte Ed25519 public key for a 32-byte seed (RFC 8032)."""
+    a, _ = _ed_expand(seed32)
+    return _ed_encode(_ed_scalarmult(_ED_B, a))
+
+
+def ed25519_sign(seed32: bytes, msg: bytes) -> bytes:
+    """RFC 8032 Ed25519 signature (64 bytes) of msg under the key derived from seed32."""
+    a, prefix = _ed_expand(seed32)
+    A = _ed_encode(_ed_scalarmult(_ED_B, a))
+    r = int.from_bytes(hashlib.sha512(prefix + msg).digest(), "little") % _L
+    R = _ed_encode(_ed_scalarmult(_ED_B, r))
+    k = int.from_bytes(hashlib.sha512(R + A + msg).digest(), "little") % _L
+    return R + ((r + k * a) % _L).to_bytes(32, "little")
+
+
+def ed25519_verify(ed_pub: bytes, msg: bytes, sig: bytes) -> bool:
+    """Verify a 64-byte Ed25519 signature. Returns True iff valid."""
+    if len(sig) != 32 + 32 or len(ed_pub) != 32:
+        return False
+    S = int.from_bytes(sig[32:], "little")
+    if S >= _L:
+        return False
+    try:
+        R, A = _ed_decode(sig[:32]), _ed_decode(ed_pub)
+    except Exception:
+        return False
+    k = int.from_bytes(hashlib.sha512(sig[:32] + ed_pub + msg).digest(), "little") % _L
+    return _ed_encode(_ed_scalarmult(_ED_B, S)) == _ed_encode(_ed_add(R, _ed_scalarmult(A, k)))
+
+
+def signing_keypair_from_user_seed(user_seed: str):
+    """(seed32, ed25519_pubkey, did:nova) for a user seed, matching nl-validator's derivation
+    (ed25519_seed = BLAKE3(user_seed))."""
+    seed32 = blake3_256(user_seed.encode("utf-8"))
+    pub = ed25519_pubkey_from_seed(seed32)
+    return seed32, pub, did_nova_from_pubkey(pub)
+
+
+def format_signature(sig: bytes) -> str:
+    return "ed25519:" + base64.b64encode(sig).decode("ascii")
+
+
+def parse_signature(s: str) -> bytes:
+    if not s.startswith("ed25519:"):
+        raise ValueError("not an ed25519 signature string")
+    sig = base64.b64decode(s[len("ed25519:"):])
+    if len(sig) != 64:
+        raise ValueError("ed25519 signature must decode to 64 bytes")
+    return sig
+
+
+# ---------------------------------------------------------------------------
+# Bundle-manifest signing (spec/resilience.md): advisory provenance over a .nlb manifest.
+# The signature covers the canonical manifest (minus the signature field); since the manifest carries
+# bundle_digest, it transitively attests to the record set. Advisory only — a node still re-verifies
+# every record by hash on ingest (the manifest signature is provenance, not the admission gate).
+# ---------------------------------------------------------------------------
+
+def sign_manifest(manifest: dict, user_seed: str) -> dict:
+    """Return a copy of `manifest` with `producer` (the signer's did:nova) and a `signature` set."""
+    seed32, _pub, did = signing_keypair_from_user_seed(user_seed)
+    m = {k: v for k, v in manifest.items() if k != "signature"}
+    m["producer"] = did
+    m["signature"] = format_signature(ed25519_sign(seed32, canonicalize(m)))
+    return m
+
+
+def verify_manifest(manifest: dict):
+    """Return (status, producer): 'unsigned' | 'valid' | 'invalid'."""
+    if "signature" not in manifest:
+        return ("unsigned", manifest.get("producer"))
+    producer = manifest.get("producer")
+    m = {k: v for k, v in manifest.items() if k != "signature"}
+    try:
+        ok = ed25519_verify(ed25519_pub_from_did(producer), canonicalize(m),
+                            parse_signature(manifest["signature"]))
+    except Exception:
+        return ("invalid", producer)
+    return (("valid" if ok else "invalid"), producer)
 
 
 def random_bytes(n: int) -> bytes:

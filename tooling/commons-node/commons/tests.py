@@ -444,6 +444,40 @@ class BundleFormatTests(TestCase):
             read_bundle(io.BytesIO(b"not a gzip"))
 
 
+class BundleSigningTests(TestCase):
+    SEED = "bundle-publisher-seed"
+
+    def test_sign_then_verify_round_trip(self):
+        from .bundle import read_bundle, verify_manifest, write_bundle
+        buf = io.BytesIO()
+        write_bundle(buf, [_R1, _R2], sign_seed=self.SEED)
+        manifest, _ = read_bundle(io.BytesIO(buf.getvalue()))
+        status, producer = verify_manifest(manifest)
+        self.assertEqual(status, "valid")
+        self.assertTrue(producer.startswith("did:nova:"))
+        self.assertEqual(manifest["producer"], producer)
+
+    def test_tampered_signed_manifest_is_invalid(self):
+        from .bundle import verify_manifest, write_bundle
+        m = write_bundle(io.BytesIO(), [_R1, _R2], sign_seed=self.SEED)   # returns signed manifest
+        m["count"] = 999                                                  # alter a signed field
+        self.assertEqual(verify_manifest(m)[0], "invalid")
+
+    def test_unsigned_reports_unsigned(self):
+        from .bundle import read_bundle, verify_manifest, write_bundle
+        buf = io.BytesIO()
+        write_bundle(buf, [_R1])
+        manifest, _ = read_bundle(io.BytesIO(buf.getvalue()))
+        self.assertEqual(verify_manifest(manifest)[0], "unsigned")
+
+    def test_signed_bundle_is_deterministic(self):
+        from .bundle import write_bundle
+        a, b = io.BytesIO(), io.BytesIO()
+        write_bundle(a, [_R1, _R2], sign_seed=self.SEED)
+        write_bundle(b, [_R2, _R1], sign_seed=self.SEED)
+        self.assertEqual(a.getvalue(), b.getvalue())
+
+
 @unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
 class BundleCommandTests(TestCase):
     def test_export_then_load_round_trip(self):
@@ -490,6 +524,28 @@ class BundleCommandTests(TestCase):
         manifest, records = read_bundle(path)
         self.assertEqual([r["hash"] for r in records], [second["hash"]])
 
+    def test_signed_export_load_reports_provenance(self):
+        rec = _load("map.json")
+        Client().post("/v0/records", data=json.dumps(rec), content_type="application/json")
+        with tempfile.NamedTemporaryFile(suffix=".nlb", delete=False) as f:
+            path = f.name
+        call_command("exportbundle", path, "--sign-seed", "node-seed")
+        Record.objects.all().delete()
+        out = io.StringIO()
+        call_command("loadbundle", path, "--require-signed", stdout=out)   # enforces a valid sig
+        self.assertIn("provenance=signed by did:nova:", out.getvalue())
+        self.assertIn("stored=1", out.getvalue())
+
+    def test_require_signed_rejects_unsigned(self):
+        from django.core.management.base import CommandError
+        Client().post("/v0/records", data=json.dumps(_load("map.json")),
+                      content_type="application/json")
+        with tempfile.NamedTemporaryFile(suffix=".nlb", delete=False) as f:
+            path = f.name
+        call_command("exportbundle", path)                                 # unsigned
+        with self.assertRaises(CommandError):
+            call_command("loadbundle", path, "--require-signed", stdout=io.StringIO())
+
 
 class NlBundleConformanceTests(TestCase):
     def test_standalone_packager_is_byte_identical(self):
@@ -510,3 +566,18 @@ class NlBundleConformanceTests(TestCase):
         buf = io.BytesIO()
         write_bundle(buf, records)
         self.assertEqual(proc.stdout, buf.getvalue())
+
+    def test_signed_packager_is_byte_identical(self):
+        import subprocess
+        import sys
+
+        from .bundle import write_bundle
+        script = Path(settings.COMMONS_SPEC_DIR).parent / "tooling" / "nl-bundle" / "nl_bundle.py"
+        records = [_R1, _R2]
+        jsonl = ("\n".join(json.dumps(r) for r in records)).encode()
+        proc = subprocess.run([sys.executable, str(script), "--sign-seed", "shared-seed"],
+                              input=jsonl, capture_output=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        buf = io.BytesIO()
+        write_bundle(buf, records, sign_seed="shared-seed")
+        self.assertEqual(proc.stdout, buf.getvalue())   # same nl_crypto -> identical signed bytes

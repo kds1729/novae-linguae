@@ -19,7 +19,9 @@ python3 ../ingest-python/nl_ingest.py --module mylib mylib/*.py \
 ## Zero dependencies
 
 A single self-contained file (`nl_bundle.py`) using only the Python standard library (3.8+) — no
-`pip install`, no network. It is the standalone sibling of the node's
+`pip install`, no network. (Signing with `--sign-seed` additionally imports the repo's pure-Python
+signer at `../crypto-python/nl_crypto.py`, still stdlib-only; unsigned packaging needs nothing but
+this file.) It is the standalone sibling of the node's
 [`commons/bundle.py`](../commons-node/commons/bundle.py); the two produce **byte-identical** bundles for
 the same record set (pinned by a conformance test in the node suite), so a bundle made here is
 indistinguishable from one a node exports.
@@ -37,12 +39,18 @@ indistinguishable from one a node exports.
 ## Usage
 
 ```
-nl_bundle.py [files...] [-o OUT] [--source-repo URL] [--source-release TAG]
+nl_bundle.py [files...] [-o OUT] [--source-repo URL] [--source-release TAG] [--sign-seed SEED]
   files            JSONL record files (default: stdin)
   -o, --output     output .nlb path (default: - for stdout)
   --source-repo    provenance: source repository URL
   --source-release provenance: release tag/version
+  --sign-seed      sign the manifest with the did:nova derived from this seed (advisory provenance)
 ```
+
+`--sign-seed` adds an Ed25519 signature over the manifest (the signer's `did:nova` as `producer`),
+which a node reports and can enforce with `loadbundle --require-signed`. It is advisory — the node
+still re-verifies every record by hash. Signing uses the shared pure-Python signer in
+`../crypto-python/nl_crypto.py`, so signed bundles are byte-identical to the node's.
 
 ## Tests
 
