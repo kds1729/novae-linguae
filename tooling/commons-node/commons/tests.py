@@ -477,6 +477,19 @@ class BundleCommandTests(TestCase):
         self.assertIn("failed=1", out.getvalue())
         self.assertFalse(Record.objects.filter(hash=tampered["hash"]).exists())
 
+    def test_export_since_is_incremental(self):
+        from .bundle import read_bundle
+        first, second = _load("map.json"), _load("double.v0.2.json")
+        for rec in (first, second):
+            Client().post("/v0/records", data=json.dumps(rec), content_type="application/json")
+        first_id = Record.objects.get(hash=first["hash"]).id
+
+        with tempfile.NamedTemporaryFile(suffix=".nlb", delete=False) as f:
+            path = f.name
+        call_command("exportbundle", path, "--since", str(first_id))   # only records after `first`
+        manifest, records = read_bundle(path)
+        self.assertEqual([r["hash"] for r in records], [second["hash"]])
+
 
 class NlBundleConformanceTests(TestCase):
     def test_standalone_packager_is_byte_identical(self):

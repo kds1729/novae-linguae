@@ -113,6 +113,7 @@ recovery, or shipping a project's records as a release artifact (see
 ```bash
 python3 manage.py exportbundle commons.nlb                          # all records
 python3 manage.py exportbundle fns.nlb --filter '{"kind":"function-record"}'
+python3 manage.py exportbundle delta.nlb --since 1200                # only records newer than cursor 1200
 python3 manage.py exportbundle - --source-repo https://github.com/org/lib > lib.nlb   # to stdout
 
 python3 manage.py loadbundle commons.nlb        # verify-then-store each record (same gate as publish)

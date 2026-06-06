@@ -52,7 +52,8 @@ the distributor is untrusted: a bundle can be *withheld* but not *poisoned*.
 - **Implemented (node)**: `exportbundle <out.nlb> [--filter <json>]` dumps records to a bundle;
   `loadbundle <in.nlb>` ingests one through the same verify-then-store gate as `POST /v0/records`
   (`commons/bundle.py` + the two management commands). Filtered exports reuse the typed `query`
-  language; incremental-since-cursor is a straightforward follow-on (`sync` already enumerates hashes).
+  language; incremental **delta** exports use `--since <cursor>` (the `/v0/sync` id cursor), and
+  `exportbundle` prints the next cursor for chaining.
 - **Distribute over anything**: HTTP mirrors, IPFS, BitTorrent, a git repo, email, physical media. If
   Arca is down or blocked, a node bootstraps from a bundle obtained by any means — verified records
   exported from a Postgres node restore cleanly into a fresh zero-dependency SQLite node.

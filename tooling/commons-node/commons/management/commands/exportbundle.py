@@ -24,18 +24,31 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("output", help="output .nlb path, or - for stdout")
         parser.add_argument("--filter", help="typed query filter as JSON (same language as /v0/query)")
+        parser.add_argument("--since", type=int,
+                            help="only records newer than this id (the /v0/sync cursor) — for "
+                                 "incremental delta bundles; the next cursor is printed on stderr")
         parser.add_argument("--source-repo", help="provenance: source repository URL")
         parser.add_argument("--source-release", help="provenance: release tag/version")
 
     def handle(self, *args, **options):
+        since = options.get("since")
         if options.get("filter"):
             try:
                 flt = json.loads(options["filter"])
             except ValueError as exc:
                 raise CommandError(f"--filter is not valid JSON: {exc}")
-            records = [r.raw for r in candidate_records(flt, cap=10 ** 9)[0]]
+            rows = candidate_records(flt, cap=10 ** 9)[0]
+            if since is not None:
+                rows = [r for r in rows if r.id > since]
+            records = [r.raw for r in rows]
+            next_cursor = max((r.id for r in rows), default=since or 0)
         else:
-            records = list(Record.objects.order_by("id").values_list("raw", flat=True))
+            qs = Record.objects.order_by("id")
+            if since is not None:
+                qs = qs.filter(id__gt=since)
+            rows = list(qs.values_list("id", "raw"))
+            records = [raw for _id, raw in rows]
+            next_cursor = rows[-1][0] if rows else (since or 0)
 
         source = {k: v for k, v in (("repo", options.get("source_repo")),
                                     ("release", options.get("source_release"))) if v} or None
@@ -45,4 +58,4 @@ class Command(BaseCommand):
         # Summary to stderr so stdout stays pure bundle bytes when output is "-".
         self.stderr.write(f"exported {manifest['count']} records  "
                           f"schema_versions={manifest['schema_versions']}  "
-                          f"digest={manifest['bundle_digest']}")
+                          f"digest={manifest['bundle_digest']}  next-cursor={next_cursor}")
