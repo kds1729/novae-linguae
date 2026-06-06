@@ -12,6 +12,7 @@ from django.core.management.base import BaseCommand
 
 from commons.embedding import get_embedder
 from commons.models import Record
+from commons.vectorindex import store_vector
 
 
 class Command(BaseCommand):
@@ -29,17 +30,18 @@ class Command(BaseCommand):
             qs = qs.exclude(embedding_model=emb.model_id)   # null and stale-model rows remain
         total = qs.count()
 
-        done, batch = 0, []
-        for r in qs.iterator():
-            r.embedding = emb.embed(r.raw)
-            r.embedding_model = emb.model_id
-            batch.append(r)
-            if len(batch) >= options["batch"]:
-                Record.objects.bulk_update(batch, ["embedding", "embedding_model"])
-                done += len(batch)
-                batch = []
-        if batch:
-            Record.objects.bulk_update(batch, ["embedding", "embedding_model"])
-            done += len(batch)
+        pending = list(qs)            # MVP scale; chunk so a remote model server batches efficiently
+        size = max(1, options["batch"])
+        done = 0
+        for i in range(0, len(pending), size):
+            chunk = pending[i:i + size]
+            vectors = emb.embed_batch([r.raw for r in chunk])
+            for r, v in zip(chunk, vectors):
+                r.embedding = v
+                r.embedding_model = emb.model_id
+            Record.objects.bulk_update(chunk, ["embedding", "embedding_model"])
+            for r in chunk:
+                store_vector(r.hash, r.embedding)   # sync pgvector column on Postgres; no-op on SQLite
+            done += len(chunk)
 
         self.stdout.write(f"embedded={done} of {total} pending  model={emb.model_id}")

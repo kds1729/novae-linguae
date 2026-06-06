@@ -112,13 +112,18 @@ python3 manage.py embedrecords --all    # re-embed everything
 | `COMMONS_DB_PATH` | `./db.sqlite3` | SQLite file |
 | `COMMONS_MAX_RECORD_BYTES` | 1 MiB | local size cap (a permitted endpoint policy) |
 | `COMMONS_PEERS` | empty | comma-separated peer hints for future replication |
-| `COMMONS_EMBEDDER` | `lexical-hashing-v0` | semantic-search embedding model id (seam for a neural backend) |
-| `COMMONS_EMBEDDING_DIM` | `256` | lexical vector dimensionality (part of the model identity) |
+| `COMMONS_EMBEDDER` | `lexical-hashing-v0` | embedding model id; a non-lexical id selects the neural backend |
+| `COMMONS_EMBEDDING_DIM` | `256` | vector dimensionality (256 lexical / 384 bge-small) — part of model identity |
+| `COMMONS_EMBEDDINGS_URL` | empty | neural model server (`/embed`-compatible, e.g. TEI); required for a neural embedder |
+| `COMMONS_EMBEDDINGS_TIMEOUT` | `30` | seconds for a model-server request |
+| `COMMONS_EMBEDDINGS_BATCH` | `32` | inputs per model-server request (TEI's default client-batch cap) |
+| `COMMONS_PG_NAME` / `_USER` / `_PASSWORD` / `_HOST` / `_PORT` | — | set any to use the Postgres backend (+ pgvector ANN) instead of SQLite |
+| `COMMONS_REDIS_URL` | empty | Redis cache (`redis://…`); falls back to in-process locmem |
 
 ## Tests
 
 ```bash
-python3 manage.py test commons      # 29 tests
+python3 manage.py test commons      # 38 tests (37 on SQLite + 1 Postgres-only, auto-skipped)
 ```
 
 Covers publish/idempotency, resolve, `HEAD` exists, `404` for absent, message
@@ -129,19 +134,54 @@ search** tests run regardless — embedding determinism / L2-normalization / rel
 `search` query + `like` + `filter` composition + `k` cap + error cases, `/v0/info` model id, and the
 `embedrecords` backfill.
 
+## Production-shaped stack (Postgres + pgvector + Redis + a model server)
+
+Local dev can run the **same compute elements** as production via [`docker-compose.yml`](docker-compose.yml):
+Postgres+pgvector, Redis, and an embeddings model server — with **Django on the host** for autoreload.
+
+```bash
+docker compose up -d db redis embeddings     # bring up the elements (first start downloads the model)
+curl http://127.0.0.1:8080/health            # TEI ready?
+cp .env.example .env                          # Postgres/Redis/neural-model env
+set -a; source .env; set +a
+
+.venv/bin/python manage.py migrate            # 0003 builds the pgvector column + HNSW index (Postgres only)
+nl-ingest-py … | .venv/bin/python manage.py loadrecords    # ingest (embeds on store)
+.venv/bin/python manage.py embedrecords --all              # (re)embed any existing rows
+.venv/bin/python manage.py runserver
+```
+
+On Postgres, `search` ranks via pgvector's `<=>` cosine distance over an **HNSW index**
+([`commons/vectorindex.py`](commons/vectorindex.py)); on SQLite it falls back to the Python cosine
+scan. The portable JSON `embedding` is the source of truth on both; `embedding_vec` is the
+Postgres-only ANN column kept in sync on ingest/backfill.
+
+**This node is the cost-minimized proof of concept, not a ceiling.** Every scaling axis is a seam or
+config — a future operator goes industrial with **no code change**:
+
+| Axis | Industrial upgrade |
+|---|---|
+| Embedding model | `COMMONS_EMBEDDER` + the model-server URL → GPU model (TEI ships CPU *and* GPU images, same API) or a hosted API |
+| Database | `COMMONS_PG_*` → managed/clustered Postgres + read replicas; HNSW scales to millions |
+| CDN | `resolve` is immutable + content-addressed (`Cache-Control: immutable`) → front it with any CDN at ~100% hit rate |
+| Horizontal scale | the app is stateless (state in Postgres/Redis) → N web replicas behind a load balancer |
+
+**Egress is the only variable cost** (the VM fee is flat). Self-hosting the model means *zero
+per-call network cost*; immutable caching + a CDN keep `resolve`/`sync` (the heavy endpoints) off the
+origin; and rate-limit / egress-budget guards are local config (principle-7 endpoint policy), never
+protocol gates. The full production layer (gunicorn web + Celery worker + a rate-limiting/egress
+proxy, see below) is the next milestone.
+
 ## Deliberately deferred (later phases of `spec/commons.md`)
 
-- **Neural / ANN search tier** — `POST /v0/search` is implemented now with the stdlib
-  `lexical-hashing-v0` embedder (see above). Still deferred: a real neural embedding model behind the
-  `Embedder` seam, and a vector index for it — on the planned Postgres backend that is `pgvector`
-  (the MVP scores cosine in Python over a bounded scan).
-- **Redis tier** — read-through cache, ephemeral `msg_` delivery with TTL, a job broker for async
-  embedding/verification/replication, and pub/sub for `sync` notifications.
+- **Production hardening (Milestone 2)** — a `Dockerfile` + `docker-compose.prod.yml` (Django under
+  gunicorn, a Celery worker for async embed/verify/replicate, a Caddy/nginx proxy for TLS + gzip +
+  rate limits), and an **egress-budget governor** (a hard ceiling on the bill). The neural embedder +
+  pgvector ANN search and the Postgres/Redis backends landed in Milestone 1 (above).
+- **Postgres typed query** — JSONB + GIN-indexed array columns so `/v0/query` array predicates run
+  in-database (today they apply in Python over a bounded scan, on either backend).
 - **Replication worker** — a background task that polls peers' `GET /v0/sync` and mirrors verified
   records, making the node a true mirror rather than a silo.
-- **Postgres backend** — JSONB + GIN-indexed array columns for in-database typed query (the MVP
-  applies array predicates in Python over a bounded scan). Swap is a settings change; see
-  `commons_node/settings.py`.
 - **In-process verification** — porting the `nl-validator` checks into Python (nl_core hashing +
   jsonschema + PyNaCl) to avoid a subprocess per publish, as long as it agrees byte-for-byte.
 

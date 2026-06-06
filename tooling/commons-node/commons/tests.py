@@ -12,13 +12,17 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from django.conf import settings
 from django.core.management import call_command
-from django.test import Client, TestCase
+from django.db import connection
+from django.test import Client, TestCase, override_settings
 
-from .embedding import LexicalHashingEmbedder, cosine, get_embedder
+from . import embedding
+from .embedding import LexicalHashingEmbedder, NeuralEmbedder, cosine, get_embedder
 from .models import Record
+from .vectorindex import get_vector_index, store_vector
 
 EXAMPLES = Path(settings.COMMONS_SPEC_DIR) / "examples"
 VALIDATOR = Path(settings.COMMONS_VALIDATOR)
@@ -227,11 +231,14 @@ class SearchTests(TestCase):
         self._mk(self.b64_hash, _B64_REC)
 
     def _mk(self, h, raw):
-        return Record.objects.create(
+        v = self.emb.embed(raw)
+        r = Record.objects.create(
             hash=h, kind="function-record", schema_version="0.1.0", raw=raw,
             name_hints=raw.get("name_hints", []), intent_tags=raw.get("intent_tags", []),
             effects=(raw.get("signature") or {}).get("effects", []),
-            embedding=self.emb.embed(raw), embedding_model=self.emb.model_id)
+            embedding=v, embedding_model=self.emb.model_id)
+        store_vector(h, v)   # populate the pgvector column so search works on both backends
+        return r
 
     def _search(self, body):
         return self.client.post("/v0/search", data=json.dumps(body),
@@ -280,3 +287,95 @@ class SearchTests(TestCase):
         bare.refresh_from_db()
         self.assertEqual(bare.embedding_model, self.emb.model_id)
         self.assertTrue(bare.embedding)
+
+
+# --- neural embedder + vector index backends ------------------------------------------------------
+
+class _FakeResp:
+    """Stand-in for an http response context manager (so neural tests need no model server)."""
+    def __init__(self, payload):
+        self._b = json.dumps(payload).encode()
+    def read(self):
+        return self._b
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+
+class NeuralEmbedderTests(TestCase):
+    def test_embed_batch_parses_list_of_vectors(self):
+        e = NeuralEmbedder("m", "http://x", dim=2)
+        with mock.patch("commons.embedding.urllib.request.urlopen",
+                        return_value=_FakeResp([[0.1, 0.2], [0.3, 0.4]])):
+            self.assertEqual(e.embed_batch(["a", "b"]), [[0.1, 0.2], [0.3, 0.4]])
+
+    def test_embed_single_uses_record_text(self):
+        e = NeuralEmbedder("m", "http://x", dim=2)
+        with mock.patch("commons.embedding.urllib.request.urlopen",
+                        return_value=_FakeResp([[1.0, 0.0]])):
+            self.assertEqual(e.embed(_MAP_REC), [1.0, 0.0])   # dict -> _record_text -> one input
+
+    def test_tolerates_openai_response_shape(self):
+        e = NeuralEmbedder("m", "http://x", dim=2)
+        with mock.patch("commons.embedding.urllib.request.urlopen",
+                        return_value=_FakeResp({"data": [{"embedding": [0.5, 0.6]}]})):
+            self.assertEqual(e.embed("hi"), [0.5, 0.6])
+
+    def test_requires_url(self):
+        with self.assertRaises(ValueError):
+            NeuralEmbedder("m", "", dim=2)
+
+
+class EmbedderDispatchTests(TestCase):
+    def setUp(self):
+        embedding._CACHE.clear()
+
+    def tearDown(self):
+        embedding._CACHE.clear()
+
+    @override_settings(COMMONS_EMBEDDER="lexical-hashing-v0", COMMONS_EMBEDDING_DIM=256)
+    def test_lexical_is_default(self):
+        self.assertIsInstance(get_embedder(), LexicalHashingEmbedder)
+
+    @override_settings(COMMONS_EMBEDDER="bge-small-en-v1.5", COMMONS_EMBEDDING_DIM=384,
+                       COMMONS_EMBEDDINGS_URL="http://x")
+    def test_neural_id_selects_neural(self):
+        e = get_embedder()
+        self.assertIsInstance(e, NeuralEmbedder)
+        self.assertEqual((e.model_id, e.dim), ("bge-small-en-v1.5", 384))
+
+    @override_settings(COMMONS_EMBEDDER="bge-small-en-v1.5", COMMONS_EMBEDDINGS_URL="")
+    def test_neural_without_url_raises(self):
+        with self.assertRaises(ValueError):
+            get_embedder()
+
+
+class VectorIndexSelectionTests(TestCase):
+    def test_index_matches_backend(self):
+        from .vectorindex import PgVectorIndex, ScanIndex
+        expected = PgVectorIndex if connection.vendor == "postgresql" else ScanIndex
+        self.assertIsInstance(get_vector_index(), expected)
+
+
+@unittest.skipUnless(connection.vendor == "postgresql", "pgvector ANN path requires Postgres")
+class PgVectorIndexTests(TestCase):
+    def test_ann_ranks_by_cosine(self):
+        from .vectorindex import PgVectorIndex, get_vector_index, store_vector
+        dim = settings.COMMONS_EMBEDDING_DIM
+
+        def unit(i):
+            v = [0.0] * dim
+            v[i] = 1.0
+            return v
+
+        for h, i in [("fn_" + "a" * 64, 0), ("fn_" + "b" * 64, 1)]:
+            Record.objects.create(hash=h, kind="function-record", schema_version="0.1.0",
+                                  raw={}, embedding=unit(i), embedding_model="m")
+            store_vector(h, unit(i))   # populate the pgvector column
+
+        idx = get_vector_index()
+        self.assertIsInstance(idx, PgVectorIndex)
+        results, _ = idx.search(unit(0), 2, {}, "m")
+        self.assertEqual(results[0]["hash"], "fn_" + "a" * 64)
+        self.assertAlmostEqual(results[0]["score"], 1.0, places=5)

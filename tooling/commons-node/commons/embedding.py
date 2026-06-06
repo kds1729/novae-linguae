@@ -20,6 +20,7 @@ import hashlib
 import json
 import math
 import re
+import urllib.request
 
 from django.conf import settings
 
@@ -113,6 +114,11 @@ class Embedder:
     def embed(self, record_or_text):
         raise NotImplementedError
 
+    def embed_batch(self, items):
+        """Embed many records/strings. Override when the backend supports a real batch call (a remote
+        model server, GPU batching); the default loop keeps small/pure embedders simple."""
+        return [self.embed(x) for x in items]
+
 
 class LexicalHashingEmbedder(Embedder):
     """Stdlib-only deterministic lexical embedding (hashing trick + sublinear TF + L2 norm)."""
@@ -139,16 +145,59 @@ class LexicalHashingEmbedder(Embedder):
         return self._vectorize(_tokens(text))
 
 
+class NeuralEmbedder(Embedder):
+    """Calls an external embedding model server over HTTP (HF Text-Embeddings-Inference, Ollama, or
+    any `/embed`-compatible endpoint). The server is where an industrial operator puts a GPU fleet —
+    the node code is identical, only `COMMONS_EMBEDDINGS_URL` changes. Vectors are used as returned
+    (TEI L2-normalizes), and ranked only against vectors from the same `model_id`."""
+
+    def __init__(self, model_id, url, dim, timeout=30.0, max_batch=32):
+        if not url:
+            raise ValueError("a neural COMMONS_EMBEDDER needs COMMONS_EMBEDDINGS_URL set")
+        self.model_id = model_id
+        self.url = url.rstrip("/")
+        self.dim = int(dim)
+        self.timeout = timeout
+        self.max_batch = max(1, int(max_batch))   # model servers cap inputs/request (TEI default 32)
+
+    def _post(self, texts):
+        body = json.dumps({"inputs": texts}).encode("utf-8")
+        req = urllib.request.Request(self.url + "/embed", data=body,
+                                     headers={"content-type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if isinstance(data, dict):   # tolerate OpenAI-style / wrapped response shapes
+            data = data.get("embeddings") or data.get("data") or []
+            data = [d["embedding"] if isinstance(d, dict) else d for d in data]
+        return data
+
+    def embed(self, record_or_text):
+        return self.embed_batch([record_or_text])[0]
+
+    def embed_batch(self, items):
+        texts = [x if isinstance(x, str) else _record_text(x) for x in items]
+        out = []
+        for i in range(0, len(texts), self.max_batch):   # chunk to the server's per-request cap
+            out.extend(self._post(texts[i:i + self.max_batch]))
+        return out
+
+
 _CACHE = {}
 
 
 def get_embedder():
-    """Return the node's embedder (cached). The seam where a neural backend would plug in."""
+    """Return the node's embedder (cached). The seam where a neural backend plugs in: the lexical id
+    selects the stdlib embedder (zero-infra default); any other id selects a NeuralEmbedder pointed at
+    COMMONS_EMBEDDINGS_URL."""
     name = getattr(settings, "COMMONS_EMBEDDER", "lexical-hashing-v0")
     dim = int(getattr(settings, "COMMONS_EMBEDDING_DIM", _DEFAULT_DIM))
     key = (name, dim)
     if key not in _CACHE:
-        # Only the lexical family ships in the MVP; an unknown id falls back to it (a node-local
-        # choice, never a protocol gate). Future: dispatch on `name` to a neural Embedder here.
-        _CACHE[key] = LexicalHashingEmbedder(dim=dim)
+        if name.startswith("lexical-hashing"):
+            _CACHE[key] = LexicalHashingEmbedder(dim=dim)
+        else:
+            _CACHE[key] = NeuralEmbedder(
+                model_id=name, url=getattr(settings, "COMMONS_EMBEDDINGS_URL", ""),
+                dim=dim, timeout=float(getattr(settings, "COMMONS_EMBEDDINGS_TIMEOUT", 30)),
+                max_batch=int(getattr(settings, "COMMONS_EMBEDDINGS_BATCH", 32)))
     return _CACHE[key]

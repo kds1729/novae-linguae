@@ -63,7 +63,11 @@ def record(request, address):
     row = Record.objects.filter(hash=address).first()
     if row is None:
         return JsonResponse({"error": "absent"}, status=404)
-    return JsonResponse(row.raw)
+    resp = JsonResponse(row.raw)
+    # Content-addressed records are immutable, so this is safe to cache forever. Lets a CDN/edge front
+    # `resolve` at ~100% hit rate and absorb traffic spikes off the origin's metered egress.
+    resp["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
 
 
 @csrf_exempt
@@ -123,7 +127,7 @@ def info(request):
     """GET /v0/info — node metadata (peers are hints, not authority)."""
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
-    return JsonResponse({
+    resp = JsonResponse({
         "protocol": "v0",
         "schema_versions": _SCHEMA_VERSIONS,
         "kinds": _KINDS,
@@ -132,3 +136,5 @@ def info(request):
         "peers": settings.COMMONS_PEERS,
         "retains_messages": "durable",    # MVP keeps everything; a TTL tier comes with Redis
     })
+    resp["Cache-Control"] = "public, max-age=10"   # cheap to serve; brief cache smooths bursts
+    return resp

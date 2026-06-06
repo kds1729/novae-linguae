@@ -1,0 +1,54 @@
+# Local stack mirroring the production compute ELEMENTS (Postgres+pgvector, Redis, an embeddings
+# model server) — not the scale. Django itself runs on the HOST (`manage.py runserver`, autoreload),
+# reaching these containers via the env vars in .env.example. Production (Milestone 2) uses the same
+# topology with Django containerized under gunicorn behind a proxy.
+#
+# Nothing here caps scale: a future operator swaps the embeddings image for a GPU one (same API),
+# points COMMONS_PG_* at a managed/clustered Postgres, and fronts `resolve` with a CDN — no code
+# change. This compose is the cost-minimized proof of concept, not a ceiling.
+#
+#   docker compose up -d db redis embeddings      # bring up the elements
+#   curl http://127.0.0.1:8080/health             # TEI ready? (first start downloads the model)
+#   set -a; source .env; set +a; .venv/bin/python manage.py migrate && ... runserver
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: commons
+      POSTGRES_USER: commons
+      POSTGRES_PASSWORD: commons
+    ports:
+      - "5432:5432"
+    volumes:
+      - commons_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commons"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  embeddings:
+    # HF Text-Embeddings-Inference (CPU). Serves ONE small model over `POST /embed`. The CPU↔GPU
+    # images share an API, so going industrial is an image swap + deploy params, not a code change.
+    # If this tag is unavailable, pick a current CPU release from
+    # https://github.com/huggingface/text-embeddings-inference/pkgs/container/text-embeddings-inference
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
+    # TEI's CPU image is published for linux/amd64. On Apple Silicon / arm64 this runs under Docker
+    # Desktop emulation (slower, fine for dev); production x86 servers run it natively. A native-arm64
+    # alternative is Ollama (`/api/embed`) — the NeuralEmbedder also tolerates that response shape.
+    platform: linux/amd64
+    command: ["--model-id", "BAAI/bge-small-en-v1.5"]
+    ports:
+      - "8080:80"
+    volumes:
+      - commons_tei:/data        # model cache, so restarts don't re-download
+
+volumes:
+  commons_pgdata:
+  commons_tei:

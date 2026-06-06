@@ -10,13 +10,12 @@ Returns {"results": [{"hash", "score"}, ...], "model": "<id>"} ranked high-to-lo
 typed `filter` means exactly what it does in `POST /v0/query` (shared via query.candidate_records).
 """
 
-from .embedding import cosine, get_embedder
+from .embedding import get_embedder
 from .models import Record
-from .query import candidate_records
+from .vectorindex import get_vector_index
 
 _DEFAULT_K = 20
 _MAX_K = 100
-_SEARCH_SCAN_CAP = 5000   # bound the per-request similarity scan for the MVP (flagged when hit)
 
 
 class SearchError(Exception):
@@ -57,15 +56,7 @@ def run_search(body):
     if not isinstance(flt, dict):
         raise SearchError("bad_request", "'filter' must be an object")
 
-    candidates, truncated = candidate_records(flt, cap=_SEARCH_SCAN_CAP)
-    scored = []
-    for r in candidates:
-        # Only rank records embedded by the same model — vectors from different models or dims are
-        # not comparable. In normal operation every row shares the node's current model.
-        if not r.embedding or r.embedding_model != emb.model_id:
-            continue
-        scored.append((cosine(qvec, r.embedding), r.hash))
-
-    scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
-    results = [{"hash": h, "score": round(s, 6)} for s, h in scored[:_k(body)]]
+    # Ranking is delegated to the active backend (pgvector ANN on Postgres, Python cosine on SQLite).
+    # Only vectors from the same model are comparable, so the model id is passed through.
+    results, truncated = get_vector_index().search(qvec, _k(body), flt, emb.model_id)
     return results, emb.model_id, truncated
