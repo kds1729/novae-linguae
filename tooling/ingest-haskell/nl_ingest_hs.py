@@ -33,13 +33,16 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingest-common"))
 from nl_core import build_record, build_v2_record, find_matching, split_top, count_top  # noqa: E402
 from nl_effects import effects_from_tokens, terminates_from_tokens  # noqa: E402
 from nl_body import body_ast_from_hs  # noqa: E402
+from nl_toolchain import tool_on_path  # noqa: E402
 from nl_types import VarCtx, apply, builtin, fn, quantify, tuple_, var  # noqa: E402
 from nl_values import ValueEncodeError, to_value_ast  # noqa: E402
 
@@ -453,8 +456,63 @@ def _build_v2(name, type_str, doctests, body, module_name):
 # Record assembly.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Optional GHC toolchain enricher (the toolchain seam — see nl_toolchain).
+# ---------------------------------------------------------------------------
+
+_MISSING_SIG_MARKER = "Top-level binding with no type signature:"
+
+
+def parse_missing_signatures(ghc_stderr: str) -> list:
+    """Inferred signatures from GHC's -Wmissing-signatures diagnostics. GHC prints either
+    'Top-level binding with no type signature: name :: T' or the marker followed by an indented
+    'name :: T' on the next line. Returns the list of 'name :: T' strings (best-effort)."""
+    sigs, lines = [], ghc_stderr.split("\n")
+    for i, ln in enumerate(lines):
+        if _MISSING_SIG_MARKER in ln:
+            after = ln.split(_MISSING_SIG_MARKER, 1)[1].strip()
+            if not after and i + 1 < len(lines):
+                after = lines[i + 1].strip()
+            if "::" in after:
+                sigs.append(after)
+    return sigs
+
+
+def _ghc_inferred_signatures(source: str) -> list:
+    """Run GHC over `source` (type-check only) and return the inferred signatures of unsignatured
+    top-level bindings. Returns [] on any failure."""
+    mod_name, _ = parse_module(strip_comments(source))
+    stem = (mod_name.split(".")[-1] if mod_name else "Main")
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / f"{stem}.hs"
+        path.write_text(source, encoding="utf-8")
+        try:
+            proc = subprocess.run(
+                ["ghc", "-fno-code", "-fno-warn-tabs", "-Wmissing-signatures", str(path)],
+                capture_output=True, text=True, timeout=60, cwd=d,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return []
+        return parse_missing_signatures(proc.stderr + "\n" + proc.stdout)
+
+
+def hs_enrich(source: str) -> str:
+    """Toolchain enricher: prepend GHC-inferred top-level signatures so the scanner sees explicit
+    types for bindings that had none. Falls back to `source` when ghc is unavailable or errors."""
+    if not tool_on_path("ghc"):
+        return source
+    sigs = _ghc_inferred_signatures(source)
+    if not sigs:
+        return source
+    return "\n".join(sigs) + "\n" + source
+
+
 def records_from_source(source: str, module_override: str | None, include_private: bool,
-                        v2: bool = False):
+                        v2: bool = False, enrich=None):
+    """``enrich``: optional source -> source transform applied before scanning (the toolchain seam,
+    see nl_toolchain). None = scanner only — the deterministic, zero-dependency default."""
+    if enrich is not None:
+        source = enrich(source)
     src = strip_comments(source)
     module_name, exports = parse_module(src)
     mod_hint = module_override or module_name
@@ -492,6 +550,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--v2", action="store_true",
                    help="higher fidelity: emit v0.2 records (structured type AST + real examples from "
                         "haddock `-- >>>` doctests) for functions with usable doctests; v0.1 otherwise")
+    p.add_argument("--toolchain", action="store_true",
+                   help="opt in to the GHC backend: prepend inferred top-level signatures before "
+                        "scanning; falls back to the scanner if ghc is unavailable. Non-deterministic "
+                        "across compiler versions — off by default (principle 5)")
     return p
 
 
@@ -508,7 +570,9 @@ def main(argv=None) -> int:
             print(f"nl-ingest-hs: reading {path}: {e}", file=sys.stderr)
             exit_code = 1
             continue
-        for record in records_from_source(source, args.module, args.include_private, v2=args.v2):
+        enrich = hs_enrich if args.toolchain else None
+        for record in records_from_source(source, args.module, args.include_private, v2=args.v2,
+                                          enrich=enrich):
             if args.pretty:
                 print(json.dumps(record, indent=2, ensure_ascii=False))
             else:

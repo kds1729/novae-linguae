@@ -44,6 +44,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from nl_core import build_record, build_v2_record  # noqa: E402
 from nl_effects import effects_from_tokens, terminates_from_tokens  # noqa: E402
 from nl_body import body_ast_from_ts  # noqa: E402
+from nl_toolchain import run_enricher, tool_on_path  # noqa: E402
+
+_TS_ENRICH_JS = Path(__file__).resolve().parent / "ts_enrich.js"
+
+
+def ts_enrich(source: str) -> str:
+    """Toolchain enricher: emit fully-typed `.d.ts` declarations via the TypeScript compiler so the
+    scanner reads resolved signatures. Falls back to `source` when node / typescript are unavailable."""
+    if not (tool_on_path("node") and _TS_ENRICH_JS.exists()):
+        return source
+    return run_enricher(["node", str(_TS_ENRICH_JS)], source)
 from nl_types import VarCtx, apply, builtin, fn, quantify, tuple_, var  # noqa: E402
 from nl_values import ValueEncodeError, to_value_ast  # noqa: E402
 
@@ -759,7 +770,12 @@ def _parse_export(s: str, export_start: int, module_name, v2=False, examples_map
     return None, i
 
 
-def records_from_source(source: str, module_name: str | None = None, v2: bool = False):
+def records_from_source(source: str, module_name: str | None = None, v2: bool = False,
+                        enrich=None):
+    """``enrich``: an optional source -> source transform applied before scanning (the toolchain
+    seam, see nl_toolchain). None = scanner only — the deterministic, zero-dependency default."""
+    if enrich is not None:
+        source = enrich(source)
     examples_map = jsdoc_examples(source) if v2 else {}   # from original source (JSDoc intact)
     s = strip_comments(source)
     records = []
@@ -792,6 +808,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--v2", action="store_true",
                    help="higher fidelity: emit v0.2 records (structured type AST + real examples from "
                         "JSDoc @example) for functions with usable examples; v0.1 otherwise")
+    p.add_argument("--toolchain", action="store_true",
+                   help="opt in to the TypeScript-compiler backend (node + typescript) to resolve "
+                        "signatures before scanning; falls back to the scanner if unavailable. "
+                        "Non-deterministic across compiler versions — off by default (principle 5)")
     return p
 
 
@@ -808,7 +828,8 @@ def main(argv=None) -> int:
             print(f"nl-ingest-ts: reading {path}: {e}", file=sys.stderr)
             exit_code = 1
             continue
-        for record in records_from_source(source, args.module, v2=args.v2):
+        enrich = ts_enrich if args.toolchain else None
+        for record in records_from_source(source, args.module, v2=args.v2, enrich=enrich):
             if args.pretty:
                 print(json.dumps(record, indent=2, ensure_ascii=False))
             else:
