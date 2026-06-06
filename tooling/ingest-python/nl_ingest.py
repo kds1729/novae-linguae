@@ -41,6 +41,12 @@ import json
 import sys
 from pathlib import Path
 
+# Higher-fidelity (v0.2) helpers live in the shared ingest-common dir: structured type ASTs and real
+# examples extracted from doctests. Imported only for --v2; the v0.1 path stays self-contained.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest-common"))
+from nl_examples import examples_from_docstring  # noqa: E402
+from nl_types import python_function_type  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # BLAKE3-256 (vendored, pure-Python). Faithful to the official reference
 # implementation (https://github.com/BLAKE3-team/BLAKE3-specs). Unkeyed hash only.
@@ -496,34 +502,35 @@ def _format_signature(func, typevars: set) -> str:
     return f"{prefix}({', '.join(param_types)}) -> {ret}"
 
 
-def build_record(func, module_name: str | None, module_typevars: set) -> dict:
-    """Build a Nova Lingua v0.1 function record (dict) from an ``ast`` function def node."""
-    fn_name = func.name
-
-    typevars = set(module_typevars)
-    # PEP 695 per-function type parameters (def f[T](...)).
-    for tp in getattr(func, "type_params", []) or []:
-        typevars.add(tp.name)
-
-    # name_hints: sanitized bare name, optionally also "<module>_<fn>".
+def _name_hints(fn_name: str, module_name: str | None) -> list:
+    """Sanitized bare name, optionally also '<module>_<fn>'."""
     hints = [_sanitize_hint(fn_name)]
     if module_name:
         combined = _sanitize_hint(f"{module_name}_{fn_name}")
         if combined not in hints:
             hints.append(combined)
+    return hints
 
-    # body_hash: BLAKE3 over the normalised source of the body statements (signature excluded),
-    # analogous to the Rust tool hashing the function's token stream. Not a Nova Lingua body AST.
+
+def _body_hash(func) -> str:
+    """BLAKE3 over the body's normalised source (signature excluded), like the Rust tool's token
+    stream. Not a Nova Lingua body AST."""
     body_src = "\n".join(ast.unparse(stmt) for stmt in func.body)
-    body_hash = format_hash("expr", blake3_256(body_src.encode("utf-8")))
+    return format_hash("expr", blake3_256(body_src.encode("utf-8")))
+
+
+def build_record(func, module_name: str | None, module_typevars: set) -> dict:
+    """Build a Nova Lingua v0.1 function record (string type, placeholder example) from a def node."""
+    typevars = set(module_typevars)
+    # PEP 695 per-function type parameters (def f[T](...)).
+    for tp in getattr(func, "type_params", []) or []:
+        typevars.add(tp.name)
 
     arity = len(_fixed_params(func))
-    example = {"args": [None] * arity, "result": None}
-
     record = {
         "schema_version": "0.1.0",
         "hash": "fn_" + "0" * 64,  # placeholder; recomputed below
-        "name_hints": hints,
+        "name_hints": _name_hints(func.name, module_name),
         "signature": {
             "type": _format_signature(func, typevars),
             "refinements": [],
@@ -531,12 +538,63 @@ def build_record(func, module_name: str | None, module_typevars: set) -> dict:
             "capabilities": [],
             "terminates": "unknown",
         },
-        "examples": [example],
+        "examples": [{"args": [None] * arity, "result": None}],
         "properties": [],
         "intent_tags": [],
         "derived_from": None,
         "supersedes": None,
-        "body_hash": body_hash,
+        "body_hash": _body_hash(func),
+    }
+    record["hash"] = content_hash(record, "fn", strip=("hash",))
+    return record
+
+
+def _fn_param_result_types(type_ast: dict):
+    """(param_types, result_type) from a (possibly forall-wrapped) fn type AST — value-encoding hints."""
+    t = type_ast["body"] if type_ast.get("kind") == "forall" else type_ast
+    if t.get("kind") == "fn":
+        return t.get("params", []), t.get("result")
+    return [], None
+
+
+def _has_float(node) -> bool:
+    """True if a value AST contains a float anywhere. Canonical serialization of floats (JCS /
+    ECMAScript Number-to-String) is a spec open question, so the hash of a float-containing record is
+    not yet well-defined across implementations — we skip such examples rather than emit an
+    unverifiable record."""
+    if isinstance(node, dict):
+        return node.get("kind") == "float" or any(_has_float(v) for v in node.values())
+    if isinstance(node, list):
+        return any(_has_float(x) for x in node)
+    return False
+
+
+def build_v2_record(func, module_name: str | None) -> dict | None:
+    """Build a v0.2 record: a STRUCTURED type AST (nl_types) + REAL examples from the function's
+    doctests (nl_examples). Returns None when there are no usable (float-free) doctest examples —
+    v0.2 requires >=1 — so the caller falls back to a v0.1 record."""
+    type_ast = python_function_type(func)
+    param_types, result_type = _fn_param_result_types(type_ast)
+    examples = examples_from_docstring(func.name, ast.get_docstring(func), param_types, result_type)
+    examples = [e for e in examples if not _has_float(e)]
+    if not examples:
+        return None
+    record = {
+        "schema_version": "0.2.0",
+        "hash": "fn_" + "0" * 64,
+        "name_hints": _name_hints(func.name, module_name),
+        "signature": {
+            "type": type_ast,
+            "refinements": [],
+            "effects": [],
+            "capabilities": [],
+            "terminates": "unknown",
+        },
+        "examples": examples,
+        "intent_tags": [],
+        "derived_from": None,
+        "supersedes": None,
+        "body_hash": _body_hash(func),
     }
     record["hash"] = content_hash(record, "fn", strip=("hash",))
     return record
@@ -592,11 +650,19 @@ def iter_functions(tree: ast.Module, include_private: bool):
             yield node
 
 
-def records_from_source(source: str, module_name: str | None, include_private: bool) -> list:
+def records_from_source(source: str, module_name: str | None, include_private: bool,
+                        v2: bool = False) -> list:
     tree = ast.parse(source)
     module_tvars = _module_typevars(tree)
-    return [build_record(fn, module_name, module_tvars)
-            for fn in iter_functions(tree, include_private)]
+    out = []
+    for fn in iter_functions(tree, include_private):
+        # In --v2 mode, emit a structured v0.2 record when the function has usable doctest examples;
+        # otherwise fall back to a v0.1 record so no function is dropped.
+        rec = build_v2_record(fn, module_name) if v2 else None
+        if rec is None:
+            rec = build_record(fn, module_name, module_tvars)
+        out.append(rec)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -615,6 +681,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="pretty-print each record (default: compact JSONL, one record per line)")
     p.add_argument("--include-private", action="store_true",
                    help="ingest every top-level function, including _-prefixed and non-__all__ ones")
+    p.add_argument("--v2", action="store_true",
+                   help="higher fidelity: emit v0.2 records (structured type AST + real examples from "
+                        "doctests) for functions that have usable doctests; v0.1 otherwise")
     return p
 
 
@@ -633,7 +702,7 @@ def main(argv=None) -> int:
             exit_code = 1
             continue
         try:
-            records = records_from_source(source, args.module, args.include_private)
+            records = records_from_source(source, args.module, args.include_private, v2=args.v2)
         except SyntaxError as e:
             print(f"nl-ingest-py: parsing {path}: {e}", file=sys.stderr)
             exit_code = 1

@@ -233,5 +233,45 @@ class TestCrossValidation(unittest.TestCase):
         self.assertEqual(out.stdout.strip(), rec["hash"], "multi-chunk hash disagreement with nl-validator")
 
 
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class TestV2Records(unittest.TestCase):
+    FR_V2 = SPEC_DIR / "function-record.v0.2.schema.json"
+    SRC = (
+        'def add(a: int, b: int) -> int:\n'
+        '    """Sum two integers.\n\n    >>> add(2, 3)\n    5\n    """\n'
+        '    return a + b\n\n'
+        'def noex(x: int) -> int:\n'
+        '    "No doctest here."\n'
+        '    return x\n'
+    )
+
+    def _run(self, *a):
+        return subprocess.run([str(VALIDATOR), *a], capture_output=True, text=True)
+
+    def test_v2_record_from_doctest_and_fallback(self):
+        recs = {r["name_hints"][0]: r for r in n.records_from_source(self.SRC, "m", False, v2=True)}
+
+        add = recs["add"]
+        self.assertEqual(add["schema_version"], "0.2.0")
+        self.assertEqual(add["signature"]["type"], {
+            "kind": "fn",
+            "params": [{"kind": "builtin", "name": "int"}, {"kind": "builtin", "name": "int"}],
+            "result": {"kind": "builtin", "name": "int"}})
+        self.assertEqual(add["examples"], [{
+            "args": [{"kind": "int", "value": 2}, {"kind": "int", "value": 3}],
+            "result": {"kind": "int", "value": 5}}])
+
+        # A function with no usable doctest falls back to a v0.1 record (never dropped).
+        self.assertEqual(recs["noex"]["schema_version"], "0.1.0")
+
+        # The v0.2 record validates against the v0.2 schema and its hash verifies.
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(add, f)
+            path = f.name
+        self.assertEqual(self._run("validate", str(self.FR_V2), path).returncode, 0,
+                         self._run("validate", str(self.FR_V2), path).stderr)
+        self.assertEqual(self._run("verify", path).returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

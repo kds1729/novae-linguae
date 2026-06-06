@@ -36,9 +36,29 @@ python3 nl_ingest.py --module mylib src/a.py src/b.py
 
 # Include private (_-prefixed / non-__all__) functions too
 python3 nl_ingest.py --include-private path/to/module.py
+
+# Higher fidelity: emit v0.2 records (structured type AST + real examples from doctests)
+python3 nl_ingest.py --v2 --module mylib path/to/module.py
 ```
 
 The file is executable (`chmod +x` already set), so `./nl_ingest.py …` also works.
+
+### `--v2` — structured, higher-fidelity records
+
+With `--v2`, a function that has **usable doctests** is emitted as a **v0.2** record:
+
+- `signature.type` is a structured **type AST** (via [`ingest-common/nl_types.py`](../ingest-common/nl_types.py))
+  instead of a flavored string; unannotated/`Any`/general-`Union`/user types become fresh
+  `forall`-bound type variables (no `unknown` builtin exists).
+- `examples` are **real** input/output pairs extracted from the function's Python **doctests** (via
+  [`ingest-common/nl_examples.py`](../ingest-common/nl_examples.py)), encoded as value ASTs — never
+  fabricated or executed.
+
+Functions without usable doctests fall back to a **v0.1** record (so none are dropped); a single run
+can emit a mix. Two current limits: examples whose values contain **floats** are skipped (canonical
+float serialization is a spec open question — `spec/canonical-serialization.md`), and `body_hash` is
+still the normalised-source hash, not a body AST. Every `--v2` record passes `nl-validator validate`
+against `function-record.v0.2.schema.json` and `nl-validator verify`.
 
 ### What counts as "public"
 
