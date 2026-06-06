@@ -214,7 +214,18 @@ target/release/nl-ingest --crate-name mycrate path/to/lib.rs
 
 # Ingest multiple files at once
 target/release/nl-ingest --crate-name mylib src/lib.rs src/utils.rs
+
+# Higher fidelity: emit v0.2 records (structured type AST + real examples from /// doc-tests)
+target/release/nl-ingest --v2 --crate-name mylib src/lib.rs
 ```
+
+With `--v2`, a function that has usable `///` doc-tests is emitted as a **v0.2** record: `signature.type`
+is a structured type-expression AST built from the `syn` types (unknown / `impl Trait` / user types
+become fresh `forall`-bound type variables — there is no `unknown` builtin), and `examples` are **real**
+value ASTs parsed from `assert_eq!(f(args), expected)` lines in the doc-tests (no code is executed).
+Functions without usable doc-tests fall back to a v0.1 record. Floats are canonicalized per JCS, so
+every record still passes `nl-validator validate` (against `function-record.v0.2.schema.json`) and
+`verify`. This is the Rust counterpart of `nl-ingest-py --v2` (which uses Python doctests).
 
 ### Post-ingestion workflow
 
