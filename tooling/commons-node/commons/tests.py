@@ -581,3 +581,96 @@ class NlBundleConformanceTests(TestCase):
         buf = io.BytesIO()
         write_bundle(buf, records, sign_seed="shared-seed")
         self.assertEqual(proc.stdout, buf.getvalue())   # same nl_crypto -> identical signed bytes
+
+
+# --- censorship-resistant bootstrap ---------------------------------------------------------------
+
+class BootstrapTests(TestCase):
+    SEED = "bootstrap-publisher"
+
+    def _did(self):
+        from .bundle import _crypto
+        return _crypto().signing_keypair_from_user_seed(self.SEED)[2]
+
+    def test_build_and_verify_trust_levels(self):
+        from .bootstrap import build_descriptor, verify_descriptor
+        doc = build_descriptor(["https://n1"], sign_seed=self.SEED)
+        self.assertEqual(verify_descriptor(doc)[0], "valid")
+        self.assertEqual(verify_descriptor(doc, trusted_dids=[doc["producer"]])[0], "valid")
+        self.assertEqual(verify_descriptor(doc, trusted_dids=["did:nova:" + "0" * 64])[0], "untrusted")
+
+    def test_resolve_falls_back_across_urls(self):
+        from .bootstrap import build_descriptor, resolve
+        good = json.dumps(build_descriptor(["https://n1"], sign_seed=self.SEED)).encode()
+
+        def fetch(url):
+            if url == "down":
+                raise OSError("unreachable")
+            return good
+
+        doc, status, producer, src = resolve(["down", "ok"], trusted_dids=[self._did()], fetch=fetch)
+        self.assertEqual((status, src), ("valid", "ok"))
+        self.assertEqual(producer, self._did())
+
+    def test_resolve_requires_trust_when_given(self):
+        from .bootstrap import BootstrapError, build_descriptor, resolve
+        good = json.dumps(build_descriptor(["https://n1"], sign_seed=self.SEED)).encode()
+        with self.assertRaises(BootstrapError):   # signed, but not by a trusted did
+            resolve(["ok"], trusted_dids=["did:nova:" + "0" * 64], fetch=lambda u: good)
+
+    def test_resolve_unsigned_is_advisory(self):
+        from .bootstrap import build_descriptor, resolve
+        doc = build_descriptor(["https://n1"])    # unsigned
+        _d, status, _p, _s = resolve(["x"], fetch=lambda u: json.dumps(doc).encode())
+        self.assertEqual(status, "unsigned")
+
+    def test_makebootstrap_writes_signed_descriptor(self):
+        from .bootstrap import verify_descriptor
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            path = f.name
+        call_command("makebootstrap", path, "--peer", "https://n1",
+                     "--bundle-hash", "blake2b:" + "0" * 64, "--bundle-url", "https://m/commons.nlb",
+                     "--sign-seed", self.SEED, stderr=io.StringIO())
+        doc = json.loads(Path(path).read_text())
+        self.assertEqual(doc["peers"], ["https://n1"])
+        self.assertEqual(doc["latest_bundle"]["urls"], ["https://m/commons.nlb"])
+        self.assertEqual(verify_descriptor(doc)[0], "valid")
+
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class BootstrapPullTests(TestCase):
+    SEED = "bootstrap-publisher"
+
+    def _did(self):
+        from .bundle import _crypto
+        return _crypto().signing_keypair_from_user_seed(self.SEED)[2]
+
+    def test_pull_digest_mismatch_rejected(self):
+        from .bootstrap import BootstrapError, build_descriptor, pull_bundle
+        from .bundle import write_bundle
+        bundle = io.BytesIO()
+        write_bundle(bundle, [_load("map.json")])
+        doc = build_descriptor([], latest_bundle={"hash": "blake2b:" + "0" * 64, "urls": ["mem"]})
+        with self.assertRaises(BootstrapError):       # descriptor hash != bundle digest
+            pull_bundle(doc, fetch=lambda u: bundle.getvalue())
+
+    def test_bootstrap_command_pull_via_file_urls(self):
+        # End-to-end with no network: descriptor + bundle on disk, fetched via file:// URLs.
+        from .bundle import write_bundle
+        rec = _load("map.json")
+        tmp = Path(tempfile.mkdtemp())
+        bundle_path = tmp / "commons.nlb"
+        manifest = write_bundle(str(bundle_path), [rec])
+        desc_path = tmp / "bootstrap.json"
+        call_command("makebootstrap", str(desc_path), "--peer", "https://n1",
+                     "--bundle-hash", manifest["bundle_digest"],
+                     "--bundle-url", f"file://{bundle_path}", "--sign-seed", self.SEED,
+                     stderr=io.StringIO())
+
+        Record.objects.all().delete()                 # simulate a stranded, empty node
+        out = io.StringIO()
+        call_command("bootstrap", "--from", f"file://{desc_path}", "--trust", self._did(),
+                     "--pull", stdout=out)
+        self.assertIn("provenance=valid", out.getvalue())
+        self.assertIn("stored=1", out.getvalue())
+        self.assertTrue(Record.objects.filter(hash=rec["hash"]).exists())

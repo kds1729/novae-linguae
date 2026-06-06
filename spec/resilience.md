@@ -42,7 +42,7 @@ not survival.
 | Federation via `sync` | **have** | nodes mirror each other; no node is authoritative |
 | Seed bundles | **have** (node) | offline / out-of-band redistribution; cold-start & disaster recovery |
 | Standard `.nlb` bundle format (`nlb/1`) | **have** (format + node export/import) | any project publishes a commons-ready release artifact |
-| Pluggable censorship-resistant bootstrap | proposed | find live data when the usual entry points are blocked |
+| Pluggable censorship-resistant bootstrap | **have** (signed HTTPS channel) | find live data when the usual entry points are blocked |
 
 ### Seed bundles
 
@@ -112,6 +112,16 @@ channels**, so blocking one does not sever bootstrap:
 What gets published is tiny and pointer-only: the **hash of the latest seed bundle**, a **signed list of
 live node endpoints**, or a periodic **checkpoint**. Whatever a stranded node fetches is verified by
 hash, so every channel is safe to trust-but-verify.
+
+**Implemented: the signed-HTTPS channel + the pluggable resolver.** A **bootstrap descriptor**
+(`nlb-bootstrap/1`: `{peers[], latest_bundle:{hash, urls[]}, producer, signature}`) is published with
+`makebootstrap` (signed by a `did:nova`, reusing the manifest signer) and resolved with `bootstrap`
+([`commons/bootstrap.py`](../tooling/commons-node/commons/bootstrap.py)): it fetches the descriptor
+from one or more URLs (trying each in turn — `http(s)://` or `file://`), verifies the signature
+(`--trust <did>` requires a trusted signer), and with `--pull` fetches the latest bundle — checking
+its digest matches the signed descriptor — and ingests it through the normal verify-then-store gate.
+The fetch is one injectable seam: **Nostr / IPNS / a blockchain anchor / DNS `TXT`** plug in by
+supplying a different fetch + URL scheme, with no change to the verify/ingest path.
 
 **On blockchains specifically.** A blockchain is the *wrong primitive for the substrate* and is rejected
 as such ([`commons.md`](commons.md)): the commons needs no global consensus or total ordering, and

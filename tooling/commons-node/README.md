@@ -132,6 +132,31 @@ manifest, which carries `bundle_digest`). This is **advisory provenance** — re
 is still the admission gate — reported by `loadbundle` as `signed by <did> (verified)` and enforceable
 with `--require-signed`.
 
+## Censorship-resistant bootstrap
+
+When a node can't reach the usual peers, it discovers *where the data is* from a small **signed
+bootstrap descriptor** published to a "dead-drop" (see [`spec/resilience.md`](../../spec/resilience.md)).
+The first channel is a signed descriptor fetched over HTTPS (or `file://`); the resolver is pluggable.
+
+```bash
+# Publish a signed descriptor pointing at peers + the latest seed bundle (host it at a well-known URL):
+python3 manage.py exportbundle commons.nlb --sign-seed "$SEED"     # note the printed digest=blake2b:…
+python3 manage.py makebootstrap bootstrap.json \
+    --peer https://node-a.example.org \
+    --bundle-hash blake2b:… --bundle-url https://mirror.example.org/commons.nlb \
+    --sign-seed "$SEED"
+
+# A stranded node recovers the commons from it (trust-but-verify), then pulls + ingests the bundle:
+python3 manage.py bootstrap --from https://a.example.org/.well-known/nlb-bootstrap.json \
+    --trust did:nova:… --pull
+```
+
+`--from` URLs are tried in order (fallback). `--trust` requires a valid signature by a trusted
+`did:nova`; otherwise provenance is reported but advisory. `--pull` verifies the fetched bundle's
+digest against the signed descriptor, then ingests through the normal verify-then-store gate — so the
+whole chain is verified end to end. A future Nostr / IPNS / blockchain-anchor / DNS channel plugs into
+the same resolver by supplying a different fetch.
+
 ## Configuration (env vars)
 
 | Var | Default | Purpose |
