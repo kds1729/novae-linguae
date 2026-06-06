@@ -43,6 +43,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingest-common"))
 from nl_core import build_record, build_v2_record  # noqa: E402
 from nl_effects import effects_from_tokens, terminates_from_tokens  # noqa: E402
+from nl_body import body_ast_from_ts  # noqa: E402
 from nl_types import VarCtx, apply, builtin, fn, quantify, tuple_, var  # noqa: E402
 from nl_values import ValueEncodeError, to_value_ast  # noqa: E402
 
@@ -537,7 +538,8 @@ def _build_ts_record(name, typevars, params, rettype, slice_text, module_name, v
         type_ast, param_types, result_type = ts_function_type(typevars, params, rettype)
         examples = ts_examples(name, examples_map.get(name, []), param_types, result_type)
         if examples:
-            return build_v2_record(name, type_ast, examples, slice_text, module_name=module_name,
+            body_repr = body_ast_from_ts(name, slice_text) or slice_text
+            return build_v2_record(name, type_ast, examples, body_repr, module_name=module_name,
                                    effects=effects_from_tokens(slice_text, "ts"),
                                    terminates=terminates_from_tokens(name, slice_text, "ts"))
     return build_record(name, _make_type(typevars, params, rettype),

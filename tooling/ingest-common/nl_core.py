@@ -396,7 +396,11 @@ def build_v2_record(name: str, type_ast: dict, examples: list, body_text: str,
         "intent_tags": [],
         "derived_from": None,
         "supersedes": None,
-        "body_hash": format_hash("expr", blake3_256(body_text.encode("utf-8"))),
+        # ``body_text`` may be a synthetic source string (hash its UTF-8 bytes — IDENTICAL to before)
+        # or a real body-expression AST dict (hash its canonical JCS form — a resolvable expr_ address).
+        "body_hash": (format_hash("expr", blake3_256(canonicalize(body_text)))
+                      if isinstance(body_text, dict)
+                      else format_hash("expr", blake3_256(body_text.encode("utf-8")))),
     }
     record["hash"] = content_hash(record, "fn", strip=("hash",))
     return record

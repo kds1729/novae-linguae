@@ -44,6 +44,7 @@ from pathlib import Path
 # Higher-fidelity (v0.2) helpers live in the shared ingest-common dir: structured type ASTs and real
 # examples extracted from doctests. Imported only for --v2; the v0.1 path stays self-contained.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest-common"))
+from nl_body import body_ast_from_py  # noqa: E402
 from nl_examples import examples_from_docstring  # noqa: E402
 from nl_effects import effects_from_py, terminates_from_py  # noqa: E402
 from nl_predicates import PredicateError, predicate_from_py  # noqa: E402
@@ -545,8 +546,12 @@ def _name_hints(fn_name: str, module_name: str | None) -> list:
 
 
 def _body_hash(func) -> str:
-    """BLAKE3 over the body's normalised source (signature excluded), like the Rust tool's token
-    stream. Not a Nova Lingua body AST."""
+    """The function's ``body_hash``: the canonical content-address of a real Nova Lingua body AST
+    when the body is in the v1 subset (single result expression of var/lit/app/field), else the
+    synthetic BLAKE3 over the body's normalised source — byte-identical to before for the fallback."""
+    body_ast = body_ast_from_py(func)
+    if body_ast is not None:
+        return format_hash("expr", blake3_256(canonicalize(body_ast)))
     body_src = "\n".join(ast.unparse(stmt) for stmt in func.body)
     return format_hash("expr", blake3_256(body_src.encode("utf-8")))
 

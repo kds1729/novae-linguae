@@ -908,6 +908,83 @@ fn infer_terminates(func: &syn::ItemFn) -> &'static str {
     }
 }
 
+// --- v0.2: pragmatic body-expression AST (spec/body-expression.schema.json) --------------------
+// v1 SUBSET: only a single result expression of var/lit/app/field is translated; anything else
+// (blocks, let, if/match, method calls, ...) returns None and the caller keeps the synthetic
+// source-token hash — byte-identical to before. Parameters are free `var`s (schema-sanctioned).
+// Operators map to `app { fn: var(op), args }`, reusing the predicate operator vocabulary.
+
+/// A body-expression `app` over a builtin operator `var`.
+fn body_op_app(op: &str, args: Vec<Value>) -> Option<Value> {
+    Some(json!({ "kind": "app", "fn": p_var(op)?, "args": args }))
+}
+
+fn expr_to_body(expr: &syn::Expr) -> Option<Value> {
+    match expr {
+        syn::Expr::Paren(p) => expr_to_body(&p.expr),
+        syn::Expr::Group(g) => expr_to_body(&g.expr),
+        syn::Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
+            p_var(&p.path.segments[0].ident.to_string())
+        }
+        syn::Expr::Lit(_) => value_ast(expr, None).map(|v| json!({ "kind": "lit", "value": v })),
+        syn::Expr::Unary(u) => match u.op {
+            // `-<literal>` folds into the literal; otherwise neg(<expr>) / not(<expr>).
+            syn::UnOp::Neg(_) if matches!(&*u.expr, syn::Expr::Lit(_)) => {
+                value_ast(expr, None).map(|v| json!({ "kind": "lit", "value": v }))
+            }
+            syn::UnOp::Neg(_) => body_op_app("neg", vec![expr_to_body(&u.expr)?]),
+            syn::UnOp::Not(_) => body_op_app("not", vec![expr_to_body(&u.expr)?]),
+            _ => None,
+        },
+        syn::Expr::Binary(b) => {
+            let op = binop_name(&b.op)?;
+            body_op_app(op, vec![expr_to_body(&b.left)?, expr_to_body(&b.right)?])
+        }
+        syn::Expr::Call(c) => {
+            let fnv = match &*c.func {
+                syn::Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
+                    p_var(&p.path.segments[0].ident.to_string())?
+                }
+                _ => return None,
+            };
+            let mut args = Vec::new();
+            for a in &c.args {
+                args.push(expr_to_body(a)?);
+            }
+            Some(json!({ "kind": "app", "fn": fnv, "args": args }))
+        }
+        syn::Expr::Field(f) => {
+            if let syn::Member::Named(id) = &f.member {
+                let name = id.to_string();
+                let ok = name.chars().next().map(|c| c.is_ascii_lowercase()).unwrap_or(false)
+                    && name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric());
+                if !ok {
+                    return None;
+                }
+                Some(json!({ "kind": "field", "record": expr_to_body(&f.base)?, "name": name }))
+            } else {
+                None // tuple index (`.0`) has no field name
+            }
+        }
+        _ => None,
+    }
+}
+
+/// A body AST for an expression-bodied fn — a block with a single trailing expression (or a single
+/// `return <expr>;`). None for anything else.
+fn body_ast(func: &syn::ItemFn) -> Option<Value> {
+    let stmts = &func.block.stmts;
+    if stmts.len() != 1 {
+        return None;
+    }
+    let expr = match &stmts[0] {
+        syn::Stmt::Expr(e, None) => e,
+        syn::Stmt::Expr(syn::Expr::Return(r), Some(_)) => r.expr.as_deref()?,
+        _ => return None,
+    };
+    expr_to_body(expr)
+}
+
 fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Option<Value>> {
     let fn_name = func.sig.ident.to_string();
     let type_ast = type_ast_from_sig(&func.sig);
@@ -921,8 +998,18 @@ fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Optio
     if let Some(krate) = crate_name {
         name_hints.push(json!(format!("{}_{}", krate, fn_name)));
     }
-    let body_tokens = func.block.to_token_stream().to_string();
-    let body_hash = format_hash("expr", &blake3_hash(body_tokens.as_bytes()));
+    // A real body-expression AST (canonical JCS hash, a resolvable expr_ address) when the body is
+    // in the v1 subset; otherwise the synthetic source-token hash (byte-identical to before).
+    let body_hash = match body_ast(func) {
+        Some(b) => {
+            let canon = canonicalize(&b).context("canonicalising body AST")?;
+            format_hash("expr", &blake3_hash(&canon))
+        }
+        None => {
+            let body_tokens = func.block.to_token_stream().to_string();
+            format_hash("expr", &blake3_hash(body_tokens.as_bytes()))
+        }
+    };
 
     let mut record = json!({
         "schema_version": "0.2.0",
@@ -1162,6 +1249,48 @@ mod tests {
         // A call to a non-total helper -> unknown (we can't prove the callee halts).
         let calls = item_fn("pub fn g(n: u64) -> u64 { helper(n) }");
         assert_eq!(infer_terminates(&calls), "unknown");
+    }
+
+    #[test]
+    fn body_ast_for_expression_body_round_trips() {
+        // `n * 2` is a single result expression -> a real body AST: app(var "mul", [var n, lit 2]).
+        let f = item_fn(
+            "/// ```\n/// assert_eq!(double(5), 10);\n/// ```\npub fn double(n: u64) -> u64 { n * 2 }",
+        );
+        let b = body_ast(&f).expect("an in-subset body");
+        assert_eq!(
+            b,
+            json!({ "kind": "app", "fn": { "kind": "var", "name": "mul" },
+                    "args": [ { "kind": "var", "name": "n" },
+                              { "kind": "lit", "value": { "kind": "int", "value": 2 } } ] })
+        );
+
+        // The body AST validates against the body-expression schema, and the record's body_hash is
+        // exactly the validator's content-address for that body artifact (a resolvable expr_ address).
+        let spec = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec");
+        let body_schema: Value = serde_json::from_str(
+            &std::fs::read_to_string(spec.join("body-expression.schema.json")).unwrap(),
+        )
+        .unwrap();
+        nl_validator::validate_with_refs(&body_schema, &b, &spec).expect("body AST validates");
+
+        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let body_addr = nl_validator::hash_artifact_with_kind(&b, nl_validator::ArtifactKind::BodyExpression)
+            .unwrap();
+        assert_eq!(rec["body_hash"], json!(body_addr));
+    }
+
+    #[test]
+    fn non_subset_body_falls_back_to_synthetic_hash() {
+        // A body with a local binding is out of subset -> body_ast None, synthetic hash unchanged.
+        let f = item_fn(
+            "/// ```\n/// assert_eq!(g(5), 5);\n/// ```\npub fn g(n: u64) -> u64 { let y = n; y }",
+        );
+        assert!(body_ast(&f).is_none());
+        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let body_tokens = f.block.to_token_stream().to_string();
+        let synthetic = format_hash("expr", &blake3_hash(body_tokens.as_bytes()));
+        assert_eq!(rec["body_hash"], json!(synthetic));
     }
 
     #[test]
