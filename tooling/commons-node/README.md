@@ -30,8 +30,11 @@ gate — mechanical, not editorial (principle 7). Build it first: `cd ../validat
 
 ```bash
 cd tooling/commons-node
-python3 manage.py migrate          # creates ./db.sqlite3 (gitignored)
-python3 manage.py runserver        # http://127.0.0.1:8000/
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+python manage.py migrate           # creates ./db.sqlite3 (gitignored)
+python manage.py runserver         # http://127.0.0.1:8000/
 
 # publish a record, then resolve it
 curl -X POST http://127.0.0.1:8000/v0/records \

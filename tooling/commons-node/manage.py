@@ -11,8 +11,8 @@ def main():
         from django.core.management import execute_from_command_line
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
-            "Django is not installed. Install it (e.g. `pip install --user django`) "
-            "or activate the project's virtualenv."
+            "Django is not installed. Create a virtualenv and install requirements: "
+            "`python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`"
         ) from exc
     execute_from_command_line(sys.argv)
 
