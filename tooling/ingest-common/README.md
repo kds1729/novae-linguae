@@ -13,7 +13,16 @@ adapters. It is **stdlib-only** (zero third-party dependencies) and provides:
 - **Bracket-aware string helpers** (`split_top`, `count_top`, `find_matching`, `sanitize_hint`)
   used by the per-language parsers.
 
-Two more modules support **higher-fidelity, structured-AST ingestion** (toward v0.2 records):
+Three more modules support **higher-fidelity, structured-AST ingestion** (toward v0.2 records):
+
+- **`nl_types.py`** — `python_function_type(func_ast)` maps a Python `def`'s annotations to the
+  structured Nova Lingua **type-expression AST** ([`spec/type-expression.schema.json`](../../spec/type-expression.schema.json))
+  used for `signature.type`. It also exposes the language-neutral builder (node constructors, a
+  fresh/named type-variable allocator, `quantify` for rank-1 forall wrapping) that other adapters'
+  front-ends reuse. Since the builtin vocabulary has **no "unknown"**, anything not faithfully
+  representable — unannotated params, `Any`, a general `Union[A, B]`, user classes, `*args` — becomes
+  a **fresh `forall`-bound type variable** (honestly parametric, never a fabricated concrete type).
+  Produced ASTs pass `nl-validator check-type` and `validate` against the schema.
 
 - **`nl_values.py`** — `to_value_ast(py_value, expected=None)` maps a Python value to the structured
   Nova Lingua **value-expression AST** ([`spec/value-expression.schema.json`](../../spec/value-expression.schema.json))
