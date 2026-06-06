@@ -13,9 +13,7 @@ import sys
 
 from django.core.management.base import BaseCommand
 
-from commons import verify as V
-from commons.ingest import create_record
-from commons.models import Record
+from commons.ingest import ingest_records
 
 
 class Command(BaseCommand):
@@ -27,33 +25,25 @@ class Command(BaseCommand):
         parser.add_argument("--quiet", action="store_true", help="do not print per-record rejects")
 
     def handle(self, *args, **options):
+        quiet = options["quiet"]
         stream = sys.stdin if options["file"] == "-" else open(options["file"], encoding="utf-8")
-        stored = skipped = failed = 0
+        parsed, malformed = [], 0
         try:
             for line in stream:
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    raw = json.loads(line)
+                    parsed.append(json.loads(line))
                 except ValueError:
-                    failed += 1
-                    if not options["quiet"]:
+                    malformed += 1
+                    if not quiet:
                         self.stderr.write("reject malformed_json")
-                    continue
-                try:
-                    kind, version = V.verify_record(raw)
-                except V.VerifyError as exc:
-                    failed += 1
-                    if not options["quiet"]:
-                        self.stderr.write(f"reject {exc.code}: {exc.detail[:100]}")
-                    continue
-                if Record.objects.filter(hash=raw["hash"]).exists():
-                    skipped += 1
-                    continue
-                create_record(raw, kind, version)
-                stored += 1
         finally:
             if stream is not sys.stdin:
                 stream.close()
+
+        on_reject = None if quiet else (lambda c, d: self.stderr.write(f"reject {c}: {d[:100]}"))
+        stored, skipped, failed = ingest_records(parsed, on_reject=on_reject)
+        failed += malformed
         self.stdout.write(f"stored={stored} skipped={skipped} failed={failed}")

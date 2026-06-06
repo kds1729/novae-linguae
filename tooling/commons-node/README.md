@@ -103,6 +103,26 @@ python3 manage.py embedrecords          # embed rows missing the current model's
 python3 manage.py embedrecords --all    # re-embed everything
 ```
 
+## Seed bundles (`.nlb`)
+
+A portable, self-verifying archive of records for out-of-band distribution — cold-start, disaster
+recovery, or shipping a project's records as a release artifact (see
+[`spec/resilience.md`](../../spec/resilience.md)). An `.nlb` is a deterministic gzipped tar of
+`manifest.json` + `records.jsonl`.
+
+```bash
+python3 manage.py exportbundle commons.nlb                          # all records
+python3 manage.py exportbundle fns.nlb --filter '{"kind":"function-record"}'
+python3 manage.py exportbundle - --source-repo https://github.com/org/lib > lib.nlb   # to stdout
+
+python3 manage.py loadbundle commons.nlb        # verify-then-store each record (same gate as publish)
+curl -s https://mirror.example.org/lib.nlb | python3 manage.py loadbundle -
+```
+
+The producer is **untrusted**: `loadbundle` re-verifies every record by hash (and signature), so a
+bundle can be withheld but not poisoned. Bundles are deterministic (same records → identical bytes),
+and portable across backends — records exported from a Postgres node restore into a fresh SQLite node.
+
 ## Configuration (env vars)
 
 | Var | Default | Purpose |

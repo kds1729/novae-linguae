@@ -22,3 +22,24 @@ def create_record(raw, kind, version):
     )
     store_vector(row.hash, vector)   # syncs the pgvector ANN column on Postgres; no-op on SQLite
     return row
+
+
+def ingest_records(records, on_reject=None):
+    """Verify-then-store an iterable of raw record dicts (the shared admission path for loadrecords
+    and loadbundle). Idempotent by hash. Returns (stored, skipped, failed). on_reject(code, detail)
+    is invoked for each record that fails verification (for CLI logging)."""
+    stored = skipped = failed = 0
+    for raw in records:
+        try:
+            kind, version = V.verify_record(raw)
+        except V.VerifyError as exc:
+            failed += 1
+            if on_reject:
+                on_reject(exc.code, exc.detail)
+            continue
+        if Record.objects.filter(hash=raw.get("hash")).exists():
+            skipped += 1
+            continue
+        create_record(raw, kind, version)
+        stored += 1
+    return stored, skipped, failed

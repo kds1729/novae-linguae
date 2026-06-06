@@ -379,3 +379,100 @@ class PgVectorIndexTests(TestCase):
         results, _ = idx.search(unit(0), 2, {}, "m")
         self.assertEqual(results[0]["hash"], "fn_" + "a" * 64)
         self.assertAlmostEqual(results[0]["score"], 1.0, places=5)
+
+
+# --- .nlb seed bundles ----------------------------------------------------------------------------
+
+_R1 = {"hash": "fn_" + "a" * 64, "schema_version": "0.1.0", "name_hints": ["a"]}
+_R2 = {"hash": "fn_" + "b" * 64, "schema_version": "0.2.0", "name_hints": ["b"]}
+
+
+def _frankenbundle(manifest_dict, record_dicts):
+    """Build a raw .nlb with an arbitrary manifest + records (for tampering tests)."""
+    import gzip
+    import tarfile
+
+    from .bundle import MANIFEST_NAME, RECORDS_NAME
+    mb = (json.dumps(manifest_dict) + "\n").encode()
+    rb = ("\n".join(json.dumps(r) for r in record_dicts) + ("\n" if record_dicts else "")).encode()
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as t:
+        for name, data in [(MANIFEST_NAME, mb), (RECORDS_NAME, rb)]:
+            ti = tarfile.TarInfo(name)
+            ti.size = len(data)
+            t.addfile(ti, io.BytesIO(data))
+    return gzip.compress(buf.getvalue())
+
+
+class BundleFormatTests(TestCase):
+    def test_round_trip(self):
+        from .bundle import read_bundle, write_bundle
+        buf = io.BytesIO()
+        write_bundle(buf, [_R1, _R2])
+        manifest, records = read_bundle(io.BytesIO(buf.getvalue()))
+        self.assertEqual(manifest["count"], 2)
+        self.assertEqual(sorted(r["hash"] for r in records), sorted([_R1["hash"], _R2["hash"]]))
+        self.assertEqual({r["hash"]: r for r in records}[_R1["hash"]], _R1)
+
+    def test_deterministic_and_order_independent(self):
+        from .bundle import write_bundle
+        b1, b2 = io.BytesIO(), io.BytesIO()
+        write_bundle(b1, [_R2, _R1])     # reversed input
+        write_bundle(b2, [_R1, _R2])
+        self.assertEqual(b1.getvalue(), b2.getvalue())
+
+    def test_empty_bundle(self):
+        from .bundle import read_bundle, write_bundle
+        buf = io.BytesIO()
+        write_bundle(buf, [])
+        manifest, records = read_bundle(io.BytesIO(buf.getvalue()))
+        self.assertEqual((manifest["count"], records), (0, []))
+
+    def test_digest_mismatch_raises(self):
+        from .bundle import BundleError, bundle_digest, read_bundle
+        # manifest claims the digest of {R1,R2} but the payload holds only R1.
+        bad = _frankenbundle(
+            {"format_version": "nlb/1", "count": 2,
+             "bundle_digest": bundle_digest([_R1["hash"], _R2["hash"]])},
+            [_R1])
+        with self.assertRaises(BundleError):
+            read_bundle(io.BytesIO(bad))
+
+    def test_not_a_bundle_raises(self):
+        from .bundle import BundleError, read_bundle
+        with self.assertRaises(BundleError):
+            read_bundle(io.BytesIO(b"not a gzip"))
+
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class BundleCommandTests(TestCase):
+    def test_export_then_load_round_trip(self):
+        from .bundle import write_bundle  # noqa: F401 (ensures module imports under the gate)
+        rec = _load("map.json")
+        Client().post("/v0/records", data=json.dumps(rec), content_type="application/json")
+        self.assertTrue(Record.objects.filter(hash=rec["hash"]).exists())
+
+        with tempfile.NamedTemporaryFile(suffix=".nlb", delete=False) as f:
+            path = f.name
+        call_command("exportbundle", path)
+
+        Record.objects.all().delete()                 # simulate a fresh node
+        out = io.StringIO()
+        call_command("loadbundle", path, stdout=out)
+        self.assertIn("stored=1", out.getvalue())
+        self.assertTrue(Record.objects.filter(hash=rec["hash"]).exists())
+
+    def test_tampered_record_in_bundle_rejected(self):
+        tampered = _load("map.json")
+        tampered["name_hints"] = tampered.get("name_hints", []) + ["x"]   # hash no longer matches
+        with tempfile.NamedTemporaryFile(suffix=".nlb", delete=False) as f:
+            path = f.name
+        from .bundle import write_bundle
+        with open(path, "wb") as fh:
+            write_bundle(fh, [tampered])              # packaging does not verify; ingest must
+
+        out = io.StringIO()
+        call_command("loadbundle", path, "--quiet", stdout=out)
+        self.assertIn("stored=0", out.getvalue())
+        self.assertIn("failed=1", out.getvalue())
+        self.assertFalse(Record.objects.filter(hash=tampered["hash"]).exists())

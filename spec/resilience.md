@@ -40,8 +40,8 @@ not survival.
 |---|---|---|
 | Content-addressed verification | **have** | every record/message verified locally; supplier untrusted |
 | Federation via `sync` | **have** | nodes mirror each other; no node is authoritative |
-| Seed bundles | proposed | offline / out-of-band redistribution; cold-start & disaster recovery |
-| Standard `.nlb` bundle format | proposed | any project publishes a commons-ready release artifact |
+| Seed bundles | **have** (node) | offline / out-of-band redistribution; cold-start & disaster recovery |
+| Standard `.nlb` bundle format (`nlb/1`) | **have** (format + node export/import) | any project publishes a commons-ready release artifact |
 | Pluggable censorship-resistant bootstrap | proposed | find live data when the usual entry points are blocked |
 
 ### Seed bundles
@@ -49,12 +49,13 @@ not survival.
 A **seed bundle** is a portable, self-verifying archive of records. Because verification is intrinsic,
 the distributor is untrusted: a bundle can be *withheld* but not *poisoned*.
 
-- **Import already exists**: `loadrecords` ingests a JSONL stream and verifies every record on the way
-  in (the same admission gate as `POST /v0/records`).
-- **To build**: an `exportbundle` command (dump all / filtered / incremental-since-cursor records to a
-  bundle) — `sync` already enumerates the hash set, so incremental bundles are straightforward.
+- **Implemented (node)**: `exportbundle <out.nlb> [--filter <json>]` dumps records to a bundle;
+  `loadbundle <in.nlb>` ingests one through the same verify-then-store gate as `POST /v0/records`
+  (`commons/bundle.py` + the two management commands). Filtered exports reuse the typed `query`
+  language; incremental-since-cursor is a straightforward follow-on (`sync` already enumerates hashes).
 - **Distribute over anything**: HTTP mirrors, IPFS, BitTorrent, a git repo, email, physical media. If
-  Arca is down or blocked, a node bootstraps from a bundle obtained by any means.
+  Arca is down or blocked, a node bootstraps from a bundle obtained by any means — verified records
+  exported from a Postgres node restore cleanly into a fresh zero-dependency SQLite node.
 
 ### The standard commons-bundle format (`.nlb`)
 
@@ -63,13 +64,20 @@ central crawler lifting libraries — **any open-source project ships its own co
 release artifact**, the way it already ships wheels, crates, or jars. This is the decentralized answer
 to "bootstrapping the commons."
 
-A `.nlb` ("Nova Lingua Bundle") is a container with:
+A `.nlb` ("Nova Lingua Bundle") is a **gzipped tar** (format id `nlb/1`, implemented in
+`tooling/commons-node/commons/bundle.py`) containing exactly:
 
 ```
-records.jsonl     # the content-addressed records (exactly what the nl-ingest-* adapters emit)
-manifest.json     # { format_version, producer (did:nova), signature-over-manifest,
-                  #   source: { repo, release_tag }, schema_versions[], record_hashes[], count }
+records.jsonl     # the content-addressed records (exactly what the nl-ingest-* adapters emit),
+                  #   one per line, sorted by hash
+manifest.json     # { format_version, count, schema_versions[], bundle_digest, source?, producer? }
 ```
+
+It is **deterministic** — the same record set always produces identical bytes (sorted records, sorted
+manifest keys, fixed tar mtime, gzip mtime=0) — so bundles dedupe and diff cleanly. `bundle_digest`
+(a blake2b fingerprint of the record set) is a cheap whole-payload integrity pre-check; it is not the
+security boundary (per-record hash verification on ingest is). Manifest *signing* (`producer` +
+signature over the manifest, advisory provenance only) is a planned addition.
 
 Properties (all of which fall out of the existing design):
 
