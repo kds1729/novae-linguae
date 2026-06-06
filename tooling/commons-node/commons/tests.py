@@ -476,3 +476,24 @@ class BundleCommandTests(TestCase):
         self.assertIn("stored=0", out.getvalue())
         self.assertIn("failed=1", out.getvalue())
         self.assertFalse(Record.objects.filter(hash=tampered["hash"]).exists())
+
+
+class NlBundleConformanceTests(TestCase):
+    def test_standalone_packager_is_byte_identical(self):
+        # The standalone tooling/nl-bundle/nl_bundle.py must produce the SAME bytes as the node's
+        # commons/bundle.py for the same records (the cross-implementation guarantee).
+        import subprocess
+        import sys
+
+        from .bundle import write_bundle
+        script = Path(settings.COMMONS_SPEC_DIR).parent / "tooling" / "nl-bundle" / "nl_bundle.py"
+        self.assertTrue(script.exists(), script)
+
+        records = [_R1, _R2]
+        jsonl = ("\n".join(json.dumps(r) for r in records)).encode()
+        proc = subprocess.run([sys.executable, str(script)], input=jsonl, capture_output=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        buf = io.BytesIO()
+        write_bundle(buf, records)
+        self.assertEqual(proc.stdout, buf.getvalue())
