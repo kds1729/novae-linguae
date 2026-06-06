@@ -55,9 +55,9 @@ With `--v2`, a function that has **usable doctests** is emitted as a **v0.2** re
   fabricated or executed.
 
 Functions without usable doctests fall back to a **v0.1** record (so none are dropped); a single run
-can emit a mix. Two current limits: examples whose values contain **floats** are skipped (canonical
-float serialization is a spec open question — `spec/canonical-serialization.md`), and `body_hash` is
-still the normalised-source hash, not a body AST. Every `--v2` record passes `nl-validator validate`
+can emit a mix. Float example values are canonicalized per JCS / ECMAScript Number-to-String (matching
+the Rust validator, pinned by `spec/conformance/` canonicalization vectors). Current limit: `body_hash`
+is still the normalised-source hash, not a body AST. Every `--v2` record passes `nl-validator validate`
 against `function-record.v0.2.schema.json` and `nl-validator verify`.
 
 ### What counts as "public"

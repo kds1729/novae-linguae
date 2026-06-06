@@ -852,5 +852,20 @@
         }
       }
     ]
+  },
+  "canonicalization_vectors": {
+    "description": "Canonicalize input_inline (JCS / RFC 8785) and compare the UTF-8 bytes to expected_canonical exactly. Exercises ECMAScript Number-to-String float serialization (the #1 cross-implementation drift source per the spec) plus key ordering and scalar forms.",
+    "vectors": [
+      { "name": "float-basic", "input_inline": { "v": 2.8 }, "expected_canonical": "{\"v\":2.8}" },
+      { "name": "float-int-valued", "input_inline": { "v": 100.0 }, "expected_canonical": "{\"v\":100}" },
+      { "name": "float-neg-zero", "input_inline": { "v": -0.0 }, "expected_canonical": "{\"v\":0}" },
+      { "name": "float-exp-large", "input_inline": { "v": 1e+21 }, "expected_canonical": "{\"v\":1e+21}" },
+      { "name": "float-exp-small", "input_inline": { "v": 1e-7 }, "expected_canonical": "{\"v\":1e-7}" },
+      { "name": "float-fixed-small", "input_inline": { "v": 1e-6 }, "expected_canonical": "{\"v\":0.000001}" },
+      { "name": "float-sci", "input_inline": { "v": 6.022e+23 }, "expected_canonical": "{\"v\":6.022e+23}" },
+      { "name": "float-list", "input_inline": { "xs": [0.1, 0.2, 0.3, 1.5] }, "expected_canonical": "{\"xs\":[0.1,0.2,0.3,1.5]}" },
+      { "name": "float-and-keysort", "input_inline": { "b": 1e+21, "a": 2.8, "c": 1e-7 }, "expected_canonical": "{\"a\":2.8,\"b\":1e+21,\"c\":1e-7}" },
+      { "name": "mixed-scalars", "input_inline": { "n": 5, "s": "hi", "t": true, "u": null, "f": 0.5 }, "expected_canonical": "{\"f\":0.5,\"n\":5,\"s\":\"hi\",\"t\":true,\"u\":null}" }
+    ]
   }
 }

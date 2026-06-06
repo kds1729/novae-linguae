@@ -32,6 +32,7 @@ Read whichever is present.
 | `signature_verification_vectors` | `valid` inputs must verify; `invalid` must not. |
 | `type_wellformedness_vectors` | `well-formed` inputs must pass the type checker; `ill-formed` must fail. |
 | `schema_validation_vectors` | `valid` instances must validate against the named schema (JSON Schema draft 2020-12); `invalid` must fail. |
+| `canonicalization_vectors` | JCS-canonicalize `input_inline`; the UTF-8 bytes must equal `expected_canonical` exactly. Pins ECMAScript Number-to-String float serialization (the #1 drift source) plus key ordering and scalar forms. |
 
 ## Why both canonical bytes *and* hashes
 

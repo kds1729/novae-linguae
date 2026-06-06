@@ -260,6 +260,39 @@ def _jcs_string(s: str) -> str:
     return json.dumps(s, ensure_ascii=False)
 
 
+def _es_number(x: float) -> str:
+    """A finite double as the canonical JCS decimal: ECMAScript ``Number::toString`` conditioned per
+    RFC 8785 §3.2.2.3 — matches the reference Rust validator (serde_jcs) byte-for-byte (pinned by the
+    conformance tests). Needed for v0.2 example values that are floats."""
+    if x != x or x == float("inf") or x == float("-inf"):
+        raise ValueError("NaN/Infinity have no JCS representation")
+    if x == 0:
+        return "0"
+    sign = "-" if x < 0 else ""
+    r = repr(abs(x)).replace("E", "e")
+    mant, _, exp = r.partition("e")
+    exp = int(exp) if exp else 0
+    intp, _, frac = mant.partition(".")
+    digits = int(intp + frac)
+    e10 = exp - len(frac)
+    while digits % 10 == 0:
+        digits //= 10
+        e10 += 1
+    s = str(digits)
+    k = len(s)
+    n = e10 + k
+    if k <= n <= 21:
+        body = s + "0" * (n - k)
+    elif 0 < n <= 21:
+        body = s[:n] + "." + s[n:]
+    elif -6 < n <= 0:
+        body = "0." + "0" * (-n) + s
+    else:
+        e = n - 1
+        body = (s if k == 1 else s[0] + "." + s[1:]) + "e" + ("+" if e >= 0 else "-") + str(abs(e))
+    return sign + body
+
+
 def _jcs_serialize(obj) -> str:
     if obj is True:
         return "true"
@@ -272,10 +305,7 @@ def _jcs_serialize(obj) -> str:
     if isinstance(obj, int):  # bool already handled above
         return str(obj)
     if isinstance(obj, float):
-        # Function records emitted by this tool contain no floats. A fully
-        # ECMAScript-conformant float serializer is deferred to the value
-        # sub-language (see spec/canonical-serialization.md open questions).
-        raise TypeError("JCS float serialization is not implemented (no floats in records)")
+        return _es_number(obj)
     if isinstance(obj, (list, tuple)):
         return "[" + ",".join(_jcs_serialize(x) for x in obj) + "]"
     if isinstance(obj, dict):
@@ -557,26 +587,13 @@ def _fn_param_result_types(type_ast: dict):
     return [], None
 
 
-def _has_float(node) -> bool:
-    """True if a value AST contains a float anywhere. Canonical serialization of floats (JCS /
-    ECMAScript Number-to-String) is a spec open question, so the hash of a float-containing record is
-    not yet well-defined across implementations — we skip such examples rather than emit an
-    unverifiable record."""
-    if isinstance(node, dict):
-        return node.get("kind") == "float" or any(_has_float(v) for v in node.values())
-    if isinstance(node, list):
-        return any(_has_float(x) for x in node)
-    return False
-
-
 def build_v2_record(func, module_name: str | None) -> dict | None:
     """Build a v0.2 record: a STRUCTURED type AST (nl_types) + REAL examples from the function's
-    doctests (nl_examples). Returns None when there are no usable (float-free) doctest examples —
-    v0.2 requires >=1 — so the caller falls back to a v0.1 record."""
+    doctests (nl_examples). Returns None when there are no usable doctest examples — v0.2 requires
+    >=1 — so the caller falls back to a v0.1 record."""
     type_ast = python_function_type(func)
     param_types, result_type = _fn_param_result_types(type_ast)
     examples = examples_from_docstring(func.name, ast.get_docstring(func), param_types, result_type)
-    examples = [e for e in examples if not _has_float(e)]
     if not examples:
         return None
     record = {

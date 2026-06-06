@@ -225,3 +225,17 @@ fn surface_vectors_parse_unparse_and_validate() {
         );
     }
 }
+
+#[test]
+fn canonicalization_vectors_reproduce_bytes() {
+    let m = manifest();
+    let vectors = section(&m, "canonicalization_vectors");
+    assert!(!vectors.is_empty(), "no canonicalization vectors in manifest");
+    for v in vectors {
+        let name = vname(v);
+        let input = vector_input(v, "input");
+        let expected = v["expected_canonical"].as_str().unwrap();
+        let got = String::from_utf8(canonicalize(&input).unwrap()).unwrap();
+        assert_eq!(got, expected, "canonicalization vector `{name}`");
+    }
+}

@@ -272,6 +272,21 @@ class TestV2Records(unittest.TestCase):
                          self._run("validate", str(self.FR_V2), path).stderr)
         self.assertEqual(self._run("verify", path).returncode, 0)
 
+    def test_v2_float_example_verifies(self):
+        # A float-valued example exercises canonical float serialization; the hash must still verify
+        # against the Rust validator (proving the Python JCS float output matches serde_jcs).
+        src = ('def half(x: int) -> float:\n'
+               '    """Halve.\n\n    >>> half(5)\n    2.5\n    """\n'
+               '    return x / 2\n')
+        rec = n.records_from_source(src, None, False, v2=True)[0]
+        self.assertEqual(rec["schema_version"], "0.2.0")
+        self.assertEqual(rec["examples"][0]["result"], {"kind": "float", "value": 2.5})
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(rec, f)
+            path = f.name
+        self.assertEqual(self._run("verify", path).returncode, 0)
+        self.assertEqual(self._run("validate", str(self.FR_V2), path).returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
