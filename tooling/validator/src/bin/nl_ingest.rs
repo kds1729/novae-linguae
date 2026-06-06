@@ -570,6 +570,165 @@ fn doctest_examples(
     out
 }
 
+// --- v0.2: leading assert! / assert_eq! / assert_ne! as precondition refinements --------------
+// Mirrors the Python adapter's `_preconditions` (nl_predicates.predicate_from_py): a leading run of
+// `assert*` statements in the body becomes {kind:"pre", expr:<predicate AST>} refinements matching
+// predicate-expression.schema.json. Anything whose condition isn't an expressible predicate is
+// silently skipped — nothing is fabricated. Rust `&&`/`||`/comparisons are already arity-2 binaries,
+// so no chained-comparison folding (Rust forbids `a < b < c`) is needed.
+
+/// A predicate `var`, or None if `name` isn't a valid predicate variable (^[a-z_][a-zA-Z0-9_']*$).
+fn p_var(name: &str) -> Option<Value> {
+    let mut cs = name.chars();
+    match cs.next() {
+        Some(c) if c == '_' || c.is_ascii_lowercase() => {}
+        _ => return None,
+    }
+    if name.len() > 64 || !name.chars().all(|c| c == '_' || c == '\'' || c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some(json!({ "kind": "var", "name": name }))
+}
+
+fn p_app(op: &str, args: Vec<Value>) -> Value {
+    json!({ "kind": "app", "op": op, "args": args })
+}
+
+/// A predicate `lit` from a Rust literal. The predicate lit.value is a raw JSON scalar (not a
+/// value-AST): bool / number / string. Large ints become decimal strings (matches `int_value`).
+fn p_lit_from_lit(lit: &syn::Lit, neg: bool) -> Option<Value> {
+    let v = match lit {
+        syn::Lit::Bool(b) => json!(b.value),
+        syn::Lit::Str(s) => json!(s.value()),
+        syn::Lit::Int(i) => {
+            let mut n: i64 = i.base10_parse().ok()?;
+            if neg {
+                n = -n;
+            }
+            int_value(n)
+        }
+        syn::Lit::Float(f) => {
+            let mut x: f64 = f.base10_parse().ok()?;
+            if neg {
+                x = -x;
+            }
+            json!(x)
+        }
+        _ => return None,
+    };
+    Some(json!({ "kind": "lit", "value": v }))
+}
+
+fn binop_name(op: &syn::BinOp) -> Option<&'static str> {
+    use syn::BinOp::*;
+    Some(match op {
+        And(_) => "and",
+        Or(_) => "or",
+        Eq(_) => "eq",
+        Ne(_) => "neq",
+        Lt(_) => "lt",
+        Le(_) => "le",
+        Gt(_) => "gt",
+        Ge(_) => "ge",
+        Add(_) => "add",
+        Sub(_) => "sub",
+        Mul(_) => "mul",
+        Div(_) => "div",
+        Rem(_) => "mod",
+        _ => return None,
+    })
+}
+
+/// Map a Rust boolean/comparison/arithmetic expression to a predicate AST. None for unsupported forms.
+fn predicate_from_expr(expr: &syn::Expr) -> Option<Value> {
+    match expr {
+        syn::Expr::Paren(p) => predicate_from_expr(&p.expr),
+        syn::Expr::Group(g) => predicate_from_expr(&g.expr),
+        syn::Expr::Binary(b) => {
+            let op = binop_name(&b.op)?;
+            Some(p_app(op, vec![predicate_from_expr(&b.left)?, predicate_from_expr(&b.right)?]))
+        }
+        syn::Expr::Unary(u) => match u.op {
+            syn::UnOp::Not(_) => Some(p_app("not", vec![predicate_from_expr(&u.expr)?])),
+            syn::UnOp::Neg(_) => {
+                // Fold `-<literal>` into the literal; otherwise neg(<expr>).
+                if let syn::Expr::Lit(el) = &*u.expr {
+                    p_lit_from_lit(&el.lit, true)
+                } else {
+                    Some(p_app("neg", vec![predicate_from_expr(&u.expr)?]))
+                }
+            }
+            _ => None,
+        },
+        // `x.len()` -> length(x), the one method call we recognise (mirrors Python's `len(x)`).
+        syn::Expr::MethodCall(m) if m.method == "len" && m.args.is_empty() => {
+            Some(p_app("length", vec![predicate_from_expr(&m.receiver)?]))
+        }
+        syn::Expr::Lit(el) => p_lit_from_lit(&el.lit, false),
+        syn::Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
+            p_var(&p.path.segments[0].ident.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Turn one `assert*` macro invocation into a predicate, or None if its condition isn't expressible.
+fn assert_macro_predicate(mac: &syn::Macro) -> Option<Value> {
+    let name = mac.path.get_ident()?.to_string();
+    let parts = mac
+        .parse_body_with(Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated)
+        .ok()?;
+    let exprs: Vec<&syn::Expr> = parts.iter().collect();
+    match name.as_str() {
+        "assert" | "debug_assert" => predicate_from_expr(exprs.first()?),
+        "assert_eq" | "debug_assert_eq" => {
+            if exprs.len() < 2 {
+                return None;
+            }
+            Some(p_app("eq", vec![predicate_from_expr(exprs[0])?, predicate_from_expr(exprs[1])?]))
+        }
+        "assert_ne" | "debug_assert_ne" => {
+            if exprs.len() < 2 {
+                return None;
+            }
+            Some(p_app("neq", vec![predicate_from_expr(exprs[0])?, predicate_from_expr(exprs[1])?]))
+        }
+        _ => None,
+    }
+}
+
+fn is_assert_ident(mac: &syn::Macro) -> bool {
+    mac.path
+        .get_ident()
+        .map(|i| {
+            matches!(
+                i.to_string().as_str(),
+                "assert" | "assert_eq" | "assert_ne" | "debug_assert" | "debug_assert_eq" | "debug_assert_ne"
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// A leading run of `assert*` statements -> {kind:"pre", expr} refinements. Scanning stops at the
+/// first non-assert statement; an assert whose condition isn't expressible is skipped, not a stop.
+fn preconditions(func: &syn::ItemFn) -> Vec<Value> {
+    let mut refs = Vec::new();
+    for stmt in &func.block.stmts {
+        let mac = match stmt {
+            syn::Stmt::Macro(sm) => &sm.mac,
+            syn::Stmt::Expr(syn::Expr::Macro(em), _) => &em.mac,
+            _ => break,
+        };
+        if !is_assert_ident(mac) {
+            break;
+        }
+        if let Some(expr) = assert_macro_predicate(mac) {
+            refs.push(json!({ "kind": "pre", "expr": expr }));
+        }
+    }
+    refs
+}
+
 fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Option<Value>> {
     let fn_name = func.sig.ident.to_string();
     let type_ast = type_ast_from_sig(&func.sig);
@@ -592,7 +751,7 @@ fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Optio
         "name_hints": name_hints,
         "signature": {
             "type": type_ast,
-            "refinements": [],
+            "refinements": preconditions(func),
             "effects": [],
             "capabilities": [],
             "terminates": "unknown"
@@ -744,6 +903,55 @@ mod tests {
         )
         .unwrap();
         nl_validator::validate_with_refs(&schema, &rec, &spec).expect("v0.2 record should validate");
+    }
+
+    #[test]
+    fn leading_asserts_become_preconditions() {
+        let f = item_fn(
+            "/// ```\n/// assert_eq!(clamp(5), 5);\n/// ```\npub fn clamp(n: i64) -> i64 { assert!(n >= 0); assert!(n < 100); let y = n; y }",
+        );
+        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let refs = rec["signature"]["refinements"].as_array().unwrap();
+        assert_eq!(refs.len(), 2);
+        assert_eq!(
+            refs[0],
+            json!({ "kind": "pre", "expr":
+                { "kind": "app", "op": "ge", "args": [
+                    { "kind": "var", "name": "n" }, { "kind": "lit", "value": 0 }] } })
+        );
+        assert_eq!(refs[1]["expr"]["op"], "lt");
+
+        // Refinement preconditions must validate against the v0.2 schema (pe_predicate).
+        let spec = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec");
+        let schema: Value = serde_json::from_str(
+            &std::fs::read_to_string(spec.join("function-record.v0.2.schema.json")).unwrap(),
+        )
+        .unwrap();
+        nl_validator::validate_with_refs(&schema, &rec, &spec).expect("record with preconditions validates");
+    }
+
+    #[test]
+    fn non_assert_statement_stops_the_precondition_run() {
+        // The `let` before the second assert stops scanning — only the first assert is a precondition.
+        let f = item_fn(
+            "/// ```\n/// assert_eq!(g(2), 2);\n/// ```\npub fn g(n: i64) -> i64 { assert!(n > 0); let _m = n; assert!(n < 9); n }",
+        );
+        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let refs = rec["signature"]["refinements"].as_array().unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0]["expr"]["op"], "gt");
+    }
+
+    #[test]
+    fn inexpressible_assert_is_skipped_not_fatal() {
+        // First assert calls an unrecognised function -> skipped; the second (a comparison) survives.
+        let f = item_fn(
+            "/// ```\n/// assert_eq!(h(3), 3);\n/// ```\npub fn h(n: i64) -> i64 { assert!(valid(n)); assert!(n >= 1); n }",
+        );
+        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let refs = rec["signature"]["refinements"].as_array().unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0]["expr"]["op"], "ge");
     }
 
     #[test]
