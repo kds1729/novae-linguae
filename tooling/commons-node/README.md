@@ -19,7 +19,7 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 | `POST /v0/query` — typed (exact) discovery | ✅ |
 | `GET /v0/sync` — replication feed (cursor) | ✅ |
 | `GET /v0/info` — node metadata | ✅ |
-| `POST /v0/search` — semantic discovery | ⏳ deferred (needs the embedding tier) |
+| `POST /v0/search` — semantic discovery (stdlib lexical embedder) | ✅ |
 
 **Verification reuses the reference validator.** On ingest, the node shells out to `nl-validator`
 to (1) `validate` the record against the schema named by its `(kind, schema_version)` and (2)
@@ -44,6 +44,10 @@ curl http://127.0.0.1:8000/v0/records/$(python3 -c "import json;print(json.load(
 # typed query
 curl -X POST http://127.0.0.1:8000/v0/query -H 'content-type: application/json' \
      -d '{"intent_tags":{"any":["elementwise"]},"effects":{"none":true}}'
+
+# semantic search (free text, or "more like this" by hash)
+curl -X POST http://127.0.0.1:8000/v0/search -H 'content-type: application/json' \
+     -d '{"query":"map a function over each element of a list","k":5}'
 ```
 
 ### The adapter → commons pipeline
@@ -60,6 +64,45 @@ python3 manage.py loadrecords /tmp/recs.jsonl
 This is the point of the whole node: records produced by `nl-ingest{,-py,-hs,-ts}` finally have a
 destination and become discoverable.
 
+## Semantic search (`POST /v0/search`)
+
+Where `query` is exact/typed, `search` ranks records by *meaning* via embedding cosine similarity —
+the discovery aid that makes principle 4 ("assemble, don't write") usable. It is **best-effort and
+node-local** (per [`spec/commons.md`](../../spec/commons.md)): the node advertises its embedding model
+and two nodes MAY rank differently. The content-addressed guarantee applies only after you resolve
+and verify a result.
+
+```bash
+# free-text query, optional typed filter (same filter language as /v0/query)
+curl -X POST http://127.0.0.1:8000/v0/search -H 'content-type: application/json' \
+     -d '{"query":"encode and decode bytes","k":5,"filter":{"kind":"function-record"}}'
+
+# "more like this" by hash
+curl -X POST http://127.0.0.1:8000/v0/search -H 'content-type: application/json' \
+     -d '{"like":"fn_…","k":10}'
+# -> {"results":[{"hash":"fn_…","score":0.87}, …], "model":"lexical-hashing-v0"}
+```
+
+**Embedding model.** This node ships a stdlib-only, **deterministic lexical** embedder
+(`lexical-hashing-v0`, in [`commons/embedding.py`](commons/embedding.py)): it builds an L2-normalized
+vector from a record's own tokens (`name_hints`, type string, `intent_tags`, refinement/property
+expressions; speech-act kind + body for messages) via the hashing trick — no model download, no
+network, reproducible byte-for-byte. It captures lexical/structural overlap, not deep meaning; that
+is the explicit trade for zero dependencies and determinism. The active model id is reported in
+`/v0/info` (`embedding_model`) and in every search response (`model`).
+
+**Pluggable.** `get_embedder()` is the seam: a neural backend (sentence-transformers, an API client,
+…) implements the `Embedder` interface and is selected by the `COMMONS_EMBEDDER` env var, with **no
+protocol change**. Vectors are only ranked against others from the same model id, so mixed-model
+corpora are safe.
+
+**Backfill.** Records ingested before search (or after a model change) get vectors via:
+
+```bash
+python3 manage.py embedrecords          # embed rows missing the current model's vector
+python3 manage.py embedrecords --all    # re-embed everything
+```
+
 ## Configuration (env vars)
 
 | Var | Default | Purpose |
@@ -69,22 +112,29 @@ destination and become discoverable.
 | `COMMONS_DB_PATH` | `./db.sqlite3` | SQLite file |
 | `COMMONS_MAX_RECORD_BYTES` | 1 MiB | local size cap (a permitted endpoint policy) |
 | `COMMONS_PEERS` | empty | comma-separated peer hints for future replication |
+| `COMMONS_EMBEDDER` | `lexical-hashing-v0` | semantic-search embedding model id (seam for a neural backend) |
+| `COMMONS_EMBEDDING_DIM` | `256` | lexical vector dimensionality (part of the model identity) |
 
 ## Tests
 
 ```bash
-python3 manage.py test commons      # 16 tests; skips if nl-validator isn't built
+python3 manage.py test commons      # 29 tests
 ```
 
 Covers publish/idempotency, resolve, `HEAD` exists, `404` for absent, message
 signature verification, tamper and malformed-input rejection, typed query (intent tags, effects,
 name-hint prefix, non-match exclusion, `include=record`), the `sync` feed, `info`, and the
-`loadrecords` pipeline.
+`loadrecords` pipeline. The verify-gated tests skip if `nl-validator` isn't built; the **semantic
+search** tests run regardless — embedding determinism / L2-normalization / relevance ordering,
+`search` query + `like` + `filter` composition + `k` cap + error cases, `/v0/info` model id, and the
+`embedrecords` backfill.
 
 ## Deliberately deferred (later phases of `spec/commons.md`)
 
-- **Semantic search** (`POST /v0/search`) — needs an embedding model + a vector index. On the
-  planned Postgres backend this is `pgvector`; the node reports its model in `/v0/info`.
+- **Neural / ANN search tier** — `POST /v0/search` is implemented now with the stdlib
+  `lexical-hashing-v0` embedder (see above). Still deferred: a real neural embedding model behind the
+  `Embedder` seam, and a vector index for it — on the planned Postgres backend that is `pgvector`
+  (the MVP scores cosine in Python over a bounded scan).
 - **Redis tier** — read-through cache, ephemeral `msg_` delivery with TTL, a job broker for async
   embedding/verification/replication, and pub/sub for `sync` notifications.
 - **Replication worker** — a background task that polls peers' `GET /v0/sync` and mirrors verified

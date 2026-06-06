@@ -49,13 +49,9 @@ def _array_ok(record, flt):
     return True
 
 
-def run_query(flt):
-    """Return (hashes, cursor, complete) for a query filter."""
+def _scalar_qs(flt):
+    """Queryset with the scalar (DB-side) predicates of a typed filter applied, ordered by id."""
     qs = Record.objects.all().order_by("id")
-
-    cursor = flt.get("cursor")
-    if cursor is not None:
-        qs = qs.filter(id__gt=int(cursor))
     if "kind" in flt:
         qs = qs.filter(kind=flt["kind"])
     if "schema_version" in flt:
@@ -65,6 +61,27 @@ def run_query(flt):
         qs = qs.filter(terminates__in=(t if isinstance(t, list) else [t]))
     if flt.get("type_contains"):
         qs = qs.filter(type_str__icontains=flt["type_contains"])
+    return qs
+
+
+def candidate_records(flt, cap=_DB_SCAN_CAP):
+    """Records matching a typed filter (scalar + array predicates), no pagination. Bounded scan.
+
+    Returns (records, truncated). Shared by run_query and semantic search (search.run_search) so a
+    typed `filter` means exactly the same thing in both endpoints.
+    """
+    scanned = list(_scalar_qs(flt)[:cap])
+    matched = [r for r in scanned if _array_ok(r, flt)]
+    return matched, len(scanned) >= cap
+
+
+def run_query(flt):
+    """Return (hashes, cursor, complete) for a query filter."""
+    qs = _scalar_qs(flt)
+
+    cursor = flt.get("cursor")
+    if cursor is not None:
+        qs = qs.filter(id__gt=int(cursor))
 
     try:
         limit = max(1, min(int(flt.get("limit", 100)), 1000))

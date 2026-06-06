@@ -50,3 +50,9 @@ COMMONS_SPEC_DIR = os.environ.get("COMMONS_SPEC_DIR", str(REPO_ROOT / "spec"))
 # Local mirroring policy (principle-7-permitted endpoint choices, never protocol gates).
 COMMONS_MAX_RECORD_BYTES = int(os.environ.get("COMMONS_MAX_RECORD_BYTES", str(1 << 20)))  # 1 MiB
 COMMONS_PEERS = [p for p in os.environ.get("COMMONS_PEERS", "").split(",") if p.strip()]
+
+# Semantic search (spec/commons.md `POST /v0/search`). The reference node ships a stdlib-only,
+# deterministic lexical embedder; this is the seam where a neural backend would be selected. The
+# active model id is advertised in /v0/info and in every search response. See commons/embedding.py.
+COMMONS_EMBEDDER = os.environ.get("COMMONS_EMBEDDER", "lexical-hashing-v0")
+COMMONS_EMBEDDING_DIM = int(os.environ.get("COMMONS_EMBEDDING_DIM", "256"))

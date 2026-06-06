@@ -29,6 +29,13 @@ class Record(models.Model):
     type_str = models.TextField(null=True, blank=True)
     body_hash = models.CharField(max_length=128, null=True, blank=True)
 
+    # Semantic-search vector (spec/commons.md `POST /v0/search`). The L2-normalized embedding and the
+    # id of the model that produced it (so a model change is detectable and rows can be re-embedded).
+    # On a Postgres backend this becomes a pgvector column with an ANN index; here it is plain JSON
+    # and cosine is computed in Python over a bounded scan (mirrors how query.py applies array preds).
+    embedding = models.JSONField(null=True, blank=True)
+    embedding_model = models.CharField(max_length=64, null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -7,8 +7,11 @@ from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from . import verify as V
+from .embedding import get_embedder
+from .ingest import create_record
 from .models import Record
 from .query import run_query
+from .search import run_search, SearchError
 
 _SCHEMA_VERSIONS = ["0.1.0", "0.2.0"]
 _KINDS = ["function-record", "message", "body", "type"]
@@ -45,8 +48,7 @@ def records(request):
     if Record.objects.filter(hash=address).exists():
         return JsonResponse({"hash": address, "stored": False}, status=200)
 
-    Record.objects.create(hash=address, kind=kind, schema_version=version, raw=raw,
-                          **V.extract(raw, kind))
+    create_record(raw, kind, version)
     return JsonResponse({"hash": address, "stored": True}, status=201)
 
 
@@ -82,6 +84,25 @@ def query(request):
     return JsonResponse({"results": hashes, "cursor": cursor, "complete": complete})
 
 
+@csrf_exempt
+def search(request):
+    """POST /v0/search — semantic discovery (best-effort, node-local; spec/commons.md)."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        body = _json_body(request)
+    except ValueError as exc:
+        return JsonResponse({"error": "malformed_json", "detail": str(exc)}, status=400)
+    try:
+        results, model_id, truncated = run_search(body)
+    except SearchError as exc:
+        return JsonResponse({"error": exc.code, "detail": exc.detail}, status=exc.status)
+    payload = {"results": results, "model": model_id}
+    if truncated:
+        payload["truncated"] = True   # scan cap hit; some records were not ranked (MVP bound)
+    return JsonResponse(payload)
+
+
 def sync(request):
     """GET /v0/sync?since={cursor}&limit={n} — replication feed (hashes since a sequence cursor)."""
     if request.method != "GET":
@@ -106,7 +127,7 @@ def info(request):
         "protocol": "v0",
         "schema_versions": _SCHEMA_VERSIONS,
         "kinds": _KINDS,
-        "embedding_model": None,          # semantic search is a later phase
+        "embedding_model": get_embedder().model_id,
         "record_count": Record.objects.count(),
         "peers": settings.COMMONS_PEERS,
         "retains_messages": "durable",    # MVP keeps everything; a TTL tier comes with Redis

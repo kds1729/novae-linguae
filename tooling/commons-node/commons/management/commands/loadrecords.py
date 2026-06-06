@@ -14,6 +14,7 @@ import sys
 from django.core.management.base import BaseCommand
 
 from commons import verify as V
+from commons.ingest import create_record
 from commons.models import Record
 
 
@@ -50,8 +51,7 @@ class Command(BaseCommand):
                 if Record.objects.filter(hash=raw["hash"]).exists():
                     skipped += 1
                     continue
-                Record.objects.create(hash=raw["hash"], kind=kind, schema_version=version,
-                                      raw=raw, **V.extract(raw, kind))
+                create_record(raw, kind, version)
                 stored += 1
         finally:
             if stream is not sys.stdin:

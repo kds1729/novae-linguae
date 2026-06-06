@@ -11,6 +11,7 @@ urlpatterns = [
     path("v0/records", views.records),                 # POST publish
     re_path(rf"^v0/records/{_ADDR}$", views.record),    # GET resolve / HEAD exists
     path("v0/query", views.query),                      # POST typed discovery
+    path("v0/search", views.search),                    # POST semantic discovery
     path("v0/sync", views.sync),                        # GET replication feed
     path("v0/info", views.info),                        # GET node metadata
 ]
