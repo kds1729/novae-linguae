@@ -454,22 +454,42 @@ fn list_elem_hint(h: Option<&Value>) -> Option<&Value> {
     })
 }
 
-/// Encode a Rust literal expression as a value-expression AST. Returns None for anything not
-/// faithfully representable (so the example is skipped — never fabricated).
+/// A doc-test evaluation environment: `let`-bound names from the doc-test mapped to their defining
+/// expressions, so a variable reference can be resolved without executing anything.
+type Env<'a> = HashMap<String, &'a syn::Expr>;
+
+/// Encode a Rust literal expression as a value-expression AST (with an empty environment — used for
+/// body literals, where there are no doc-test `let` bindings to resolve).
 fn value_ast(expr: &syn::Expr, hint: Option<&Value>) -> Option<Value> {
+    eval_value(expr, hint, &Env::new(), 0)
+}
+
+/// The doc-test interpreter: evaluate a *value* expression to a value-AST. It is purely structural —
+/// it never runs the function under test — but it DOES resolve the value subset of real doc-tests:
+/// literals, arrays / `vec!` / tuples, `Some`/`Ok`/`Err`/`None`, references, `let`-bound variables
+/// (via `env`), integer ranges (`0..3`, `1..=5`), `.chars()` over a string, and trivial transparent
+/// iterator adapters (`.iter()` / `.into_iter()` / `.collect()` / ...). Returns None for anything
+/// outside this subset (so the example is skipped — never fabricated). `depth` bounds recursion
+/// through `let` chains.
+fn eval_value(expr: &syn::Expr, hint: Option<&Value>, env: &Env, depth: usize) -> Option<Value> {
+    if depth > 64 {
+        return None;
+    }
+    let d = depth + 1;
     match expr {
         syn::Expr::Lit(el) => lit_value(&el.lit, hint, false),
         syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Neg(_)) => match &*u.expr {
             syn::Expr::Lit(el) => lit_value(&el.lit, hint, true),
             _ => None,
         },
-        syn::Expr::Group(g) => value_ast(&g.expr, hint),
-        syn::Expr::Paren(p) => value_ast(&p.expr, hint),
+        syn::Expr::Group(g) => eval_value(&g.expr, hint, env, d),
+        syn::Expr::Paren(p) => eval_value(&p.expr, hint, env, d),
+        syn::Expr::Reference(r) => eval_value(&r.expr, hint, env, d), // `&x` / `&[..]` -> x
         syn::Expr::Array(a) => {
             let eh = list_elem_hint(hint);
             let mut elems = Vec::new();
             for e in &a.elems {
-                elems.push(value_ast(e, eh)?);
+                elems.push(eval_value(e, eh, env, d)?);
             }
             Some(json!({ "kind": "list", "elems": elems }))
         }
@@ -477,11 +497,11 @@ fn value_ast(expr: &syn::Expr, hint: Option<&Value>) -> Option<Value> {
             if t.elems.is_empty() {
                 Some(json!({ "kind": "unit" }))
             } else if t.elems.len() == 1 {
-                value_ast(&t.elems[0], None)
+                eval_value(&t.elems[0], None, env, d)
             } else {
                 let mut elems = Vec::new();
                 for e in &t.elems {
-                    elems.push(value_ast(e, None)?);
+                    elems.push(eval_value(e, None, env, d)?);
                 }
                 Some(json!({ "kind": "tuple", "elems": elems }))
             }
@@ -490,18 +510,25 @@ fn value_ast(expr: &syn::Expr, hint: Option<&Value>) -> Option<Value> {
             if let syn::Expr::Path(p) = &*c.func {
                 let name = p.path.segments.last()?.ident.to_string();
                 if matches!(name.as_str(), "Some" | "Ok" | "Err") && c.args.len() == 1 {
-                    let payload = value_ast(&c.args[0], None)?;
+                    let payload = eval_value(&c.args[0], None, env, d)?;
                     return Some(json!({ "kind": "variant", "tag": name, "payload": payload }));
                 }
             }
             None
         }
-        syn::Expr::Path(p) => match p.path.segments.last()?.ident.to_string().as_str() {
-            "None" => Some(json!({ "kind": "variant", "tag": "None" })),
-            "true" => Some(json!({ "kind": "bool", "value": true })),
-            "false" => Some(json!({ "kind": "bool", "value": false })),
-            _ => None,
-        },
+        // Integer range `a..b` / `a..=b` -> the list it enumerates (bounded).
+        syn::Expr::Range(r) => range_to_list(r, hint),
+        syn::Expr::Path(p) => {
+            let name = p.path.get_ident()?.to_string();
+            match name.as_str() {
+                "None" => return Some(json!({ "kind": "variant", "tag": "None" })),
+                "true" => return Some(json!({ "kind": "bool", "value": true })),
+                "false" => return Some(json!({ "kind": "bool", "value": false })),
+                _ => {}
+            }
+            // A `let`-bound doc-test variable: evaluate its definition.
+            eval_value(env.get(&name)?, hint, env, d)
+        }
         syn::Expr::Macro(m) if m.mac.path.is_ident("vec") => {
             let parts = m
                 .mac
@@ -510,13 +537,19 @@ fn value_ast(expr: &syn::Expr, hint: Option<&Value>) -> Option<Value> {
             let eh = list_elem_hint(hint);
             let mut elems = Vec::new();
             for e in &parts {
-                elems.push(value_ast(e, eh)?);
+                elems.push(eval_value(e, eh, env, d)?);
             }
             Some(json!({ "kind": "list", "elems": elems }))
         }
+        // `<string>.chars()` -> a list of single-character strings.
+        syn::Expr::MethodCall(m) if m.method == "chars" && m.args.is_empty() => {
+            let recv = eval_value(&m.receiver, None, env, d)?;
+            let s = recv.get("value").filter(|_| recv["kind"] == "string").and_then(|v| v.as_str())?;
+            Some(json!({ "kind": "list",
+                "elems": s.chars().map(|c| json!({ "kind": "string", "value": c.to_string() })).collect::<Vec<_>>() }))
+        }
         // Trivial iterator/collection adapters that don't change the logical sequence of values
-        // (`vec![..].into_iter()`, `xs.iter()`, `.cloned()`, `.collect()`, ...). These wrap the
-        // receiver so that iterator-style assert_equal examples encode as the underlying sequence.
+        // (`vec![..].into_iter()`, `xs.iter()`, `.cloned()`, `.collect()`, ...): encode the receiver.
         syn::Expr::MethodCall(m)
             if m.args.is_empty()
                 && matches!(
@@ -524,10 +557,43 @@ fn value_ast(expr: &syn::Expr, hint: Option<&Value>) -> Option<Value> {
                     "iter" | "into_iter" | "iter_mut" | "cloned" | "copied" | "to_vec" | "to_owned" | "collect"
                 ) =>
         {
-            value_ast(&m.receiver, hint)
+            eval_value(&m.receiver, hint, env, d)
         }
         _ => None,
     }
+}
+
+/// An `i64` from an integer-literal expression (possibly negated / parenthesised), for range bounds.
+fn lit_i64(expr: &syn::Expr) -> Option<i64> {
+    match expr {
+        syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(i), .. }) => i.base10_parse().ok(),
+        syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Neg(_)) => lit_i64(&u.expr).map(|n| -n),
+        syn::Expr::Paren(p) => lit_i64(&p.expr),
+        syn::Expr::Group(g) => lit_i64(&g.expr),
+        _ => None,
+    }
+}
+
+/// Expand an integer range expression to the value-AST list it enumerates. Both bounds must be
+/// integer literals; the span is bounded to keep mining cheap.
+fn range_to_list(r: &syn::ExprRange, hint: Option<&Value>) -> Option<Value> {
+    let start = lit_i64(r.start.as_deref()?)?;
+    let end = lit_i64(r.end.as_deref()?)?;
+    let hi = if matches!(r.limits, syn::RangeLimits::Closed(_)) { end.checked_add(1)? } else { end };
+    if hi < start || hi - start > 10_000 {
+        return None;
+    }
+    let nat = is_nat_hint(list_elem_hint(hint));
+    let elems: Vec<Value> = (start..hi)
+        .map(|n| {
+            if nat && n >= 0 {
+                json!({ "kind": "nat", "value": int_value(n) })
+            } else {
+                json!({ "kind": "int", "value": int_value(n) })
+            }
+        })
+        .collect();
+    Some(json!({ "kind": "list", "elems": elems }))
 }
 
 fn doc_text(func: &syn::ItemFn) -> String {
@@ -571,13 +637,15 @@ fn call_args(expr: &syn::Expr) -> Vec<&syn::Expr> {
     }
 }
 
-/// Turn `assert_eq!(call, expected)` (either argument order) into a {args, result} example.
+/// Turn `assert_eq!(call, expected)` (either argument order) into a {args, result} example, resolving
+/// value expressions against the doc-test `env` (let bindings, ranges, .chars(), ...).
 fn example_from_assert(
     a: &syn::Expr,
     b: &syn::Expr,
     fn_name: &str,
     param_types: &[Value],
     result_type: Option<&Value>,
+    env: &Env,
 ) -> Option<Value> {
     let (call, expected) = if is_call_to(a, fn_name) {
         (a, b)
@@ -588,9 +656,9 @@ fn example_from_assert(
     };
     let mut args = Vec::new();
     for (i, e) in call_args(call).iter().enumerate() {
-        args.push(value_ast(e, param_types.get(i))?);
+        args.push(eval_value(e, param_types.get(i), env, 0)?);
     }
-    let result = value_ast(expected, result_type)?;
+    let result = eval_value(expected, result_type, env, 0)?;
     Some(json!({ "args": args, "result": result }))
 }
 
@@ -657,6 +725,18 @@ fn doctest_examples(
         Ok(f) => f,
         Err(_) => return Vec::new(),
     };
+    // Collect `let <name> = <expr>;` bindings so variable receivers/args/results resolve.
+    let mut env: Env = Env::new();
+    for stmt in &parsed.block.stmts {
+        if let syn::Stmt::Local(local) = stmt {
+            if let syn::Pat::Ident(pi) = &local.pat {
+                if let Some(init) = &local.init {
+                    env.insert(pi.ident.to_string(), init.expr.as_ref());
+                }
+            }
+        }
+    }
+
     let mut out = Vec::new();
     for stmt in &parsed.block.stmts {
         // The two compared expressions, from `assert_eq!(a, b)` (macro) or `assert_equal(a, b)`
@@ -668,7 +748,7 @@ fn doctest_examples(
             _ => None,
         };
         if let Some((a, b)) = pair {
-            if let Some(ex) = example_from_assert(&a, &b, fn_name, param_types, result_type) {
+            if let Some(ex) = example_from_assert(&a, &b, fn_name, param_types, result_type, &env) {
                 out.push(ex);
             }
         }
@@ -1547,6 +1627,39 @@ mod tests {
         assert_eq!(
             nl_validator::evaluate_property(&rec["properties"][0]["expr"], rec["examples"].as_array().unwrap()),
             nl_validator::Verdict::Consistent
+        );
+    }
+
+    #[test]
+    fn interpreter_resolves_let_bindings_chars_and_ranges() {
+        // The exact shape of itertools' `sorted` doc-test: a let-bound string + `.chars()`.
+        let (m, self_ty, generics) = first_method(
+            "impl Helpers {\n\
+             /// ```\n\
+             /// let text = \"bdacfe\";\n\
+             /// itertools::assert_equal(text.chars().sorted(), \"abcdef\".chars());\n\
+             /// ```\n\
+             pub fn sorted(self) -> Vec<char> { unimplemented!() }\n\
+             }",
+        );
+        let func = lift_method(&m.attrs, &m.vis, &m.sig, Some(&m.block), &self_ty, &generics).unwrap();
+        let rec = build_v2_record(&func, None, true, true).unwrap().expect("a v0.2 record");
+        // `text.chars()` resolved through the let binding to a 6-element list of single-char strings.
+        assert_eq!(rec["examples"][0]["args"][0]["elems"].as_array().unwrap().len(), 6);
+        assert_eq!(rec["examples"][0]["args"][0]["elems"][0], json!({ "kind": "string", "value": "b" }));
+        assert_eq!(rec["examples"][0]["result"]["elems"][0], json!({ "kind": "string", "value": "a" }));
+        assert_eq!(rec["properties"][0]["name"], "length_preserving");
+        assert_eq!(
+            nl_validator::evaluate_property(&rec["properties"][0]["expr"], rec["examples"].as_array().unwrap()),
+            nl_validator::Verdict::Consistent
+        );
+
+        // Ranges expand: `(0..3)` -> [0, 1, 2].
+        let range: syn::Expr = syn::parse_str("0..3").unwrap();
+        assert_eq!(
+            value_ast(&range, None).unwrap(),
+            json!({ "kind": "list", "elems": [
+                { "kind": "int", "value": 0 }, { "kind": "int", "value": 1 }, { "kind": "int", "value": 2 }] })
         );
     }
 
