@@ -34,6 +34,9 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingest-common"))
 from nl_core import blake3_256, canonicalize  # noqa: E402  (vendored BLAKE3 + JCS, match nl-validator)
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ml_kem  # noqa: E402  (pure-Python ML-KEM-768, FIPS 203 final — post-quantum key agreement)
+
 _P25519 = (1 << 255) - 19
 
 
@@ -465,6 +468,82 @@ def verify_manifest(manifest: dict):
     return (("valid" if ok else "invalid"), producer)
 
 
+# ---------------------------------------------------------------------------
+# ML-KEM-768 key-agreement keys + DID documents (spec/did-document.md).
+#
+# X25519 keys come for free from the did:nova Ed25519 identity (the Edwards->Montgomery map). An
+# ML-KEM public key cannot — lattice math, not curve math — so it must be generated and *published*.
+# A DID document does that: it binds the did:nova identity to its ML-KEM key-agreement key and is
+# signed by that very identity, so it is self-verifying with no central authority (principle 7). The
+# ML-KEM keypair is derived deterministically from the agent's user seed, so one seed still
+# regenerates every key (signing + X25519 + ML-KEM) and there is no new secret to manage.
+# ---------------------------------------------------------------------------
+
+_MLKEM_KEYGEN_LABEL = b"novae-linguae/v0.3/ml-kem-768/keygen"
+MLKEM_KEY_TYPE = "ML-KEM-768"
+_MLKEM_KEY_FRAGMENT = "#mlkem768"
+
+
+def mlkem_keypair_from_user_seed(user_seed: str):
+    """An agent's ML-KEM-768 keypair from its user seed. Returns (mlkem_secret_dk, mlkem_public_ek).
+
+    The 64-byte ML-KEM seed (d || z) is two domain-separated BLAKE3 draws over the user seed; the Rust
+    hardened impl derives the same bytes, so the keypair is stable and cross-implementation."""
+    base = user_seed.encode("utf-8") + _MLKEM_KEYGEN_LABEL
+    d = blake3_256(base + b"\x00")
+    z = blake3_256(base + b"\x01")
+    ek, dk = ml_kem.keygen_derand(d, z)
+    return dk, ek
+
+
+def build_did_document(user_seed: str) -> dict:
+    """A signed DID document publishing the agent's ML-KEM-768 key-agreement key.
+
+    Shape: {id, keyAgreement:[{id, type:"ML-KEM-768", publicKeyBase64}], signature}. The signature is
+    Ed25519 over the canonical document minus the signature field (same construction as sign_manifest),
+    verifiable against the did:nova in `id`. See spec/did-document.md."""
+    seed32, _pub, did = signing_keypair_from_user_seed(user_seed)
+    _dk, ek = mlkem_keypair_from_user_seed(user_seed)
+    doc = {
+        "id": did,
+        "keyAgreement": [
+            {"id": did + _MLKEM_KEY_FRAGMENT, "type": MLKEM_KEY_TYPE,
+             "publicKeyBase64": base64.b64encode(ek).decode("ascii")},
+        ],
+    }
+    doc["signature"] = format_signature(ed25519_sign(seed32, canonicalize(doc)))
+    return doc
+
+
+def verify_did_document(doc: dict):
+    """Return (status, id): 'unsigned' | 'valid' | 'invalid'. Mirrors verify_manifest."""
+    did = doc.get("id")
+    if "signature" not in doc:
+        return ("unsigned", did)
+    body = {k: v for k, v in doc.items() if k != "signature"}
+    try:
+        ok = ed25519_verify(ed25519_pub_from_did(did), canonicalize(body),
+                            parse_signature(doc["signature"]))
+    except Exception:
+        return ("invalid", did)
+    return (("valid" if ok else "invalid"), did)
+
+
+def mlkem_pub_from_did_document(doc: dict, *, require_valid: bool = True) -> bytes:
+    """Extract the ML-KEM-768 public key from a DID document, verifying its signature first by default."""
+    if require_valid:
+        status, _ = verify_did_document(doc)
+        if status != "valid":
+            raise ValueError(f"DID document signature is {status}")
+    for entry in doc.get("keyAgreement", []):
+        if entry.get("type") == MLKEM_KEY_TYPE:
+            pub = base64.b64decode(entry["publicKeyBase64"])
+            if len(pub) != ml_kem.EK_SIZE:
+                raise ValueError("ML-KEM-768 public key has wrong length")
+            return pub
+    raise ValueError("DID document has no ML-KEM-768 key-agreement key")
+
+
 def random_bytes(n: int) -> bytes:
     return os.urandom(n)
 
@@ -496,10 +575,17 @@ def seeded_rng(seed: bytes):
 # ---------------------------------------------------------------------------
 
 ENVELOPE_VERSION = "0.2"
+ENVELOPE_VERSION_PQ = "0.3"
 ENC_ALG = "xchacha20poly1305"
 KDF_ALG = "hkdf-sha256"
 KEX_ALG = "x25519-ed25519"
+# Post-quantum hybrid key agreement (v0.3, spec/encryption.md): run X25519 *and* an ML-KEM-768
+# encapsulation against the recipient, then derive the KEK from both shared secrets, so the wrap is
+# secure as long as *either* primitive holds. The recipient's ML-KEM key is published in its DID
+# document (spec/did-document.md); each recipient entry gains a `kem_ct` ML-KEM ciphertext.
+KEX_MLKEM = "x25519-mlkem768"
 _KEYWRAP_INFO = b"novae-linguae/v0.2/xchacha20poly1305/key-wrap"
+_HYBRID_WRAP_INFO = b"novae-linguae/v0.3/x25519-mlkem768/key-wrap"
 # Stealth addressing (v0.3, spec/encryption.md): hide the recipient set. Recipient DIDs are omitted
 # from the envelope and the per-recipient wrap is bound to a fixed domain-separation label instead of
 # the DID, so a recipient recovers the CEK by trial-decrypting entries with its own derived KEK.
@@ -518,9 +604,16 @@ def _derive_kek(shared: bytes, epk: bytes, recipient_xpub: bytes) -> bytes:
     return hkdf_sha256(shared, epk + recipient_xpub, _KEYWRAP_INFO, 32)
 
 
+def _derive_kek_hybrid(ecdh_ss: bytes, mlkem_ss: bytes, epk: bytes, recipient_xpub: bytes) -> bytes:
+    """Hybrid KEK: HKDF over the concatenated X25519 and ML-KEM shared secrets (spec/encryption.md).
+
+    The KEK is secure if *either* secret is, and the info label domain-separates it from the v0.2 KDF."""
+    return hkdf_sha256(ecdh_ss + mlkem_ss, epk + recipient_xpub, _HYBRID_WRAP_INFO, 32)
+
+
 def seal(plaintext: bytes, recipient_dids, aad: bytes = b"", *, rng=random_bytes,
          cek: bytes | None = None, ephemeral_secret: bytes | None = None,
-         stealth: bool = False) -> dict:
+         stealth: bool = False, recipient_mlkem_keys: dict | None = None) -> dict:
     """Seal ``plaintext`` to one or more ``did:nova`` recipients. Returns an envelope dict.
 
     ``cek`` (content-encryption key) may be supplied to reuse a per-conversation symmetric key
@@ -530,11 +623,20 @@ def seal(plaintext: bytes, recipient_dids, aad: bytes = b"", *, rng=random_bytes
     With ``stealth=True`` the recipient set is hidden: the ``to`` DID is omitted from each entry and
     the wrap is bound to a fixed label instead of the DID, so a recipient recovers the CEK by trial-
     decrypting entries. The recipient DIDs are still required here (to derive each KEK) but never
-    appear in the output. Order: cek, esk, nonce, then each wrap_nonce (a byte-for-byte contract).
+    appear in the output.
+
+    When ``recipient_mlkem_keys`` (a ``{did: ml_kem_public_key}`` map) is given, key agreement is the
+    post-quantum hybrid ``kex: x25519-mlkem768``: each recipient also gets an ML-KEM-768 encapsulation
+    (carried as ``kem_ct``) and the KEK mixes both shared secrets. The envelope version is then ``0.3``.
+    Use :func:`seal_to_did` to supply the keys from recipients' DID documents.
+
+    RNG draw order (a byte-for-byte contract): cek, esk, nonce, then per recipient — for the hybrid
+    kex an ML-KEM ``m`` (32 bytes) precedes each ``wrap_nonce`` (24 bytes); for v0.2 just ``wrap_nonce``.
     """
     dids = list(recipient_dids)
     if not dids:
         raise ValueError("at least one recipient DID is required")
+    hybrid = recipient_mlkem_keys is not None
     cek = cek if cek is not None else rng(32)
     esk = ephemeral_secret if ephemeral_secret is not None else rng(32)
     epk = x25519_base(esk)
@@ -544,20 +646,32 @@ def seal(plaintext: bytes, recipient_dids, aad: bytes = b"", *, rng=random_bytes
     recipients = []
     for did in dids:
         rxpub = x25519_pub_from_did(did)
-        kek = _derive_kek(x25519(esk, rxpub), epk, rxpub)
+        ecdh_ss = x25519(esk, rxpub)
+        kem_ct = None
+        if hybrid:
+            if did not in recipient_mlkem_keys:
+                raise ValueError(f"no ML-KEM key for recipient {did}")
+            mlkem_ss, kem_ct = ml_kem.encaps_derand(recipient_mlkem_keys[did], rng(32))
+            kek = _derive_kek_hybrid(ecdh_ss, mlkem_ss, epk, rxpub)
+        else:
+            kek = _derive_kek(ecdh_ss, epk, rxpub)
         wrap_nonce = rng(24)
         wrap_aad = _STEALTH_WRAP_AAD if stealth else did.encode("utf-8")
         wrapped = xchacha20poly1305_seal(kek, wrap_nonce, cek, wrap_aad)
-        if stealth:
-            recipients.append({"wrap_nonce": _b64(wrap_nonce), "wrapped_key": _b64(wrapped)})
-        else:
-            recipients.append({"to": did, "wrap_nonce": _b64(wrap_nonce), "wrapped_key": _b64(wrapped)})
+        entry = {}
+        if not stealth:
+            entry["to"] = did
+        if hybrid:
+            entry["kem_ct"] = _b64(kem_ct)
+        entry["wrap_nonce"] = _b64(wrap_nonce)
+        entry["wrapped_key"] = _b64(wrapped)
+        recipients.append(entry)
 
     envelope = {
-        "v": ENVELOPE_VERSION,
+        "v": ENVELOPE_VERSION_PQ if hybrid else ENVELOPE_VERSION,
         "enc": ENC_ALG,
         "kdf": KDF_ALG,
-        "kex": KEX_ALG,
+        "kex": KEX_MLKEM if hybrid else KEX_ALG,
         "epk": _b64(epk),
         "nonce": _b64(nonce),
         "ciphertext": _b64(ciphertext),
@@ -570,21 +684,55 @@ def seal(plaintext: bytes, recipient_dids, aad: bytes = b"", *, rng=random_bytes
     return envelope
 
 
-def open_envelope(envelope: dict, recipient_did: str | None, x25519_secret: bytes) -> bytes:
+def seal_to_did(plaintext: bytes, recipient_did_documents, aad: bytes = b"", *, rng=random_bytes,
+                cek: bytes | None = None, ephemeral_secret: bytes | None = None,
+                stealth: bool = False) -> dict:
+    """Post-quantum hybrid seal to recipients given by their DID documents (spec/did-document.md).
+
+    Each document is verified and its ML-KEM-768 key extracted, then the message is sealed with
+    ``kex: x25519-mlkem768``. This is the ergonomic front door: a sender that has resolved a
+    recipient's self-verifying DID document can seal to it without handling a loose, untrusted key."""
+    docs = list(recipient_did_documents)
+    if not docs:
+        raise ValueError("at least one recipient DID document is required")
+    dids = []
+    mlkem_keys = {}
+    for doc in docs:
+        ek = mlkem_pub_from_did_document(doc)   # verifies the document signature first
+        did = doc["id"]
+        dids.append(did)
+        mlkem_keys[did] = ek
+    return seal(plaintext, dids, aad, rng=rng, cek=cek, ephemeral_secret=ephemeral_secret,
+                stealth=stealth, recipient_mlkem_keys=mlkem_keys)
+
+
+def open_envelope(envelope: dict, recipient_did: str | None, x25519_secret: bytes,
+                  mlkem_secret: bytes | None = None) -> bytes:
     """Recover the plaintext from ``envelope`` for the recipient holding ``x25519_secret``. In stealth
     mode ``recipient_did`` is ignored (entries are trial-decrypted); in direct mode it selects the
-    recipient entry."""
-    if envelope.get("enc") != ENC_ALG or envelope.get("kdf") != KDF_ALG or envelope.get("kex") != KEX_ALG:
+    recipient entry. For a ``kex: x25519-mlkem768`` envelope the recipient's ``mlkem_secret`` (its
+    ML-KEM-768 decapsulation key) is also required."""
+    kex = envelope.get("kex")
+    if envelope.get("enc") != ENC_ALG or envelope.get("kdf") != KDF_ALG or kex not in (KEX_ALG, KEX_MLKEM):
         raise ValueError("unsupported envelope algorithms")
+    hybrid = kex == KEX_MLKEM
+    if hybrid and mlkem_secret is None:
+        raise ValueError("this envelope uses x25519-mlkem768; the recipient's ML-KEM secret is required")
     epk = _unb64(envelope["epk"])
     aad = _unb64(envelope["aad"]) if envelope.get("aad") else b""
     rxpub = x25519_base(x25519_secret)
-    kek = _derive_kek(x25519(x25519_secret, epk), epk, rxpub)
+    ecdh_ss = x25519(x25519_secret, epk)
+
+    def kek_for(entry):
+        if hybrid:
+            mlkem_ss = ml_kem.decaps(mlkem_secret, _unb64(entry["kem_ct"]))
+            return _derive_kek_hybrid(ecdh_ss, mlkem_ss, epk, rxpub)
+        return _derive_kek(ecdh_ss, epk, rxpub)
 
     if envelope.get("addressing") == "stealth":
         for entry in envelope.get("recipients", []):
             try:
-                cek = xchacha20poly1305_open(kek, _unb64(entry["wrap_nonce"]),
+                cek = xchacha20poly1305_open(kek_for(entry), _unb64(entry["wrap_nonce"]),
                                              _unb64(entry["wrapped_key"]), _STEALTH_WRAP_AAD)
             except Exception:
                 continue  # not our entry — trial-decrypt the next
@@ -594,12 +742,16 @@ def open_envelope(envelope: dict, recipient_did: str | None, x25519_secret: byte
     entry = next((r for r in envelope.get("recipients", []) if r.get("to") == recipient_did), None)
     if entry is None:
         raise ValueError(f"envelope is not addressed to {recipient_did}")
-    cek = xchacha20poly1305_open(kek, _unb64(entry["wrap_nonce"]),
+    cek = xchacha20poly1305_open(kek_for(entry), _unb64(entry["wrap_nonce"]),
                                  _unb64(entry["wrapped_key"]), recipient_did.encode("utf-8"))
     return xchacha20poly1305_open(cek, _unb64(envelope["nonce"]), _unb64(envelope["ciphertext"]), aad)
 
 
 def open_with_seed(envelope: dict, recipient_did: str, user_seed: str) -> bytes:
-    """Convenience: derive the recipient's X25519 secret from its user seed, then open."""
+    """Convenience: derive the recipient's X25519 (and, for a hybrid envelope, ML-KEM) secret from its
+    user seed, then open."""
     xsk, _ = x25519_keypair_from_user_seed(user_seed)
-    return open_envelope(envelope, recipient_did, xsk)
+    mlkem_sk = None
+    if envelope.get("kex") == KEX_MLKEM:
+        mlkem_sk, _ek = mlkem_keypair_from_user_seed(user_seed)
+    return open_envelope(envelope, recipient_did, xsk, mlkem_secret=mlkem_sk)

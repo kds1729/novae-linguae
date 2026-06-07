@@ -1,7 +1,8 @@
 # Crypto conformance contract
 
-**Status:** v0.2. Normative for any implementation of the Nova Locutio encrypted envelope
-([`encryption.md`](encryption.md), [`encrypted-envelope.schema.json`](encrypted-envelope.schema.json)).
+**Status:** v0.2 / v0.3. Normative for any implementation of the Nova Locutio encrypted envelope
+([`encryption.md`](encryption.md), [`encrypted-envelope.schema.json`](encrypted-envelope.schema.json)),
+including the v0.3 post-quantum hybrid `kex`.
 
 Confidentiality in Nova Locutio is defined by **test vectors, not by a reference codebase**. An
 implementation is conformant iff it reproduces the bytes in
@@ -24,7 +25,7 @@ Two conformant implementations ship in this repo and are tested against each oth
   hand-written and checked against its RFC/draft vector.
 - **Hardened (Rust, vetted crates):** [`tooling/validator/src/seal.rs`](../tooling/validator/src/seal.rs)
   and the `nl-seal` binary, built on `x25519-dalek`, `curve25519-dalek`, `chacha20poly1305`,
-  `hkdf`+`sha2`, and `ed25519-dalek`.
+  `hkdf`+`sha2`, `ed25519-dalek`, and (for the post-quantum hybrid) the NIST-validated `ml-kem` crate.
 
 Because both reproduce the same vectors, an envelope sealed by either opens with the other.
 
@@ -40,24 +41,45 @@ A hybrid multi-recipient sealed box (full prose in [`encryption.md`](encryption.
 | CEK wrap | XChaCha20-Poly1305 | key = KEK, AAD = the recipient DID bytes |
 
 **RNG draw order is part of the contract** (so deterministic vectors are reproducible): `cek` (32) →
-`esk` (32) → payload `nonce` (24) → then, per recipient in list order, `wrap_nonce` (24). The
-ephemeral public key is `epk = X25519_base(esk)`. Real implementations draw these from a CSPRNG; the
-vectors use a deterministic source `BLAKE3(seed ‖ counter_le64)` (NOT for production).
+`esk` (32) → payload `nonce` (24) → then, per recipient in list order, an ML-KEM `m` (32, **hybrid kex
+only**) before each `wrap_nonce` (24). The ephemeral public key is `epk = X25519_base(esk)`. Real
+implementations draw these from a CSPRNG; the vectors use a deterministic source
+`BLAKE3(seed ‖ counter_le64)` (NOT for production).
 
 A recipient's X25519 secret is derived from its user seed exactly as the validator derives its
 signing identity: `ed25519_seed = BLAKE3(user_seed)`, then
 `x25519_secret = clamp(SHA-512(ed25519_seed)[..32])`.
 
+### Post-quantum hybrid (`kex: x25519-mlkem768`, v0.3)
+
+The additive variant keeps the payload path identical and changes only key agreement (full prose in
+[`encryption.md`](encryption.md)):
+
+| Element | Primitive | Detail |
+|---|---|---|
+| Key agreement | X25519 ECDH **+** ML-KEM-768 (FIPS 203) | recipient ML-KEM key published in its DID document ([`did-document.md`](did-document.md)); each recipient entry adds `kem_ct` (1088 bytes) |
+| KEK derivation | HKDF-SHA-256 | `ikm = ecdh_ss ‖ mlkem_ss`, `salt = epk ‖ rxpub`, `info = "novae-linguae/v0.3/x25519-mlkem768/key-wrap"` |
+
+A recipient's ML-KEM keypair is derived from its user seed: the 64-byte FIPS 203 seed is
+`BLAKE3(user_seed ‖ "novae-linguae/v0.3/ml-kem-768/keygen" ‖ 0x00) ‖ BLAKE3(… ‖ 0x01)`, then
+`ML-KEM.KeyGen_internal`. The envelope version is `0.3`.
+
 ## The vectors
 
-[`conformance/encryption.json`](conformance/encryption.json) has two sections:
+[`conformance/encryption.json`](conformance/encryption.json) has these sections:
 
 - `primitives` — one case each for X25519 (RFC 7748), HChaCha20 + ChaCha20-Poly1305 (RFC 8439),
-  XChaCha20-Poly1305 (draft-irtf-cfrg-xchacha), HKDF-SHA-256 (RFC 5869), and the Ed25519→X25519
-  conversion against a real signer DID. These pin each primitive to its published test vector.
-- `envelope` — a full deterministic seal to one recipient: given `rng_seed_hex`, `plaintext_hex`,
-  `aad_hex`, and `recipient_did`, the `envelope` field is the exact output. A conformant impl
-  **reseals to identical bytes** and **opens it back to the plaintext** using the recipient seed.
+  XChaCha20-Poly1305 (draft-irtf-cfrg-xchacha), HKDF-SHA-256 (RFC 5869), the Ed25519→X25519
+  conversion against a real signer DID, and `ml_kem` — a FIPS-203-final ML-KEM-768 known-answer test
+  (`d,z → ek`; `ek,m → ct,K`; decaps recovers `K`) from the NIST-validated `ml-kem` crate. These pin
+  each primitive to its published / cross-validated test vector.
+- `envelope`, `stealth_envelope` — deterministic v0.2 seals (direct and stealth) to one recipient.
+- `mlkem768_envelope`, `mlkem768_stealth_envelope` — deterministic **v0.3 post-quantum hybrid** seals
+  (direct and stealth). The recipient's ML-KEM key is derived from `recipient_seed`.
+
+For every envelope vector — given `rng_seed_hex`, `plaintext_hex`, `aad_hex`, `recipient_did`, and (for
+the hybrid) the recipient's seed-derived ML-KEM key — a conformant impl **reseals to identical bytes**
+and **opens it back to the plaintext** using the recipient seed.
 
 ## Running the check
 
@@ -65,5 +87,6 @@ signing identity: `ed25519_seed = BLAKE3(user_seed)`, then
 - Reference Python: the `TestConformance` cases in `tooling/crypto-python/tests/`.
 
 Both replay the same file; a new backend is conformant when it passes the same replay. Adding a new
-algorithm (e.g. a post-quantum `kex`, see [`encryption.md`](encryption.md) open questions) means a
-new envelope-format version and a new vector set — the existing vectors never change.
+algorithm follows the additive pattern the post-quantum hybrid `kex` already demonstrated: a new
+envelope-format version (`0.3`) and a new vector set (`mlkem768_*`), with the existing vectors never
+changing.

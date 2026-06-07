@@ -246,6 +246,145 @@ class TestConformance(unittest.TestCase):
         opened = x.open_with_seed(v["envelope"], None, v["recipient_seed"])
         self.assertEqual(opened, bytes.fromhex(v["plaintext_hex"]))
 
+    def test_ml_kem_primitive_vector(self):
+        v = self.vectors["primitives"]["ml_kem"]
+        ek, dk = x.ml_kem.keygen_derand(bytes.fromhex(v["d"]), bytes.fromhex(v["z"]))
+        self.assertEqual(ek.hex(), v["ek"])
+        K, ct = x.ml_kem.encaps_derand(ek, bytes.fromhex(v["m"]))
+        self.assertEqual(ct.hex(), v["ct"])
+        self.assertEqual(K.hex(), v["K"])
+        self.assertEqual(x.ml_kem.decaps(dk, ct).hex(), v["K"])
+
+    def test_mlkem768_envelope_reseals_and_opens(self):
+        v = self.vectors["mlkem768_envelope"]
+        keys = {v["recipient_did"]: x.mlkem_keypair_from_user_seed(v["recipient_seed"])[1]}
+        rng = x.seeded_rng(bytes.fromhex(v["rng_seed_hex"]))
+        env = x.seal(bytes.fromhex(v["plaintext_hex"]), [v["recipient_did"]],
+                     aad=bytes.fromhex(v["aad_hex"]), rng=rng, recipient_mlkem_keys=keys)
+        self.assertEqual(env, v["envelope"])
+        self.assertEqual(env["v"], "0.3")
+        self.assertEqual(env["kex"], "x25519-mlkem768")
+        opened = x.open_with_seed(v["envelope"], v["recipient_did"], v["recipient_seed"])
+        self.assertEqual(opened, bytes.fromhex(v["plaintext_hex"]))
+
+    def test_mlkem768_stealth_envelope_reseals_and_opens(self):
+        v = self.vectors["mlkem768_stealth_envelope"]
+        keys = {v["recipient_did"]: x.mlkem_keypair_from_user_seed(v["recipient_seed"])[1]}
+        rng = x.seeded_rng(bytes.fromhex(v["rng_seed_hex"]))
+        env = x.seal(bytes.fromhex(v["plaintext_hex"]), [v["recipient_did"]],
+                     aad=bytes.fromhex(v["aad_hex"]), rng=rng, stealth=True, recipient_mlkem_keys=keys)
+        self.assertEqual(env, v["envelope"])
+        self.assertTrue(all("to" not in r for r in v["envelope"]["recipients"]))
+        opened = x.open_with_seed(v["envelope"], None, v["recipient_seed"])
+        self.assertEqual(opened, bytes.fromhex(v["plaintext_hex"]))
+
+
+class TestDidDocument(unittest.TestCase):
+    """DID documents publish the ML-KEM key-agreement key the did:nova string cannot carry."""
+
+    SEED = "novae-linguae-example-claude"
+
+    def test_build_verify_extract(self):
+        doc = x.build_did_document(self.SEED)
+        self.assertEqual(x.verify_did_document(doc), ("valid", doc["id"]))
+        ek = x.mlkem_pub_from_did_document(doc)
+        _dk, ek_direct = x.mlkem_keypair_from_user_seed(self.SEED)
+        self.assertEqual(ek, ek_direct)
+        self.assertEqual(len(ek), 1184)
+
+    def test_deterministic_from_seed(self):
+        # One seed regenerates the same key + the same document.
+        self.assertEqual(x.build_did_document(self.SEED), x.build_did_document(self.SEED))
+
+    def test_id_matches_signing_identity(self):
+        doc = x.build_did_document(self.SEED)
+        _seed32, _pub, did = x.signing_keypair_from_user_seed(self.SEED)
+        self.assertEqual(doc["id"], did)
+
+    def test_tamper_is_rejected(self):
+        doc = x.build_did_document(self.SEED)
+        bad = json.loads(json.dumps(doc))
+        b64 = bad["keyAgreement"][0]["publicKeyBase64"]
+        bad["keyAgreement"][0]["publicKeyBase64"] = ("A" if b64[0] != "A" else "B") + b64[1:]
+        self.assertEqual(x.verify_did_document(bad)[0], "invalid")
+        with self.assertRaises(ValueError):
+            x.mlkem_pub_from_did_document(bad)
+
+    def test_unsigned_document(self):
+        doc = x.build_did_document(self.SEED)
+        del doc["signature"]
+        self.assertEqual(x.verify_did_document(doc)[0], "unsigned")
+
+
+class TestHybridEnvelope(unittest.TestCase):
+    """Post-quantum hybrid kex (x25519-mlkem768): X25519 + ML-KEM-768, KEK mixes both secrets."""
+
+    SEED_A = "novae-linguae-example-claude"
+    SEED_B = "novae-linguae-example-verifier"
+
+    def setUp(self):
+        self.doc_a = x.build_did_document(self.SEED_A)
+        self.doc_b = x.build_did_document(self.SEED_B)
+        self.pt = b'{"kind":"assert","claim":"post-quantum-confidential"}'
+
+    def test_shape_and_roundtrip_single(self):
+        env = x.seal_to_did(self.pt, [self.doc_a], aad=b"label")
+        self.assertEqual(env["v"], "0.3")
+        self.assertEqual(env["kex"], "x25519-mlkem768")
+        import base64 as _b
+        entry = env["recipients"][0]
+        self.assertEqual(len(_b.b64decode(entry["kem_ct"])), 1088)   # ML-KEM-768 ciphertext
+        self.assertEqual(x.open_with_seed(env, self.doc_a["id"], self.SEED_A), self.pt)
+
+    def test_deterministic_reseal(self):
+        keys = {self.doc_a["id"]: x.mlkem_pub_from_did_document(self.doc_a)}
+        rng1 = x.seeded_rng(b"hybrid-vector-seed")
+        rng2 = x.seeded_rng(b"hybrid-vector-seed")
+        e1 = x.seal(self.pt, [self.doc_a["id"]], aad=b"a", rng=rng1, recipient_mlkem_keys=keys)
+        e2 = x.seal(self.pt, [self.doc_a["id"]], aad=b"a", rng=rng2, recipient_mlkem_keys=keys)
+        self.assertEqual(e1, e2)
+
+    def test_multi_recipient(self):
+        env = x.seal_to_did(self.pt, [self.doc_a, self.doc_b])
+        self.assertEqual(len(env["recipients"]), 2)
+        self.assertEqual(x.open_with_seed(env, self.doc_a["id"], self.SEED_A), self.pt)
+        self.assertEqual(x.open_with_seed(env, self.doc_b["id"], self.SEED_B), self.pt)
+
+    def test_non_recipient_rejected(self):
+        env = x.seal_to_did(self.pt, [self.doc_a])
+        with self.assertRaises(Exception):
+            x.open_with_seed(env, self.doc_b["id"], self.SEED_B)
+
+    def test_stealth_hybrid(self):
+        env = x.seal_to_did(self.pt, [self.doc_a], stealth=True)
+        self.assertEqual(env["addressing"], "stealth")
+        self.assertTrue(all("to" not in r for r in env["recipients"]))
+        self.assertTrue(all("kem_ct" in r for r in env["recipients"]))
+        self.assertEqual(x.open_with_seed(env, None, self.SEED_A), self.pt)
+        with self.assertRaises(Exception):
+            x.open_with_seed(env, None, self.SEED_B)
+
+    def test_missing_mlkem_secret_raises(self):
+        env = x.seal_to_did(self.pt, [self.doc_a])
+        xsk, _ = x.x25519_keypair_from_user_seed(self.SEED_A)
+        with self.assertRaises(ValueError):
+            x.open_envelope(env, self.doc_a["id"], xsk)   # no mlkem_secret supplied
+
+    def test_tampered_kem_ct_fails(self):
+        env = x.seal_to_did(self.pt, [self.doc_a])
+        import base64 as _b
+        ct = bytearray(_b.b64decode(env["recipients"][0]["kem_ct"]))
+        ct[0] ^= 0xFF
+        env["recipients"][0]["kem_ct"] = _b.b64encode(bytes(ct)).decode()
+        with self.assertRaises(Exception):
+            x.open_with_seed(env, self.doc_a["id"], self.SEED_A)
+
+    def test_unsigned_did_doc_refused(self):
+        bad = json.loads(json.dumps(self.doc_a))
+        del bad["signature"]
+        with self.assertRaises(ValueError):
+            x.seal_to_did(self.pt, [bad])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

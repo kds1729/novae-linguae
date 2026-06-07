@@ -1,5 +1,5 @@
 {
-  "description": "Conformance vectors for Nova Locutio payload encryption (spec/encryption.md). Primitive vectors are the official RFC/draft test vectors; the envelope vector is a deterministic seal (BLAKE3-seeded RNG) that any implementation must reproduce and open.",
+  "description": "Conformance vectors for Nova Locutio payload encryption (spec/encryption.md). Primitive vectors are the official RFC/draft test vectors (the ml_kem block is a FIPS-203-final ML-KEM-768 KAT from the NIST-validated RustCrypto crate); the envelope vectors are deterministic seals (BLAKE3-seeded RNG) that any implementation must reproduce and open, including the post-quantum hybrid kex (mlkem768_envelope).",
   "primitives": {
     "x25519": [
       {
@@ -44,6 +44,15 @@
       "did": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
       "x25519_pub": "8b06b8c0ab344ba952d730f40296eae19f4247e141acae1474d7bf148b133139",
       "from_seed": "novae-linguae-example-claude"
+    },
+    "ml_kem": {
+      "comment": "FIPS 203 final ML-KEM-768, generated from the NIST-validated RustCrypto ml-kem crate. keygen_derand(d,z)->ek; encaps_derand(ek,m)->(K,ct); decaps(dk,ct)->K. Both impls must reproduce ek, ct and K.",
+      "d": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "z": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "m": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "ek": "298aa10d423c8dda069d02bc59e6cdf03a096b8b3da4cab9b80ca4a14907672ccef1ec4faf234a0bc5b7e9d473f2b3133b3b26a1d175cb67a7805919699c02f76531b99c5f89180704bb4ca4535c5b8972679c660a07c5e514b87009c862eb8f5157695efb3fc40a9def6b81c1cc02a249ae4f094ad0d9bd3485c1c1c68080520a7c8c632032cee738154e5c5176c07da56024776a430fe76eacf665a3f7b832102215bc82f10939c8355704336a8fac1d81e4bb0485aa5d7c74d6b59bbe5c5e972a0d8bac411b55b5d5557cd680a1a8f71b4eb86bc48c9a0509731a54bd9d7290b27963e4372dc9b199cfdcac0b01acd28a62395112e4c43648d622c48c8234d01440e8cc376c927f23a5afc9ac0474c662274e424525c8552ece3b3fe26516de901bc7d515bde89558e626c95c80b93342f8010004f39e6c6c94871c5e344cab3966c835f9a96a59afd31c40286b38b1c1a78470bab947518934453ce86736a919f1f5a6d510a86f5454fc3980cb5c765bd2bd5f7b36b1410d6635c8ceb47c4dda0d76a28eac939c71c3024804866c71626658442163c2c22117e50acefce6378a985652302a4ef0c2ce0cc716b7796e2b6b2e3777dfa1ac3da259a31b5a9b530f8cb638a81a62ac301849abaf95a7301bda30068909bfdb7e67dbccbb38a5551a25b1a3a0f685748ad5753d8880f0016c627486166384c5571fe2365900364d038311e2d875db366686932b5ec602430a369e87a6ef5c338786657825bd4c057aceb923eb0935e6905e63b4ced7f80857a773dd64b150d26612ea9ac12052db2017bf1843ccb4b3281b690dc728adfa85c00281b8e3c09287335f856b4fc2892f69a2f57921ada01914c40988662d57769662a786351b9b66493dab79594d986de2100d65ba0ff4ea58b81538d24a4435a258fac25404aa7f41f658b1385065e158dcb60115732720f40459aaac15e406953a90ac52997d1ccd070060efc65db9e653354467fad56ec713c86e7540c423acf2669f52fa6f4ac6888d871ef3e847c029a8aafbb92e17b24aa079b1f419ba6175b442afb11909d4a56b70a0335b28739218aa7c9348e2c3c2f3eb3d15a41e6417c0dd94bfeb21419b311a7bb13a180bbe833218a9a6b17447cc85f225859587a73077049acbcfd44d0f025438e15d1538270d586e1bf83192a9459cf63c0e972f85297679831ecf121509851cb8340f6f107b0fa1a0efd1b36a8189bc085c4f5cb784e553f41b918f80397ce1956f785bee377ca9aa8be6998ada30c26b7c3d8c6b55254cc96203b20c42aee0ac4e1ebb408e49a9e3f879d0ab0785eb7025425d1305a2299c015e120d163b0e19494ce57253d0246d182745cb8197ab7438b3c1bb7972bec5a306eba3567855c014699fef65ae54c770a0d85c18400cf642aedc660777ba4b138502bd5a7812f621f84a48296b98dd4322b6f15828b8a8f0e00a8ba44a53c3a8b143571b0740abd567daf1cde9c79c204b6d5e259d1766a31bbbcb4e6a05cf4502176b301c1c2f41247750157bcec85e809b30a4d60d7747cdd0f5b99aa8c826987517793aaa8080a0b124a8558df72bbe37b75f4edbb6be8216d6c633fb2b2280e25113d8695e43481c3eeb397eb192505229b67a201ea893c3e2cb32da8bc342fa4dea0578",
+      "ct": "04c1e43bd82139e4600aa87fddc0793f7c147e0eb7dccc377f019d22c16ecdcbd22e05bb45e2fd38ca184e7bcc5bb504cdc13fc6d915cc029057311814bd916923de25330a22a53b6061dc17d892c437276108f1cb12bbbb37dce17eb4fecff68859850dbac4e0b6fc218a24caa82a4434b0886e63e824632aa32b0dce207636cbeb40a22b8432c094f07f54af3793d6449322066890576e7d191347e34578f264c5406379e7c0c46dbc1857dcd07ced02dd14a5e882cb8073a0906ae293e7a639499321751b7d9b3de1e38eebf20fc0957fe72643106eb8a87b3862e680c235d99a7e432f7bce65ccbed16973ed46f23c207e4096a563a945a867feaadb2a01d570d3bff7585c5f276a23e8f8995076904f89d0d044acf66a93550309326731ef4c0509047015e0068862de943e84cc9fab33850c86e295dca82d44b3ce236c186aad8120d9134d4f6597e7278534f42339286987c06c4ba0d52c82e451041106ceddb3c6154d72a8214de6ab4e7af96623684a36130d96498698724e4b5fe02f98e602e5d89f35335412bb7d3d9350bd61b99dd8f529b8f61e5d4f6cb78733d3048e491f3296fb9972ca8af433870287f2ee52ccf487166d7edbbafe475bd30c1aa831e5c34975e9b227c5005cce483d9feac2b392efbe5e7c1b81d72d61ef6a9c55f37170c694b40bae5e6b89274b25613db3de07d426bfb21db9a8f8cd2beb8756fdc9af863c904c2ff9453d21ce147c96c56e2e052dfaea6ad0ec6dc7eba35af185d2df99ee3d0ae22886d3135da04d90dc384857d128d38ea128f794d37d7c2dc74d5406455f04be7d75b5bcffc2b20fa34a5cb633c53874a3930abf387f16f5b0da53320dc5747956015f28a6ab54519d0528e4fe56515ace0109cbea117fefae7846e4c167734880ea6adb062abb7a530f5855133017fcdf4b25617881eb16538bf69f363d6f4bf9800b3687e0b18f63489a5da21acb78258f36c30e76b6d268c77131df64e8625aaf8fd1d43de92a1fa8578fb22ccde5b97e840fe97503c612199e7e99d7b4849035b3bd274228de0ad486fb788017e2124e34ebfb0885cfa1c5445d12f64da3694ca0eee205506950a08495f1be86ba0d756ce35c599e9507a3dbeea8403f78e71e1f0972a4b95519d34ab20b302a93902139666a6000f4549ed2db07ae211733c9050a10153dd55f3b02e9c345ffb4a58c0bd2ca34e23c3d3dc45ecd875321420f921527e7d1de27bf9525ae4c014ab52d147771be029d1dc18352d93f47c3ac7a2d2d6004d1a70da2207cb7de664166e2be537fdee44d9697f9a5ad80934cf189cd34c6160f05852de601efc8e745543369ca94d7d6f661de020c32b63fffa0e5f85da87494f8286b49f03a3e3006df6a8b9cbc4dd7846809d24d23d0a1ae191cb8fd1946d713762a14a2c4e68927774570c1f6e472047550ed8b83e5a77cc150d700f80433502daf12c33da4409e0f776add4b990dc6ed9a4202ea3eca5dec9fbe0281ca2e9e62c218d3dc5cd92ffc040a9ce0",
+      "K": "ef91db44b6cd5b2c50f483481a3d6e2a08cc149764fcb8dc568851332da45ed9"
     }
   },
   "envelope": {
@@ -93,6 +102,58 @@
         {
           "wrap_nonce": "fx+MmS1OPrC4ZnpZdOdzLR4iWav1Uk/s",
           "wrapped_key": "zyBPEM0qQiG0i05p6pnWrZCcDE9n80C/wEzmvcdE772Ne7oUI8M2m4ovf7da3d9/"
+        }
+      ],
+      "addressing": "stealth",
+      "aad": "bm92YWUtbGluZ3VhZS9leGFtcGxl"
+    }
+  },
+  "mlkem768_envelope": {
+    "comment": "Post-quantum hybrid seal (kex x25519-mlkem768): X25519 ECDH + ML-KEM-768 encapsulation, KEK = HKDF(ecdh_ss || mlkem_ss, ...). The recipient's ML-KEM key is derived from recipient_seed. RNG draw order: cek, esk, nonce, then per recipient an ML-KEM m (32) and a wrap_nonce (24). Reproduce with the seeded RNG.",
+    "rng_seed_hex": "0102030405060708090a0b0c0d0e0f10",
+    "recipient_did": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+    "recipient_seed": "novae-linguae-example-claude",
+    "aad_hex": "6e6f7661652d6c696e677561652f6578616d706c65",
+    "plaintext_hex": "7b226b696e64223a22617373657274222c22636c61696d223a22636f6e666964656e7469616c227d",
+    "envelope": {
+      "v": "0.3",
+      "enc": "xchacha20poly1305",
+      "kdf": "hkdf-sha256",
+      "kex": "x25519-mlkem768",
+      "epk": "f5SV95dTTtVfiN2+0K1Zcn+jAK9EJJfYzqU5h+gKRjM=",
+      "nonce": "usVilhTRiu3pvE/ToXBynHmWMNOwJU2U",
+      "ciphertext": "7STDMDxuQyb/c7/psXeqvbSBkKwfyU5qR5CGBJmnJ4ILAg/xT80YoMO2qHZoDYTm3BssQq+p6FE=",
+      "recipients": [
+        {
+          "to": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+          "kem_ct": "vMMLkxO/C2cAcwFt+DRa1Awwa8cSTRQfcAJxdZLaYdMhA04HXHnQWYqL/+Q1O9Y2grbUIOGsR7WiQJd5zYHouP26ccimvbpe6NpZEXgHPfJZwNBAq45Ty4rWVxNJCtE7nA5+Z4jujC9bJpVJdc42cxJffOSVrPz3pvIuCM8zWDVzoz1K2hQOfrJHQ1fKfvJwLJYTgKj4zsas+y7okdePFjGsdLkUd8v4JOfhTRRKOKGk0NM2Ht5indN0Y3cGtTqujVB6MR1svfPogOYnllHH8OJcRheRIlVCTofe7BxTAYcqRS2BxW3eVE40G+0czxD3LF0vABrP2Kq+tvHJguU05COiWeWbk4gSIcsNvOrpCwsKmVGS8rM962dx5MEjgJQhtXrPseEQpm1NC7q6NGoEbCZyuhNWj4WpfCsfFXWlE3Mq5zj59wcpU4xAMrwplReD6pFN5BXdunfeQrvuMlveik4zBQ63Wrx0Lo4jUuhE4EktqCizkdnhyARhZrfww6b9Z0A1d8TDEu36Jw9kpjMmwT+YzPGHEI7MyqyDIpPBfeRFaenEJV4R37P67IrQP2kp4hwVGM2tASPWGe0tep0jk1vr15zTzRppzuvMSE5DFSk5DHCg7/A37UjFCtoTGguH8MfNCmu16Til3XbLdrd7f4yxaMAMRnmTjb41unhm/sIOHRWFFFGHblDW1HjxJuVcP7jA17mmqdrmjN0PUETbsyntOky/oC1Z4ZOti17Rmp3Xc2pnFsMGZL6c5A92M1s4oDgtserqqpivH1cQD5zcVGbiPsNf7NaVQ2BqgKD27/7vuSO1FaIXG2XI1XVJWcqclYF8jtRhozwmex8dfT6pEoPbK7G6vSHJnUWpFwdTOYqQuGcDbFFhv4R+V7p9YdlxDdQVAAVDBfkMIwL7ehNfkIYfCbiFgcVIlyuX+b2MczX5wVqAzcNdIy/rmpK8JU7PSOziikvvNd2/0iW1N9OkLtfr+SknFF3RxyV8h0qYoWD8gJX4VZQdrmkilRs2Dp4A8cqzySFeXeyHPHJViWQ2T/VN5w8gm12KcPCf4Edj+HDUHXL3UAkx5XSHnsbixTD36eMQMxBNBad+0gp7Ki/oUZRnc2xD+tcFbRD3U+g6+JlKvs4F0hdxoj0X9GGN3fit86erzzzJbVpGYLQi3bmZHySzS7iq87Vy5+qXg5INIBMbanO4YHqXeItXumApuhm5zahgifqfuvz2L34HSE4bSpbuCIXED57qIsgg8mYYyMCml6w4GR4o2InDHTlAPKMsRIpTTowku4rytiLrWyBlbtOMDjN/KlM1ZgNN/1PUwaH4+eMEuEpl0ydbGkYp8DwanX810GBkr9rwPGHmjakoL3MaC+wJnANZO0QnOgWLt/ytXxRF689w1TJo+flj9QJPgwUirshJ2pbJP7DLxQ2hVCKAtDpgutFueAmRCvOvCoo=",
+          "wrap_nonce": "zafyiedHGd5GURyZNic+05tRg0DWe/fL",
+          "wrapped_key": "RUX2Yho12uek3GktB11xmLo0JhBiXTWw79tK8IhaTn2nJx1sMwqtG/IOfZ9mwjvP"
+        }
+      ],
+      "aad": "bm92YWUtbGluZ3VhZS9leGFtcGxl"
+    }
+  },
+  "mlkem768_stealth_envelope": {
+    "comment": "Hybrid kex + stealth addressing: post-quantum and recipient set hidden. Reproduce with the seeded RNG, stealth=True, the recipient's ML-KEM key derived from recipient_seed.",
+    "rng_seed_hex": "100f0e0d0c0b0a090807060504030201",
+    "recipient_did": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+    "recipient_seed": "novae-linguae-example-claude",
+    "aad_hex": "6e6f7661652d6c696e677561652f6578616d706c65",
+    "plaintext_hex": "7b226b696e64223a22617373657274222c22636c61696d223a22636f6e666964656e7469616c227d",
+    "envelope": {
+      "v": "0.3",
+      "enc": "xchacha20poly1305",
+      "kdf": "hkdf-sha256",
+      "kex": "x25519-mlkem768",
+      "epk": "UkwY5AunVvDjBMzqPefJ+tNVjy5GNIi7ZBvx5zw8Q0E=",
+      "nonce": "DqaCOkls5jZ9IjTkYRLcj7hBmrEwelGo",
+      "ciphertext": "t4qywScBQ8s9N8WhmPHzP6chQ84NKYu8uNMByUTBRvF3kPeF3K6A3WyrRZsZ+CDJlqSJXGH2sG4=",
+      "recipients": [
+        {
+          "kem_ct": "yIKo3OJl17/b9+3+xyEYgfICYTV+5BY8lNf1RXCa0+/MnIFfRx/OJa1DkAv1Hm0I9GQ7kb+hKfJbmsiiMwS+kJZF0D9oZoAphnE3UiJ0IkQajNfKmP6WlfPCcuG75ZTZiAR1kU32LKRXOammAL6ikgb3j68C2X+qxBroOGE5fxfdiMY2ng/QrTxSCMvh0hw4iGyueXHA5HBf8qh4QzOol2kzA178j9M1vhn7Q+JuTZIK9rBmdEK9d2HUe2hNtv2URjBwAbR2s+atQYIoVkkLRCOhznAUC3+OTFramnYrfWKvX4l6UX4exSJ9dQtmpDbU/yFyPCj0vGP+yTftcWrkJQQjQwX0LuOkcvjWLtJTGAIl1G2sZhLQ5CbvId4cnuOgrYFQ7+qt9NPTSl8yVk+tUbjFVDqsnox0YIFgGSQe2nG4IB/IdVS7+iQgDgYMsGRgeVzs3EMlwlvesz06DryzmlySVsxf+a1kasokEOGpibUC2jolFsbJ2R5w5bpMdyMIle0mEs672jveF0f88TDHKNENHYORuZbMVI9tfWQCwYyz530Ms/PBKtCk/KVlOmeSPoQ1wdQt+tSW7yWvyzSAMW9PsagQbEH6SkseoIw5nJ32VTlNBY4zS0wXQ/mQMswGDeqNLg7zuaCXvLxmpNktUszdl7oxGPBHT9/EhAnCvJpQpYThOAPXgNd6MEQje6lmA7Dn7nyba3Yjr2u89cE19eWiXEcfU02gSmZ7ATPgZ+MLVzX7mos3DoIE/4MeEbcve7Ll1Y6c1xdKE0UYpr3q2co/Eme5zpGAilRbBhgBdY675K3MKB6kxjpvjRWV29V3Z32Rc8M7VE5ZhHus/IebL+U4O8t2vj1+JQ+/w0WjA5ANmWsjN5Ocwy2kTIisVVSZmuxGzkNIMgwHS16fc5999IjoS+UcsnwW7t1S9d7Ycwv0jJBWFzAt3mqgcgZMql5Q5bc6hMWkpLu1YoqytolC4F0KylmkVrV/3wNI60DVhaQxcAnKaBUyT+rQrPW8z1hAVeC3Le+C5PlGmu4N9Iq+fNhsIT8DEHaKu24Xy7NdrABT75BQYnRF5EI36Uw7T4NiLBXmwZwb+pgWG3ECvmcMNMZPIpTzEQKjcuzL89pSdpWYPjmt5/yye3ikTODVZhHylT7ZO+cTYBoP4G+HOoXyXtS7g6/XUX7TPB2C2abupvXD885M05qXk1YuhQ5aPQZQZ7KtcIuR7bap+Dmf9DR6MMq6fli1sjmgP+2hwL44trz9za/XIiYzIM9LRCwAqrmoloXVP+fIadgl5k0yo5ZYNA9RkrX8RdMTc1u97ZntylPfUleu7J3IeMlsE9yBD41y9mIJ9llcKHC4cWbU8tUyGV0D5WZaSG9ym6yiEFdzcxz0A+Su9FxrwGfGQ4xVR+AFg2shLg63EqHPd8qzZfGaB+ChG5iAeYwNF3XjpTavNXw=",
+          "wrap_nonce": "x2HvFUz8odCVzXFLbIABcPh0OxnqWVhy",
+          "wrapped_key": "IgjyK6qA6iLI2VNS1hFNksUFC1li8EgOZfNzi7jmkptgQb7GfGfxZA4SXmwFkmTK"
         }
       ],
       "addressing": "stealth",

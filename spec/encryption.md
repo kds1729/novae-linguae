@@ -81,8 +81,10 @@ obtained by converting a DID equals the one derived from that DID's seed.
 
 > **Caveat (acknowledged, not glossed):** reusing one keypair for both signing and key agreement is
 > a deliberate simplicity/identity-reuse trade-off, standard in practice (Signal, age, libsodium)
-> but not free — it couples the two uses. v0.3+ may let a DID document advertise a *separate* X25519
-> key; the `kex` field is versioned so that change is additive.
+> but not free — it couples the two uses. As of v0.3 a DID document
+> ([`did-document.md`](did-document.md)) advertises a *separate* key-agreement key — currently the
+> post-quantum ML-KEM key; advertising a distinct X25519 key there too is additive (the `kex` field is
+> versioned), and remains open question 1 below.
 
 ## The scheme
 
@@ -212,37 +214,47 @@ recipients is still visible; pad with decoy entries (random wraps no key opens) 
 is sensitive. This is metadata-hiding, not a full anonymity system — a network observer still sees
 traffic; stealth addressing only removes recipient identities from the artifact itself.
 
-## Post-quantum key agreement (v0.3, specified — implementation deferred)
+## Post-quantum key agreement (v0.3, implemented)
 
 X25519 is not post-quantum secure: a future quantum adversary that records envelopes today could
 recover the per-recipient KEK later ("harvest now, decrypt later"). The forward path is a **hybrid**
-key agreement that stays secure as long as *either* component holds.
+key agreement that stays secure as long as *either* component holds. It is opt-in per envelope via a
+new `kex` value, gated behind a format-version bump so it is unambiguous on the wire.
 
-Planned construction (a new `kex` value, gated behind a format-version bump so it is unambiguous on
-the wire):
+Construction:
 
-- `kex: "x25519-mlkem768"` — run X25519 ECDH **and** an ML-KEM-768 (FIPS 203) encapsulation against
-  the recipient. The recipient's ML-KEM public key is published in its DID document (this depends on
-  open question 1, a separate key-agreement key — an Ed25519→Curve25519 map cannot yield an ML-KEM
-  key).
-- The wire gains a per-recipient ML-KEM ciphertext (~1 KB) alongside the existing `epk`.
-- The KEK is `HKDF( ecdh_shared ‖ mlkem_shared, salt, info' )` — concatenating both shared secrets so
-  the KEK is secure if either KEM is. `info'` carries the new `kex` label for domain separation.
+- `kex: "x25519-mlkem768"` (envelope version `0.3`) — run X25519 ECDH **and** an ML-KEM-768 (FIPS 203)
+  encapsulation against the recipient. The recipient's ML-KEM public key is published in its DID
+  document ([`did-document.md`](did-document.md), resolving open question 1 — an Ed25519→Curve25519
+  map cannot yield an ML-KEM key, so the key is generated, derived deterministically from the agent's
+  seed, and signed by the identity).
+- Each recipient entry gains a `kem_ct` — the per-recipient ML-KEM ciphertext (1088 bytes, base64) —
+  alongside the shared `epk`.
+- The KEK is `HKDF( ecdh_shared ‖ mlkem_shared, salt = epk ‖ recipient_xpub,
+  info = "novae-linguae/v0.3/x25519-mlkem768/key-wrap" )` — concatenating both shared secrets so the
+  KEK is secure if either KEM is, with the new `info` label as the domain separator. Everything below
+  the KEK (the XChaCha20-Poly1305 / HKDF payload and key-wrap path) is unchanged from v0.2.
+- RNG draw order (the byte-for-byte contract): cek, esk, nonce, then per recipient an ML-KEM `m`
+  (32 bytes) before each `wrap_nonce` (24 bytes).
 
-Why deferred, not implemented now: ML-KEM adds ~1 KB per recipient (a large fraction of a typical
-token-compact message) and needs the DID-document key-publication mechanism first. The envelope
-format is intentionally `kex`-pluggable so this drops in as an additive version without touching the
-XChaCha20-Poly1305 / HKDF payload path. Until then, agents needing PQ confidentiality should rely on
-a PQ-secure transport beneath the protocol.
+The cost is ~1 KB per recipient (a large fraction of a token-compact message), which is why PQ is
+opt-in rather than the default: agents choose it per conversation when "harvest now, decrypt later" is
+in their threat model. The `kex`-pluggable format meant this dropped in additively. A pure-Python
+reference (`ml_kem.py` + `nl_crypto.py`'s `seal`/`seal_to_did`/`open`) and the hardened Rust impl
+(`nl-seal`) both reproduce the same `mlkem768_envelope` conformance vectors byte for byte, against a
+FIPS-203-final ML-KEM known-answer test.
 
 ## Open questions (v0.3+, not blockers)
 
-1. **Separate encryption key in a DID document** — decouple signing from key agreement (also the
-   prerequisite for the post-quantum `kex` above).
+1. ~~**Separate encryption key in a DID document** — decouple signing from key agreement (also the
+   prerequisite for the post-quantum `kex` above).~~ **DID documents now exist**
+   ([`did-document.md`](did-document.md)) and publish a (post-quantum) key-agreement key separate from
+   the signing identity; the open remainder is advertising a distinct *X25519* key there too, to
+   decouple even the classical key agreement from signing.
 2. ~~**Metadata privacy** — stealth/anonymous recipient addressing.~~ **Implemented** (above); the
    open remainder is decoy-padding to also hide the recipient *count*.
-3. **Post-quantum** — the hybrid X25519 + ML-KEM `kex` is **specified** (above); implementation is
-   deferred behind the DID-document key and a wire-cost decision.
+3. ~~**Post-quantum** — the hybrid X25519 + ML-KEM `kex`.~~ **Implemented** (above): `kex:
+   x25519-mlkem768`, ML-KEM-768 (FIPS 203), with cross-implementation conformance vectors.
 4. **Sender authentication / deniability** — an authenticated-but-deniable mode (e.g. a sender-static
    ECDH variant) for agents that want sender binding without a non-repudiable signature.
 5. **Group/conversation key management** — rekeying, membership changes, and forward secrecy for

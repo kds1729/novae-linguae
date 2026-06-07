@@ -15,15 +15,24 @@ use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use hkdf::Hkdf;
+use ml_kem::kem::Decapsulate;
+use ml_kem::{B32, Ciphertext, DecapsulationKey, EncapsulationKey, KeyExport, MlKem768, Seed, TryKeyInit};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256, Sha512};
+use std::collections::BTreeMap;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 const ENVELOPE_VERSION: &str = "0.2";
+const ENVELOPE_VERSION_PQ: &str = "0.3";
 const ENC_ALG: &str = "xchacha20poly1305";
 const KDF_ALG: &str = "hkdf-sha256";
 const KEX_ALG: &str = "x25519-ed25519";
+// Post-quantum hybrid key agreement (v0.3, spec/encryption.md): X25519 ECDH + an ML-KEM-768
+// encapsulation against the recipient's published key, with the KEK derived from both shared secrets.
+const KEX_MLKEM: &str = "x25519-mlkem768";
 const KEYWRAP_INFO: &[u8] = b"novae-linguae/v0.2/xchacha20poly1305/key-wrap";
+const HYBRID_WRAP_INFO: &[u8] = b"novae-linguae/v0.3/x25519-mlkem768/key-wrap";
+const MLKEM_KEYGEN_LABEL: &[u8] = b"novae-linguae/v0.3/ml-kem-768/keygen";
 // Stealth addressing (v0.3): wrap bound to a fixed label instead of the recipient DID, so the
 // recipient set can be omitted and recovered by trial-decryption.
 const STEALTH_WRAP_AAD: &[u8] = b"novae-linguae/v0.3/stealth/key-wrap";
@@ -137,20 +146,106 @@ fn derive_kek(shared: &[u8; 32], epk: &[u8; 32], rxpub: &[u8; 32]) -> [u8; 32] {
     okm
 }
 
+/// Hybrid KEK (spec/encryption.md): HKDF over the X25519 and ML-KEM shared secrets concatenated, with
+/// the same `epk ‖ recipient_xpub` salt as v0.2 and a distinct info label. Secure if either holds.
+fn derive_kek_hybrid(ecdh_ss: &[u8; 32], mlkem_ss: &[u8], epk: &[u8; 32], rxpub: &[u8; 32]) -> [u8; 32] {
+    let mut ikm = Vec::with_capacity(32 + mlkem_ss.len());
+    ikm.extend_from_slice(ecdh_ss);
+    ikm.extend_from_slice(mlkem_ss);
+    let mut salt = Vec::with_capacity(64);
+    salt.extend_from_slice(epk);
+    salt.extend_from_slice(rxpub);
+    let hk = Hkdf::<Sha256>::new(Some(&salt), &ikm);
+    let mut okm = [0u8; 32];
+    hk.expand(HYBRID_WRAP_INFO, &mut okm).expect("32 is a valid HKDF length");
+    okm
+}
+
+/// An agent's ML-KEM-768 keypair from its user seed (matching tooling/crypto-python): the 64-byte
+/// FIPS 203 seed is two domain-separated BLAKE3 draws over `user_seed ‖ label`. Returns the
+/// decapsulation key and the serialized 1184-byte encapsulation (public) key.
+pub fn mlkem_keypair_from_user_seed(user_seed: &str) -> (DecapsulationKey<MlKem768>, Vec<u8>) {
+    let mut base = Vec::from(user_seed.as_bytes());
+    base.extend_from_slice(MLKEM_KEYGEN_LABEL);
+    let mut b0 = base.clone();
+    b0.push(0x00);
+    let mut b1 = base;
+    b1.push(0x01);
+    let mut seed = Seed::default();
+    seed[..32].copy_from_slice(blake3::hash(&b0).as_bytes());
+    seed[32..].copy_from_slice(blake3::hash(&b1).as_bytes());
+    let dk = DecapsulationKey::<MlKem768>::from_seed(seed);
+    let ek = dk.encapsulation_key().to_bytes()[..].to_vec();
+    (dk, ek)
+}
+
+/// Deterministically encapsulate to a recipient's serialized ML-KEM-768 public key with message `m`.
+/// Returns (shared_secret, ciphertext).
+fn mlkem_encaps(ek_bytes: &[u8], m: &[u8; 32]) -> Result<(Vec<u8>, Vec<u8>)> {
+    let ek = EncapsulationKey::<MlKem768>::new_from_slice(ek_bytes)
+        .map_err(|_| anyhow!("invalid ML-KEM-768 encapsulation key"))?;
+    let (ct, k) = ek.encapsulate_deterministic(&B32::from(*m));
+    Ok((k[..].to_vec(), ct[..].to_vec()))
+}
+
+/// Decapsulate an ML-KEM-768 ciphertext to its shared secret (implicit rejection on failure).
+fn mlkem_decaps(dk: &DecapsulationKey<MlKem768>, ct_bytes: &[u8]) -> Result<Vec<u8>> {
+    let ct = Ciphertext::<MlKem768>::try_from(ct_bytes)
+        .map_err(|_| anyhow!("malformed ML-KEM-768 ciphertext"))?;
+    Ok(dk.decapsulate(&ct)[..].to_vec())
+}
+
+/// Verify a DID document and return (id, serialized ML-KEM-768 public key). The Ed25519 signature must
+/// be valid over the JCS-canonical document minus `signature`, against the key embedded in `id`
+/// (spec/did-document.md). Mirrors the Python reference's `mlkem_pub_from_did_document`.
+pub fn mlkem_pub_from_did_document(doc: &Value) -> Result<(String, Vec<u8>)> {
+    let id = doc.get("id").and_then(|v| v.as_str()).ok_or_else(|| anyhow!("DID document missing id"))?;
+    let sig_str = doc.get("signature").and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("DID document is unsigned"))?;
+    let mut body = doc.clone();
+    body.as_object_mut().ok_or_else(|| anyhow!("DID document must be a JSON object"))?.remove("signature");
+    let msg = crate::canonicalize(&body)?;
+    let vk = crate::pubkey_from_did_nova(id)?;
+    let sig = crate::parse_signature(sig_str)?;
+    vk.verify_strict(&msg, &sig).map_err(|_| anyhow!("DID document signature is invalid"))?;
+
+    let entries = doc.get("keyAgreement").and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow!("DID document has no keyAgreement"))?;
+    for e in entries {
+        if e.get("type").and_then(|v| v.as_str()) == Some("ML-KEM-768") {
+            let pk = unb64(e.get("publicKeyBase64").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("keyAgreement entry missing publicKeyBase64"))?)?;
+            if pk.len() != 1184 {
+                return Err(anyhow!("ML-KEM-768 public key has wrong length ({})", pk.len()));
+            }
+            return Ok((id.to_string(), pk));
+        }
+    }
+    Err(anyhow!("DID document has no ML-KEM-768 key-agreement key"))
+}
+
 /// Seal `plaintext` to one or more did:nova recipients, returning an envelope JSON value matching
 /// encrypted-envelope.schema.json. `rng` is the byte source (use `Rng::Os` for real use; `Rng::seeded`
-/// reproduces conformance vectors). The RNG draw order — cek, esk, nonce, then each wrap_nonce — is
-/// part of the byte-for-byte contract.
+/// reproduces conformance vectors).
+///
+/// When `mlkem_keys` (a `{did: serialized ML-KEM public key}` map) is supplied, key agreement is the
+/// post-quantum hybrid `kex: x25519-mlkem768`: each recipient also gets an ML-KEM-768 encapsulation
+/// (carried as `kem_ct`) and the KEK mixes both shared secrets; the envelope version becomes `0.3`.
+///
+/// RNG draw order (part of the byte-for-byte contract): cek, esk, nonce, then per recipient — for the
+/// hybrid kex an ML-KEM `m` (32 bytes) precedes each `wrap_nonce` (24 bytes); for v0.2 just `wrap_nonce`.
 pub fn seal(
     plaintext: &[u8],
     recipient_dids: &[String],
     aad: &[u8],
     rng: &mut Rng,
     stealth: bool,
+    mlkem_keys: Option<&BTreeMap<String, Vec<u8>>>,
 ) -> Result<Value> {
     if recipient_dids.is_empty() {
         return Err(anyhow!("at least one recipient DID is required"));
     }
+    let hybrid = mlkem_keys.is_some();
     let cek = to_arr32(&rng.fill(32))?;
     let esk = to_arr32(&rng.fill(32))?;
     let esk_secret = StaticSecret::from(esk);
@@ -161,23 +256,36 @@ pub fn seal(
     let mut recipients = Vec::new();
     for did in recipient_dids {
         let rxpub = xpub_from_did(did)?;
-        let shared = esk_secret.diffie_hellman(&PublicKey::from(rxpub)).to_bytes();
-        let kek = derive_kek(&shared, &epk, &rxpub);
+        let ecdh = esk_secret.diffie_hellman(&PublicKey::from(rxpub)).to_bytes();
+        let (kek, kem_ct) = match mlkem_keys {
+            Some(keys) => {
+                let ek = keys.get(did).ok_or_else(|| anyhow!("no ML-KEM key for recipient {did}"))?;
+                let m = to_arr32(&rng.fill(32))?;
+                let (mlkem_ss, ct) = mlkem_encaps(ek, &m)?;
+                (derive_kek_hybrid(&ecdh, &mlkem_ss, &epk, &rxpub), Some(ct))
+            }
+            None => (derive_kek(&ecdh, &epk, &rxpub), None),
+        };
         let wrap_nonce = rng.fill(24);
         let wrap_aad: &[u8] = if stealth { STEALTH_WRAP_AAD } else { did.as_bytes() };
         let wrapped = xchacha_seal(&kek, &wrap_nonce, &cek, wrap_aad)?;
-        recipients.push(if stealth {
-            json!({ "wrap_nonce": b64(&wrap_nonce), "wrapped_key": b64(&wrapped) })
-        } else {
-            json!({ "to": did, "wrap_nonce": b64(&wrap_nonce), "wrapped_key": b64(&wrapped) })
-        });
+        let mut entry = serde_json::Map::new();
+        if !stealth {
+            entry.insert("to".into(), json!(did));
+        }
+        if let Some(ct) = &kem_ct {
+            entry.insert("kem_ct".into(), json!(b64(ct)));
+        }
+        entry.insert("wrap_nonce".into(), json!(b64(&wrap_nonce)));
+        entry.insert("wrapped_key".into(), json!(b64(&wrapped)));
+        recipients.push(Value::Object(entry));
     }
 
     let mut envelope = json!({
-        "v": ENVELOPE_VERSION,
+        "v": if hybrid { ENVELOPE_VERSION_PQ } else { ENVELOPE_VERSION },
         "enc": ENC_ALG,
         "kdf": KDF_ALG,
-        "kex": KEX_ALG,
+        "kex": if hybrid { KEX_MLKEM } else { KEX_ALG },
         "epk": b64(&epk),
         "nonce": b64(&nonce),
         "ciphertext": b64(&ciphertext),
@@ -192,13 +300,25 @@ pub fn seal(
     Ok(envelope)
 }
 
-/// Recover the plaintext from `envelope` for the recipient holding `x25519_secret`.
-pub fn open(envelope: &Value, recipient_did: &str, x25519_secret: &[u8; 32]) -> Result<Vec<u8>> {
+/// Recover the plaintext from `envelope` for the recipient holding `x25519_secret`. For a
+/// `kex: x25519-mlkem768` envelope the recipient's ML-KEM-768 decapsulation key (`mlkem_dk`) is also
+/// required; for v0.2 envelopes it is ignored.
+pub fn open(
+    envelope: &Value,
+    recipient_did: &str,
+    x25519_secret: &[u8; 32],
+    mlkem_dk: Option<&DecapsulationKey<MlKem768>>,
+) -> Result<Vec<u8>> {
+    let kex = envelope.get("kex").and_then(|v| v.as_str());
     let alg_ok = envelope.get("enc").and_then(|v| v.as_str()) == Some(ENC_ALG)
         && envelope.get("kdf").and_then(|v| v.as_str()) == Some(KDF_ALG)
-        && envelope.get("kex").and_then(|v| v.as_str()) == Some(KEX_ALG);
+        && (kex == Some(KEX_ALG) || kex == Some(KEX_MLKEM));
     if !alg_ok {
         return Err(anyhow!("unsupported envelope algorithms"));
+    }
+    let hybrid = kex == Some(KEX_MLKEM);
+    if hybrid && mlkem_dk.is_none() {
+        return Err(anyhow!("this envelope uses x25519-mlkem768; the recipient ML-KEM secret is required"));
     }
     let recipients = envelope
         .get("recipients")
@@ -212,16 +332,30 @@ pub fn open(envelope: &Value, recipient_did: &str, x25519_secret: &[u8; 32]) -> 
     };
     let secret = StaticSecret::from(*x25519_secret);
     let rxpub = PublicKey::from(&secret).to_bytes();
-    let shared = secret.diffie_hellman(&PublicKey::from(epk)).to_bytes();
-    let kek = derive_kek(&shared, &epk, &rxpub);
+    let ecdh = secret.diffie_hellman(&PublicKey::from(epk)).to_bytes();
     let payload_nonce = unb64(envelope["nonce"].as_str().context("nonce")?)?;
     let payload_ct = unb64(envelope["ciphertext"].as_str().context("ciphertext")?)?;
+
+    // The KEK for an entry: hybrid mixes the ML-KEM shared secret decapsulated from that entry's kem_ct.
+    let kek_for = |entry: &Value| -> Result<[u8; 32]> {
+        if hybrid {
+            let ct = unb64(entry["kem_ct"].as_str().context("kem_ct")?)?;
+            let mlkem_ss = mlkem_decaps(mlkem_dk.unwrap(), &ct)?;
+            Ok(derive_kek_hybrid(&ecdh, &mlkem_ss, &epk, &rxpub))
+        } else {
+            Ok(derive_kek(&ecdh, &epk, &rxpub))
+        }
+    };
 
     let stealth = envelope.get("addressing").and_then(|v| v.as_str()) == Some("stealth");
     if stealth {
         // The recipient set is hidden: trial-decrypt each entry's wrap with our KEK and the fixed
         // stealth label; the one that authenticates yields the CEK.
         for entry in recipients {
+            let kek = match kek_for(entry) {
+                Ok(k) => k,
+                Err(_) => continue,
+            };
             let wn = unb64(entry["wrap_nonce"].as_str().context("wrap_nonce")?)?;
             let wk = unb64(entry["wrapped_key"].as_str().context("wrapped_key")?)?;
             if let Ok(cek_vec) = xchacha_open(&kek, &wn, &wk, STEALTH_WRAP_AAD) {
@@ -237,7 +371,7 @@ pub fn open(envelope: &Value, recipient_did: &str, x25519_secret: &[u8; 32]) -> 
         .find(|r| r.get("to").and_then(|v| v.as_str()) == Some(recipient_did))
         .ok_or_else(|| anyhow!("envelope is not addressed to {recipient_did}"))?;
     let cek_vec = xchacha_open(
-        &kek,
+        &kek_for(entry)?,
         &unb64(entry["wrap_nonce"].as_str().context("wrap_nonce")?)?,
         &unb64(entry["wrapped_key"].as_str().context("wrapped_key")?)?,
         recipient_did.as_bytes(),
@@ -322,6 +456,25 @@ pub fn run_conformance(vectors: &Value) -> Result<()> {
             return Err(anyhow!("ed25519->x25519 vector mismatch"));
         }
     }
+    // ML-KEM-768 (FIPS 203 final): keygen(d,z)->ek, encaps(ek,m)->(ct,K), decaps recovers K.
+    if let Some(v) = prim.get("ml_kem") {
+        let mut seed = Seed::default();
+        seed[..32].copy_from_slice(&hex(field(v, "d")?)?);
+        seed[32..].copy_from_slice(&hex(field(v, "z")?)?);
+        let dk = DecapsulationKey::<MlKem768>::from_seed(seed);
+        let ek = dk.encapsulation_key();
+        if ek.to_bytes()[..] != hex(field(v, "ek")?)?[..] {
+            return Err(anyhow!("ml_kem keygen (ek) vector mismatch"));
+        }
+        let m = to_arr32(&hex(field(v, "m")?)?)?;
+        let (ct, k) = ek.encapsulate_deterministic(&B32::from(m));
+        if ct[..] != hex(field(v, "ct")?)?[..] || k[..] != hex(field(v, "K")?)?[..] {
+            return Err(anyhow!("ml_kem encaps (ct/K) vector mismatch"));
+        }
+        if dk.decapsulate(&ct)[..] != hex(field(v, "K")?)?[..] {
+            return Err(anyhow!("ml_kem decaps did not recover K"));
+        }
+    }
 
     // Deterministic envelope: reseal byte-for-byte, then open and recover the plaintext.
     {
@@ -333,14 +486,14 @@ pub fn run_conformance(vectors: &Value) -> Result<()> {
         let expected = env.get("envelope").ok_or_else(|| anyhow!("no expected envelope"))?;
 
         let mut rng = Rng::seeded(seed);
-        let resealed = seal(&plaintext, &[did.clone()], &aad, &mut rng, false)?;
+        let resealed = seal(&plaintext, &[did.clone()], &aad, &mut rng, false, None)?;
         if &resealed != expected {
             return Err(anyhow!(
                 "envelope reseal mismatch:\n got: {resealed}\nwant: {expected}"
             ));
         }
         let xsk = x25519_secret_from_user_seed(field(env, "recipient_seed")?);
-        if open(expected, &did, &xsk)? != plaintext {
+        if open(expected, &did, &xsk, None)? != plaintext {
             return Err(anyhow!("opening the vector envelope did not recover the plaintext"));
         }
     }
@@ -354,7 +507,7 @@ pub fn run_conformance(vectors: &Value) -> Result<()> {
         let expected = env.get("envelope").ok_or_else(|| anyhow!("no expected stealth envelope"))?;
 
         let mut rng = Rng::seeded(seed);
-        let resealed = seal(&plaintext, &[did.clone()], &aad, &mut rng, true)?;
+        let resealed = seal(&plaintext, &[did.clone()], &aad, &mut rng, true, None)?;
         if &resealed != expected {
             return Err(anyhow!("stealth envelope reseal mismatch:\n got: {resealed}\nwant: {expected}"));
         }
@@ -362,8 +515,38 @@ pub fn run_conformance(vectors: &Value) -> Result<()> {
             return Err(anyhow!("stealth envelope leaks a cleartext recipient `to`"));
         }
         let xsk = x25519_secret_from_user_seed(field(env, "recipient_seed")?);
-        if open(expected, "", &xsk)? != plaintext {
+        if open(expected, "", &xsk, None)? != plaintext {
             return Err(anyhow!("opening the stealth vector envelope did not recover the plaintext"));
+        }
+    }
+
+    // Post-quantum hybrid envelope (v0.3, kex x25519-mlkem768): reseal byte-for-byte, then open with
+    // the recipient's seed-derived ML-KEM key. Both the direct and stealth variants are exercised.
+    for (name, stealth) in [("mlkem768_envelope", false), ("mlkem768_stealth_envelope", true)] {
+        let env = match vectors.get(name) {
+            Some(e) => e,
+            None => continue,
+        };
+        let seed = hex(field(env, "rng_seed_hex")?)?;
+        let aad = hex(field(env, "aad_hex")?)?;
+        let plaintext = hex(field(env, "plaintext_hex")?)?;
+        let did = field(env, "recipient_did")?.to_string();
+        let recipient_seed = field(env, "recipient_seed")?;
+        let expected = env.get("envelope").ok_or_else(|| anyhow!("no expected {name}"))?;
+
+        let (mlkem_dk, mlkem_ek) = mlkem_keypair_from_user_seed(recipient_seed);
+        let mut keys = BTreeMap::new();
+        keys.insert(did.clone(), mlkem_ek);
+
+        let mut rng = Rng::seeded(seed);
+        let resealed = seal(&plaintext, &[did.clone()], &aad, &mut rng, stealth, Some(&keys))?;
+        if &resealed != expected {
+            return Err(anyhow!("{name} reseal mismatch:\n got: {resealed}\nwant: {expected}"));
+        }
+        let xsk = x25519_secret_from_user_seed(recipient_seed);
+        let opened_did = if stealth { "" } else { did.as_str() };
+        if open(expected, opened_did, &xsk, Some(&mlkem_dk))? != plaintext {
+            return Err(anyhow!("opening the {name} vector did not recover the plaintext"));
         }
     }
     Ok(())
@@ -392,12 +575,12 @@ mod tests {
         let xsk = x25519_secret_from_user_seed(v["envelope"]["recipient_seed"].as_str().unwrap());
 
         let mut rng = Rng::Os; // real OS randomness
-        let env = seal(b"hello nova", &[did.clone()], b"label", &mut rng, false).unwrap();
-        assert_eq!(open(&env, &did, &xsk).unwrap(), b"hello nova");
+        let env = seal(b"hello nova", &[did.clone()], b"label", &mut rng, false, None).unwrap();
+        assert_eq!(open(&env, &did, &xsk, None).unwrap(), b"hello nova");
 
         // A wrong secret fails authentication.
         let wrong = x25519_secret_from_user_seed("not-the-recipient");
-        assert!(open(&env, &did, &wrong).is_err());
+        assert!(open(&env, &did, &wrong, None).is_err());
     }
 
     #[test]
@@ -407,13 +590,37 @@ mod tests {
         let xsk = x25519_secret_from_user_seed(v["envelope"]["recipient_seed"].as_str().unwrap());
 
         let mut rng = Rng::Os;
-        let env = seal(b"secret", &[did.clone()], b"", &mut rng, true).unwrap();
+        let env = seal(b"secret", &[did.clone()], b"", &mut rng, true, None).unwrap();
         // No cleartext recipient is present.
         assert_eq!(env["addressing"], "stealth");
         assert!(env["recipients"].as_array().unwrap().iter().all(|r| r.get("to").is_none()));
         // The true recipient still opens it (by trial-decryption; recipient_did is ignored).
-        assert_eq!(open(&env, "", &xsk).unwrap(), b"secret");
+        assert_eq!(open(&env, "", &xsk, None).unwrap(), b"secret");
         // A non-recipient cannot.
-        assert!(open(&env, "", &x25519_secret_from_user_seed("nope")).is_err());
+        assert!(open(&env, "", &x25519_secret_from_user_seed("nope"), None).is_err());
+    }
+
+    #[test]
+    fn hybrid_mlkem_round_trip_and_wrong_key_fails() {
+        // The recipient's ML-KEM key (and secret) come from its user seed, like the Python reference.
+        let v = vectors();
+        let did = v["envelope"]["recipient_did"].as_str().unwrap().to_string();
+        let seed = v["envelope"]["recipient_seed"].as_str().unwrap();
+        let xsk = x25519_secret_from_user_seed(seed);
+        let (dk, ek) = mlkem_keypair_from_user_seed(seed);
+        let mut keys = BTreeMap::new();
+        keys.insert(did.clone(), ek);
+
+        let mut rng = Rng::Os;
+        let env = seal(b"pq secret", &[did.clone()], b"label", &mut rng, false, Some(&keys)).unwrap();
+        assert_eq!(env["v"], "0.3");
+        assert_eq!(env["kex"], "x25519-mlkem768");
+        assert!(env["recipients"][0].get("kem_ct").is_some());
+        assert_eq!(open(&env, &did, &xsk, Some(&dk)).unwrap(), b"pq secret");
+
+        // Missing the ML-KEM secret is an error; a wrong ML-KEM secret fails to authenticate.
+        assert!(open(&env, &did, &xsk, None).is_err());
+        let (wrong_dk, _) = mlkem_keypair_from_user_seed("not-the-recipient");
+        assert!(open(&env, &did, &xsk, Some(&wrong_dk)).is_err());
     }
 }

@@ -33,11 +33,25 @@ def main():
     stealth_seed = bytes.fromhex("0f0e0d0c0b0a09080706050403020100")
     stealth_envelope = x.seal(plaintext, [did_a], aad=aad, rng=x.seeded_rng(stealth_seed), stealth=True)
 
+    # Post-quantum hybrid vectors (v0.3, kex x25519-mlkem768). The ML-KEM primitive KAT is the
+    # crate-derived FIPS-203-final vector; the envelopes seal to the same recipient, whose ML-KEM key
+    # is derived from its seed (one seed regenerates signing + X25519 + ML-KEM).
+    mlkem_kat = json.loads((HERE / "mlkem768_kat.json").read_text())
+    mlkem_keys = {did_a: x.mlkem_keypair_from_user_seed(seed_a)[1]}
+    mlkem_seed = bytes.fromhex("0102030405060708090a0b0c0d0e0f10")
+    mlkem_envelope = x.seal(plaintext, [did_a], aad=aad, rng=x.seeded_rng(mlkem_seed),
+                            recipient_mlkem_keys=mlkem_keys)
+    mlkem_stealth_seed = bytes.fromhex("100f0e0d0c0b0a090807060504030201")
+    mlkem_stealth_envelope = x.seal(plaintext, [did_a], aad=aad, rng=x.seeded_rng(mlkem_stealth_seed),
+                                    stealth=True, recipient_mlkem_keys=mlkem_keys)
+
     vectors = {
         "description": (
             "Conformance vectors for Nova Locutio payload encryption (spec/encryption.md). "
-            "Primitive vectors are the official RFC/draft test vectors; the envelope vector is a "
-            "deterministic seal (BLAKE3-seeded RNG) that any implementation must reproduce and open."
+            "Primitive vectors are the official RFC/draft test vectors (the ml_kem block is a "
+            "FIPS-203-final ML-KEM-768 KAT from the NIST-validated RustCrypto crate); the envelope "
+            "vectors are deterministic seals (BLAKE3-seeded RNG) that any implementation must "
+            "reproduce and open, including the post-quantum hybrid kex (mlkem768_envelope)."
         ),
         "primitives": {
             "x25519": [
@@ -93,6 +107,17 @@ def main():
                 "x25519_pub": x.x25519_pub_from_did(did_a).hex(),
                 "from_seed": seed_a,
             },
+            "ml_kem": {
+                "comment": ("FIPS 203 final ML-KEM-768, generated from the NIST-validated RustCrypto "
+                            "ml-kem crate. keygen_derand(d,z)->ek; encaps_derand(ek,m)->(K,ct); "
+                            "decaps(dk,ct)->K. Both impls must reproduce ek, ct and K."),
+                "d": mlkem_kat["d"],
+                "z": mlkem_kat["z"],
+                "m": mlkem_kat["m"],
+                "ek": mlkem_kat["ek"],
+                "ct": mlkem_kat["ct"],
+                "K": mlkem_kat["K"],
+            },
         },
         "envelope": {
             "comment": "Deterministic seal to one recipient; reproduce with the BLAKE3-seeded RNG.",
@@ -115,21 +140,55 @@ def main():
             "plaintext_hex": plaintext.hex(),
             "envelope": stealth_envelope,
         },
+        "mlkem768_envelope": {
+            "comment": ("Post-quantum hybrid seal (kex x25519-mlkem768): X25519 ECDH + ML-KEM-768 "
+                        "encapsulation, KEK = HKDF(ecdh_ss || mlkem_ss, ...). The recipient's ML-KEM "
+                        "key is derived from recipient_seed. RNG draw order: cek, esk, nonce, then per "
+                        "recipient an ML-KEM m (32) and a wrap_nonce (24). Reproduce with the seeded RNG."),
+            "rng_seed_hex": mlkem_seed.hex(),
+            "recipient_did": did_a,
+            "recipient_seed": seed_a,
+            "aad_hex": aad.hex(),
+            "plaintext_hex": plaintext.hex(),
+            "envelope": mlkem_envelope,
+        },
+        "mlkem768_stealth_envelope": {
+            "comment": ("Hybrid kex + stealth addressing: post-quantum and recipient set hidden. "
+                        "Reproduce with the seeded RNG, stealth=True, the recipient's ML-KEM key "
+                        "derived from recipient_seed."),
+            "rng_seed_hex": mlkem_stealth_seed.hex(),
+            "recipient_did": did_a,
+            "recipient_seed": seed_a,
+            "aad_hex": aad.hex(),
+            "plaintext_hex": plaintext.hex(),
+            "envelope": mlkem_stealth_envelope,
+        },
     }
 
     OUT.write_text(json.dumps(vectors, indent=2) + "\n")
     print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
 
-    # The same envelope, written as the standalone worked example.
+    # The same envelopes, written as standalone worked examples.
     example = EXAMPLES / "encrypted-envelope.json"
     example.write_text(json.dumps(envelope, indent=2) + "\n")
     print(f"wrote {example}")
+    mlkem_example = EXAMPLES / "encrypted-envelope-mlkem768.json"
+    mlkem_example.write_text(json.dumps(mlkem_envelope, indent=2) + "\n")
+    print(f"wrote {mlkem_example}")
 
     # Self-check.
     recovered = x.open_with_seed(envelope, did_a, seed_a)
     assert recovered == plaintext, "self-check failed"
     assert x.open_with_seed(stealth_envelope, None, seed_a) == plaintext, "stealth self-check failed"
-    print("self-check: direct and stealth envelopes open to the expected plaintext")
+    assert x.open_with_seed(mlkem_envelope, did_a, seed_a) == plaintext, "hybrid self-check failed"
+    assert x.open_with_seed(mlkem_stealth_envelope, None, seed_a) == plaintext, \
+        "hybrid stealth self-check failed"
+    # The ML-KEM primitive KAT round-trips and matches the crate-derived bytes.
+    _ek, _dk = x.ml_kem.keygen_derand(bytes.fromhex(mlkem_kat["d"]), bytes.fromhex(mlkem_kat["z"]))
+    assert _ek.hex() == mlkem_kat["ek"], "ml_kem keygen KAT mismatch"
+    _K, _ct = x.ml_kem.encaps_derand(_ek, bytes.fromhex(mlkem_kat["m"]))
+    assert _ct.hex() == mlkem_kat["ct"] and _K.hex() == mlkem_kat["K"], "ml_kem encaps KAT mismatch"
+    print("self-check: direct, stealth, and hybrid envelopes open; ML-KEM KAT reproduces")
 
 
 if __name__ == "__main__":

@@ -27,6 +27,9 @@ const VALID_PAIRS: &[(&str, &str)] = &[
     ("value-expression.schema.json", "value-list-int.json"),
     ("body-expression.schema.json", "body-double.json"),
     ("body-expression.schema.json", "body-is-zero.json"),
+    ("encrypted-envelope.schema.json", "encrypted-envelope.json"),
+    ("encrypted-envelope.schema.json", "encrypted-envelope-mlkem768.json"),
+    ("did-document.schema.json", "did-document.json"),
 ];
 
 #[test]

@@ -1,0 +1,18 @@
+{
+  "v": "0.3",
+  "enc": "xchacha20poly1305",
+  "kdf": "hkdf-sha256",
+  "kex": "x25519-mlkem768",
+  "epk": "f5SV95dTTtVfiN2+0K1Zcn+jAK9EJJfYzqU5h+gKRjM=",
+  "nonce": "usVilhTRiu3pvE/ToXBynHmWMNOwJU2U",
+  "ciphertext": "7STDMDxuQyb/c7/psXeqvbSBkKwfyU5qR5CGBJmnJ4ILAg/xT80YoMO2qHZoDYTm3BssQq+p6FE=",
+  "recipients": [
+    {
+      "to": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+      "kem_ct": "vMMLkxO/C2cAcwFt+DRa1Awwa8cSTRQfcAJxdZLaYdMhA04HXHnQWYqL/+Q1O9Y2grbUIOGsR7WiQJd5zYHouP26ccimvbpe6NpZEXgHPfJZwNBAq45Ty4rWVxNJCtE7nA5+Z4jujC9bJpVJdc42cxJffOSVrPz3pvIuCM8zWDVzoz1K2hQOfrJHQ1fKfvJwLJYTgKj4zsas+y7okdePFjGsdLkUd8v4JOfhTRRKOKGk0NM2Ht5indN0Y3cGtTqujVB6MR1svfPogOYnllHH8OJcRheRIlVCTofe7BxTAYcqRS2BxW3eVE40G+0czxD3LF0vABrP2Kq+tvHJguU05COiWeWbk4gSIcsNvOrpCwsKmVGS8rM962dx5MEjgJQhtXrPseEQpm1NC7q6NGoEbCZyuhNWj4WpfCsfFXWlE3Mq5zj59wcpU4xAMrwplReD6pFN5BXdunfeQrvuMlveik4zBQ63Wrx0Lo4jUuhE4EktqCizkdnhyARhZrfww6b9Z0A1d8TDEu36Jw9kpjMmwT+YzPGHEI7MyqyDIpPBfeRFaenEJV4R37P67IrQP2kp4hwVGM2tASPWGe0tep0jk1vr15zTzRppzuvMSE5DFSk5DHCg7/A37UjFCtoTGguH8MfNCmu16Til3XbLdrd7f4yxaMAMRnmTjb41unhm/sIOHRWFFFGHblDW1HjxJuVcP7jA17mmqdrmjN0PUETbsyntOky/oC1Z4ZOti17Rmp3Xc2pnFsMGZL6c5A92M1s4oDgtserqqpivH1cQD5zcVGbiPsNf7NaVQ2BqgKD27/7vuSO1FaIXG2XI1XVJWcqclYF8jtRhozwmex8dfT6pEoPbK7G6vSHJnUWpFwdTOYqQuGcDbFFhv4R+V7p9YdlxDdQVAAVDBfkMIwL7ehNfkIYfCbiFgcVIlyuX+b2MczX5wVqAzcNdIy/rmpK8JU7PSOziikvvNd2/0iW1N9OkLtfr+SknFF3RxyV8h0qYoWD8gJX4VZQdrmkilRs2Dp4A8cqzySFeXeyHPHJViWQ2T/VN5w8gm12KcPCf4Edj+HDUHXL3UAkx5XSHnsbixTD36eMQMxBNBad+0gp7Ki/oUZRnc2xD+tcFbRD3U+g6+JlKvs4F0hdxoj0X9GGN3fit86erzzzJbVpGYLQi3bmZHySzS7iq87Vy5+qXg5INIBMbanO4YHqXeItXumApuhm5zahgifqfuvz2L34HSE4bSpbuCIXED57qIsgg8mYYyMCml6w4GR4o2InDHTlAPKMsRIpTTowku4rytiLrWyBlbtOMDjN/KlM1ZgNN/1PUwaH4+eMEuEpl0ydbGkYp8DwanX810GBkr9rwPGHmjakoL3MaC+wJnANZO0QnOgWLt/ytXxRF689w1TJo+flj9QJPgwUirshJ2pbJP7DLxQ2hVCKAtDpgutFueAmRCvOvCoo=",
+      "wrap_nonce": "zafyiedHGd5GURyZNic+05tRg0DWe/fL",
+      "wrapped_key": "RUX2Yho12uek3GktB11xmLo0JhBiXTWw79tK8IhaTn2nJx1sMwqtG/IOfZ9mwjvP"
+    }
+  ],
+  "aad": "bm92YWUtbGluZ3VhZS9leGFtcGxl"
+}

@@ -4,11 +4,13 @@
 //! (tooling/crypto-python) — conformance is the shared vectors in spec/conformance/encryption.json.
 //!
 //!   nl-seal seal   <plaintext-file> --to <did> [--to <did> ...] [--aad <str>] [--seed <hex>]
+//!   nl-seal seal   <plaintext-file> --did-doc <doc.json> [...]   # post-quantum hybrid (x25519-mlkem768)
 //!   nl-seal open   <envelope.json>  --did <did> --recipient-seed <user-seed>
 //!   nl-seal conformance [<encryption.json>]   # replay the conformance vectors
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -25,9 +27,13 @@ enum Commands {
     Seal {
         /// File whose bytes are the plaintext payload.
         plaintext: PathBuf,
-        /// Recipient did:nova DID (repeatable).
-        #[arg(long = "to", required = true)]
+        /// Recipient did:nova DID for the v0.2 (X25519) kex (repeatable).
+        #[arg(long = "to")]
         to: Vec<String>,
+        /// Recipient DID-document JSON file (repeatable). Selects the post-quantum hybrid kex
+        /// (x25519-mlkem768): the document is verified and its ML-KEM-768 key used.
+        #[arg(long = "did-doc")]
+        did_doc: Vec<PathBuf>,
         /// Optional additional authenticated data (UTF-8 string).
         #[arg(long)]
         aad: Option<String>,
@@ -69,14 +75,32 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<()> {
     use nl_validator::seal as s;
     match cli.command {
-        Commands::Seal { plaintext, to, aad, seed, stealth } => {
+        Commands::Seal { plaintext, to, did_doc, aad, seed, stealth } => {
             let pt = std::fs::read(&plaintext).with_context(|| format!("reading {}", plaintext.display()))?;
             let aad_bytes = aad.unwrap_or_default().into_bytes();
             let mut rng = match seed {
                 Some(h) => s::Rng::seeded(decode_hex(&h)?),
                 None => s::Rng::Os,
             };
-            let env = s::seal(&pt, &to, &aad_bytes, &mut rng, stealth)?;
+            let env = if !did_doc.is_empty() {
+                // Post-quantum hybrid: recipients and their ML-KEM keys come from verified DID documents.
+                let mut dids = Vec::new();
+                let mut keys = BTreeMap::new();
+                for path in &did_doc {
+                    let doc: serde_json::Value =
+                        serde_json::from_str(&std::fs::read_to_string(path)?)
+                            .with_context(|| format!("parsing DID document {}", path.display()))?;
+                    let (id, ek) = s::mlkem_pub_from_did_document(&doc)?;
+                    dids.push(id.clone());
+                    keys.insert(id, ek);
+                }
+                s::seal(&pt, &dids, &aad_bytes, &mut rng, stealth, Some(&keys))?
+            } else {
+                if to.is_empty() {
+                    return Err(anyhow!("provide --to <did> (v0.2 X25519) or --did-doc <path> (post-quantum)"));
+                }
+                s::seal(&pt, &to, &aad_bytes, &mut rng, stealth, None)?
+            };
             println!("{}", serde_json::to_string_pretty(&env)?);
         }
         Commands::Open { envelope, did, recipient_seed } => {
@@ -84,7 +108,13 @@ fn run(cli: Cli) -> Result<()> {
             let env: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&envelope)?).context("parsing envelope")?;
             let xsk = s::x25519_secret_from_user_seed(&recipient_seed);
-            let pt = s::open(&env, &did, &xsk)?;
+            // A hybrid envelope also needs the recipient's ML-KEM secret, derived from the same seed.
+            let mlkem = if env.get("kex").and_then(|v| v.as_str()) == Some("x25519-mlkem768") {
+                Some(s::mlkem_keypair_from_user_seed(&recipient_seed).0)
+            } else {
+                None
+            };
+            let pt = s::open(&env, &did, &xsk, mlkem.as_ref())?;
             std::io::stdout().write_all(&pt)?;
         }
         Commands::Conformance { vectors } => {

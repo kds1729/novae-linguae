@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://novae-linguae.org/spec/v0.2/encrypted-envelope.schema.json",
   "title": "Nova Locutio Encrypted Envelope",
-  "description": "A confidentiality wrapper for a Nova Locutio payload (v0.2). A hybrid multi-recipient sealed box: the payload is encrypted once under a random content-encryption key (CEK), and the CEK is wrapped for each recipient via X25519 ECDH against the recipient's did:nova key. The envelope is a transport artifact, not a commons artifact: it is NOT content-addressed and carries no hash of its own. Confidentiality is layered over — not instead of — signing: the cleartext payload is normally a fully-signed inner message, so decrypting yields verifiable provenance. See spec/encryption.md.",
+  "description": "A confidentiality wrapper for a Nova Locutio payload. A multi-recipient sealed box: the payload is encrypted once under a random content-encryption key (CEK), and the CEK is wrapped for each recipient via key agreement against the recipient's did:nova key. v0.2 uses X25519 ECDH (kex x25519-ed25519); v0.3 adds the post-quantum hybrid (kex x25519-mlkem768), mixing X25519 with an ML-KEM-768 encapsulation. The envelope is a transport artifact, not a commons artifact: it is NOT content-addressed and carries no hash of its own. Confidentiality is layered over — not instead of — signing: the cleartext payload is normally a fully-signed inner message, so decrypting yields verifiable provenance. See spec/encryption.md.",
   "type": "object",
   "required": ["v", "enc", "kdf", "kex", "epk", "nonce", "ciphertext", "recipients"],
   "additionalProperties": false,
   "properties": {
     "v": {
-      "const": "0.2",
-      "description": "Envelope format version."
+      "enum": ["0.2", "0.3"],
+      "description": "Envelope format version. 0.2 is the X25519 (kex x25519-ed25519) envelope; 0.3 is the post-quantum hybrid (kex x25519-mlkem768). The version is bound to the kex below, so the envelope is unambiguous on the wire and a v0.2 reader rejects a v0.3 envelope it cannot decrypt."
     },
     "enc": {
       "type": "string",
@@ -23,8 +23,8 @@
     },
     "kex": {
       "type": "string",
-      "enum": ["x25519-ed25519"],
-      "description": "Key agreement: X25519 ECDH with public keys obtained by mapping each party's did:nova Ed25519 key to Curve25519 (the standard birational map). No key material beyond the signing DID is required."
+      "enum": ["x25519-ed25519", "x25519-mlkem768"],
+      "description": "Key agreement. 'x25519-ed25519' (v0.2): X25519 ECDH with public keys mapped from each party's did:nova Ed25519 key; no key material beyond the signing DID. 'x25519-mlkem768' (v0.3): the post-quantum hybrid — X25519 ECDH *and* an ML-KEM-768 (FIPS 203) encapsulation, with the per-recipient key derived from both shared secrets (secure if either holds). The hybrid kex requires the recipient's ML-KEM key, published in its DID document (spec/did-document.md), and adds a per-recipient 'kem_ct'."
     },
     "epk": {
       "$ref": "#/$defs/b64_32",
@@ -68,6 +68,25 @@
         "properties": { "recipients": { "items": { "required": ["to"] } } },
         "description": "Direct (default): every recipient entry must carry its 'to' DID."
       }
+    },
+    {
+      "if": {
+        "properties": { "kex": { "const": "x25519-mlkem768" } }
+      },
+      "then": {
+        "properties": {
+          "v": { "const": "0.3" },
+          "recipients": { "items": { "required": ["kem_ct"] } }
+        },
+        "description": "Post-quantum hybrid: version is 0.3 and every recipient entry carries a 'kem_ct'."
+      },
+      "else": {
+        "properties": {
+          "v": { "const": "0.2" },
+          "recipients": { "items": { "not": { "required": ["kem_ct"] } } }
+        },
+        "description": "X25519 (kex x25519-ed25519): version is 0.2 and no recipient entry carries a 'kem_ct'."
+      }
     }
   ],
   "$defs": {
@@ -80,6 +99,10 @@
           "type": "string",
           "pattern": "^did:[a-z0-9]+:.+$",
           "description": "Recipient DID (direct addressing only; omitted under stealth). v0.2 key agreement requires a did:nova:<64-hex> Ed25519 key; the field accepts any DID syntactically."
+        },
+        "kem_ct": {
+          "$ref": "#/$defs/b64",
+          "description": "ML-KEM-768 ciphertext encapsulating this recipient's post-quantum shared secret (1088 bytes, base64). Present iff kex is 'x25519-mlkem768'; one of the two inputs to that recipient's hybrid key-encryption key."
         },
         "wrap_nonce": {
           "$ref": "#/$defs/b64_24",

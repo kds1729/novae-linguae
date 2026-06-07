@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.3/did-document.schema.json",
+  "title": "Nova Locutio DID Document",
+  "description": "A self-verifying record that publishes key material a did:nova identity cannot embed. A did:nova *is* its Ed25519 signing key, and an X25519 key-agreement key is derived from it by the Edwards->Montgomery map — but a post-quantum ML-KEM key cannot be derived from a curve key, so it must be published. This document binds the did:nova identity to its ML-KEM-768 key-agreement key and is signed by that very identity, so any party can verify it with no central authority (principle 7). The ML-KEM keypair is derived deterministically from the agent's seed, so one seed still regenerates every key. See spec/did-document.md.",
+  "type": "object",
+  "required": ["id", "keyAgreement", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^did:nova:[0-9a-f]{64}$",
+      "description": "The subject identity: a did:nova:<64-hex> embedding the Ed25519 public key that signs this document."
+    },
+    "keyAgreement": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/keyAgreementKey" },
+      "description": "Published key-agreement keys. At least one ML-KEM-768 key is expected for post-quantum (`kex: x25519-mlkem768`) envelopes."
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^ed25519:[A-Za-z0-9+/]+={0,2}$",
+      "description": "Ed25519 signature (`ed25519:<base64>`) over the JCS-canonical document with the `signature` field removed, verifiable against the Ed25519 key in `id`."
+    }
+  },
+  "$defs": {
+    "keyAgreementKey": {
+      "type": "object",
+      "required": ["id", "type", "publicKeyBase64"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Key identifier, conventionally the subject DID with a fragment (e.g. '<did>#mlkem768')."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["ML-KEM-768"],
+          "description": "Key-agreement algorithm. v0.3 defines ML-KEM-768 (FIPS 203). A closed enum; new algorithms are additive."
+        },
+        "publicKeyBase64": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+          "description": "The raw algorithm public key, base64 (RFC 4648). For ML-KEM-768 this is the 1184-byte encapsulation key."
+        }
+      }
+    }
+  }
+}
