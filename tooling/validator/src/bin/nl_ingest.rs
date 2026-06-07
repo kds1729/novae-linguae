@@ -26,6 +26,7 @@ use nl_validator::{blake3_hash, canonicalize, format_hash};
 use quote::ToTokens;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 use std::{fs, path::PathBuf};
 use syn::punctuated::Punctuated;
 use syn::{FnArg, Item, ReturnType};
@@ -51,6 +52,11 @@ struct Cli {
     /// for functions with usable doc-tests; v0.1 otherwise.
     #[arg(long)]
     v2: bool,
+
+    /// Attach curated algebraic laws (property_catalog.json) to recognised functions
+    /// (map/filter/sort/reverse/id, ...); implies --v2. Verify with `nl-validator check-properties`.
+    #[arg(long)]
+    properties: bool,
 }
 
 fn main() -> Result<()> {
@@ -67,7 +73,7 @@ fn main() -> Result<()> {
         for item in ast.items {
             if let Item::Fn(func) = item {
                 if matches!(func.vis, syn::Visibility::Public(_)) {
-                    let record = build_one(&func, cli.crate_name.as_deref(), cli.v2)
+                    let record = build_one(&func, cli.crate_name.as_deref(), cli.v2 || cli.properties, cli.properties)
                         .with_context(|| {
                             format!(
                                 "building record for `{}` in {}",
@@ -141,9 +147,9 @@ fn build_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Value> {
 }
 
 /// Dispatch: a v0.2 record when `--v2` and the function has usable doc-test examples, else v0.1.
-fn build_one(func: &syn::ItemFn, crate_name: Option<&str>, v2: bool) -> Result<Value> {
+fn build_one(func: &syn::ItemFn, crate_name: Option<&str>, v2: bool, properties: bool) -> Result<Value> {
     if v2 {
-        if let Some(rec) = build_v2_record(func, crate_name)? {
+        if let Some(rec) = build_v2_record(func, crate_name, properties)? {
             return Ok(rec);
         }
     }
@@ -985,7 +991,62 @@ fn body_ast(func: &syn::ItemFn) -> Option<Value> {
     expr_to_body(expr)
 }
 
-fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Option<Value>> {
+// --- v0.2: curated algebraic-law catalog (opt-in --properties) ---------------------------------
+// The same language-neutral catalog the Python adapters use (ingest-common/property_catalog.json),
+// embedded at compile time. Laws are matched by name-hint + arity; attached laws are checkable with
+// `nl-validator check-properties`. `properties` is included only when non-empty, so records without
+// laws hash exactly as before.
+
+const PROPERTY_CATALOG_JSON: &str = include_str!("../../../ingest-common/property_catalog.json");
+
+fn property_catalog() -> &'static Value {
+    static CATALOG: OnceLock<Value> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        serde_json::from_str(PROPERTY_CATALOG_JSON).expect("property_catalog.json is valid JSON")
+    })
+}
+
+/// (properties, intent_tags) for catalog laws matching these name_hints + arity, de-duplicated by
+/// property name / tag value in catalog order. Mirrors property_catalog.py:match_catalog.
+fn catalog_match(name_hints: &[Value], arity: usize) -> (Vec<Value>, Vec<Value>) {
+    let hints: HashSet<&str> = name_hints.iter().filter_map(|v| v.as_str()).collect();
+    let mut props: Vec<Value> = Vec::new();
+    let mut prop_names: HashSet<String> = HashSet::new();
+    let mut tags: Vec<Value> = Vec::new();
+    let laws = match property_catalog().get("laws").and_then(|v| v.as_array()) {
+        Some(l) => l,
+        None => return (props, tags),
+    };
+    for law in laws {
+        let m = &law["match"];
+        let name_ok = m.get("name_hints").and_then(|v| v.as_array()).map_or(false, |hs| {
+            hs.iter().any(|h| h.as_str().map_or(false, |s| hints.contains(s)))
+        });
+        if !name_ok {
+            continue;
+        }
+        if let Some(a) = m.get("arity").and_then(|v| v.as_u64()) {
+            if a as usize != arity {
+                continue;
+            }
+        }
+        if let Some(prop) = law.get("property") {
+            let name = prop.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if prop_names.insert(name) {
+                props.push(prop.clone());
+            }
+        }
+        if let Some(tag) = law.get("intent_tag").and_then(|v| v.as_str()) {
+            let tv = json!(tag);
+            if !tags.contains(&tv) {
+                tags.push(tv);
+            }
+        }
+    }
+    (props, tags)
+}
+
+fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>, with_properties: bool) -> Result<Option<Value>> {
     let fn_name = func.sig.ident.to_string();
     let type_ast = type_ast_from_sig(&func.sig);
     let (param_types, result_type) = split_fn_type(&type_ast);
@@ -998,6 +1059,12 @@ fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Optio
     if let Some(krate) = crate_name {
         name_hints.push(json!(format!("{}_{}", krate, fn_name)));
     }
+    // Curated algebraic laws for recognised functions (opt-in). Empty unless --properties matches.
+    let (catalog_props, catalog_tags) = if with_properties {
+        catalog_match(&name_hints, param_types.len())
+    } else {
+        (Vec::new(), Vec::new())
+    };
     // A real body-expression AST (canonical JCS hash, a resolvable expr_ address) when the body is
     // in the v1 subset; otherwise the synthetic source-token hash (byte-identical to before).
     let body_hash = match body_ast(func) {
@@ -1023,11 +1090,16 @@ fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Optio
             "terminates": infer_terminates(func)
         },
         "examples": examples,
-        "intent_tags": [],
+        "intent_tags": catalog_tags,
         "derived_from": null,
         "supersedes": null,
         "body_hash": body_hash
     });
+    // `properties` is optional in v0.2; include it only when laws were attached, so records without
+    // laws hash exactly as before.
+    if !catalog_props.is_empty() {
+        record["properties"] = json!(catalog_props);
+    }
     record["hash"] = json!(fn_hash(&record)?);
     Ok(Some(record))
 }
@@ -1144,7 +1216,7 @@ mod tests {
     #[test]
     fn no_doctest_is_v1_fallback() {
         let f = item_fn("pub fn noex(x: i32) -> i32 { x }");
-        assert!(build_v2_record(&f, None).unwrap().is_none());
+        assert!(build_v2_record(&f, None, false).unwrap().is_none());
     }
 
     #[test]
@@ -1152,7 +1224,7 @@ mod tests {
         let f = item_fn(
             "/// Doubles.\n/// ```\n/// assert_eq!(double(5), 10);\n/// assert_eq!(double(0), 0);\n/// ```\npub fn double(n: u64) -> u64 { n * 2 }",
         );
-        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
         assert_eq!(rec["schema_version"], "0.2.0");
         assert_eq!(rec["examples"][0]["args"][0], json!({ "kind": "nat", "value": 5 }));
         assert_eq!(rec["examples"][0]["result"], json!({ "kind": "nat", "value": 10 }));
@@ -1176,7 +1248,7 @@ mod tests {
         let f = item_fn(
             "/// ```\n/// assert_eq!(clamp(5), 5);\n/// ```\npub fn clamp(n: i64) -> i64 { assert!(n >= 0); assert!(n < 100); let y = n; y }",
         );
-        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
         let refs = rec["signature"]["refinements"].as_array().unwrap();
         assert_eq!(refs.len(), 2);
         assert_eq!(
@@ -1202,7 +1274,7 @@ mod tests {
         let f = item_fn(
             "/// ```\n/// assert_eq!(g(2), 2);\n/// ```\npub fn g(n: i64) -> i64 { assert!(n > 0); let _m = n; assert!(n < 9); n }",
         );
-        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
         let refs = rec["signature"]["refinements"].as_array().unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0]["expr"]["op"], "gt");
@@ -1214,7 +1286,7 @@ mod tests {
         let f = item_fn(
             "/// ```\n/// assert_eq!(h(3), 3);\n/// ```\npub fn h(n: i64) -> i64 { assert!(valid(n)); assert!(n >= 1); n }",
         );
-        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
         let refs = rec["signature"]["refinements"].as_array().unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0]["expr"]["op"], "ge");
@@ -1252,6 +1324,49 @@ mod tests {
     }
 
     #[test]
+    fn properties_flag_attaches_catalog_laws() {
+        // `reverse/1` matches the catalog: a length-preserving law + the `lossless` intent tag.
+        let f = item_fn(
+            "/// ```\n/// assert_eq!(reverse(vec![1, 2, 3]), vec![3, 2, 1]);\n/// ```\npub fn reverse(xs: Vec<u64>) -> Vec<u64> { xs }",
+        );
+        // Without --properties: no properties, no tags (byte-compatible).
+        let plain = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
+        assert!(plain.get("properties").is_none());
+        assert_eq!(plain["intent_tags"], json!([]));
+
+        // With --properties: the law and tag are attached.
+        let rec = build_v2_record(&f, None, true).unwrap().expect("a v0.2 record");
+        assert_eq!(rec["properties"][0]["name"], "length_preserving");
+        assert_eq!(rec["intent_tags"], json!(["lossless"]));
+
+        // The record still validates and its hash is correct.
+        let spec = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec");
+        let schema: Value = serde_json::from_str(
+            &std::fs::read_to_string(spec.join("function-record.v0.2.schema.json")).unwrap(),
+        )
+        .unwrap();
+        nl_validator::validate_with_refs(&schema, &rec, &spec).expect("record with properties validates");
+        let h = nl_validator::hash_artifact_with_kind(&rec, nl_validator::ArtifactKind::FunctionRecord)
+            .unwrap();
+        assert_eq!(rec["hash"], json!(h));
+
+        // The attached law is CONSISTENT with the worked example (not contradicted).
+        assert_eq!(
+            nl_validator::evaluate_property(&rec["properties"][0]["expr"],
+                rec["examples"].as_array().unwrap()),
+            nl_validator::Verdict::Consistent
+        );
+
+        // A non-recognised name gets nothing even under --properties.
+        let g = item_fn(
+            "/// ```\n/// assert_eq!(frob(1), 1);\n/// ```\npub fn frob(n: u64) -> u64 { n }",
+        );
+        let gr = build_v2_record(&g, None, true).unwrap().expect("a v0.2 record");
+        assert!(gr.get("properties").is_none());
+        assert_eq!(gr["intent_tags"], json!([]));
+    }
+
+    #[test]
     fn body_ast_for_expression_body_round_trips() {
         // `n * 2` is a single result expression -> a real body AST: app(var "mul", [var n, lit 2]).
         let f = item_fn(
@@ -1274,7 +1389,7 @@ mod tests {
         .unwrap();
         nl_validator::validate_with_refs(&body_schema, &b, &spec).expect("body AST validates");
 
-        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
         let body_addr = nl_validator::hash_artifact_with_kind(&b, nl_validator::ArtifactKind::BodyExpression)
             .unwrap();
         assert_eq!(rec["body_hash"], json!(body_addr));
@@ -1287,7 +1402,7 @@ mod tests {
             "/// ```\n/// assert_eq!(g(5), 5);\n/// ```\npub fn g(n: u64) -> u64 { let y = n; y }",
         );
         assert!(body_ast(&f).is_none());
-        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
         let body_tokens = f.block.to_token_stream().to_string();
         let synthetic = format_hash("expr", &blake3_hash(body_tokens.as_bytes()));
         assert_eq!(rec["body_hash"], json!(synthetic));
@@ -1298,7 +1413,7 @@ mod tests {
         let f = item_fn(
             "/// ```\n/// assert_eq!(rev(vec![1, 2, 3]), vec![3, 2, 1]);\n/// ```\npub fn rev(xs: Vec<u64>) -> Vec<u64> { xs }",
         );
-        let rec = build_v2_record(&f, None).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
         assert_eq!(
             rec["examples"][0]["result"],
             json!({ "kind": "list", "elems": [

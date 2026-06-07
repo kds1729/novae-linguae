@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 pub mod surface;
 
 mod eval;
-pub use eval::{check_properties, evaluate_property};
+pub use eval::{check_properties, evaluate_property, Verdict};
 
 pub mod seal;
 
