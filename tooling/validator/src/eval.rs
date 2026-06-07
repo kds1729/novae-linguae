@@ -274,7 +274,13 @@ pub fn evaluate_property(expr: &Value, examples: &[Value]) -> Verdict {
 
 /// Check every `properties[]` entry of a function record against its `examples[]`. Prints a
 /// per-property verdict to stdout; returns Err iff any property is CONTRADICTED by an example.
-pub fn check_properties(record: &Value) -> Result<()> {
+///
+/// When `body` (the function's executable body AST) is supplied, properties are verified by *running*
+/// (crate::interp): the function-under-test `self`, the higher-order ops (map/filter/fold/compose/
+/// apply), and `forall`/`exists` quantifiers (ranged over the examples) all become decidable, so laws
+/// that are UNVERIFIABLE statically are actually checked. Without a body, the static example evaluator
+/// is used (its honest UNVERIFIABLE boundary).
+pub fn check_properties(record: &Value, body: Option<&Value>) -> Result<()> {
     let props = record
         .get("properties")
         .and_then(|v| v.as_array())
@@ -289,13 +295,18 @@ pub fn check_properties(record: &Value) -> Result<()> {
         println!("no properties to check");
         return Ok(());
     }
+    let self_fn = body.and_then(crate::interp::self_fn_from_body);
     let mut contradicted = Vec::new();
     for prop in &props {
         let name = prop.get("name").and_then(|v| v.as_str()).unwrap_or("<unnamed>");
         let expr = prop
             .get("expr")
             .ok_or_else(|| anyhow!("property `{name}` missing `expr`"))?;
-        let verdict = evaluate_property(expr, &examples);
+        let verdict = if body.is_some() {
+            crate::interp::runtime_verdict(expr, &examples, &self_fn)
+        } else {
+            evaluate_property(expr, &examples)
+        };
         let label = match verdict {
             Verdict::Contradicted => "CONTRADICTED",
             Verdict::Unverifiable => "UNVERIFIABLE",

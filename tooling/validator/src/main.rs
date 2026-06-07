@@ -136,6 +136,11 @@ enum Commands {
     CheckProperties {
         /// Path to the function record
         record: PathBuf,
+        /// Optional body-expression AST: verify properties by *running* (decides
+        /// self / map / filter / fold / compose / apply and forall over the
+        /// examples) instead of the static example evaluator.
+        #[arg(long)]
+        body: Option<PathBuf>,
     },
     /// Evaluate a Nova Lingua body-expression AST and apply it to zero or more
     /// argument values, printing the resulting value AST. This *executes* the
@@ -251,7 +256,7 @@ fn main() -> ExitCode {
         Commands::CheckPredicate { record } => (cmd_check_predicate(&record), true),
         Commands::CheckValue { record } => (cmd_check_value(&record), true),
         Commands::CheckBody { record } => (cmd_check_body(&record), true),
-        Commands::CheckProperties { record } => (cmd_check_properties(&record), true),
+        Commands::CheckProperties { record, body } => (cmd_check_properties(&record, body.as_ref()), true),
         Commands::Eval { body, args } => (cmd_eval(&body, &args), false),
         Commands::Run { record, body } => (cmd_run(&record, &body), false),
         #[cfg(feature = "surface")]
@@ -399,9 +404,10 @@ fn cmd_check_body(record: &PathBuf) -> Result<()> {
     nl_validator::check_body_well_formed(&value)
 }
 
-fn cmd_check_properties(record: &PathBuf) -> Result<()> {
+fn cmd_check_properties(record: &PathBuf, body: Option<&PathBuf>) -> Result<()> {
     let value = nl_validator::read_json(record)?;
-    nl_validator::check_properties(&value)
+    let body = body.map(|p| nl_validator::read_json(p)).transpose()?;
+    nl_validator::check_properties(&value, body.as_ref())
 }
 
 fn cmd_eval(body: &PathBuf, args: &[PathBuf]) -> Result<()> {

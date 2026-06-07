@@ -505,6 +505,119 @@ pub fn run_examples(record: &J, body: &J) -> Result<Vec<ExampleRun>> {
     Ok(out)
 }
 
+// ---------------------------------------------------------------------------
+// Run-backed property verification (predicate-expression AST, spec/predicate-expression.schema.json).
+//
+// The static property checker (eval.rs) honestly marks any law needing to *re-apply a function*
+// (`map`/`filter`/`fold`/`compose`/`apply`/the function-under-test `self`) or a quantifier as
+// UNVERIFIABLE. With an executable body in hand, those become decidable: `self` is the running
+// function, the higher-order ops are the builtins above, and a `forall` ranges over the worked
+// examples' arguments (the examples ARE the test inputs). So `forall n. eq(self(n), add(n, n))` is
+// now actually checked, per example — CONSISTENT instead of UNVERIFIABLE. Still example-bound, so not
+// a proof: a CONSISTENT verdict means "ran true on every example and false on none".
+// ---------------------------------------------------------------------------
+
+use crate::Verdict;
+
+fn decode_pred_lit(v: &J) -> Option<Val> {
+    match v {
+        J::Bool(b) => Some(Val::Bool(*b)),
+        J::Number(n) => n.as_i64().map(|i| Val::Int(i as i128)).or_else(|| n.as_f64().map(Val::Float)),
+        J::String(s) => Some(Val::Str(s.clone())),
+        J::Null => Some(Val::Unit),
+        _ => None,
+    }
+}
+
+/// Evaluate a predicate-expression node. `None` == undecidable (unbound var, unknown op, or an
+/// application that errors). `self_fn` is the executable function-under-test, bound to `self`.
+fn eval_predicate(node: &J, env: &Env, self_fn: &Option<Val>) -> Option<Val> {
+    let kind = node.get("kind")?.as_str()?;
+    match kind {
+        "var" => {
+            let name = node.get("name")?.as_str()?;
+            if name == "self" {
+                self_fn.clone()
+            } else {
+                env.get(name).cloned()
+            }
+        }
+        "lit" => decode_pred_lit(node.get("value")?),
+        "forall" | "exists" => {
+            // Range the quantifier over THIS example: bind the bound vars positionally to arg0..argN.
+            let mut env2 = env.clone();
+            if let Some(vars) = node.get("vars").and_then(|v| v.as_array()) {
+                for (i, var) in vars.iter().enumerate() {
+                    if let (Some(name), Some(arg)) = (var.as_str(), env.get(&format!("arg{i}"))) {
+                        env2.insert(name.to_string(), arg.clone());
+                    }
+                }
+            }
+            eval_predicate(node.get("body")?, &env2, self_fn)
+        }
+        "app" => {
+            let op = node.get("op")?.as_str()?;
+            let arg_nodes = node.get("args")?.as_array()?;
+            let args: Option<Vec<Val>> = arg_nodes.iter().map(|a| eval_predicate(a, env, self_fn)).collect();
+            let args = args?;
+            match op {
+                // Boolean connectives not in the builtin library.
+                "implies" => match (&args[0], &args[1]) {
+                    (Val::Bool(a), Val::Bool(b)) => Some(Val::Bool(!a || *b)),
+                    _ => None,
+                },
+                "iff" => match (&args[0], &args[1]) {
+                    (Val::Bool(a), Val::Bool(b)) => Some(Val::Bool(a == b)),
+                    _ => None,
+                },
+                // Everything else — eq/neq/and/or/not, arithmetic, comparisons, list ops, and the
+                // higher-order map/filter/fold/compose/apply — IS a builtin. Run it.
+                _ => {
+                    let f = resolve_var(op, &Env::new()).ok()?;
+                    apply(f, args).ok()
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Verdict for one property across a record's examples, with the body available to run.
+pub fn runtime_verdict(expr: &J, examples: &[J], self_fn: &Option<Val>) -> Verdict {
+    let mut any_true = false;
+    let mut any_false = false;
+    for ex in examples {
+        let mut env = Env::new();
+        if let Some(r) = ex.get("result").and_then(|r| decode_value(r).ok()) {
+            env.insert("result".to_string(), r);
+        }
+        if let Some(args) = ex.get("args").and_then(|a| a.as_array()) {
+            for (i, a) in args.iter().enumerate() {
+                if let Ok(v) = decode_value(a) {
+                    env.insert(format!("arg{i}"), v);
+                }
+            }
+        }
+        match eval_predicate(expr, &env, self_fn) {
+            Some(Val::Bool(true)) => any_true = true,
+            Some(Val::Bool(false)) => any_false = true,
+            _ => {}
+        }
+    }
+    if any_false {
+        Verdict::Contradicted
+    } else if any_true {
+        Verdict::Consistent
+    } else {
+        Verdict::Unverifiable
+    }
+}
+
+/// Build the executable function-under-test from a body AST (for `self`), if it evaluates.
+pub fn self_fn_from_body(body: &J) -> Option<Val> {
+    eval(body, &Env::new()).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,6 +706,25 @@ mod tests {
         let twice = apply(compose, vec![dbl.clone(), dbl]).unwrap(); // partial: a function
         let out = apply(twice, vec![Val::Int(3)]).unwrap();
         assert!(val_eq(&out, &Val::Int(12)));
+    }
+
+    #[test]
+    fn run_backed_property_verification() {
+        // double's law `forall n. eq(self(n), add(n, n))` is UNVERIFIABLE statically (self + forall),
+        // but with the runnable body it is actually checked over the examples -> CONSISTENT.
+        let record = load("double.v0.2.json");
+        let body = load("body-double.json");
+        let examples: Vec<J> = record["examples"].as_array().unwrap().clone();
+        let expr = &record["properties"][0]["expr"];
+        let self_fn = self_fn_from_body(&body);
+        assert_eq!(runtime_verdict(expr, &examples, &self_fn), Verdict::Consistent);
+
+        // A body that does NOT satisfy the law (triple instead of double) is CONTRADICTED.
+        let triple = json!({ "kind": "lambda", "params": [{ "name": "n" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "mul" },
+                      "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": nat(3) }] } });
+        let wrong = self_fn_from_body(&triple);
+        assert_eq!(runtime_verdict(expr, &examples, &wrong), Verdict::Contradicted);
     }
 
     #[test]

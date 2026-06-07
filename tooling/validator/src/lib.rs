@@ -26,7 +26,7 @@ mod eval;
 pub use eval::{check_properties, evaluate_property, Verdict};
 
 pub mod interp;
-pub use interp::{eval_body, run_examples, ExampleRun};
+pub use interp::{eval_body, run_examples, runtime_verdict, self_fn_from_body, ExampleRun};
 
 pub mod seal;
 
