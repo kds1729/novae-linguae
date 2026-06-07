@@ -55,16 +55,30 @@ services:
       COMMONS_REDIS_URL: redis://redis:6379/0
       COMMONS_CELERY_BROKER: redis://redis:6379/0
       COMMONS_EMBEDDINGS_URL: http://embeddings:80
-    command: >
-      sh -c "python manage.py migrate --noinput &&
-             exec gunicorn commons_node.wsgi:application
-                  --bind 0.0.0.0:8000 --workers 3 --threads 2 --timeout 60 --access-logfile -"
+    # Single line on purpose: a YAML folded scalar (`>`) with extra-indented continuation lines keeps
+    # the newlines, which would split the gunicorn args onto a dead line and drop --bind.
+    command: ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn commons_node.wsgi:application --bind 0.0.0.0:8000 --workers 3 --threads 2 --timeout 60 --access-logfile -"]
     ports:
       - "127.0.0.1:8001:8000"        # loopback only — the host's edge proxy fronts this
     depends_on:
       db: { condition: service_healthy }
       redis: { condition: service_started }
       embeddings: { condition: service_started }
+    restart: unless-stopped
+
+  # Public TLS edge (automatic Let's Encrypt). Include this only when Arca owns ports 80/443 on the
+  # host; on a shared host, omit it and front `web` (127.0.0.1:8001) with the existing edge instead.
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data            # persists issued certs across restarts (avoid LE rate limits)
+      - caddy_config:/config
+    depends_on:
+      web: { condition: service_started }
     restart: unless-stopped
 
   worker:
@@ -86,3 +100,5 @@ volumes:
   commons_pgdata:
   commons_redis:
   commons_tei:
+  caddy_data:
+  caddy_config:

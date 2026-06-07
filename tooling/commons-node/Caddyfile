@@ -1,0 +1,9 @@
+# Public TLS edge for Arca (the commons node), used by docker-compose.prod.yml on a host where Arca
+# owns ports 80/443. Caddy automatically provisions and renews a Let's Encrypt certificate for the
+# domain (the DNS A record must point at this host and 80/443 must be free), redirects http→https, and
+# reverse-proxies to the web container. On a *shared* host where another service owns 443, drop this
+# proxy and instead add a vhost to that edge pointing at web's 127.0.0.1:8001.
+nl.1105software.com {
+	encode zstd gzip
+	reverse_proxy web:8000
+}
