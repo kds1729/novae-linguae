@@ -17,6 +17,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `claim-expression.schema.json` | v0.1 draft | Structured AST for `assert.claim` (predicate / satisfies / verified) |
 | `commitment-expression.schema.json` | v0.1 draft | Structured AST for `commit.commitment` (apply / provide / refrain) |
 | `surface-syntax.md` | v0.1 | Concrete syntax for all four expression sub-languages (type, predicate, value, body): grammar, infix-to-AST mapping, canonical pretty-print rules, and round-trip requirement. Parser/pretty-printer shipped in `nl-validator` (`parse-*`/`unparse-*` subcommands), with round-trip conformance vectors for all four sub-languages |
+| `evaluation.md` | v0.1 | Normative-by-reference spec for the semantic core: how a body **executes** (call-by-value, closures, currying, `case`, builtins incl. map/filter/fold/compose, `fn_ref` composition) and how it is **type-checked** (Hindley-Milner, skolemized `forall`). Implemented in `nl-validator` (`eval`/`run`/`typecheck`/`check-properties --body`). Load-bearing for principles 3 and 9. |
 | `canonical-serialization.md` | v0.1 | Normative spec for canonical form (JCS RFC 8785) and hashing (BLAKE3-256) |
 | `trust-model.md` | v0.1 | Normative spec for the trust model: local trust policy + capability tokens + attestations, no central authority. Built on already-shipped *Nova Locutio* primitives. |
 | `intent-tag-vocabulary.md` | v0.1 | Controlled vocabulary for `intent_tags`: 16 top-level categories (`transform`, `predicate`, `aggregate`, `filter`, `query`, `parse`, `serialize`, `io`, `arithmetic`, `math`, `logical`, `string`, `concurrent`, `crypto`, `time`, `coll`) plus property-modifier tags (`pure`, `elementwise`, `idempotent`, …). Non-vocab tags still validate; cross-agent agreement is the benefit. |
@@ -153,6 +154,11 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 
 # Type-expression well-formedness (beyond JSON Schema)
 ./tooling/validator/target/release/nl-validator check-type spec/examples/type-map.json
+
+# Execute a body, run a record's examples as tests, and type-check it (spec/evaluation.md)
+./tooling/validator/target/release/nl-validator run        spec/examples/double.v0.2.json --records spec/examples/
+./tooling/validator/target/release/nl-validator typecheck  spec/examples/double.v0.2.json --body spec/examples/body-double.json
+./tooling/validator/target/release/nl-validator check-properties spec/examples/double.v0.2.json --body spec/examples/body-double.json
 ```
 
 Cross-file `$ref`s resolve against sibling schema files: when a schema references another by its `https://novae-linguae.org/spec/<version>/<file>` identifier, `nl-validator validate` maps that to `<file>` in the schema's own directory. The version path segment is logical only — all schema files live flat in `spec/`. Any JSON Schema 2020-12 validator can also be used for structural checks; the reference is byte-equality of hash and JCS form across implementations.
