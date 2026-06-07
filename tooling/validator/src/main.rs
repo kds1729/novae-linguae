@@ -166,6 +166,17 @@ enum Commands {
         #[arg(long)]
         body: PathBuf,
     },
+    /// Type-check a function record's body against its declared `signature.type`
+    /// (Hindley-Milner inference; spec/type-expression.schema.json). The second
+    /// pillar of "verified by default": confirms the body actually has its
+    /// declared type. Exit 1 if ILL-TYPED. The body AST is supplied with `--body`.
+    Typecheck {
+        /// Path to the function record (provides signature.type).
+        record: PathBuf,
+        /// Path to the body-expression JSON AST to check.
+        #[arg(long)]
+        body: PathBuf,
+    },
     /// Parse a Nova Lingua type-expression surface string into its JSON AST.
     /// Reads the surface string from the `input` argument, or from stdin when
     /// omitted. Writes the AST as pretty JSON to stdout. See
@@ -259,6 +270,7 @@ fn main() -> ExitCode {
         Commands::CheckProperties { record, body } => (cmd_check_properties(&record, body.as_ref()), true),
         Commands::Eval { body, args } => (cmd_eval(&body, &args), false),
         Commands::Run { record, body } => (cmd_run(&record, &body), false),
+        Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
         #[cfg(feature = "surface")]
         Commands::ParseType { input } => (cmd_parse_type(input), false),
         #[cfg(feature = "surface")]
@@ -408,6 +420,13 @@ fn cmd_check_properties(record: &PathBuf, body: Option<&PathBuf>) -> Result<()> 
     let value = nl_validator::read_json(record)?;
     let body = body.map(|p| nl_validator::read_json(p)).transpose()?;
     nl_validator::check_properties(&value, body.as_ref())
+}
+
+fn cmd_typecheck(record: &PathBuf, body: &PathBuf) -> Result<()> {
+    let record = nl_validator::read_json(record)?;
+    let body = nl_validator::read_json(body)?;
+    println!("{}", nl_validator::typecheck_record(&record, &body)?);
+    Ok(())
 }
 
 fn cmd_eval(body: &PathBuf, args: &[PathBuf]) -> Result<()> {

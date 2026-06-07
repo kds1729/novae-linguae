@@ -28,6 +28,9 @@ pub use eval::{check_properties, evaluate_property, Verdict};
 pub mod interp;
 pub use interp::{eval_body, run_examples, runtime_verdict, self_fn_from_body, ExampleRun};
 
+pub mod typecheck;
+pub use typecheck::{typecheck, typecheck_record};
+
 pub mod seal;
 
 /// Read and parse a UTF-8 JSON file from disk.
