@@ -37,6 +37,17 @@ class CatalogMatchTests(unittest.TestCase):
         self.assertEqual(expr["kind"], "app")
         self.assertEqual(expr["op"], "eq")
 
+    def test_expanded_laws(self):
+        # append/concat (binary) -> length-additive; dedup/unique -> length-bounded;
+        # add/mul (binary) -> commutative. All keyed by name + arity.
+        self.assertEqual([p["name"] for p in match_catalog(["append"], 2)[0]], ["length_additive"])
+        self.assertEqual([p["name"] for p in match_catalog(["concat"], 2)[0]], ["length_additive"])
+        self.assertEqual([p["name"] for p in match_catalog(["unique"], 1)[0]], ["length_bounded"])
+        self.assertEqual(match_catalog(["add"], 2)[1], ["commutative"])
+        self.assertEqual(match_catalog(["multiply"], 2)[1], ["commutative"])
+        # `concat` as a 1-ary flatten does not match the binary append law.
+        self.assertEqual(match_catalog(["concat"], 1), ([], []))
+
 
 @unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
 class EndToEndTests(unittest.TestCase):

@@ -78,6 +78,54 @@
           { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "result" }] },
           { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg0" }] } ] }
       }
+    },
+    {
+      "id": "law.append_length_additive",
+      "match": { "name_hints": ["append", "concat", "mappend"], "arity": 2 },
+      "intent_tag": "lossless",
+      "property": {
+        "name": "length_additive",
+        "expr": { "kind": "app", "op": "eq", "args": [
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "result" }] },
+          { "kind": "app", "op": "add", "args": [
+            { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg0" }] },
+            { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg1" }] } ] } ] }
+      }
+    },
+    {
+      "id": "law.dedup_length_bounded",
+      "match": { "name_hints": ["dedup", "unique", "distinct", "nub", "uniq"], "arity": 1 },
+      "intent_tag": "idempotent",
+      "property": {
+        "name": "length_bounded",
+        "expr": { "kind": "app", "op": "le", "args": [
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "result" }] },
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg0" }] } ] }
+      }
+    },
+    {
+      "id": "law.add_commutative",
+      "match": { "name_hints": ["add", "plus"], "arity": 2 },
+      "intent_tag": "commutative",
+      "property": {
+        "name": "commutative",
+        "expr": { "kind": "app", "op": "eq", "args": [
+          { "kind": "var", "name": "result" },
+          { "kind": "app", "op": "add", "args": [
+            { "kind": "var", "name": "arg1" }, { "kind": "var", "name": "arg0" } ] } ] }
+      }
+    },
+    {
+      "id": "law.mul_commutative",
+      "match": { "name_hints": ["mul", "multiply", "times", "product"], "arity": 2 },
+      "intent_tag": "commutative",
+      "property": {
+        "name": "commutative",
+        "expr": { "kind": "app", "op": "eq", "args": [
+          { "kind": "var", "name": "result" },
+          { "kind": "app", "op": "mul", "args": [
+            { "kind": "var", "name": "arg1" }, { "kind": "var", "name": "arg0" } ] } ] }
+      }
     }
   ]
 }
