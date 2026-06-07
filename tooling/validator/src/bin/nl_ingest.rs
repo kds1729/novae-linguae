@@ -514,6 +514,18 @@ fn value_ast(expr: &syn::Expr, hint: Option<&Value>) -> Option<Value> {
             }
             Some(json!({ "kind": "list", "elems": elems }))
         }
+        // Trivial iterator/collection adapters that don't change the logical sequence of values
+        // (`vec![..].into_iter()`, `xs.iter()`, `.cloned()`, `.collect()`, ...). These wrap the
+        // receiver so that iterator-style assert_equal examples encode as the underlying sequence.
+        syn::Expr::MethodCall(m)
+            if m.args.is_empty()
+                && matches!(
+                    m.method.to_string().as_str(),
+                    "iter" | "into_iter" | "iter_mut" | "cloned" | "copied" | "to_vec" | "to_owned" | "collect"
+                ) =>
+        {
+            value_ast(&m.receiver, hint)
+        }
         _ => None,
     }
 }
@@ -582,8 +594,33 @@ fn example_from_assert(
     Some(json!({ "args": args, "result": result }))
 }
 
+/// The two compared expressions of an `assert_eq!(a, b)` macro invocation.
+fn pair_from_assert_eq(mac: &syn::Macro) -> Option<(syn::Expr, syn::Expr)> {
+    if !mac.path.is_ident("assert_eq") {
+        return None;
+    }
+    let parts = mac
+        .parse_body_with(Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated)
+        .ok()?;
+    let mut it = parts.into_iter();
+    Some((it.next()?, it.next()?))
+}
+
+/// The two compared expressions of an `assert_equal(a, b)` call — itertools' function that compares
+/// two iterables element-wise. Recognised by name (bare or path-qualified), exactly two arguments.
+fn pair_from_assert_equal(expr: &syn::Expr) -> Option<(syn::Expr, syn::Expr)> {
+    let syn::Expr::Call(c) = expr else { return None };
+    let syn::Expr::Path(p) = &*c.func else { return None };
+    if p.path.segments.last().map_or(false, |s| s.ident == "assert_equal") && c.args.len() == 2 {
+        let mut it = c.args.iter();
+        return Some((it.next()?.clone(), it.next()?.clone()));
+    }
+    None
+}
+
 /// Extract real examples from the function's `///` doc-tests: parse the fenced code blocks and turn
-/// each `assert_eq!(fn_name(literals), literal)` into a value-AST example. No code is executed.
+/// each `assert_eq!(fn_name(literals), literal)` (or itertools' `assert_equal(...)`) into a value-AST
+/// example. No code is executed.
 fn doctest_examples(
     func: &syn::ItemFn,
     fn_name: &str,
@@ -622,24 +659,17 @@ fn doctest_examples(
     };
     let mut out = Vec::new();
     for stmt in &parsed.block.stmts {
-        let mac = match stmt {
-            syn::Stmt::Macro(sm) => &sm.mac,
-            syn::Stmt::Expr(syn::Expr::Macro(em), _) => &em.mac,
-            _ => continue,
+        // The two compared expressions, from `assert_eq!(a, b)` (macro) or `assert_equal(a, b)`
+        // (itertools' iterator-equality function — common in iterator-method doc-tests).
+        let pair = match stmt {
+            syn::Stmt::Macro(sm) => pair_from_assert_eq(&sm.mac),
+            syn::Stmt::Expr(syn::Expr::Macro(em), _) => pair_from_assert_eq(&em.mac),
+            syn::Stmt::Expr(e, _) => pair_from_assert_equal(e),
+            _ => None,
         };
-        if !mac.path.is_ident("assert_eq") {
-            continue;
-        }
-        if let Ok(parts) =
-            mac.parse_body_with(Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated)
-        {
-            let exprs: Vec<&syn::Expr> = parts.iter().collect();
-            if exprs.len() >= 2 {
-                if let Some(ex) =
-                    example_from_assert(exprs[0], exprs[1], fn_name, param_types, result_type)
-                {
-                    out.push(ex);
-                }
+        if let Some((a, b)) = pair {
+            if let Some(ex) = example_from_assert(&a, &b, fn_name, param_types, result_type) {
+                out.push(ex);
             }
         }
     }
@@ -1491,6 +1521,33 @@ mod tests {
         // An associated fn without a receiver is not a method.
         let (nr, ty, g) = first_method("impl Foo { pub fn new() -> Self { unimplemented!() } }");
         assert!(lift_method(&nr.attrs, &nr.vis, &nr.sig, Some(&nr.block), &ty, &g).is_none());
+    }
+
+    #[test]
+    fn assert_equal_doctest_mines_examples_for_iterator_methods() {
+        // itertools-style trait method whose doc-test uses `assert_equal` over iterator expressions.
+        // The trivial `.into_iter()` adapter is transparent, so the literal receiver encodes.
+        let (m, self_ty, generics) = first_method(
+            "impl Helpers {\n\
+             /// ```\n\
+             /// itertools::assert_equal(vec![3, 1, 2].into_iter().sorted(), vec![1, 2, 3]);\n\
+             /// ```\n\
+             pub fn sorted(self) -> Vec<u64> { unimplemented!() }\n\
+             }",
+        );
+        let func = lift_method(&m.attrs, &m.vis, &m.sig, Some(&m.block), &self_ty, &generics).unwrap();
+        let rec = build_v2_record(&func, None, true, true).unwrap().expect("a v0.2 record");
+        // The receiver `vec![3,1,2].into_iter()` is mined as arg0 = [3,1,2].
+        assert_eq!(
+            rec["examples"][0]["args"][0],
+            json!({ "kind": "list", "elems": [
+                { "kind": "int", "value": 3 }, { "kind": "int", "value": 1 }, { "kind": "int", "value": 2 }] })
+        );
+        assert_eq!(rec["properties"][0]["name"], "length_preserving");
+        assert_eq!(
+            nl_validator::evaluate_property(&rec["properties"][0]["expr"], rec["examples"].as_array().unwrap()),
+            nl_validator::Verdict::Consistent
+        );
     }
 
     #[test]
