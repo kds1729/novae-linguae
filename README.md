@@ -309,7 +309,7 @@ What landed since (the "remaining fidelity / hardening" pass):
 What is next:
 - **Commons node, production hardening (Milestone 2)** — the neural embedder, pgvector ANN search, the Postgres/Redis backends, and the resilience stack have all landed (above). Remaining is the production *deployment* layer, designed in [`tooling/commons-node/DEPLOYMENT.md`](tooling/commons-node/DEPLOYMENT.md): a `Dockerfile` + `docker-compose.prod.yml` (gunicorn web, a Celery worker for async embed/verify/replicate, a Caddy/nginx proxy with TLS / gzip / rate-limits), an **egress-budget governor** (a hard cap on the bill), Postgres GIN-indexed in-database typed query, and a replication worker (mirror peers)
 - **Post-quantum `kex` (implementation)** — the hybrid X25519 + ML-KEM-768 key agreement is now fully **specified** in [`spec/encryption.md`](spec/encryption.md); implementing it is deferred behind a DID-document key-agreement key and a wire-cost decision
-- **Deeper ingestion (v0.3+)** — effect inference beyond the syntactic lower bound; full body-expression ASTs (control flow / `let` / `case`, not just the single-expression subset); the Rust adapter's own `--properties` wiring; and effects/termination/properties driven by the toolchain backends, not just the scanners
+- **Deeper ingestion (v0.3+)** — effect inference beyond the syntactic lower bound; full body-expression ASTs (control flow / `let` / `case`, not just the single-expression subset); and effects/termination/properties driven by the toolchain backends, not just the scanners
 
 Looking for collaborators on all of the above.
 
