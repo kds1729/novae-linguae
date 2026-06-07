@@ -1,6 +1,6 @@
 {
   "catalog_version": "0.1",
-  "_comment": "Curated algebraic laws keyed by canonical name-hint + arity. Attached opt-in via the adapters' --properties flag (ingestion cannot DERIVE laws, only recognise well-known functions). Each emitted law is then checkable by `nl-validator check-properties` against the record's worked examples, so a mis-match that contradicts an example is caught. Property exprs use the predicate-expression vocabulary with the reserved bindings result / arg0..argN. Where possible the law is in the evaluator's DECIDABLE subset (length/eq/le) so consistency can actually be confirmed from examples; involution / functor laws are valid but report UNVERIFIABLE.",
+  "_comment": "Curated algebraic laws keyed by canonical name-hint + arity. Attached opt-in via the adapters' --properties flag (ingestion cannot DERIVE laws, only recognise well-known functions). Each emitted law is then checkable by `nl-validator check-properties` against the record's worked examples, so a mis-match that contradicts an example is caught. Property exprs use the predicate-expression vocabulary with the reserved bindings result / arg0..argN. Where possible the law is in the evaluator's DECIDABLE subset (length/eq/le) so consistency can actually be confirmed from examples; involution / functor laws are valid but report UNVERIFIABLE. `match.convention` selects the calling convention: 'function' (free function, e.g. map(f, xs) — collection at arg1) or 'method' (iterator/UFCS method, e.g. xs.map(f) where the receiver is arg0 — collection at arg0); absent means it applies to either (reverse/sort/identity reference arg0 in both conventions).",
   "laws": [
     {
       "id": "law.identity",
@@ -37,7 +37,7 @@
     },
     {
       "id": "law.map_length_preserving",
-      "match": { "name_hints": ["map", "fmap"], "arity": 2 },
+      "match": { "name_hints": ["map", "fmap"], "arity": 2, "convention": "function" },
       "intent_tag": "elementwise",
       "property": {
         "name": "length_preserving",
@@ -48,13 +48,35 @@
     },
     {
       "id": "law.filter_length_bounded",
-      "match": { "name_hints": ["filter"], "arity": 2 },
+      "match": { "name_hints": ["filter"], "arity": 2, "convention": "function" },
       "intent_tag": "idempotent",
       "property": {
         "name": "length_bounded",
         "expr": { "kind": "app", "op": "le", "args": [
           { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "result" }] },
           { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg1" }] } ] }
+      }
+    },
+    {
+      "id": "law.map_method_length_preserving",
+      "match": { "name_hints": ["map", "fmap"], "arity": 2, "convention": "method" },
+      "intent_tag": "elementwise",
+      "property": {
+        "name": "length_preserving",
+        "expr": { "kind": "app", "op": "eq", "args": [
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "result" }] },
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg0" }] } ] }
+      }
+    },
+    {
+      "id": "law.filter_method_length_bounded",
+      "match": { "name_hints": ["filter"], "arity": 2, "convention": "method" },
+      "intent_tag": "idempotent",
+      "property": {
+        "name": "length_bounded",
+        "expr": { "kind": "app", "op": "le", "args": [
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "result" }] },
+          { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "arg0" }] } ] }
       }
     }
   ]

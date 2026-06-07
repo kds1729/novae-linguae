@@ -25,10 +25,12 @@ def _load():
     return _CATALOG
 
 
-def match_catalog(name_hints, arity=None):
+def match_catalog(name_hints, arity=None, is_method=False):
     """(properties, intent_tags) for laws that fit. A law matches when one of its `name_hints` is
-    among the record's `name_hints` and its `arity` (if set) equals `arity`. Properties are
-    de-duplicated by name; intent_tags by value, in catalog order."""
+    among the record's `name_hints`, its `arity` (if set) equals `arity`, and its calling
+    `convention` is compatible: 'function' laws apply to free functions, 'method' laws to methods
+    (receiver = arg0), and a law with no convention applies to either. Properties are de-duplicated by
+    name; intent_tags by value, in catalog order."""
     hints = set(name_hints or [])
     props, tags, seen = [], [], set()
     for law in _load().get("laws", []):
@@ -36,6 +38,11 @@ def match_catalog(name_hints, arity=None):
         if not (hints & set(m.get("name_hints", []))):
             continue
         if m.get("arity") is not None and arity is not None and m["arity"] != arity:
+            continue
+        convention = m.get("convention")
+        if convention == "function" and is_method:
+            continue
+        if convention == "method" and not is_method:
             continue
         prop = law["property"]
         if prop["name"] not in seen:

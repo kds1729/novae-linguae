@@ -13,7 +13,10 @@
 //! the doc-tests (nothing is executed). Functions without usable doc-tests fall back to a v0.1 record.
 //!
 //! CAVEATS (all addressable in future iterations):
-//!   - Only top-level `pub fn` items are ingested; methods in `impl` blocks are skipped.
+//!   - Top-level `pub fn` items AND public methods of inherent `impl` blocks are ingested; for a
+//!     method the receiver (`self`) is treated as the first parameter (`arg0`, UFCS convention), so
+//!     `xs.reverse()` records like `reverse(xs)`. Trait-impl methods (Clone::clone, Iterator::next,
+//!     ...) are skipped — they are the trait's API surface, not the type's own.
 //!   - v0.1 mode: `examples.args` is one null per parameter and `result` is null (fill in later);
 //!     types render as a flavored string. `--v2` fixes both for doc-tested functions.
 //!   - `signature.terminates` is always "unknown". Static analysis is future work.
@@ -70,25 +73,57 @@ fn main() -> Result<()> {
             fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let ast = syn::parse_file(&source)
             .with_context(|| format!("parsing {}", path.display()))?;
+        let v2 = cli.v2 || cli.properties;
+        let crate_name = cli.crate_name.as_deref();
         for item in ast.items {
-            if let Item::Fn(func) = item {
-                if matches!(func.vis, syn::Visibility::Public(_)) {
-                    let record = build_one(&func, cli.crate_name.as_deref(), cli.v2 || cli.properties, cli.properties)
-                        .with_context(|| {
-                            format!(
-                                "building record for `{}` in {}",
-                                func.sig.ident,
-                                path.display()
-                            )
-                        })?;
-                    if cli.pretty {
-                        println!("{}", serde_json::to_string_pretty(&record)?);
-                    } else {
-                        println!("{}", serde_json::to_string(&record)?);
+            match item {
+                // Top-level public functions.
+                Item::Fn(func) if matches!(func.vis, syn::Visibility::Public(_)) => {
+                    let record = build_one(&func, crate_name, v2, cli.properties, false)
+                        .with_context(|| format!("building record for `{}` in {}", func.sig.ident, path.display()))?;
+                    print_record(&record, cli.pretty)?;
+                }
+                // Public methods of inherent `impl` blocks (receiver -> arg0). Trait *impls* are
+                // skipped: their methods (Clone::clone, Iterator::next, ...) are the trait's API.
+                Item::Impl(imp) if imp.trait_.is_none() => {
+                    for ii in &imp.items {
+                        let syn::ImplItem::Fn(m) = ii else { continue };
+                        if !matches!(m.vis, syn::Visibility::Public(_)) {
+                            continue;
+                        }
+                        let Some(func) = lift_method(&m.attrs, &m.vis, &m.sig, Some(&m.block), &imp.self_ty, &imp.generics)
+                        else { continue };
+                        let record = build_one(&func, crate_name, v2, cli.properties, true)
+                            .with_context(|| format!("building record for method `{}` in {}", m.sig.ident, path.display()))?;
+                        print_record(&record, cli.pretty)?;
                     }
                 }
+                // Methods *declared* on a public trait (the canonical iterator-method home:
+                // `trait Iterator { fn map(self, f) -> ...; }`). Receiver -> arg0; Self is the type var.
+                Item::Trait(tr) if matches!(tr.vis, syn::Visibility::Public(_)) => {
+                    let self_ty: syn::Type = syn::parse_quote!(Self);
+                    let pub_vis: syn::Visibility = syn::parse_quote!(pub);
+                    for ti in &tr.items {
+                        let syn::TraitItem::Fn(m) = ti else { continue };
+                        let Some(func) = lift_method(&m.attrs, &pub_vis, &m.sig, m.default.as_ref(), &self_ty, &tr.generics)
+                        else { continue };
+                        let record = build_one(&func, crate_name, v2, cli.properties, true)
+                            .with_context(|| format!("building record for trait method `{}` in {}", m.sig.ident, path.display()))?;
+                        print_record(&record, cli.pretty)?;
+                    }
+                }
+                _ => {}
             }
         }
+    }
+    Ok(())
+}
+
+fn print_record(record: &Value, pretty: bool) -> Result<()> {
+    if pretty {
+        println!("{}", serde_json::to_string_pretty(record)?);
+    } else {
+        println!("{}", serde_json::to_string(record)?);
     }
     Ok(())
 }
@@ -147,13 +182,43 @@ fn build_record(func: &syn::ItemFn, crate_name: Option<&str>) -> Result<Value> {
 }
 
 /// Dispatch: a v0.2 record when `--v2` and the function has usable doc-test examples, else v0.1.
-fn build_one(func: &syn::ItemFn, crate_name: Option<&str>, v2: bool, properties: bool) -> Result<Value> {
+/// `is_method` marks records lifted from `impl` methods (receiver = arg0) for the property catalog.
+fn build_one(func: &syn::ItemFn, crate_name: Option<&str>, v2: bool, properties: bool, is_method: bool) -> Result<Value> {
     if v2 {
-        if let Some(rec) = build_v2_record(func, crate_name, properties)? {
+        if let Some(rec) = build_v2_record(func, crate_name, properties, is_method)? {
             return Ok(rec);
         }
     }
     build_record(func, crate_name)
+}
+
+/// Lift a method into a synthetic free function so the whole record pipeline can reuse it: the
+/// receiver (`self` / `&self` / `&mut self`) becomes a typed first parameter `__self` of `self_ty`
+/// (the impl's `Self` for inherent methods, or `Self` for trait methods), and the enclosing generics
+/// are merged in. `block` is the method body, or `None` for a body-less trait method (a synthetic
+/// `unimplemented!()` body stands in — only the signature/doc/examples are used). Returns None for an
+/// associated function with no receiver (a constructor etc.) — that isn't a method.
+fn lift_method(
+    attrs: &[syn::Attribute],
+    vis: &syn::Visibility,
+    sig: &syn::Signature,
+    block: Option<&syn::Block>,
+    self_ty: &syn::Type,
+    outer_generics: &syn::Generics,
+) -> Option<syn::ItemFn> {
+    if !matches!(sig.inputs.first(), Some(syn::FnArg::Receiver(_))) {
+        return None;
+    }
+    let mut sig = sig.clone();
+    let self_param: syn::FnArg = syn::parse_quote!(__self: #self_ty);
+    if let Some(first) = sig.inputs.first_mut() {
+        *first = self_param;
+    }
+    let mut params = outer_generics.params.clone();
+    params.extend(sig.generics.params.clone());
+    sig.generics.params = params;
+    let block = block.cloned().unwrap_or_else(|| syn::parse_quote!({ unimplemented!() }));
+    Some(syn::ItemFn { attrs: attrs.to_vec(), vis: vis.clone(), sig, block: Box::new(block) })
 }
 
 // --- v0.2: structured type AST (from syn) + real examples from `///` doc-tests ----------------
@@ -471,21 +536,26 @@ fn doc_text(func: &syn::ItemFn) -> String {
 }
 
 fn is_call_to(expr: &syn::Expr, fn_name: &str) -> bool {
-    if let syn::Expr::Call(c) = expr {
-        if let syn::Expr::Path(p) = &*c.func {
-            if let Some(seg) = p.path.segments.last() {
-                return seg.ident == fn_name;
-            }
-        }
+    match expr {
+        // free call `fn_name(args)`
+        syn::Expr::Call(c) => matches!(&*c.func, syn::Expr::Path(p)
+            if p.path.segments.last().map_or(false, |seg| seg.ident == fn_name)),
+        // method call `receiver.fn_name(args)` — the receiver is treated as arg0 (UFCS convention).
+        syn::Expr::MethodCall(m) => m.method == fn_name,
+        _ => false,
     }
-    false
 }
 
+/// Positional arguments of a recognised call. For a method call the receiver is prepended as arg0.
 fn call_args(expr: &syn::Expr) -> Vec<&syn::Expr> {
-    if let syn::Expr::Call(c) = expr {
-        c.args.iter().collect()
-    } else {
-        Vec::new()
+    match expr {
+        syn::Expr::Call(c) => c.args.iter().collect(),
+        syn::Expr::MethodCall(m) => {
+            let mut v: Vec<&syn::Expr> = vec![&m.receiver];
+            v.extend(m.args.iter());
+            v
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -1006,9 +1076,11 @@ fn property_catalog() -> &'static Value {
     })
 }
 
-/// (properties, intent_tags) for catalog laws matching these name_hints + arity, de-duplicated by
-/// property name / tag value in catalog order. Mirrors property_catalog.py:match_catalog.
-fn catalog_match(name_hints: &[Value], arity: usize) -> (Vec<Value>, Vec<Value>) {
+/// (properties, intent_tags) for catalog laws matching these name_hints + arity + calling convention,
+/// de-duplicated by property name / tag value in catalog order. Mirrors property_catalog.py:match_catalog.
+/// `is_method` selects the convention: 'function' laws apply to free functions, 'method' laws to
+/// methods (receiver = arg0); a law with no convention applies to either.
+fn catalog_match(name_hints: &[Value], arity: usize, is_method: bool) -> (Vec<Value>, Vec<Value>) {
     let hints: HashSet<&str> = name_hints.iter().filter_map(|v| v.as_str()).collect();
     let mut props: Vec<Value> = Vec::new();
     let mut prop_names: HashSet<String> = HashSet::new();
@@ -1030,6 +1102,11 @@ fn catalog_match(name_hints: &[Value], arity: usize) -> (Vec<Value>, Vec<Value>)
                 continue;
             }
         }
+        match m.get("convention").and_then(|v| v.as_str()) {
+            Some("function") if is_method => continue,
+            Some("method") if !is_method => continue,
+            _ => {}
+        }
         if let Some(prop) = law.get("property") {
             let name = prop.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
             if prop_names.insert(name) {
@@ -1046,7 +1123,7 @@ fn catalog_match(name_hints: &[Value], arity: usize) -> (Vec<Value>, Vec<Value>)
     (props, tags)
 }
 
-fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>, with_properties: bool) -> Result<Option<Value>> {
+fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>, with_properties: bool, is_method: bool) -> Result<Option<Value>> {
     let fn_name = func.sig.ident.to_string();
     let type_ast = type_ast_from_sig(&func.sig);
     let (param_types, result_type) = split_fn_type(&type_ast);
@@ -1061,7 +1138,7 @@ fn build_v2_record(func: &syn::ItemFn, crate_name: Option<&str>, with_properties
     }
     // Curated algebraic laws for recognised functions (opt-in). Empty unless --properties matches.
     let (catalog_props, catalog_tags) = if with_properties {
-        catalog_match(&name_hints, param_types.len())
+        catalog_match(&name_hints, param_types.len(), is_method)
     } else {
         (Vec::new(), Vec::new())
     };
@@ -1216,7 +1293,7 @@ mod tests {
     #[test]
     fn no_doctest_is_v1_fallback() {
         let f = item_fn("pub fn noex(x: i32) -> i32 { x }");
-        assert!(build_v2_record(&f, None, false).unwrap().is_none());
+        assert!(build_v2_record(&f, None, false, false).unwrap().is_none());
     }
 
     #[test]
@@ -1224,7 +1301,7 @@ mod tests {
         let f = item_fn(
             "/// Doubles.\n/// ```\n/// assert_eq!(double(5), 10);\n/// assert_eq!(double(0), 0);\n/// ```\npub fn double(n: u64) -> u64 { n * 2 }",
         );
-        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false, false).unwrap().expect("a v0.2 record");
         assert_eq!(rec["schema_version"], "0.2.0");
         assert_eq!(rec["examples"][0]["args"][0], json!({ "kind": "nat", "value": 5 }));
         assert_eq!(rec["examples"][0]["result"], json!({ "kind": "nat", "value": 10 }));
@@ -1248,7 +1325,7 @@ mod tests {
         let f = item_fn(
             "/// ```\n/// assert_eq!(clamp(5), 5);\n/// ```\npub fn clamp(n: i64) -> i64 { assert!(n >= 0); assert!(n < 100); let y = n; y }",
         );
-        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false, false).unwrap().expect("a v0.2 record");
         let refs = rec["signature"]["refinements"].as_array().unwrap();
         assert_eq!(refs.len(), 2);
         assert_eq!(
@@ -1274,7 +1351,7 @@ mod tests {
         let f = item_fn(
             "/// ```\n/// assert_eq!(g(2), 2);\n/// ```\npub fn g(n: i64) -> i64 { assert!(n > 0); let _m = n; assert!(n < 9); n }",
         );
-        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false, false).unwrap().expect("a v0.2 record");
         let refs = rec["signature"]["refinements"].as_array().unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0]["expr"]["op"], "gt");
@@ -1286,7 +1363,7 @@ mod tests {
         let f = item_fn(
             "/// ```\n/// assert_eq!(h(3), 3);\n/// ```\npub fn h(n: i64) -> i64 { assert!(valid(n)); assert!(n >= 1); n }",
         );
-        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false, false).unwrap().expect("a v0.2 record");
         let refs = rec["signature"]["refinements"].as_array().unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0]["expr"]["op"], "ge");
@@ -1330,12 +1407,12 @@ mod tests {
             "/// ```\n/// assert_eq!(reverse(vec![1, 2, 3]), vec![3, 2, 1]);\n/// ```\npub fn reverse(xs: Vec<u64>) -> Vec<u64> { xs }",
         );
         // Without --properties: no properties, no tags (byte-compatible).
-        let plain = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
+        let plain = build_v2_record(&f, None, false, false).unwrap().expect("a v0.2 record");
         assert!(plain.get("properties").is_none());
         assert_eq!(plain["intent_tags"], json!([]));
 
         // With --properties: the law and tag are attached.
-        let rec = build_v2_record(&f, None, true).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, true, false).unwrap().expect("a v0.2 record");
         assert_eq!(rec["properties"][0]["name"], "length_preserving");
         assert_eq!(rec["intent_tags"], json!(["lossless"]));
 
@@ -1361,9 +1438,59 @@ mod tests {
         let g = item_fn(
             "/// ```\n/// assert_eq!(frob(1), 1);\n/// ```\npub fn frob(n: u64) -> u64 { n }",
         );
-        let gr = build_v2_record(&g, None, true).unwrap().expect("a v0.2 record");
+        let gr = build_v2_record(&g, None, true, false).unwrap().expect("a v0.2 record");
         assert!(gr.get("properties").is_none());
         assert_eq!(gr["intent_tags"], json!([]));
+    }
+
+    fn first_method(src: &str) -> (syn::ImplItemFn, syn::Type, syn::Generics) {
+        let imp: syn::ItemImpl = syn::parse_str(src).expect("parse impl");
+        let m = imp
+            .items
+            .iter()
+            .find_map(|i| if let syn::ImplItem::Fn(f) = i { Some(f.clone()) } else { None })
+            .expect("an impl method");
+        (m, (*imp.self_ty).clone(), imp.generics.clone())
+    }
+
+    #[test]
+    fn impl_method_is_lifted_with_self_as_arg0_and_matches_catalog() {
+        // A `reverse` method on a concrete type: the receiver becomes arg0, the method-call doctest
+        // mines an example, and the (convention-agnostic) reverse law attaches.
+        let (m, self_ty, generics) = first_method(
+            "impl<T: Clone> Stack<T> {\n\
+             /// ```\n\
+             /// assert_eq!(vec![1, 2, 3].reverse(), vec![3, 2, 1]);\n\
+             /// ```\n\
+             pub fn reverse(&self) -> Vec<T> { unimplemented!() }\n\
+             }",
+        );
+        let func = lift_method(&m.attrs, &m.vis, &m.sig, Some(&m.block), &self_ty, &generics)
+            .expect("a method (has a receiver)");
+        let rec = build_v2_record(&func, None, true, true).unwrap().expect("a v0.2 record");
+
+        // self is arg0: the example's first arg is the receiver value [1,2,3].
+        assert_eq!(rec["examples"][0]["args"][0]["kind"], "list");
+        assert_eq!(rec["properties"][0]["name"], "length_preserving");
+        assert_eq!(rec["intent_tags"], json!(["lossless"]));
+        assert_eq!(
+            nl_validator::evaluate_property(&rec["properties"][0]["expr"], rec["examples"].as_array().unwrap()),
+            nl_validator::Verdict::Consistent
+        );
+    }
+
+    #[test]
+    fn catalog_distinguishes_function_and_method_conventions() {
+        let map = vec![json!("map")];
+        // Free `map(f, xs)`: the collection is arg1.
+        let (fp, _) = catalog_match(&map, 2, false);
+        assert_eq!(fp[0]["expr"]["args"][1]["args"][0]["name"], "arg1");
+        // Method `xs.map(f)`: the collection (receiver) is arg0.
+        let (mp, _) = catalog_match(&map, 2, true);
+        assert_eq!(mp[0]["expr"]["args"][1]["args"][0]["name"], "arg0");
+        // An associated fn without a receiver is not a method.
+        let (nr, ty, g) = first_method("impl Foo { pub fn new() -> Self { unimplemented!() } }");
+        assert!(lift_method(&nr.attrs, &nr.vis, &nr.sig, Some(&nr.block), &ty, &g).is_none());
     }
 
     #[test]
@@ -1389,7 +1516,7 @@ mod tests {
         .unwrap();
         nl_validator::validate_with_refs(&body_schema, &b, &spec).expect("body AST validates");
 
-        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false, false).unwrap().expect("a v0.2 record");
         let body_addr = nl_validator::hash_artifact_with_kind(&b, nl_validator::ArtifactKind::BodyExpression)
             .unwrap();
         assert_eq!(rec["body_hash"], json!(body_addr));
@@ -1402,7 +1529,7 @@ mod tests {
             "/// ```\n/// assert_eq!(g(5), 5);\n/// ```\npub fn g(n: u64) -> u64 { let y = n; y }",
         );
         assert!(body_ast(&f).is_none());
-        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false, false).unwrap().expect("a v0.2 record");
         let body_tokens = f.block.to_token_stream().to_string();
         let synthetic = format_hash("expr", &blake3_hash(body_tokens.as_bytes()));
         assert_eq!(rec["body_hash"], json!(synthetic));
@@ -1413,7 +1540,7 @@ mod tests {
         let f = item_fn(
             "/// ```\n/// assert_eq!(rev(vec![1, 2, 3]), vec![3, 2, 1]);\n/// ```\npub fn rev(xs: Vec<u64>) -> Vec<u64> { xs }",
         );
-        let rec = build_v2_record(&f, None, false).unwrap().expect("a v0.2 record");
+        let rec = build_v2_record(&f, None, false, false).unwrap().expect("a v0.2 record");
         assert_eq!(
             rec["examples"][0]["result"],
             json!({ "kind": "list", "elems": [
