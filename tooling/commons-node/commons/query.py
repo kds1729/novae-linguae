@@ -1,11 +1,18 @@
 """Typed discovery — translate a query filter (spec/commons.md `POST /v0/query`) to results.
 
-Scalar fields (kind, schema_version, terminates, type substring) filter in the database; the array
-predicates (effects/capabilities/intent_tags membership, name-hint prefix) are applied in Python.
-On a Postgres backend these array predicates become GIN-indexed `contains`/overlap queries; doing
-them in Python here keeps the SQLite MVP simple and obviously correct. Pagination is by the `id`
-sequence cursor.
+Scalar fields (kind, schema_version, terminates, type substring) filter in the database. The array
+predicates (effects/capabilities/intent_tags membership, name-hint prefix) are confirmed in Python by
+``_array_ok`` on every backend — that is the obviously-correct source of truth. On Postgres they are
+*also* pushed into the database (GIN-indexed JSONB `@>` containment, migration 0004) to narrow the
+scan before the Python pass; on SQLite the pushdown is skipped and the Python pass does all the work.
+Pagination is by the `id` sequence cursor.
 """
+
+import functools
+import operator
+
+from django.db import connection
+from django.db.models import Q
 
 from .models import Record
 
@@ -49,8 +56,32 @@ def _array_ok(record, flt):
     return True
 
 
+def _pushdown_array(qs, field, pred):
+    """Narrow `qs` by a single array predicate using GIN-indexable JSONB lookups (Postgres only).
+
+    Conservative: applies only containment forms that `_array_ok` also enforces, so this can only ever
+    *shrink* the candidate set — the Python post-filter still has the final say. `any` becomes an OR of
+    single-element `@>` containments (each GIN-indexed); `all` a single `@>`; `subset_of`/`none` map to
+    `<@`/empty. Unknown shapes are left for the Python pass."""
+    if not isinstance(pred, dict):
+        return qs
+    if pred.get("none"):
+        qs = qs.filter(**{field: []})
+    if isinstance(pred.get("all"), list) and pred["all"]:
+        qs = qs.filter(**{f"{field}__contains": pred["all"]})
+    if isinstance(pred.get("any"), list) and pred["any"]:
+        qs = qs.filter(functools.reduce(operator.or_,
+                                         (Q(**{f"{field}__contains": [x]}) for x in pred["any"])))
+    if isinstance(pred.get("subset_of"), list):
+        qs = qs.filter(**{f"{field}__contained_by": pred["subset_of"]})
+    return qs
+
+
 def _scalar_qs(flt):
-    """Queryset with the scalar (DB-side) predicates of a typed filter applied, ordered by id."""
+    """Queryset with the DB-side predicates of a typed filter applied, ordered by id.
+
+    Always applies the scalar predicates; on Postgres also pushes the array predicates into the database
+    (the Python `_array_ok` pass still confirms every row, so correctness does not depend on this)."""
     qs = Record.objects.all().order_by("id")
     if "kind" in flt:
         qs = qs.filter(kind=flt["kind"])
@@ -61,6 +92,10 @@ def _scalar_qs(flt):
         qs = qs.filter(terminates__in=(t if isinstance(t, list) else [t]))
     if flt.get("type_contains"):
         qs = qs.filter(type_str__icontains=flt["type_contains"])
+    if connection.vendor == "postgresql":
+        for field in ("effects", "capabilities", "intent_tags"):
+            if flt.get(field):
+                qs = _pushdown_array(qs, field, flt[field])
     return qs
 
 

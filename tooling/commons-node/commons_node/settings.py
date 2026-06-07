@@ -17,8 +17,14 @@ ALLOWED_HOSTS = os.environ.get("COMMONS_ALLOWED_HOSTS", "*").split(",")
 
 INSTALLED_APPS = ["commons"]
 
-# Minimal middleware — this is a machine-to-machine JSON API, so no sessions/auth/CSRF stack.
-MIDDLEWARE = ["django.middleware.common.CommonMiddleware"]
+# Minimal middleware — this is a machine-to-machine JSON API, so no sessions/auth/CSRF stack. The
+# egress governor is listed first so its response phase runs last (metering the final, gzip-compressed
+# bytes); GZip compresses JSON responses to cut egress (DEPLOYMENT.md).
+MIDDLEWARE = [
+    "commons.egress.EgressBudgetMiddleware",
+    "django.middleware.gzip.GZipMiddleware",
+    "django.middleware.common.CommonMiddleware",
+]
 
 ROOT_URLCONF = "commons_node.urls"
 WSGI_APPLICATION = "commons_node.wsgi.application"
@@ -80,3 +86,16 @@ COMMONS_EMBEDDING_DIM = int(os.environ.get("COMMONS_EMBEDDING_DIM", "256"))
 COMMONS_EMBEDDINGS_URL = os.environ.get("COMMONS_EMBEDDINGS_URL", "")
 COMMONS_EMBEDDINGS_TIMEOUT = float(os.environ.get("COMMONS_EMBEDDINGS_TIMEOUT", "30"))
 COMMONS_EMBEDDINGS_BATCH = int(os.environ.get("COMMONS_EMBEDDINGS_BATCH", "32"))  # inputs per request
+
+# Egress-budget governor (commons/egress.py, DEPLOYMENT.md): a monthly ceiling on outbound bytes — the
+# only variable cost — past which the node returns 503. 0 disables throttling (usage still metered and
+# shown in /v0/info). A hard cap on the bill, not a protocol gate.
+COMMONS_EGRESS_BUDGET_BYTES = int(os.environ.get("COMMONS_EGRESS_BUDGET_BYTES", "0"))
+
+# Replication worker (commons/tasks.py): the Celery app mirrors verified records from COMMONS_PEERS.
+# Broker defaults to the configured Redis. Off (no worker running) leaves the node a pure origin.
+COMMONS_CELERY_BROKER = os.environ.get("COMMONS_CELERY_BROKER", os.environ.get("COMMONS_REDIS_URL", ""))
+COMMONS_REPLICATE_INTERVAL = float(os.environ.get("COMMONS_REPLICATE_INTERVAL", "300"))  # seconds
+COMMONS_EMBED_INTERVAL = float(os.environ.get("COMMONS_EMBED_INTERVAL", "120"))  # backfill null embeddings
+COMMONS_REPLICATE_BATCH = int(os.environ.get("COMMONS_REPLICATE_BATCH", "200"))  # records per peer per run
+COMMONS_SYNC_PER_PEER_LIMIT = int(os.environ.get("COMMONS_SYNC_PER_PEER_LIMIT", "500"))  # /v0/sync page

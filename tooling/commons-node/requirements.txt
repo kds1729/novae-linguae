@@ -6,3 +6,4 @@ Django>=6.0,<7.0
 psycopg[binary]>=3.2
 redis>=5.0
 gunicorn>=23.0
+celery>=5.4          # async replication worker (commons/tasks.py); the web process never imports it

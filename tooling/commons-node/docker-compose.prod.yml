@@ -1,0 +1,88 @@
+# Production stack for the commons node (Arca) — DEPLOYMENT.md, Milestone 2.
+#
+# Same compute elements as the dev docker-compose.yml, but Django is containerized under gunicorn and a
+# Celery worker is added. There is intentionally NO public proxy here: on a shared host an existing edge
+# (e.g. another app's nginx) terminates TLS and reverse-proxies nl.<domain> to web's 127.0.0.1:8001.
+# The web port binds to loopback only, so nothing is exposed except through that edge.
+#
+#   cd tooling/commons-node
+#   cp .env.prod.example .env   # then edit secrets
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Build context is the repo root (../../) so the image can include tooling/validator + spec/.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${COMMONS_PG_NAME}
+      POSTGRES_USER: ${COMMONS_PG_USER}
+      POSTGRES_PASSWORD: ${COMMONS_PG_PASSWORD}
+    volumes:
+      - commons_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${COMMONS_PG_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]   # persist the egress counter + replication cursors
+    volumes:
+      - commons_redis:/data
+    restart: unless-stopped
+
+  embeddings:
+    # HF Text-Embeddings-Inference (CPU, native amd64 on the prod host). Serves the model over POST /embed.
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
+    command: ["--model-id", "BAAI/bge-small-en-v1.5"]
+    volumes:
+      - commons_tei:/data            # model cache, so restarts don't re-download
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../../
+      dockerfile: tooling/commons-node/Dockerfile
+    image: arca-node:latest
+    env_file: .env
+    environment:
+      # Reach the sibling containers by service name (override any loopback defaults in .env).
+      COMMONS_PG_HOST: db
+      COMMONS_REDIS_URL: redis://redis:6379/0
+      COMMONS_CELERY_BROKER: redis://redis:6379/0
+      COMMONS_EMBEDDINGS_URL: http://embeddings:80
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             exec gunicorn commons_node.wsgi:application
+                  --bind 0.0.0.0:8000 --workers 3 --threads 2 --timeout 60 --access-logfile -"
+    ports:
+      - "127.0.0.1:8001:8000"        # loopback only — the host's edge proxy fronts this
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+      embeddings: { condition: service_started }
+    restart: unless-stopped
+
+  worker:
+    image: arca-node:latest          # reuse the web image (built above)
+    env_file: .env
+    environment:
+      COMMONS_PG_HOST: db
+      COMMONS_REDIS_URL: redis://redis:6379/0
+      COMMONS_CELERY_BROKER: redis://redis:6379/0
+      COMMONS_EMBEDDINGS_URL: http://embeddings:80
+    command: ["celery", "-A", "commons_node", "worker", "-B", "--loglevel", "info", "--concurrency", "2"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+      web: { condition: service_started }
+    restart: unless-stopped
+
+volumes:
+  commons_pgdata:
+  commons_redis:
+  commons_tei:

@@ -7,6 +7,7 @@ from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from . import verify as V
+from .egress import usage as egress_usage
 from .embedding import get_embedder
 from .ingest import create_record
 from .models import Record
@@ -127,6 +128,7 @@ def info(request):
     """GET /v0/info — node metadata (peers are hints, not authority)."""
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
+    used, budget, window = egress_usage()
     resp = JsonResponse({
         "protocol": "v0",
         "schema_versions": _SCHEMA_VERSIONS,
@@ -135,6 +137,9 @@ def info(request):
         "record_count": Record.objects.count(),
         "peers": settings.COMMONS_PEERS,
         "retains_messages": "durable",    # MVP keeps everything; a TTL tier comes with Redis
+        # Egress-budget transparency (DEPLOYMENT.md): a node advertises its own cost posture so peers
+        # can prefer a mirror before this one starts shedding load. budget_bytes 0 == no throttle.
+        "egress": {"window": window, "used_bytes": used, "budget_bytes": budget},
     })
     resp["Cache-Control"] = "public, max-age=10"   # cheap to serve; brief cache smooths bursts
     return resp

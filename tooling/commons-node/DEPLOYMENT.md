@@ -1,8 +1,12 @@
-# Production deployment & cost strategy (Milestone 2 design)
+# Production deployment & cost strategy (Milestone 2)
 
-**Status: design — not yet built.** The runnable PoC stack is [`docker-compose.yml`](docker-compose.yml)
-(Postgres+pgvector, Redis, an embeddings model server; Django on the host). This document records the
-*production* topology and — importantly — how to keep the bill bounded. It is the plan for Milestone 2.
+**Status: built.** The production stack is [`docker-compose.prod.yml`](docker-compose.prod.yml) +
+[`Dockerfile`](Dockerfile): containerized Django under gunicorn, a Celery worker (replication + async
+embedding backfill), Postgres+pgvector, Redis, and the TEI embeddings model server. The egress-budget
+governor ([`commons/egress.py`](commons/egress.py)), gzip, and the Postgres GIN typed-query pushdown
+([`commons/query.py`](commons/query.py) + migration `0004`) are in. TLS / ingress is intentionally left
+to the host's edge (see "Running it" below) so the node coexists on a shared host. The dev PoC stack
+([`docker-compose.yml`](docker-compose.yml), Django on the host) is unchanged.
 
 ## Principle: cheap PoC, no ceiling
 
@@ -55,16 +59,35 @@ only thing that can run away. The content-addressed design makes egress unusuall
    other nodes mirror and serve *their* clients. Run a deliberately modest node, cap your throughput, and
    let the mesh absorb growth — no node is forced to carry global load.
 
-## Milestone 2 build list
+## Milestone 2 build list (status)
 
-- `Dockerfile` + `docker-compose.prod.yml`: web (gunicorn), worker (Celery on Redis), proxy (Caddy/nginx
-  with TLS + gzip + rate limits).
-- **Egress-budget governor** middleware (config-driven byte budget → throttle/`503`) and per-peer `sync`
-  bandwidth caps.
-- Postgres **GIN-indexed** in-database typed query (today `/v0/query` array predicates apply in Python
-  over a bounded scan).
-- **Replication worker** (polls peers' `GET /v0/sync` and mirrors verified records).
-- CDN deployment guide for `resolve`.
+- ✅ `Dockerfile` (multi-stage: builds the `nl-validator` verification binary, then a slim gunicorn
+  image) + `docker-compose.prod.yml` (web, Celery `worker`, db, redis, embeddings). TLS/rate-limit live
+  at the host edge rather than a bundled proxy, so the node shares a host without owning :443.
+- ✅ **Egress-budget governor** ([`commons/egress.py`](commons/egress.py)): a monthly byte budget in the
+  cache → `503` past the cap; usage is advertised in `/v0/info` and `X-Egress-Used`. gzip is on.
+- ✅ Postgres **GIN-indexed** typed query: migration `0004` adds `gin (… jsonb_path_ops)` indexes and
+  `query.py` pushes `@>` containment into the DB on Postgres (the Python post-filter stays authoritative;
+  SQLite is unchanged).
+- ✅ **Replication worker** + **async embedding** ([`commons/tasks.py`](commons/tasks.py)): Celery beat
+  runs `replicate_all` (mirror verified records from `COMMONS_PEERS`) and `embed_pending` (backfill
+  embeddings, so publish never blocks on the model server).
+- CDN for `resolve`: `resolve` already emits `Cache-Control: public, max-age=…, immutable`; front it with
+  any CDN at ~100% hit rate (off-box, so it also absorbs metered egress). No code change.
+
+## Running it
+
+On a **dedicated** host, terminate TLS in front of `web` (`127.0.0.1:8001`) with Caddy/nginx. On a
+**shared** host, add a vhost to the existing edge that reverse-proxies `nl.<domain>` → `127.0.0.1:8001`.
+
+```sh
+cd tooling/commons-node
+cp .env.prod.example .env            # set COMMONS_SECRET_KEY, COMMONS_PG_PASSWORD, COMMONS_ALLOWED_HOSTS
+docker compose -f docker-compose.prod.yml up -d --build   # migrate runs on web start
+docker compose -f docker-compose.prod.yml exec -T web \
+  sh -c 'python ../ingest-common/... | python manage.py loadrecords -'   # optional: seed
+curl -s http://127.0.0.1:8001/v0/info | python3 -m json.tool             # health + egress posture
+```
 
 See also [`../../spec/resilience.md`](../../spec/resilience.md) for the availability/anti-sabotage design
 (Arca, seed bundles, the `.nlb` bundle format, censorship-resistant bootstrap).
