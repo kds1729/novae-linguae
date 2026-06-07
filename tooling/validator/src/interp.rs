@@ -19,10 +19,34 @@
 use anyhow::{anyhow, bail, Result};
 use base64::Engine;
 use serde_json::{json, Value as J};
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 type Env = BTreeMap<String, Val>;
+
+// Composition / linking: a scoped address → body-AST map. When set, applying a `fn_ref` value resolves
+// the target (a function content-address, or a body's own `expr_` address) to its body and runs it, so
+// records compose end-to-end — e.g. running map's example `map(<fn_ref double>, [1,2,3])` executes the
+// referenced `double` (commons/linking, principle 4: assemble from existing records). Thread-local so
+// the evaluator's signatures stay unchanged; set for the duration of a linked run, then cleared.
+thread_local! {
+    static RESOLVER: RefCell<HashMap<String, J>> = RefCell::new(HashMap::new());
+}
+
+/// Install the link map (address → body AST) for `fn_ref` resolution during evaluation.
+pub fn set_resolver(map: HashMap<String, J>) {
+    RESOLVER.with(|r| *r.borrow_mut() = map);
+}
+
+/// Clear the link map.
+pub fn clear_resolver() {
+    RESOLVER.with(|r| r.borrow_mut().clear());
+}
+
+fn resolve_fn_ref(addr: &str) -> Option<J> {
+    RESOLVER.with(|r| r.borrow().get(addr).cloned())
+}
 
 /// A runtime value. Mirrors the value-expression kinds, plus the two callable forms (`Closure`,
 /// `Builtin`) that only exist at runtime.
@@ -337,6 +361,11 @@ pub fn apply(f: Val, mut args: Vec<Val>) -> Result<Val> {
                 apply(result, rest)
             }
         }
+        Val::FnRef(addr) => match resolve_fn_ref(&addr) {
+            // Composition: resolve the referenced record's body and apply it (see RESOLVER above).
+            Some(body) => apply(eval(&body, &Env::new())?, args),
+            None => bail!("cannot apply unresolved fn_ref {addr} (run with --records to link it)"),
+        },
         other => bail!("cannot apply a non-function value: {}", encode_value(&other)),
     }
 }
@@ -706,6 +735,37 @@ mod tests {
         let twice = apply(compose, vec![dbl.clone(), dbl]).unwrap(); // partial: a function
         let out = apply(twice, vec![Val::Int(3)]).unwrap();
         assert!(val_eq(&out, &Val::Int(12)));
+    }
+
+    #[test]
+    fn composition_resolves_fn_ref_across_records() {
+        // Link `double` by its real content-address, then run `\xs -> map(<fn_ref double>, xs)` on
+        // [1,2,3]: the fn_ref resolves to double's committed body and runs -> [2,4,6]. Cross-record
+        // composition with real data (principle 4: assemble from existing records).
+        let double_rec = load("double.v0.2.json");
+        let addr = double_rec["hash"].as_str().unwrap().to_string();
+        let mut map = HashMap::new();
+        map.insert(addr.clone(), load("body-double.json"));
+        set_resolver(map);
+
+        let body = json!({ "kind": "lambda", "params": [{ "name": "xs" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "map" }, "args": [
+                { "kind": "lit", "value": { "kind": "fn_ref", "target": addr } },
+                { "kind": "var", "name": "xs" }] } });
+        let xs = json!({ "kind": "list", "elems": [nat(1), nat(2), nat(3)] });
+        let got = eval_body(&body, &[xs]).unwrap();
+        clear_resolver();
+
+        assert_eq!(got, json!({ "kind": "list", "elems": [
+            { "kind": "int", "value": 2 }, { "kind": "int", "value": 4 }, { "kind": "int", "value": 6 }] }));
+
+        // An unresolved fn_ref is an honest error (not a silent pass).
+        assert!(eval_body(
+            &json!({ "kind": "app", "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": "fn_deadbeef" } },
+                     "args": [{ "kind": "lit", "value": nat(1) }] }),
+            &[],
+        )
+        .is_err());
     }
 
     #[test]

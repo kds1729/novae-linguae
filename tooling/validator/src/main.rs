@@ -1,6 +1,6 @@
 //! `nl-validator`: reference CLI for validating Novae Linguae artifacts.
 
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -157,14 +157,21 @@ enum Commands {
     /// Run a function record's worked `examples[]` through its `body`: bind each
     /// example's args, evaluate the body, and check the result equals the claimed
     /// `result`. Turns the examples into executable tests. Exit 1 if any example
-    /// fails (or errors). The body AST is supplied with `--body` (a `body_hash`
-    /// is only an address; this is the expression it resolves to).
+    /// fails (or errors).
+    ///
+    /// Supply the body with `--body <body.json>`, or with `--records <dir>` to
+    /// LINK: resolve the record's `body_hash` from the directory, and resolve any
+    /// `fn_ref` arguments to their referenced records' bodies so composites run
+    /// end-to-end (e.g. map's example applying `double` by address).
     Run {
         /// Path to the function record (provides examples).
         record: PathBuf,
-        /// Path to the body-expression JSON AST to execute.
+        /// Path to the body-expression JSON AST to execute (alternative to --records).
         #[arg(long)]
-        body: PathBuf,
+        body: Option<PathBuf>,
+        /// Directory of records/bodies to link `body_hash` and `fn_ref`s against.
+        #[arg(long)]
+        records: Option<PathBuf>,
     },
     /// Type-check a function record's body against its declared `signature.type`
     /// (Hindley-Milner inference; spec/type-expression.schema.json). The second
@@ -269,7 +276,7 @@ fn main() -> ExitCode {
         Commands::CheckBody { record } => (cmd_check_body(&record), true),
         Commands::CheckProperties { record, body } => (cmd_check_properties(&record, body.as_ref()), true),
         Commands::Eval { body, args } => (cmd_eval(&body, &args), false),
-        Commands::Run { record, body } => (cmd_run(&record, &body), false),
+        Commands::Run { record, body, records } => (cmd_run(&record, body.as_ref(), records.as_ref()), false),
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
         #[cfg(feature = "surface")]
         Commands::ParseType { input } => (cmd_parse_type(input), false),
@@ -437,10 +444,63 @@ fn cmd_eval(body: &PathBuf, args: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_run(record: &PathBuf, body: &PathBuf) -> Result<()> {
+/// Build an address → body-AST link map from a directory of records / body-expression files. A
+/// function record's content-address (`fn_…`) maps to its `body_hash`'s body; a body's own `expr_…`
+/// address maps to itself. Used to resolve `body_hash` and `fn_ref`s during a linked run.
+fn build_link_map(dir: &PathBuf) -> Result<std::collections::HashMap<String, serde_json::Value>> {
+    use std::collections::HashMap;
+    const BODY_KINDS: [&str; 7] = ["lambda", "var", "lit", "app", "let", "case", "field"];
+    let mut bodies_by_expr: HashMap<String, serde_json::Value> = HashMap::new();
+    let mut records = vec![];
+    for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let v = nl_validator::read_json(&path)?;
+        let is_record = v.get("hash").and_then(|h| h.as_str()).is_some_and(|h| h.starts_with("fn_"));
+        if is_record {
+            records.push(v);
+        } else if v.get("kind").and_then(|k| k.as_str()).is_some_and(|k| BODY_KINDS.contains(&k)) {
+            let addr = nl_validator::hash_artifact_with_kind(&v, nl_validator::ArtifactKind::BodyExpression)?;
+            bodies_by_expr.insert(addr, v);
+        }
+    }
+    let mut map = bodies_by_expr.clone();
+    for r in records {
+        if let (Some(h), Some(bh)) = (r["hash"].as_str(), r.get("body_hash").and_then(|b| b.as_str())) {
+            if let Some(b) = bodies_by_expr.get(bh) {
+                map.insert(h.to_string(), b.clone());
+            }
+        }
+    }
+    Ok(map)
+}
+
+fn cmd_run(record: &PathBuf, body: Option<&PathBuf>, records: Option<&PathBuf>) -> Result<()> {
     let record = nl_validator::read_json(record)?;
-    let body = nl_validator::read_json(body)?;
-    let runs = nl_validator::run_examples(&record, &body)?;
+    let body = match (body, records) {
+        (Some(b), _) => nl_validator::read_json(b)?,
+        (None, Some(dir)) => {
+            // Link: resolve the record's body_hash from the directory, and set the resolver so that
+            // fn_ref arguments resolve to their referenced bodies (composition).
+            let map = build_link_map(dir)?;
+            let bh = record
+                .get("body_hash")
+                .and_then(|b| b.as_str())
+                .ok_or_else(|| anyhow::anyhow!("record has no body_hash to resolve"))?;
+            let resolved = map
+                .get(bh)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("could not resolve body_hash {bh} from {}", dir.display()))?;
+            nl_validator::set_resolver(map);
+            resolved
+        }
+        (None, None) => bail!("provide --body <body.json> or --records <dir> to resolve the body"),
+    };
+    let runs = nl_validator::run_examples(&record, &body);
+    nl_validator::clear_resolver();
+    let runs = runs?;
     if runs.is_empty() {
         println!("run: no examples to execute");
         return Ok(());
