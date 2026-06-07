@@ -113,7 +113,7 @@ The standard GitHub flow, with project-specific norms:
 
 ## Style and code expectations
 
-The project does not yet have a surface syntax, a compiler, or a runtime. There is therefore no style guide for *Nova Lingua* code, because *Nova Lingua* code does not exist yet outside of schema examples.
+The project has a surface syntax (all four sub-languages, with round-trip `parse-*`/`unparse-*` in `nl-validator`) and a reference **evaluator** and **type checker** (`nl-validator eval`/`run`/`typecheck`), but no optimizing compiler and little surface-level *Nova Lingua* code in the wild yet — so there is not much to have a style guide for.
 
 For the artifacts that do exist:
 
