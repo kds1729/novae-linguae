@@ -552,7 +552,7 @@ def _build_ts_record(name, typevars, params, rettype, slice_text, module_name, v
         examples = ts_examples(name, examples_map.get(name, []), param_types, result_type)
         if examples:
             body_repr = body_ast_from_ts(name, slice_text) or slice_text
-            props, tags = (match_catalog(_name_hints(name, module_name), len(params))
+            props, tags = (match_catalog(_name_hints(name, module_name), len(param_types))
                            if with_properties else ([], []))
             return build_v2_record(name, type_ast, examples, body_repr, module_name=module_name,
                                    effects=effects_from_tokens(slice_text, "ts"),

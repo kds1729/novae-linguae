@@ -183,6 +183,18 @@ class TestV2Records(unittest.TestCase):
         self.assertEqual(self._run("validate", str(self.FR_V2), path).returncode, 0)
         self.assertEqual(self._run("verify", path).returncode, 0)
 
+    def test_properties_flag_matches_on_arity(self):
+        # Regression: arity passed to the catalog must be the parameter COUNT, not len(params-string).
+        # `reverse/1` (data-first) matches the catalog; a 2-ary `reverse` must NOT.
+        src = (
+            "/**\n * @example\n * reverse([1, 2, 3]) // [3, 2, 1]\n */\n"
+            "export function reverse<T>(xs: ReadonlyArray<T>): Array<T> { return [...xs].reverse(); }\n"
+        )
+        rec = next(r for r in t.records_from_source(src, None, v2=True, with_properties=True)
+                   if r["schema_version"] == "0.2.0")
+        self.assertEqual([p["name"] for p in rec.get("properties", [])], ["length_preserving"])
+        self.assertEqual(rec["intent_tags"], ["lossless"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
