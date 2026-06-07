@@ -137,6 +137,30 @@ enum Commands {
         /// Path to the function record
         record: PathBuf,
     },
+    /// Evaluate a Nova Lingua body-expression AST and apply it to zero or more
+    /// argument values, printing the resulting value AST. This *executes* the
+    /// body (a tree-walking evaluator over the v0.1 body schema: closures,
+    /// currying, `case`, `let`, field projection, and a small builtin library
+    /// incl. map/filter/fold/compose). See `spec/body-expression.schema.json`.
+    Eval {
+        /// Path to the body-expression JSON AST.
+        body: PathBuf,
+        /// Argument value (a value-expression JSON file). Repeatable, positional order.
+        #[arg(long = "arg")]
+        args: Vec<PathBuf>,
+    },
+    /// Run a function record's worked `examples[]` through its `body`: bind each
+    /// example's args, evaluate the body, and check the result equals the claimed
+    /// `result`. Turns the examples into executable tests. Exit 1 if any example
+    /// fails (or errors). The body AST is supplied with `--body` (a `body_hash`
+    /// is only an address; this is the expression it resolves to).
+    Run {
+        /// Path to the function record (provides examples).
+        record: PathBuf,
+        /// Path to the body-expression JSON AST to execute.
+        #[arg(long)]
+        body: PathBuf,
+    },
     /// Parse a Nova Lingua type-expression surface string into its JSON AST.
     /// Reads the surface string from the `input` argument, or from stdin when
     /// omitted. Writes the AST as pretty JSON to stdout. See
@@ -228,6 +252,8 @@ fn main() -> ExitCode {
         Commands::CheckValue { record } => (cmd_check_value(&record), true),
         Commands::CheckBody { record } => (cmd_check_body(&record), true),
         Commands::CheckProperties { record } => (cmd_check_properties(&record), true),
+        Commands::Eval { body, args } => (cmd_eval(&body, &args), false),
+        Commands::Run { record, body } => (cmd_run(&record, &body), false),
         #[cfg(feature = "surface")]
         Commands::ParseType { input } => (cmd_parse_type(input), false),
         #[cfg(feature = "surface")]
@@ -376,6 +402,43 @@ fn cmd_check_body(record: &PathBuf) -> Result<()> {
 fn cmd_check_properties(record: &PathBuf) -> Result<()> {
     let value = nl_validator::read_json(record)?;
     nl_validator::check_properties(&value)
+}
+
+fn cmd_eval(body: &PathBuf, args: &[PathBuf]) -> Result<()> {
+    let body = nl_validator::read_json(body)?;
+    let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
+    let result = nl_validator::eval_body(&body, &argv)?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
+}
+
+fn cmd_run(record: &PathBuf, body: &PathBuf) -> Result<()> {
+    let record = nl_validator::read_json(record)?;
+    let body = nl_validator::read_json(body)?;
+    let runs = nl_validator::run_examples(&record, &body)?;
+    if runs.is_empty() {
+        println!("run: no examples to execute");
+        return Ok(());
+    }
+    let mut failed = 0;
+    for r in &runs {
+        if r.passed {
+            println!("example {:>2}  PASS  {}", r.index, r.got);
+        } else {
+            failed += 1;
+            match &r.error {
+                Some(e) => println!("example {:>2}  FAIL  error: {e}", r.index),
+                None => println!("example {:>2}  FAIL  got {}  want {}", r.index, r.got, r.expected),
+            }
+        }
+    }
+    let passed = runs.len() - failed;
+    if failed == 0 {
+        println!("run: {passed}/{} examples passed", runs.len());
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("run: {failed}/{} examples failed", runs.len()))
+    }
 }
 
 /// Read a raw surface string from the `input` argument, or from stdin when it is

@@ -25,6 +25,9 @@ pub mod surface;
 mod eval;
 pub use eval::{check_properties, evaluate_property, Verdict};
 
+pub mod interp;
+pub use interp::{eval_body, run_examples, ExampleRun};
+
 pub mod seal;
 
 /// Read and parse a UTF-8 JSON file from disk.
