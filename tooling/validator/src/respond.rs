@@ -171,8 +171,55 @@ pub fn respond_to_message(
             }
         }
         "query" => query_reply(message, record_map, signing_key, timestamp),
-        other => bail!("respond handles `request` and `query` speech acts, not `{other}`"),
+        "propose" => propose_reply(message, link_map, signing_key, timestamp),
+        other => bail!("respond handles `request`, `query`, and `propose` speech acts, not `{other}`"),
     }
+}
+
+/// `propose`/`apply`: a proposal invites action with refusal allowed. The responder verifies it can
+/// fulfil the application (resolve + test-run the target), then replies `commit` (an `apply`
+/// commitment to run it) or `reject` with a reason.
+fn propose_reply(
+    message: &J,
+    link_map: HashMap<String, J>,
+    signing_key: &SigningKey,
+    timestamp: Option<&str>,
+) -> Result<J> {
+    let requester = message.get("from").and_then(|f| f.as_str()).ok_or_else(|| anyhow!("message has no `from`"))?;
+    let prop_hash = message.get("hash").and_then(|h| h.as_str()).ok_or_else(|| anyhow!("message has no `hash`"))?;
+    let reject = |code: &str, reason: String| {
+        sign_envelope(
+            build_envelope("reject", requester, prop_hash, timestamp,
+                json!({ "rejects": prop_hash, "code": code, "reason": reason })),
+            signing_key,
+        )
+    };
+
+    let action = message.pointer("/body/action").and_then(|a| a.as_str()).unwrap_or_default();
+    if action != "apply" {
+        return reject("refused", format!("propose action `{action}` is not supported (only `apply`)"));
+    }
+    let Some(target) = message.pointer("/body/target").and_then(|t| t.as_str()) else {
+        return reject("malformed", "a propose/apply must carry a `target`".into());
+    };
+    let args = message.pointer("/body/args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    let Some(body_ast) = link_map.get(target).cloned() else {
+        return reject("unknown_target", format!("cannot resolve target `{target}`"));
+    };
+
+    // Only commit to what we can actually fulfil: resolve + test-run the target on the proposed args.
+    set_resolver(link_map);
+    let runnable = eval_body(&body_ast, &args).is_ok();
+    clear_resolver();
+    if !runnable {
+        return reject("constraint_violated", format!("cannot fulfil: running `{target}` on the proposed args errored"));
+    }
+
+    sign_envelope(
+        build_envelope("commit", requester, prop_hash, timestamp,
+            json!({ "commitment": { "kind": "apply", "fn": target, "args": args }, "conditions": [], "expires_at": null })),
+        signing_key,
+    )
 }
 
 /// `request`/`validate`: typecheck the target's body and run its examples; assert it `verified` (by
@@ -461,5 +508,33 @@ mod tests {
         let matches = reply["body"]["result"]["matches"].as_array().unwrap();
         assert!(matches.iter().any(|m| m == &json!(greet)), "greet should match the io.console query");
         verify_signature(&reply).unwrap();
+    }
+
+    #[test]
+    fn propose_apply_commits() {
+        // Propose applying double to [21]: the responder test-runs it, then commits.
+        let prop = json!({ "schema_version": "0.2.0", "kind": "propose", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null,
+            "body": { "action": "apply", "target": double_addr(), "args": [{ "kind": "nat", "value": 21 }] } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&prop, link, recs, &key, None).unwrap();
+        assert_eq!(reply["kind"], "commit");
+        assert_eq!(reply["body"]["commitment"]["kind"], "apply");
+        assert_eq!(reply["body"]["commitment"]["fn"], double_addr().as_str());
+        assert_eq!(reply["in_reply_to"], A_MSG);
+        verify_signature(&reply).expect("commit signature must verify");
+    }
+
+    #[test]
+    fn propose_unknown_target_rejects() {
+        let bad = "fn_0000000000000000000000000000000000000000000000000000000000000000";
+        let prop = json!({ "schema_version": "0.2.0", "kind": "propose", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null, "body": { "action": "apply", "target": bad, "args": [] } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&prop, link, recs, &key, None).unwrap();
+        assert_eq!(reply["kind"], "reject");
+        assert_eq!(reply["body"]["code"], "unknown_target");
     }
 }

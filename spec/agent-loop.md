@@ -81,6 +81,13 @@ The responder dispatches on the message: it also handles a `request` to **valida
   [`request-validate.json`](examples/request-validate.v0.2.json) → [`assert-verified.json`](examples/assert-verified.v0.2.json)
   (validate `double` → `verified`).
 
+- **`propose`** — *"would you do this?"* A proposal invites action but allows refusal. The responder
+  verifies it can fulfil the `apply` (resolve + test-run the target on the proposed args) and replies
+  `commit` — an `apply` commitment to run it — or `reject` with a reason. Worked example:
+  [`propose.json`](examples/propose.v0.2.json) (apply `double` to `[21]`) → [`commit-apply.json`](examples/commit-apply.v0.2.json).
+  Acting on the commitment (execute → assert) reuses the `apply` path above, so a full
+  `query → propose → commit → assert` chain composes from these handlers, threaded by `in_reply_to`.
+
 - **`query`** — *"what do you have that matches?"* The responder searches its records for those
   matching the query `pattern` (`effects` / `intent_tags` as containment, `terminates` as equality;
   `signature_type` matching is deferred) and replies with an `ack` carrying the sorted matching
@@ -95,10 +102,11 @@ nl-validator respond spec/examples/query.v0.2.json            --records spec/exa
 
 ## Scope (v0.2, honest)
 
-- **`apply` / `validate` / `query`.** The responder handles the `apply` and `validate` request
-  actions and the `query` speech act. The `store` action and the negotiating acts
-  (propose/commit/delegate/retract) — and multi-step conversations that chain query → compose →
-  commit — build on the same substrate and are the next step.
+- **`apply` / `validate` / `query` / `propose`.** The responder handles the `apply` and `validate`
+  request actions, the `query` speech act, and `propose` (→ `commit`/`reject`). The `store` action,
+  the remaining negotiating acts (`delegate` / `retract` / acting on a received `commit`), and a
+  driver that *orchestrates* a multi-step `query → propose → commit → assert` conversation
+  autonomously build on the same substrate and are the next step.
 - **Pure targets.** The target must be a body the v0.1 evaluator handles (`spec/evaluation.md`):
   effects are not modelled, so an effectful target is out of scope. An unresolvable target or args
   that don't decode are an honest error, never a silent empty assert.

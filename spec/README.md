@@ -49,6 +49,8 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `examples/assert-verified.v0.2.json` | example | The responder's signed `assert` reply to `request-validate.v0.2.json`: a `verified` claim (double verified **by** the responder's DID), after it typechecked the body and ran the examples. A `reject` is emitted instead when validation fails |
 | `examples/query.v0.2.json` | example | A v0.2 `query` for records whose effects include `io.console`; signed by the example claude identity |
 | `examples/ack-query.v0.2.json` | example | The responder's signed `ack` reply to `query.v0.2.json`: `result.matches` lists the sole match (`greet`), threaded by `in_reply_to`. Discovery over Nova Locutio (principle 4) |
+| `examples/propose.v0.2.json` | example | A v0.2 `propose` to apply `double` to `[21]` (a proposal invites action but allows refusal); signed by the example claude identity |
+| `examples/commit-apply.v0.2.json` | example | The responder's signed `commit` reply to `propose.v0.2.json`: an `apply` commitment to run `double(21)` (the responder test-ran it first), threaded by `in_reply_to`. A `reject` is emitted instead when it can't fulfil |
 | `examples/assert.json` | example | Concrete `assert` message (v0.1 — string claim) claiming an identity property; signed with deterministic seed `novae-linguae-example-verifier` |
 | `examples/assert.v0.2.json` | example | Concrete `assert` message (v0.2 — structured `satisfies` claim against `map.json`); signed with deterministic seed `test-agent-v02` |
 | `examples/commit.v0.2.json` | example | Concrete `commit` message (v0.2 — structured `apply` commitment to run `map` on `[1,2,3]` by end of 2026); signed with deterministic seed `test-agent-v02` |
