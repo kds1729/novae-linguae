@@ -81,11 +81,25 @@ class PythonBodyTests(unittest.TestCase):
             {"kind": "app", "fn": {"kind": "var", "name": "length"}, "args": [{"kind": "var", "name": "xs"}]},
         )
 
+    def test_list_comprehension_becomes_map(self):
+        body = py_body("def f(xs):\n    return [x * 2 for x in xs]")
+        self.assertEqual(body["body"]["fn"], {"kind": "var", "name": "map"})
+
+    def test_filtered_comprehension_uses_filter(self):
+        # `[x for x in xs if x > 0]` is identity-over-filter -> just filter(\x -> gt(x,0), xs).
+        body = py_body("def f(xs):\n    return [x for x in xs if x > 0]")
+        self.assertEqual(body["body"]["fn"], {"kind": "var", "name": "filter"})
+
+    def test_accumulator_loop_becomes_foldl(self):
+        body = py_body("def f(xs):\n    acc = 0\n    for x in xs:\n        acc = acc + x\n    return acc")
+        inner = body["body"]["body"]  # lambda -> (let acc=0 in <let acc=foldl(...) in acc>)
+        self.assertEqual(inner["value"]["fn"], {"kind": "var", "name": "foldl"})
+
     def test_out_of_subset_returns_none(self):
         self.assertIsNone(py_body("def f(x):\n    if x:\n        return 1\n    return 0"))  # truthy non-bool test
-        self.assertIsNone(py_body("def f(x):\n    return [i for i in x]"))  # comprehension
+        self.assertIsNone(py_body("def f(x):\n    return [i for r in x for i in r]"))  # multi-generator comp
         self.assertIsNone(py_body("def f(x):\n    return"))  # bare return
-        self.assertIsNone(py_body("def f(x):\n    for i in x:\n        return i\n    return 0"))  # loop
+        self.assertIsNone(py_body("def f(x):\n    for i in x:\n        return i\n    return 0"))  # non-accumulator loop
 
 
 class TokenBodyTests(unittest.TestCase):

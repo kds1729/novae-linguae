@@ -319,8 +319,8 @@ class TestExecutableCorpus(unittest.TestCase):
         src = (Path(__file__).resolve().parent / "sample_executable.py").read_text(encoding="utf-8")
         records = n.records_from_source(src, "sample", include_private=False, v2=True)
         bodies = n.bodies_from_source(src, include_private=False)
-        self.assertEqual(len(records), 3)               # clamp / sign / abs_diff
-        self.assertEqual(len(bodies), 3)                # all three bodies are in the executable subset
+        self.assertEqual(len(records), 5)               # clamp / sign / abs_diff / squares / total
+        self.assertEqual(len(bodies), 5)                # every body is in the executable subset
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)

@@ -48,3 +48,28 @@ def abs_diff(a, b):
     """
     d = a - b
     return abs(d)
+
+
+def squares(xs):
+    """Square each element (list comprehension -> map).
+
+    >>> squares([1, 2, 3])
+    [1, 4, 9]
+    >>> squares([])
+    []
+    """
+    return [x * x for x in xs]
+
+
+def total(xs):
+    """Sum a list (accumulator loop -> foldl).
+
+    >>> total([1, 2, 3, 4])
+    10
+    >>> total([])
+    0
+    """
+    acc = 0
+    for x in xs:
+        acc = acc + x
+    return acc

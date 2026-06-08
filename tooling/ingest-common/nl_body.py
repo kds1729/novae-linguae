@@ -8,13 +8,16 @@ form, matching `spec/examples/body-double.json`) whose body is built from:
     `abs` → `abs`), and the conditional expression `a if c else b`;
   * local bindings — `x = expr; …; return r` → nested `let`;
   * conditionals — `if c: …` / `elif` / `else` and early `return` → `case` on the boolean test
-    (the schema has no `if`; it is `case` on a `bool`).
-Conditionals are only translated when the test is genuinely boolean (a comparison / boolean
-connective / `not` / bool literal) so Python truthiness is never silently mistranslated. Anything
-outside the subset (loops, comprehensions, `with`/`try`, truthy non-bool tests, unrepresentable
-sub-expressions) yields None, and the adapter keeps its synthetic source-hash body — byte-identical
-to before. A zero-parameter function emits the bare result expression (no `lambda`), so applying it
-to `[]` still evaluates.
+    (the schema has no `if`; it is `case` on a `bool`);
+  * list comprehensions — `[elt for v in src (if cond)]` → `map`/`filter` over `src`;
+  * accumulator loops — `for x in src: acc = update` → `foldl(\acc x -> update, acc, src)`.
+Conditionals (and comprehension filters) are only translated when the test is genuinely boolean (a
+comparison / boolean connective / `not` / bool literal) so Python truthiness is never silently
+mistranslated. Anything outside the subset (`while`, non-accumulator `for`, multi-generator / dict /
+set comprehensions, `with`/`try`, truthy non-bool tests, unrepresentable sub-expressions) yields
+None, and the adapter keeps its synthetic source-hash body — byte-identical to before. A
+zero-parameter function emits the bare result expression (no `lambda`), so applying it to `[]` still
+evaluates.
 
 Front-ends:
   * `body_ast_from_py` — real Python `ast` (nl-ingest-py): the executable subset above.
@@ -132,6 +135,23 @@ def _expr_from_py(node):
         if not _is_boolish(node.test):
             raise BodyError("non-boolean ternary test (Python truthiness is not representable)")
         return b_if(_expr_from_py(node.test), _expr_from_py(node.body), _expr_from_py(node.orelse))
+    if isinstance(node, ast.ListComp):
+        # [elt for v in src (if cond)] -> map(\v -> elt, filter(\v -> cond, src))  (builtins, no loop)
+        if len(node.generators) != 1:
+            raise BodyError("only single-generator comprehensions are in subset")
+        gen = node.generators[0]
+        if getattr(gen, "is_async", 0) or not isinstance(gen.target, ast.Name) or len(gen.ifs) > 1:
+            raise BodyError("comprehension shape out of subset")
+        var = gen.target.id
+        src = _expr_from_py(gen.iter)
+        if gen.ifs:
+            if not _is_boolish(gen.ifs[0]):
+                raise BodyError("comprehension filter must be boolean")
+            src = b_app(b_var("filter"), [b_lambda([var], _expr_from_py(gen.ifs[0])), src])
+        elt = _expr_from_py(node.elt)
+        if elt == b_var(var):
+            return src  # `[v for v in src ...]` is the (filtered) source — no identity map
+        return b_app(b_var("map"), [b_lambda([var], elt), src])
     if isinstance(node, ast.BoolOp):
         return _fold(_PY_BOOL[type(node.op)], [_expr_from_py(v) for v in node.values])
     if isinstance(node, ast.UnaryOp):
@@ -200,6 +220,21 @@ def _block_from_py(stmts):
         # An `else`/`elif` block is the false branch; without one, the rest of the function is.
         else_expr = _block_from_py(head.orelse if head.orelse else tail)
         return b_if(_expr_from_py(head.test), then_expr, else_expr)
+    if isinstance(head, ast.For):
+        # An accumulator loop `for <x> in <src>: <acc> = <update>` is a left fold over `src`. `acc`
+        # must already be bound (a preceding `acc = init` -> let), and the fold re-binds it:
+        #   acc = foldl(\acc x -> update, acc, src) ; <rest>
+        if head.orelse or not isinstance(head.target, ast.Name):
+            raise BodyError("only `for <name> in <src>:` accumulator loops are in subset")
+        if len(head.body) != 1 or not isinstance(head.body[0], ast.Assign):
+            raise BodyError("loop body must be a single accumulator assignment")
+        asg = head.body[0]
+        if len(asg.targets) != 1 or not isinstance(asg.targets[0], ast.Name):
+            raise BodyError("accumulator assignment must target a single name")
+        acc, x = asg.targets[0].id, head.target.id
+        fold = b_app(b_var("foldl"),
+                     [b_lambda([acc, x], _expr_from_py(asg.value)), b_var(acc), _expr_from_py(head.iter)])
+        return b_let(acc, fold, _block_from_py(tail))
     raise BodyError(f"unsupported statement {type(head).__name__}")
 
 
