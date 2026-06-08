@@ -21,9 +21,24 @@
 use anyhow::{anyhow, bail, Context, Result};
 use ed25519_dalek::SigningKey;
 use serde_json::{json, Value as J};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
-use crate::{clear_resolver, eval_body, set_resolver, sign_message};
+use crate::{clear_resolver, eval_body, set_resolver, sign_message, verify_delegation_chain};
+
+/// A responder's **local trust policy** for verifying presented capabilities (spec/trust-model.md).
+/// When `roots` is non-empty the capability gate switches from possession-only ("did the request list
+/// the string?") to chain-verified ("can the sender exhibit a signed `delegate` chain back to a root I
+/// recognize?"), using the [`crate::verify_delegation_chain`] verifier. An empty policy (the default)
+/// keeps the legacy possession-only behavior, so a responder with no configured roots is unchanged.
+#[derive(Default, Clone)]
+pub struct TrustPolicy {
+    /// DIDs the receiver recognizes as roots per local policy (a root is self-authorizing).
+    pub roots: BTreeSet<String>,
+    /// The pool of signed `delegate` tokens the receiver has on hand to reconstruct chains from.
+    pub delegations: Vec<J>,
+    /// Verification instant (RFC 3339 UTC) for expiry checks; `None` ignores expiry.
+    pub at: Option<String>,
+}
 
 /// Run the responder over a `request` message, returning the signed `assert` reply.
 ///
@@ -157,12 +172,27 @@ pub fn respond_to_message(
     signing_key: &SigningKey,
     timestamp: Option<&str>,
 ) -> Result<J> {
+    respond_to_message_with_trust(message, link_map, record_map, signing_key, timestamp, &TrustPolicy::default())
+}
+
+/// As [`respond_to_message`], but the capability gate verifies presented capabilities against the
+/// responder's `policy`: with recognized roots configured, `apply`/`propose` succeed only when the
+/// sender can exhibit a valid signed `delegate` chain to a root (not merely list the capability
+/// string). An empty policy is identical to [`respond_to_message`].
+pub fn respond_to_message_with_trust(
+    message: &J,
+    link_map: HashMap<String, J>,
+    record_map: HashMap<String, J>,
+    signing_key: &SigningKey,
+    timestamp: Option<&str>,
+    policy: &TrustPolicy,
+) -> Result<J> {
     let kind = message.get("kind").and_then(|k| k.as_str()).unwrap_or_default();
     match kind {
         "request" => {
             let action = message.pointer("/body/action").and_then(|a| a.as_str()).unwrap_or_default();
             match action {
-                "apply" => match capability_gate(message, &record_map, signing_key, timestamp) {
+                "apply" => match capability_gate(message, &record_map, policy, signing_key, timestamp) {
                     Some(reject) => reject,
                     None => respond_to_request(message, link_map, signing_key, timestamp),
                 },
@@ -172,7 +202,7 @@ pub fn respond_to_message(
             }
         }
         "query" => query_reply(message, record_map, signing_key, timestamp),
-        "propose" => match capability_gate(message, &record_map, signing_key, timestamp) {
+        "propose" => match capability_gate(message, &record_map, policy, signing_key, timestamp) {
             Some(reject) => reject,
             None => propose_reply(message, link_map, signing_key, timestamp),
         },
@@ -183,14 +213,21 @@ pub fn respond_to_message(
     }
 }
 
-/// Capability gate for `apply`/`propose`: the request is only fulfilled if it presents (in
-/// `constraints.capabilities`) every capability the target's record declares it requires
-/// (`signature.capabilities`). Returns `Some(signed reject `not_authorized`)` when a required
-/// capability is missing, else `None`. This is where a *delegated* capability is checked — an agent
-/// must present what a prior `delegate` granted it (principle 6: capability delegation is first-class).
+/// Capability gate for `apply`/`propose`. The target's record declares the capabilities it requires
+/// (`signature.capabilities`); the gate decides whether the sender is authorized for all of them,
+/// returning `Some(signed reject `not_authorized`)` if not, else `None` (proceed). Two modes,
+/// selected by the responder's [`TrustPolicy`] (principle 6: capability delegation is first-class):
+///
+/// - **Possession-only** (no recognized roots): the request must list each required capability in
+///   `constraints.capabilities`. This is the legacy behavior — the string *is* the claim.
+/// - **Chain-verified** (recognized roots configured): each required capability must be backed by a
+///   valid signed `delegate` chain from the sender (`from`) back to a recognized root, verified by
+///   [`crate::verify_delegation_chain`] against the policy's token pool. Listing the string no longer
+///   suffices — the sender must actually hold the delegation.
 fn capability_gate(
     message: &J,
     record_map: &HashMap<String, J>,
+    policy: &TrustPolicy,
     signing_key: &SigningKey,
     timestamp: Option<&str>,
 ) -> Option<Result<J>> {
@@ -204,24 +241,47 @@ fn capability_gate(
     if required.is_empty() {
         return None;
     }
-    let presented: Vec<&str> = message
-        .pointer("/constraints/capabilities")
-        .and_then(|c| c.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
-        .unwrap_or_default();
-    let missing: Vec<&str> = required.iter().copied().filter(|c| !presented.contains(c)).collect();
-    if missing.is_empty() {
-        return None;
-    }
     let from = message.get("from").and_then(|f| f.as_str())?;
     let hash = message.get("hash").and_then(|h| h.as_str())?;
-    Some(sign_envelope(
-        build_envelope("reject", from, hash, timestamp, json!({
-            "rejects": hash, "code": "not_authorized",
-            "reason": format!("target requires capabilit{} [{}] not presented in constraints.capabilities",
-                              if missing.len() == 1 { "y" } else { "ies" }, missing.join(", "))
-        })),
-        signing_key,
+    let reject = |reason: String| {
+        Some(sign_envelope(
+            build_envelope("reject", from, hash, timestamp, json!({
+                "rejects": hash, "code": "not_authorized", "reason": reason
+            })),
+            signing_key,
+        ))
+    };
+
+    if policy.roots.is_empty() {
+        // Possession-only: the request must list each required capability.
+        let presented: Vec<&str> = message
+            .pointer("/constraints/capabilities")
+            .and_then(|c| c.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+            .unwrap_or_default();
+        let missing: Vec<&str> = required.iter().copied().filter(|c| !presented.contains(c)).collect();
+        if missing.is_empty() {
+            return None;
+        }
+        return reject(format!(
+            "target requires capabilit{} [{}] not presented in constraints.capabilities",
+            if missing.len() == 1 { "y" } else { "ies" }, missing.join(", ")
+        ));
+    }
+
+    // Chain-verified: each required capability must trace through a signed delegation chain to a root.
+    let at = policy.at.as_deref();
+    let unbacked: Vec<&str> = required
+        .iter()
+        .copied()
+        .filter(|cap| !verify_delegation_chain(cap, from, &policy.delegations, &policy.roots, at).authorized)
+        .collect();
+    if unbacked.is_empty() {
+        return None;
+    }
+    reject(format!(
+        "no valid signed delegation chain authorizes `{from}` for capabilit{} [{}] back to a recognized root",
+        if unbacked.len() == 1 { "y" } else { "ies" }, unbacked.join(", ")
     ))
 }
 
@@ -733,5 +793,52 @@ mod tests {
         // Presenting it → fulfilled.
         let r2 = respond_to_message(&apply_req(json!(["cap:io/write"])), build_link_map(&examples_dir()).unwrap(), gated_record(), &key, None).unwrap();
         assert_eq!(r2["kind"], "assert");
+    }
+
+    #[test]
+    fn apply_gate_requires_signed_delegation_chain_under_a_trust_policy() {
+        // With a trust policy configured, merely *listing* the capability no longer suffices — the
+        // sender (REQUESTER) must hold a signed `delegate` chain back to a recognized root.
+        use crate::{did_nova_from_pubkey, TrustPolicy};
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let gated_record = || {
+            let mut m = std::collections::HashMap::new();
+            m.insert(double_addr(), json!({ "hash": double_addr(), "signature": { "capabilities": ["cap:io/write"] } }));
+            m
+        };
+        let apply_req = json!({
+            "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG, "to": null,
+            "in_reply_to": null, "constraints": { "capabilities": ["cap:io/write"] },
+            "body": { "action": "apply", "target": double_addr(), "args": [{ "kind": "nat", "value": 21 }] } });
+
+        // A recognized root that grants cap:io/write directly to REQUESTER.
+        let root_key = signing_key_from_seed("gate-trust-root");
+        let root_did = did_nova_from_pubkey(&root_key.verifying_key());
+        let mut grant = json!({ "schema_version": "0.2.0", "kind": "delegate", "to": REQUESTER,
+            "in_reply_to": null, "body": { "capability": "cap:io/write", "expires_at": null, "conditions": [] } });
+        sign_message(&mut grant, &root_key).unwrap();
+
+        // Policy recognizing the root, holding the grant → the listed capability is now backed → fulfilled.
+        let backed = TrustPolicy {
+            roots: std::collections::BTreeSet::from([root_did]),
+            delegations: vec![grant],
+            at: None,
+        };
+        let ok = respond_to_message_with_trust(
+            &apply_req, build_link_map(&examples_dir()).unwrap(), gated_record(), &key, None, &backed).unwrap();
+        assert_eq!(ok["kind"], "assert", "a backed capability under a trust policy is authorized");
+
+        // Same request, same listed capability, but a policy with a root and NO matching delegation →
+        // listing the string is not enough → rejected.
+        let empty_root = TrustPolicy {
+            roots: std::collections::BTreeSet::from([did_nova_from_pubkey(&signing_key_from_seed("other-root").verifying_key())]),
+            delegations: vec![],
+            at: None,
+        };
+        let denied = respond_to_message_with_trust(
+            &apply_req, build_link_map(&examples_dir()).unwrap(), gated_record(), &key, None, &empty_root).unwrap();
+        assert_eq!(denied["kind"], "reject");
+        assert_eq!(denied["body"]["code"], "not_authorized");
+        verify_signature(&denied).unwrap();
     }
 }

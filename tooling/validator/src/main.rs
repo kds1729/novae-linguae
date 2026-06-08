@@ -281,6 +281,29 @@ enum Commands {
         #[arg(long)]
         records: PathBuf,
     },
+    /// Verify a delegation chain (spec/trust-model.md): can `--grantee` wield `--capability` by a chain
+    /// of signed `delegate` tokens back to a recognized `--root`? Checks every token's signature,
+    /// attenuation (no link widens the grant), expiry (against `--at`), and that the chain reaches a
+    /// recognized root. Prints the verified chain + any accumulated conditions. Exit 0 if AUTHORIZED,
+    /// 1 if not.
+    VerifyDelegation {
+        /// The capability the action requires (e.g. `cap:apply/double`).
+        #[arg(long)]
+        capability: String,
+        /// The DID that must end up authorized (the presenter).
+        #[arg(long)]
+        grantee: String,
+        /// A recognized root DID (repeatable): an authority the receiver trusts per local policy.
+        #[arg(long = "root")]
+        roots: Vec<String>,
+        /// Directory of `delegate` message JSON files forming the available token pool. Repeatable.
+        #[arg(long = "delegations")]
+        delegations: Vec<PathBuf>,
+        /// Optional verification instant (RFC 3339 UTC, e.g. `2026-06-08T00:00:00Z`); tokens whose
+        /// `expires_at` precedes it are skipped. Omit to ignore expiry.
+        #[arg(long)]
+        at: Option<String>,
+    },
     /// Parse a Nova Lingua type-expression surface string into its JSON AST.
     /// Reads the surface string from the `input` argument, or from stdin when
     /// omitted. Writes the AST as pretty JSON to stdout. See
@@ -386,6 +409,9 @@ fn main() -> ExitCode {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
         }
         Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
+        Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
+            (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
+        }
         Commands::Orchestrate { records, intents, args, seed, responder_seed, timestamp } => {
             (cmd_orchestrate(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
         }
@@ -588,6 +614,58 @@ fn cmd_verify_claim(assert: &PathBuf, records: &PathBuf) -> Result<()> {
         Ok(())
     } else {
         Err(anyhow::anyhow!("REFUTED  the claim re-ran false"))
+    }
+}
+
+fn cmd_verify_delegation(
+    capability: &str,
+    grantee: &str,
+    roots: &[String],
+    delegations: &[PathBuf],
+    at: Option<&str>,
+) -> Result<()> {
+    use std::collections::BTreeSet;
+    // Each --delegations path may be a single delegate file or a directory of them; collect every
+    // JSON object whose `kind` is `delegate`.
+    let mut tokens: Vec<serde_json::Value> = Vec::new();
+    for path in delegations {
+        let mut consider = |p: &Path| -> Result<()> {
+            if p.extension().and_then(|e| e.to_str()) != Some("json") {
+                return Ok(());
+            }
+            let v = nl_validator::read_json(&p.to_path_buf())?;
+            if v.get("kind").and_then(|k| k.as_str()) == Some("delegate") {
+                tokens.push(v);
+            }
+            Ok(())
+        };
+        if path.is_dir() {
+            let mut entries: Vec<PathBuf> = std::fs::read_dir(path)
+                .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .collect();
+            entries.sort(); // deterministic order
+            for p in entries {
+                consider(&p)?;
+            }
+        } else {
+            consider(path)?;
+        }
+    }
+    let roots: BTreeSet<String> = roots.iter().cloned().collect();
+    let verdict = nl_validator::verify_delegation_chain(capability, grantee, &tokens, &roots, at);
+    if verdict.authorized {
+        println!("AUTHORIZED  {}", verdict.reason);
+        for (i, link) in verdict.chain.iter().enumerate() {
+            let to = link.grantee.as_deref().unwrap_or("<bearer>");
+            println!("  [{i}] {} --({})--> {}", link.granter, link.capability, to);
+        }
+        if !verdict.conditions.is_empty() {
+            println!("  conditions (enforce in policy): {}", verdict.conditions.join("; "));
+        }
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("UNAUTHORIZED  {}", verdict.reason))
     }
 }
 

@@ -1,0 +1,14 @@
+{
+  "body": {
+    "capability": "cap:apply",
+    "conditions": [],
+    "expires_at": null
+  },
+  "from": "did:nova:0700db5231c241577a4c2b8c228e1ba93ebbbf9fbb9a1d617b762079bf1c2ea8",
+  "hash": "msg_2efd3a01021552730aa3385ca8ff3dc9b96bdb2eb9a6453550b1d9c86b36d31c",
+  "in_reply_to": null,
+  "kind": "delegate",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:W0HAAh9O+FgchW/PE25SYFmNWwR9AW6PrJbBnozkjaFsE0daqfAs68/B/TbxIeyBCIRZibluCqk9NJTjmWGNAA==",
+  "to": "did:nova:9c1456c0e620785fec83caaa78e803ce720afa780135fc6298d4b89953143224"
+}

@@ -121,10 +121,13 @@ composes `double` twice, confirming `double(double(21)) = 84` (ten messages).
   function → `assert` the result, closing `propose → commit → assert`); and `delegate` / `retract`
   (acknowledged). The loop is driven end to end by `nl-validator orchestrate` (above), and
   `apply`/`propose` are **capability-gated**: a target whose record declares required
-  `signature.capabilities` is fulfilled only if the request presents them (in
-  `constraints.capabilities`), else `not_authorized` — the point where a *delegated* capability is
-  honored. What remains is a real delegation-chain verifier behind the gate: the gate checks the
-  capabilities a request presents; verifying the signed `delegate` chain that granted them is next.
+  `signature.capabilities` is fulfilled only if the sender is authorized, else `not_authorized`. With
+  no recognized roots configured the gate is possession-only (the request must list the capability in
+  `constraints.capabilities`); configured with a `TrustPolicy` (recognized roots + a `delegate` token
+  pool) it switches to **chain-verified** — the sender must exhibit a valid signed `delegate` chain
+  back to a recognized root, checked by `verify_delegation_chain` (signatures, attenuation, expiry,
+  conditions; see `spec/trust-model.md` and `nl-validator verify-delegation`). Listing the string no
+  longer suffices.
 - **Pure targets.** The target must be a body the v0.1 evaluator handles (`spec/evaluation.md`):
   effects are not modelled, so an effectful target is out of scope. An unresolvable target or args
   that don't decode are an honest error, never a silent empty assert.

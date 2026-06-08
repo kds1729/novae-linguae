@@ -192,13 +192,13 @@ Most of the trust model is *already expressible* in v0.1 of the schemas. The rel
 | `retract` speech act | `message.schema.json` | Revocation |
 | `query` speech act | `message.schema.json` | Discovering attestations |
 
-**No new schema is required to implement v0.1 of the trust model.** What is required, and not yet built:
+**No new schema is required to implement v0.1 of the trust model.** What is required:
 
-- A reference policy engine (consumes local policy declarations and evaluates incoming attestations against them).
-- A capability verifier (validates token chains, attenuation, expiration, conditions).
-- An attestation-graph query layer over the commons.
+- A reference policy engine (consumes local policy declarations and evaluates incoming attestations against them). *Not yet built.*
+- A capability verifier (validates token chains, attenuation, expiration, conditions). **Built** — `nl_validator::verify_delegation_chain` (`tooling/validator/src/delegation.rs`), exposed as `nl-validator verify-delegation`. It checks every token's Ed25519 signature, walks the chain back to a recognized root, enforces attenuation (no link may widen the grant — capability covering is prefix-on-segments), skips expired tokens (against a supplied verification instant), honours bearer tokens (`to: null`), terminates on cyclic delegations, and collects every `condition` along the chain for the policy layer to enforce. It is wired **behind the capability gate**: a responder configured with a `TrustPolicy` (recognized roots + a token pool) fulfils a capability-gated `apply`/`propose` only when the sender can exhibit a valid chain — listing the capability string no longer suffices.
+- An attestation-graph query layer over the commons. *Not yet built.*
 
-These are tier-2 implementation work — see the project README for the rough roadmap.
+The remaining two are tier-2 implementation work — see the project README for the rough roadmap.
 
 ---
 

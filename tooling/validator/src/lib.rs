@@ -41,8 +41,13 @@ pub use typecheck::{typecheck, typecheck_record};
 
 pub mod seal;
 
+pub mod delegation;
+pub use delegation::{capability_covers, verify_delegation_chain, ChainLink, ChainVerdict};
+
 pub mod respond;
-pub use respond::{respond_to_message, respond_to_request, verify_claim};
+pub use respond::{
+    respond_to_message, respond_to_message_with_trust, respond_to_request, verify_claim, TrustPolicy,
+};
 
 pub mod orchestrate;
 pub use orchestrate::{orchestrate, Run, Step};

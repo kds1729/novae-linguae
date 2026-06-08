@@ -51,6 +51,8 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `examples/ack-query.v0.2.json` | example | The responder's signed `ack` reply to `query.v0.2.json`: `result.matches` lists the sole match (`greet`), threaded by `in_reply_to`. Discovery over Nova Locutio (principle 4) |
 | `examples/propose.v0.2.json` | example | A v0.2 `propose` to apply `double` to `[21]` (a proposal invites action but allows refusal); signed by the example claude identity |
 | `examples/commit-apply.v0.2.json` | example | The responder's signed `commit` reply to `propose.v0.2.json`: an `apply` commitment to run `double(21)` (the responder test-ran it first), threaded by `in_reply_to`. A `reject` is emitted instead when it can't fulfil |
+| `examples/delegation/delegate-root-to-alice.json` | example | A signed `delegate` token: the example **root** identity grants alice the broad `cap:apply`. Root of the 2-hop chain `nl-validator verify-delegation` checks |
+| `examples/delegation/delegate-alice-to-bob.json` | example | A signed `delegate` token: alice **attenuates** her `cap:apply` to `cap:apply/double` for bob (with a `condition`). Verifying the chain authorizes bob for `cap:apply/double` but not the broader `cap:apply` |
 | `examples/assert.json` | example | Concrete `assert` message (v0.1 — string claim) claiming an identity property; signed with deterministic seed `novae-linguae-example-verifier` |
 | `examples/assert.v0.2.json` | example | Concrete `assert` message (v0.2 — structured `satisfies` claim against `map.json`); signed with deterministic seed `test-agent-v02` |
 | `examples/commit.v0.2.json` | example | Concrete `commit` message (v0.2 — structured `apply` commitment to run `map` on `[1,2,3]` by end of 2026); signed with deterministic seed `test-agent-v02` |
@@ -191,6 +193,11 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 ./tooling/validator/target/release/nl-validator respond      spec/examples/request.v0.2.json --records spec/examples/ --seed novae-linguae-example-responder
 ./tooling/validator/target/release/nl-validator verify-claim spec/examples/assert-result.v0.2.json --records spec/examples/
 ./tooling/validator/target/release/nl-validator orchestrate  --records spec/examples/ --intent arithmetic --arg <nat.json> --seed novae-linguae-example-claude
+
+# Verify a delegation chain (spec/trust-model.md): can the grantee wield the capability via a chain
+# of signed `delegate` tokens back to a recognized root? Checks signatures, attenuation, expiry.
+./tooling/validator/target/release/nl-validator verify-delegation --capability cap:apply/double \
+  --grantee <bob-did> --root <root-did> --delegations spec/examples/delegation
 ```
 
 Cross-file `$ref`s resolve against sibling schema files: when a schema references another by its `https://novae-linguae.org/spec/<version>/<file>` identifier, `nl-validator validate` maps that to `<file>` in the schema's own directory. The version path segment is logical only — all schema files live flat in `spec/`. Any JSON Schema 2020-12 validator can also be used for structural checks; the reference is byte-equality of hash and JCS form across implementations.
