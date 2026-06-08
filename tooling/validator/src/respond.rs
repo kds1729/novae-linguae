@@ -213,7 +213,12 @@ fn commit_reply(
     signing_key: &SigningKey,
     timestamp: Option<&str>,
 ) -> Result<J> {
-    let (requester, commit_hash) = envelope_ids(message)?;
+    // A commit is sent BY the committer TO the proposer; fulfilling it reports back to that proposer
+    // (the commit's `to`), falling back to its sender if unaddressed.
+    let commit_hash = message.get("hash").and_then(|h| h.as_str()).ok_or_else(|| anyhow!("message has no `hash`"))?;
+    let requester = message.get("to").and_then(|t| t.as_str())
+        .or_else(|| message.get("from").and_then(|f| f.as_str()))
+        .ok_or_else(|| anyhow!("commit has no `to`/`from` to reply to"))?;
     let reject = |code: &str, reason: String| {
         sign_envelope(build_envelope("reject", requester, commit_hash, timestamp,
             json!({ "rejects": commit_hash, "code": code, "reason": reason })), signing_key)

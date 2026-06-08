@@ -100,15 +100,26 @@ nl-validator respond spec/examples/request-validate.v0.2.json --records spec/exa
 nl-validator respond spec/examples/query.v0.2.json            --records spec/examples/ --seed <s>  # -> ack with matches
 ```
 
+## Autonomous orchestration
+
+`nl-validator orchestrate --records <dir> --intent <tag> --arg <value> --seed <s>` drives the whole
+conversation end to end: the orchestrator **discovers** a function by intent (`query` → `ack`),
+**proposes** applying it (`propose` → `commit`), the committer **fulfils** it (`commit` → `assert`),
+and the orchestrator **verifies** the result by re-running the claim. The agent never names the
+function — it finds one (principle 4, made autonomous). Every message is signed and threaded; the run
+prints the transcript and exits non-zero unless the final claim is CONFIRMED. Worked: intent
+`arithmetic` over `[21]` discovers `double`, applies it, and confirms `double(21) = 42` across a
+five-message signed exchange.
+
 ## Scope (v0.2, honest)
 
 - **The inbound speech acts are wired.** Beyond `apply`/`validate`/`query`/`propose`, the responder
   also handles: the `store` request action (verify the inline payload's content-address →
   `ack`/`reject`); **acting on a received `commit`** (fulfil an `apply` commitment — resolve + run the
   function → `assert` the result, closing `propose → commit → assert`); and `delegate` / `retract`
-  (acknowledged). What remains is a driver that *orchestrates* a multi-step `query → propose → commit
-  → assert` conversation autonomously, and effect/capability *gating* of what a delegation actually
-  authorizes.
+  (acknowledged). The loop is now driven end to end by `nl-validator orchestrate` (above); what
+  remains is effect/capability *gating* of what a delegation actually authorizes, and richer discovery
+  (compose multiple found functions rather than apply one).
 - **Pure targets.** The target must be a body the v0.1 evaluator handles (`spec/evaluation.md`):
   effects are not modelled, so an effectful target is out of scope. An unresolvable target or args
   that don't decode are an honest error, never a silent empty assert.

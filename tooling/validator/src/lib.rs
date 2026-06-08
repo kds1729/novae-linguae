@@ -44,6 +44,9 @@ pub mod seal;
 pub mod respond;
 pub use respond::{respond_to_message, respond_to_request, verify_claim};
 
+pub mod orchestrate;
+pub use orchestrate::{orchestrate, Run, Step};
+
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {
     let text = std::fs::read_to_string(path)

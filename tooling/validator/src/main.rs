@@ -233,6 +233,30 @@ enum Commands {
         #[arg(long)]
         timestamp: Option<String>,
     },
+    /// Autonomous orchestration (spec/agent-loop.md): drive a full `query → propose → commit →
+    /// assert → verify` conversation. The orchestrator discovers a commons function by `--intent`,
+    /// proposes applying it to the `--arg`s, the responder commits + fulfils, and the orchestrator
+    /// verifies the result. Prints the signed transcript; exit 1 if it isn't CONFIRMED.
+    Orchestrate {
+        /// Directory of records/bodies (the commons view).
+        #[arg(long)]
+        records: PathBuf,
+        /// Intent tag the target function must carry (repeatable; containment match).
+        #[arg(long = "intent")]
+        intents: Vec<String>,
+        /// Argument value (a value-expression JSON file). Repeatable, positional order.
+        #[arg(long = "arg")]
+        args: Vec<PathBuf>,
+        /// Seed for the orchestrator's signing identity (signs query + propose).
+        #[arg(long)]
+        seed: String,
+        /// Seed for the responder's identity (signs the replies).
+        #[arg(long, default_value = "novae-linguae-example-responder")]
+        responder_seed: String,
+        /// Optional ISO 8601 timestamp for the messages (default: null, deterministic per seed).
+        #[arg(long)]
+        timestamp: Option<String>,
+    },
     /// Verify a Nova Locutio `assert` by RE-RUNNING its `predicate` claim against the commons:
     /// resolve the claim's content-addressed function(s) from `--records` and evaluate it. The
     /// receiver half of the agent loop — trust nothing, re-execute (principle 3). Exit 0 if the
@@ -347,6 +371,9 @@ fn main() -> ExitCode {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
         }
         Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
+        Commands::Orchestrate { records, intents, args, seed, responder_seed, timestamp } => {
+            (cmd_orchestrate(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
+        }
         #[cfg(feature = "surface")]
         Commands::ParseType { input } => (cmd_parse_type(input), false),
         #[cfg(feature = "surface")]
@@ -546,6 +573,40 @@ fn cmd_verify_claim(assert: &PathBuf, records: &PathBuf) -> Result<()> {
         Ok(())
     } else {
         Err(anyhow::anyhow!("REFUTED  the claim re-ran false"))
+    }
+}
+
+fn cmd_orchestrate(
+    records: &PathBuf,
+    intents: &[String],
+    args: &[PathBuf],
+    seed: &str,
+    responder_seed: &str,
+    timestamp: Option<&str>,
+) -> Result<()> {
+    let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
+    let orch = nl_validator::signing_key_from_seed(seed);
+    let resp = nl_validator::signing_key_from_seed(responder_seed);
+    let run = nl_validator::orchestrate(records, intents, argv, &orch, &resp, timestamp)?;
+    for step in &run.steps {
+        let m = &step.message;
+        let hash = m.get("hash").and_then(|h| h.as_str()).unwrap_or("");
+        let short = &hash[..hash.len().min(18)];
+        let detail = match step.label.as_str() {
+            "query" => format!("intent {intents:?}"),
+            "ack" => format!("matches {}", m.pointer("/body/result/matches").map(|v| v.to_string()).unwrap_or_default()),
+            "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
+            "commit" => format!("commit apply {}", m.pointer("/body/commitment/fn").and_then(|t| t.as_str()).unwrap_or_default()),
+            "assert" => format!("result {}", m.pointer("/body/claim/expr/args/1/value").map(|v| v.to_string()).unwrap_or_default()),
+            other => other.to_string(),
+        };
+        println!("{:>8}  {short}…  {detail}", step.label);
+    }
+    if run.confirmed {
+        println!("CONFIRMED  discovered the function, applied it, and re-verified the result");
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("orchestration did not confirm (rejected, or the claim failed to re-run)"))
     }
 }
 
