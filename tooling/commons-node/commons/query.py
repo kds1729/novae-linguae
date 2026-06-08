@@ -18,36 +18,75 @@ from .models import Record
 
 _DB_SCAN_CAP = 2000  # bound the per-request scan for the MVP
 
+# Fields whose value must be an object predicate, and the predicate keys they accept.
+_ARRAY_FIELDS = ("effects", "capabilities", "intent_tags")
+_ARRAY_PRED_KEYS = {"all", "any", "none", "subset_of"}
+
+
+class QueryError(ValueError):
+    """A malformed typed-query filter — surfaced as HTTP 400, not a 500."""
+
+
+def validate_filter(flt):
+    """Raise QueryError if `flt` is malformed. Array predicates (effects / capabilities /
+    intent_tags) must be objects — e.g. ``{"all": [...]}`` / ``{"any": [...]}`` /
+    ``{"subset_of": [...]}`` / ``{"none": true}`` — never a bare list, so a wrong shape is a clean
+    400 instead of an AttributeError 500. Returns `flt` unchanged on success."""
+    if not isinstance(flt, dict):
+        raise QueryError("query filter must be a JSON object")
+    for field in _ARRAY_FIELDS:
+        if field not in flt:
+            continue
+        pred = flt[field]
+        if not isinstance(pred, dict):
+            raise QueryError(
+                f'`{field}` must be an object predicate like {{"all": [...]}} / {{"any": [...]}}, '
+                f"not {type(pred).__name__}"
+            )
+        for key, val in pred.items():
+            if key not in _ARRAY_PRED_KEYS:
+                raise QueryError(f"`{field}` has unknown predicate key `{key}` "
+                                 f"(allowed: {', '.join(sorted(_ARRAY_PRED_KEYS))})")
+            if key == "none":
+                if not isinstance(val, bool):
+                    raise QueryError(f"`{field}.none` must be a boolean")
+            elif not isinstance(val, list):
+                raise QueryError(f"`{field}.{key}` must be an array")
+    return flt
+
 
 def _array_ok(record, flt):
+    # Defensive: only honor an array predicate when it is the documented object shape, so even an
+    # unvalidated caller (e.g. best-effort search) can never crash here — a malformed predicate is
+    # simply not applied. `validate_filter` rejects malformed filters up front for `/v0/query`.
     eff = flt.get("effects")
-    if eff:
+    if isinstance(eff, dict):
         rec_eff = set(record.effects)
         if eff.get("none") and rec_eff:
             return False
-        if "subset_of" in eff and not rec_eff.issubset(set(eff["subset_of"])):
+        if isinstance(eff.get("subset_of"), list) and not rec_eff.issubset(set(eff["subset_of"])):
             return False
-        if "all" in eff and not set(eff["all"]).issubset(rec_eff):
+        if isinstance(eff.get("all"), list) and not set(eff["all"]).issubset(rec_eff):
             return False
-        if "any" in eff and not (set(eff["any"]) & rec_eff):
+        if isinstance(eff.get("any"), list) and not (set(eff["any"]) & rec_eff):
             return False
 
     cap = flt.get("capabilities")
-    if cap:
+    if isinstance(cap, dict):
         rec_cap = set(record.capabilities)
         if cap.get("none") and rec_cap:
             return False
-        if "all" in cap and not set(cap["all"]).issubset(rec_cap):
+        if isinstance(cap.get("all"), list) and not set(cap["all"]).issubset(rec_cap):
             return False
-        if "any" in cap and not (set(cap["any"]) & rec_cap):
+        if isinstance(cap.get("any"), list) and not (set(cap["any"]) & rec_cap):
             return False
 
     tags = flt.get("intent_tags")
-    if tags:
+    if isinstance(tags, dict):
         rec_tags = set(record.intent_tags)
-        if "all" in tags and not set(tags["all"]).issubset(rec_tags):
+        if isinstance(tags.get("all"), list) and not set(tags["all"]).issubset(rec_tags):
             return False
-        if "any" in tags and not (set(tags["any"]) & rec_tags):
+        if isinstance(tags.get("any"), list) and not (set(tags["any"]) & rec_tags):
             return False
 
     prefix = flt.get("name_hint_prefix")
@@ -111,7 +150,8 @@ def candidate_records(flt, cap=_DB_SCAN_CAP):
 
 
 def run_query(flt):
-    """Return (hashes, cursor, complete) for a query filter."""
+    """Return (hashes, cursor, complete) for a query filter. Raises QueryError on a malformed filter."""
+    validate_filter(flt)
     qs = _scalar_qs(flt)
 
     cursor = flt.get("cursor")

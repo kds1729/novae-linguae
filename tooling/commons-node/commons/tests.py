@@ -145,6 +145,18 @@ class CommonsProtocolTests(TestCase):
                                 content_type="application/json")
         self.assertIn(rec, resp.json()["records"])
 
+    def test_query_malformed_array_predicate_is_400(self):
+        # A bare list where an object predicate is required is a clean 400 (not an AttributeError 500).
+        resp = self.client.post("/v0/query", data=json.dumps({"effects": ["io.console"]}),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.json()["error"], "malformed_filter")
+
+    def test_query_unknown_predicate_key_is_400(self):
+        resp = self.client.post("/v0/query", data=json.dumps({"effects": {"bogus": ["x"]}}),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 400, resp.content)
+
     # --- federation feed / metadata -----------------------------------------------------------
 
     def test_sync_feed(self):

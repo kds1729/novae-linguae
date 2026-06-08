@@ -11,7 +11,7 @@ from .egress import usage as egress_usage
 from .embedding import get_embedder
 from .ingest import create_record
 from .models import Record
-from .query import run_query
+from .query import QueryError, run_query
 from .search import run_search, SearchError
 
 _SCHEMA_VERSIONS = ["0.1.0", "0.2.0"]
@@ -81,7 +81,10 @@ def query(request):
     except ValueError as exc:
         return JsonResponse({"error": "malformed_json", "detail": str(exc)}, status=400)
 
-    hashes, cursor, complete = run_query(flt)
+    try:
+        hashes, cursor, complete = run_query(flt)
+    except QueryError as exc:
+        return JsonResponse({"error": "malformed_filter", "detail": str(exc)}, status=400)
     if request.GET.get("include") == "record":
         by_hash = {r.hash: r.raw for r in Record.objects.filter(hash__in=hashes)}
         return JsonResponse({"records": [by_hash[h] for h in hashes if h in by_hash],
