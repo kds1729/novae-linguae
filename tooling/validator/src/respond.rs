@@ -162,19 +162,67 @@ pub fn respond_to_message(
         "request" => {
             let action = message.pointer("/body/action").and_then(|a| a.as_str()).unwrap_or_default();
             match action {
-                "apply" => respond_to_request(message, link_map, signing_key, timestamp),
+                "apply" => match capability_gate(message, &record_map, signing_key, timestamp) {
+                    Some(reject) => reject,
+                    None => respond_to_request(message, link_map, signing_key, timestamp),
+                },
                 "validate" => validate_reply(message, link_map, record_map, signing_key, timestamp),
                 "store" => store_reply(message, signing_key, timestamp),
                 other => bail!("respond handles the `apply`/`validate`/`store` request actions, not `{other}`"),
             }
         }
         "query" => query_reply(message, record_map, signing_key, timestamp),
-        "propose" => propose_reply(message, link_map, signing_key, timestamp),
+        "propose" => match capability_gate(message, &record_map, signing_key, timestamp) {
+            Some(reject) => reject,
+            None => propose_reply(message, link_map, signing_key, timestamp),
+        },
         "commit" => commit_reply(message, link_map, signing_key, timestamp),
         "delegate" => delegate_reply(message, signing_key, timestamp),
         "retract" => retract_reply(message, signing_key, timestamp),
         other => bail!("respond handles request/query/propose/commit/delegate/retract, not `{other}`"),
     }
+}
+
+/// Capability gate for `apply`/`propose`: the request is only fulfilled if it presents (in
+/// `constraints.capabilities`) every capability the target's record declares it requires
+/// (`signature.capabilities`). Returns `Some(signed reject `not_authorized`)` when a required
+/// capability is missing, else `None`. This is where a *delegated* capability is checked — an agent
+/// must present what a prior `delegate` granted it (principle 6: capability delegation is first-class).
+fn capability_gate(
+    message: &J,
+    record_map: &HashMap<String, J>,
+    signing_key: &SigningKey,
+    timestamp: Option<&str>,
+) -> Option<Result<J>> {
+    let target = message.pointer("/body/target").and_then(|t| t.as_str())?;
+    let required: Vec<&str> = record_map
+        .get(target)
+        .and_then(|r| r.pointer("/signature/capabilities"))
+        .and_then(|c| c.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+        .unwrap_or_default();
+    if required.is_empty() {
+        return None;
+    }
+    let presented: Vec<&str> = message
+        .pointer("/constraints/capabilities")
+        .and_then(|c| c.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+        .unwrap_or_default();
+    let missing: Vec<&str> = required.iter().copied().filter(|c| !presented.contains(c)).collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let from = message.get("from").and_then(|f| f.as_str())?;
+    let hash = message.get("hash").and_then(|h| h.as_str())?;
+    Some(sign_envelope(
+        build_envelope("reject", from, hash, timestamp, json!({
+            "rejects": hash, "code": "not_authorized",
+            "reason": format!("target requires capabilit{} [{}] not presented in constraints.capabilities",
+                              if missing.len() == 1 { "y" } else { "ies" }, missing.join(", "))
+        })),
+        signing_key,
+    ))
 }
 
 /// `(from, hash)` of a message, for replies threaded back to the sender.
@@ -660,5 +708,30 @@ mod tests {
             "to": null, "in_reply_to": null, "body": { "retracts": A_MSG, "reason": "superseded" } });
         let (l2, r2) = maps();
         assert_eq!(respond_to_message(&ret, l2, r2, &key, None).unwrap()["kind"], "ack");
+    }
+
+    #[test]
+    fn apply_gated_on_required_capability() {
+        // A target whose record requires cap:io/write is rejected unless the request presents it.
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let gated_record = || {
+            let mut m = std::collections::HashMap::new();
+            m.insert(double_addr(), json!({ "hash": double_addr(), "signature": { "capabilities": ["cap:io/write"] } }));
+            m
+        };
+        let apply_req = |caps: serde_json::Value| json!({
+            "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG, "to": null,
+            "in_reply_to": null, "constraints": { "capabilities": caps },
+            "body": { "action": "apply", "target": double_addr(), "args": [{ "kind": "nat", "value": 21 }] } });
+
+        // Missing the capability → not_authorized.
+        let r = respond_to_message(&apply_req(json!([])), build_link_map(&examples_dir()).unwrap(), gated_record(), &key, None).unwrap();
+        assert_eq!(r["kind"], "reject");
+        assert_eq!(r["body"]["code"], "not_authorized");
+        verify_signature(&r).unwrap();
+
+        // Presenting it → fulfilled.
+        let r2 = respond_to_message(&apply_req(json!(["cap:io/write"])), build_link_map(&examples_dir()).unwrap(), gated_record(), &key, None).unwrap();
+        assert_eq!(r2["kind"], "assert");
     }
 }

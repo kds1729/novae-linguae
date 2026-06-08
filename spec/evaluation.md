@@ -40,8 +40,8 @@ run end-to-end (principle 4). `nl-validator run --records <dir>` builds the link
 and resolves both a record's `body_hash` and its `fn_ref` arguments.
 
 **Scope (v0.1, honest).** Integers are 128-bit and `nat` is a non-negative `int`. Most builtins are
-pure; the two effectful ones (`print` → `io.console`, `rand` → `random`) are gated by a capability
-sandbox (see **Effect enforcement** below). The evaluator does not enforce exhaustiveness or types;
+pure; the effectful ones (`print` → `io.console`, `rand` → `random`, `now` → `time`, `panic` →
+`panic`) are gated by a capability sandbox (see **Effect enforcement** below). The evaluator does not enforce exhaustiveness or types;
 those are the checker's job.
 
 ## Type checking
@@ -101,9 +101,11 @@ it finds counterexamples the examples never would.
 A function record *declares* its effects (`signature.effects`, the closed ten-effect vocabulary:
 `fs.read`/`fs.write`/`net.read`/`net.write`/`alloc`/`time`/`random`/`io.console`/`process.spawn`/
 `panic`). Effect **enforcement** makes that declaration a capability the runtime checks, not just
-metadata. The evaluator runs against a *granted* effect set; the two effectful builtins — `print`
-(`io.console`) and `rand` (`random`) — gate on it, and each performed effect is appended to a
-structured **trace** (principle 9: an AI-ingestible record of what the body did).
+metadata. The evaluator runs against a *granted* effect set; the effectful builtins — `print`
+(`io.console`), `rand` (`random`), `now` (`time`), `panic` (`panic`) — gate on it, and each performed
+effect is appended to a structured **trace** (principle 9: an AI-ingestible record of what the body
+did). Adding an effect kind is just an entry in `builtin_effect`; enforcement, tracing, and inference
+follow automatically.
 
 - `nl-validator run <record> --records <dir>` grants exactly the record's declared
   `signature.effects`. A body that performs an effect it didn't declare is rejected at eval time — so
@@ -132,6 +134,7 @@ a higher-order *argument's* effects belong to the caller (effect polymorphism), 
 the `print` body against a no-effects record → UNDER-DECLARED; a body applying `greet` by `fn_ref` →
 UNVERIFIABLE bare, SOUND with `--records` (its `io.console` folded in).
 
-**Scope (v0.1, honest).** Two effectful builtins stand in for the ten-effect vocabulary — enough to
-make enforcement, tracing, and scope-aware inference (with `fn_ref`-callee resolution) real and
-end-to-end. The remaining effect kinds are the next rung.
+**Scope (v0.1, honest).** Four effectful builtins exercise four of the ten effect kinds
+(`io.console`/`random`/`time`/`panic`) — enough to make enforcement, tracing, and scope-aware
+inference (with `fn_ref`-callee resolution) real and end-to-end; the rest are one `builtin_effect`
+entry each. The evaluator has no real fs/net, so those effects await real I/O primitives.

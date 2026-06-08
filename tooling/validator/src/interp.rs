@@ -296,7 +296,7 @@ fn as_list(v: &Val) -> Result<Vec<Val>> {
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
         "neg" | "abs" | "not" | "id" | "head" | "tail" | "length" | "null" | "reverse" | "fst"
-        | "snd" | "print" | "rand" => 1,
+        | "snd" | "print" | "rand" | "now" | "panic" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
         | "apply" => 2,
@@ -310,6 +310,8 @@ pub fn builtin_effect(name: &str) -> Option<&'static str> {
     match name {
         "print" => Some("io.console"),
         "rand" => Some("random"),
+        "now" => Some("time"),
+        "panic" => Some("panic"),
         _ => None,
     }
 }
@@ -603,6 +605,16 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             let n = as_int(&a[0])?;
             perform_effect("random", json!({ "bound": n.to_string() }))?;
             Val::Int(effect_rand(n)?)
+        }
+        "now" => {
+            // time: a fixed clock reading (deterministic/replayable, principle 5), recorded.
+            perform_effect("time", json!({}))?;
+            Val::Int(0)
+        }
+        "panic" => {
+            // panic: record the effect, then abort with the message.
+            perform_effect("panic", encode_value(&a[0]))?;
+            bail!("panic: {}", encode_value(&a[0]));
         }
         other => bail!("unknown builtin: {other}"),
     })
@@ -1003,6 +1015,30 @@ mod tests {
         // Ungranted: random is rejected.
         set_effect_grants(Vec::<String>::new());
         assert!(eval_body(&body, &[n]).is_err(), "rand must be rejected without the random grant");
+        clear_effects();
+    }
+
+    #[test]
+    fn now_and_panic_are_gated_effects() {
+        let unary = |op: &str| json!({ "kind": "lambda", "params": [{ "name": "x" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": op }, "args": [{ "kind": "var", "name": "x" }] } });
+
+        // now → time: ungranted rejected; granted returns a fixed reading + traces `time`.
+        set_effect_grants(Vec::<String>::new());
+        assert!(eval_body(&unary("now"), &[nat(1)]).is_err());
+        clear_effects();
+        set_effect_grants(vec!["time".to_string()]);
+        assert_eq!(eval_body(&unary("now"), &[nat(1)]).unwrap(), json!({ "kind": "int", "value": 0 }));
+        let trace = take_effect_trace();
+        clear_effects();
+        assert_eq!(trace[0]["effect"], "time");
+
+        // panic → panic: gated, and aborts even when granted.
+        set_effect_grants(Vec::<String>::new());
+        assert!(eval_body(&unary("panic"), &[nat(1)]).is_err()); // ungranted
+        clear_effects();
+        set_effect_grants(vec!["panic".to_string()]);
+        assert!(eval_body(&unary("panic"), &[nat(1)]).is_err()); // granted but aborts
         clear_effects();
     }
 }

@@ -249,6 +249,14 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
             Ty::Fun(vec![a], Box::new(con("unit")))
         }
         "rand" => Ty::Fun(vec![con("int")], Box::new(con("int"))),
+        "now" => {
+            let a = inf.fresh();
+            Ty::Fun(vec![a], Box::new(con("int")))
+        }
+        "panic" => {
+            let (a, b) = (inf.fresh(), inf.fresh());
+            Ty::Fun(vec![a], Box::new(b)) // diverges: a -> b
+        }
         "lt" | "le" | "gt" | "ge" => Ty::Fun(vec![con("int"), con("int")], Box::new(con("bool"))),
         "and" | "or" | "xor" => Ty::Fun(vec![con("bool"), con("bool")], Box::new(con("bool"))),
         "not" => Ty::Fun(vec![con("bool")], Box::new(con("bool"))),

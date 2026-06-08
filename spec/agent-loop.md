@@ -117,9 +117,12 @@ five-message signed exchange.
   also handles: the `store` request action (verify the inline payload's content-address →
   `ack`/`reject`); **acting on a received `commit`** (fulfil an `apply` commitment — resolve + run the
   function → `assert` the result, closing `propose → commit → assert`); and `delegate` / `retract`
-  (acknowledged). The loop is now driven end to end by `nl-validator orchestrate` (above); what
-  remains is effect/capability *gating* of what a delegation actually authorizes, and richer discovery
-  (compose multiple found functions rather than apply one).
+  (acknowledged). The loop is driven end to end by `nl-validator orchestrate` (above), and
+  `apply`/`propose` are **capability-gated**: a target whose record declares required
+  `signature.capabilities` is fulfilled only if the request presents them (in
+  `constraints.capabilities`), else `not_authorized` — the point where a *delegated* capability is
+  honored. What remains is richer discovery (compose multiple found functions rather than apply one)
+  and a real delegation-chain verifier behind the gate.
 - **Pure targets.** The target must be a body the v0.1 evaluator handles (`spec/evaluation.md`):
   effects are not modelled, so an effectful target is out of scope. An unresolvable target or args
   that don't decode are an honest error, never a silent empty assert.
