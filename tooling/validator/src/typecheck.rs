@@ -257,6 +257,8 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
             let (a, b) = (inf.fresh(), inf.fresh());
             Ty::Fun(vec![a], Box::new(b)) // diverges: a -> b
         }
+        "read_file" => Ty::Fun(vec![con("string")], Box::new(con("string"))),
+        "write_file" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("unit"))),
         "lt" | "le" | "gt" | "ge" => Ty::Fun(vec![con("int"), con("int")], Box::new(con("bool"))),
         "and" | "or" | "xor" => Ty::Fun(vec![con("bool"), con("bool")], Box::new(con("bool"))),
         "not" => Ty::Fun(vec![con("bool")], Box::new(con("bool"))),

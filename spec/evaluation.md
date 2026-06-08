@@ -107,10 +107,19 @@ A function record *declares* its effects (`signature.effects`, the closed ten-ef
 `fs.read`/`fs.write`/`net.read`/`net.write`/`alloc`/`time`/`random`/`io.console`/`process.spawn`/
 `panic`). Effect **enforcement** makes that declaration a capability the runtime checks, not just
 metadata. The evaluator runs against a *granted* effect set; the effectful builtins — `print`
-(`io.console`), `rand` (`random`), `now` (`time`), `panic` (`panic`) — gate on it, and each performed
-effect is appended to a structured **trace** (principle 9: an AI-ingestible record of what the body
-did). Adding an effect kind is just an entry in `builtin_effect`; enforcement, tracing, and inference
-follow automatically.
+(`io.console`), `rand` (`random`), `now` (`time`), `panic` (`panic`), and the **real-I/O** pair
+`read_file` (`fs.read`) / `write_file` (`fs.write`) — gate on it, and each performed effect is
+appended to a structured **trace** (principle 9: an AI-ingestible record of what the body did). Adding
+an effect kind is just an entry in `builtin_effect`; enforcement, tracing, and inference follow
+automatically.
+
+**Record / replay (principle 5).** Every trace entry records its `result` (what the builtin
+returned), so a run is **replayable**: `nl-validator eval … --replay <trace>` makes the effectful
+builtins return their recorded results in order instead of performing real I/O — the same body
+reproduces deterministically, and the trace is sufficient to re-run it. So `read_file` reads a real
+file on a live run (and is gated by `fs.read`), but returns the recorded contents under `--replay`
+without touching the filesystem; `write_file` writes for real (gated by `fs.write`) but is a no-op on
+replay. Live: capture with `--trace-out <file>`, then re-run with `--replay <file>`.
 
 - `nl-validator run <record> --records <dir>` grants exactly the record's declared
   `signature.effects`. A body that performs an effect it didn't declare is rejected at eval time — so
@@ -139,7 +148,9 @@ a higher-order *argument's* effects belong to the caller (effect polymorphism), 
 the `print` body against a no-effects record → UNDER-DECLARED; a body applying `greet` by `fn_ref` →
 UNVERIFIABLE bare, SOUND with `--records` (its `io.console` folded in).
 
-**Scope (v0.1, honest).** Four effectful builtins exercise four of the ten effect kinds
-(`io.console`/`random`/`time`/`panic`) — enough to make enforcement, tracing, and scope-aware
-inference (with `fn_ref`-callee resolution) real and end-to-end; the rest are one `builtin_effect`
-entry each. The evaluator has no real fs/net, so those effects await real I/O primitives.
+**Scope (v0.1, honest).** Six effectful builtins exercise five of the ten effect kinds
+(`io.console`/`random`/`time`/`panic`/`fs.read`+`fs.write`), with `read_file`/`write_file` performing
+**real** filesystem I/O recorded for replay. The remaining kinds (`net.read`/`net.write`/`alloc`/
+`process.spawn`) follow the identical `effect_op` pattern — one `builtin_effect` entry plus a
+primitive — but network egress and process spawn are outward-facing surfaces deferred to an explicit
+per-deployment opt-in.

@@ -59,12 +59,20 @@ thread_local! {
 struct EffectState {
     granted: std::collections::HashSet<String>,
     trace: Vec<J>,
+    /// A recorded trace to replay: effectful builtins consume their recorded result in order instead
+    /// of performing real I/O, so a run reproduces deterministically (principle 5). `None` = live.
+    replay: Option<std::collections::VecDeque<J>>,
     rng: u64,
 }
 
 impl EffectState {
     fn new() -> Self {
-        EffectState { granted: std::collections::HashSet::new(), trace: Vec::new(), rng: 0x1234_5678_9abc_def0 }
+        EffectState {
+            granted: std::collections::HashSet::new(),
+            trace: Vec::new(),
+            replay: None,
+            rng: 0x1234_5678_9abc_def0,
+        }
     }
 }
 
@@ -79,27 +87,65 @@ pub fn set_effect_grants<I: IntoIterator<Item = String>>(granted: I) {
     });
 }
 
-/// Reset the effect sandbox (empty grant, empty trace).
+/// Install a recorded effect trace to REPLAY: effectful builtins return their recorded results in
+/// order without performing real I/O, so an effectful run reproduces deterministically (principle 5;
+/// the trace is sufficient to re-run — principle 9). `entries` is the trace from a prior live run.
+pub fn set_effect_replay(entries: Vec<J>) {
+    EFFECTS.with(|e| e.borrow_mut().replay = Some(entries.into_iter().collect()));
+}
+
+/// Reset the effect sandbox (empty grant, empty trace, live mode).
 pub fn clear_effects() {
     EFFECTS.with(|e| *e.borrow_mut() = EffectState::new());
 }
 
 /// Drain the structured effect trace collected during evaluation (principle 9: AI-ingestible trace).
+/// Each entry is `{effect, detail, result}` — `result` is what the builtin returned, enabling replay.
 pub fn take_effect_trace() -> Vec<J> {
     EFFECTS.with(|e| std::mem::take(&mut e.borrow_mut().trace))
 }
 
-/// Gate and record an effect. Errors if `effect` is not in the granted set — this is the enforcement:
-/// declared effects become a capability the runtime checks, not just metadata.
-fn perform_effect(effect: &str, detail: J) -> Result<()> {
-    EFFECTS.with(|e| {
+/// Run an effectful operation. In **replay** mode it returns the next recorded result for `effect`
+/// (no real I/O — deterministic re-execution); otherwise it gates on the granted set (enforcement),
+/// runs `live` (the real side effect), records `{effect, detail, result}`, and returns the result.
+/// The sandbox borrow is released before `live` runs, so `live` may itself touch the sandbox (e.g.
+/// the rand PRNG).
+fn effect_op(effect: &str, detail: J, live: impl FnOnce() -> Result<Val>) -> Result<Val> {
+    enum Mode {
+        Replay(J),
+        ReplayExhausted,
+        Live,
+    }
+    let mode = EFFECTS.with(|e| -> Result<Mode> {
         let mut e = e.borrow_mut();
+        if let Some(q) = e.replay.as_mut() {
+            return Ok(q.pop_front().map_or(Mode::ReplayExhausted, Mode::Replay));
+        }
         if !e.granted.contains(effect) {
             bail!("ungranted effect `{effect}`: the body performed it, but it is not in the granted capability set (declare it in signature.effects or pass --grant {effect})");
         }
-        e.trace.push(json!({ "effect": effect, "detail": detail }));
-        Ok(())
-    })
+        Ok(Mode::Live)
+    })?;
+    match mode {
+        Mode::Replay(entry) => {
+            let recorded = entry.get("effect").and_then(|x| x.as_str()).unwrap_or_default();
+            if recorded != effect {
+                bail!("replay mismatch: body performed `{effect}` but the trace recorded `{recorded}`");
+            }
+            match entry.get("result") {
+                Some(r) => decode_value(r),
+                None => Ok(Val::Unit),
+            }
+        }
+        Mode::ReplayExhausted => bail!("replay log exhausted while performing effect `{effect}`"),
+        Mode::Live => {
+            let result = live()?;
+            EFFECTS.with(|e| {
+                e.borrow_mut().trace.push(json!({ "effect": effect, "detail": detail, "result": encode_value(&result) }));
+            });
+            Ok(result)
+        }
+    }
 }
 
 /// Deterministic per-evaluation PRNG draw in `[0, bound)` for the `rand` effect.
@@ -278,6 +324,13 @@ fn as_f64n(v: &Val) -> Result<f64> {
     }
 }
 
+fn as_str(v: &Val) -> Result<String> {
+    match v {
+        Val::Str(s) => Ok(s.clone()),
+        _ => bail!("expected a string, got {}", encode_value(v)),
+    }
+}
+
 fn as_bool(v: &Val) -> Result<bool> {
     match v {
         Val::Bool(b) => Ok(*b),
@@ -296,10 +349,10 @@ fn as_list(v: &Val) -> Result<Vec<Val>> {
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
         "neg" | "abs" | "not" | "id" | "head" | "tail" | "length" | "null" | "reverse" | "fst"
-        | "snd" | "print" | "rand" | "now" | "panic" => 1,
+        | "snd" | "print" | "rand" | "now" | "panic" | "read_file" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
-        | "apply" => 2,
+        | "apply" | "write_file" => 2,
         "foldl" | "foldr" | "compose" => 3,
         _ => return None,
     })
@@ -312,6 +365,8 @@ pub fn builtin_effect(name: &str) -> Option<&'static str> {
         "rand" => Some("random"),
         "now" => Some("time"),
         "panic" => Some("panic"),
+        "read_file" => Some("fs.read"),
+        "write_file" => Some("fs.write"),
         _ => None,
     }
 }
@@ -594,27 +649,31 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             apply(a[0].clone(), vec![inner])?
         }
         "apply" => apply(a[0].clone(), vec![a[1].clone()])?,
-        // Effectful builtins — gated by the capability sandbox (see EFFECTS above).
-        "print" => {
-            // io.console: emit the argument to the trace, return unit.
-            perform_effect("io.console", encode_value(&a[0]))?;
-            Val::Unit
-        }
+        // Effectful builtins — gated by the capability sandbox, recorded, and replayable (EFFECTS).
+        "print" => effect_op("io.console", encode_value(&a[0]), || Ok(Val::Unit))?,
         "rand" => {
-            // random: a deterministic draw in [0, n) recorded as an effect.
             let n = as_int(&a[0])?;
-            perform_effect("random", json!({ "bound": n.to_string() }))?;
-            Val::Int(effect_rand(n)?)
+            effect_op("random", json!({ "bound": n.to_string() }), || Ok(Val::Int(effect_rand(n)?)))?
         }
-        "now" => {
-            // time: a fixed clock reading (deterministic/replayable, principle 5), recorded.
-            perform_effect("time", json!({}))?;
-            Val::Int(0)
-        }
+        "now" => effect_op("time", json!({}), || Ok(Val::Int(0)))?,
         "panic" => {
-            // panic: record the effect, then abort with the message.
-            perform_effect("panic", encode_value(&a[0]))?;
+            effect_op("panic", encode_value(&a[0]), || Ok(Val::Unit))?;
             bail!("panic: {}", encode_value(&a[0]));
+        }
+        "read_file" => {
+            // fs.read: read a real file's contents (live), or the recorded contents (replay).
+            let path = as_str(&a[0])?;
+            effect_op("fs.read", json!({ "path": path.as_str() }), move || {
+                std::fs::read_to_string(&path).map(Val::Str).map_err(|e| anyhow!("read_file {path}: {e}"))
+            })?
+        }
+        "write_file" => {
+            // fs.write: write a real file (live), or a no-op returning unit (replay).
+            let path = as_str(&a[0])?;
+            let contents = as_str(&a[1])?;
+            effect_op("fs.write", json!({ "path": path.as_str() }), move || {
+                std::fs::write(&path, &contents).map(|_| Val::Unit).map_err(|e| anyhow!("write_file {path}: {e}"))
+            })?
         }
         other => bail!("unknown builtin: {other}"),
     })
@@ -1040,5 +1099,41 @@ mod tests {
         set_effect_grants(vec!["panic".to_string()]);
         assert!(eval_body(&unary("panic"), &[nat(1)]).is_err()); // granted but aborts
         clear_effects();
+    }
+
+    #[test]
+    fn fs_read_write_are_gated_and_replayable() {
+        let path = std::env::temp_dir().join("nl-fs-roundtrip.txt");
+        let path_s = path.to_str().unwrap().to_string();
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+
+        let write_body = json!({ "kind": "lambda", "params": [{ "name": "p" }, { "name": "c" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "write_file" },
+                      "args": [{ "kind": "var", "name": "p" }, { "kind": "var", "name": "c" }] } });
+        let read_body = json!({ "kind": "lambda", "params": [{ "name": "p" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "read_file" }, "args": [{ "kind": "var", "name": "p" }] } });
+
+        // Real write (gated fs.write).
+        set_effect_grants(vec!["fs.write".to_string()]);
+        eval_body(&write_body, &[s(&path_s), s("hello fs")]).unwrap();
+        clear_effects();
+
+        // Ungranted read → rejected; granted read → real contents, with a recorded `result`.
+        set_effect_grants(Vec::<String>::new());
+        assert!(eval_body(&read_body, &[s(&path_s)]).is_err());
+        clear_effects();
+        set_effect_grants(vec!["fs.read".to_string()]);
+        assert_eq!(eval_body(&read_body, &[s(&path_s)]).unwrap(), s("hello fs"));
+        let trace = take_effect_trace();
+        clear_effects();
+        assert_eq!(trace[0]["effect"], "fs.read");
+        assert_eq!(trace[0]["result"], s("hello fs"));
+
+        // REPLAY: reading a nonexistent path reproduces the recorded contents — no real I/O.
+        set_effect_replay(trace);
+        assert_eq!(eval_body(&read_body, &[s("/no/such/path")]).unwrap(), s("hello fs"));
+        clear_effects();
+
+        let _ = std::fs::remove_file(&path);
     }
 }

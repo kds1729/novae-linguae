@@ -162,11 +162,19 @@ enum Commands {
         /// Argument value (a value-expression JSON file). Repeatable, positional order.
         #[arg(long = "arg")]
         args: Vec<PathBuf>,
-        /// Grant an effect the body may perform (e.g. `io.console`, `random`). Repeatable. An
-        /// effectful builtin (`print`/`rand`) whose effect is not granted is rejected at eval time;
+        /// Grant an effect the body may perform (e.g. `io.console`, `random`, `fs.read`, `fs.write`).
+        /// Repeatable. An effectful builtin whose effect is not granted is rejected at eval time;
         /// pure bodies need no grants. The performed effects are printed as a trace.
         #[arg(long = "grant")]
         grants: Vec<String>,
+        /// Replay a recorded effect trace (a JSON array from --trace-out): effectful builtins return
+        /// their recorded results instead of performing real I/O — deterministic re-execution (P5).
+        #[arg(long)]
+        replay: Option<PathBuf>,
+        /// Write the effect trace (a JSON array of {effect, detail, result}) here instead of to
+        /// stderr — feed it back to a later `--replay`.
+        #[arg(long = "trace-out")]
+        trace_out: Option<PathBuf>,
     },
     /// Run a function record's worked `examples[]` through its `body`: bind each
     /// example's args, evaluate the body, and check the result equals the claimed
@@ -362,7 +370,9 @@ fn main() -> ExitCode {
         Commands::CheckProperties { record, body, generate, cases } => {
             (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases)), true)
         }
-        Commands::Eval { body, args, grants } => (cmd_eval(&body, &args, &grants), false),
+        Commands::Eval { body, args, grants, replay, trace_out } => {
+            (cmd_eval(&body, &args, &grants, replay.as_ref(), trace_out.as_ref()), false)
+        }
         Commands::Run { record, body, records } => (cmd_run(&record, body.as_ref(), records.as_ref()), false),
         Commands::CheckEffects { record, body, records } => {
             (cmd_check_effects(&record, &body, records.as_ref()), false)
@@ -612,17 +622,34 @@ fn cmd_orchestrate(
     }
 }
 
-fn cmd_eval(body: &PathBuf, args: &[PathBuf], grants: &[String]) -> Result<()> {
+fn cmd_eval(
+    body: &PathBuf,
+    args: &[PathBuf],
+    grants: &[String],
+    replay: Option<&PathBuf>,
+    trace_out: Option<&PathBuf>,
+) -> Result<()> {
     let body = nl_validator::read_json(body)?;
     let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
     // Effect sandbox: the body may only perform effects in the granted set.
     nl_validator::set_effect_grants(grants.iter().cloned());
+    if let Some(rp) = replay {
+        let entries = nl_validator::read_json(rp)?;
+        let arr = entries
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("replay file must be a JSON array of trace entries"))?;
+        nl_validator::set_effect_replay(arr.clone());
+    }
     let result = nl_validator::eval_body(&body, &argv);
     let trace = nl_validator::take_effect_trace();
     nl_validator::clear_effects();
     let result = result?;
     println!("{}", serde_json::to_string_pretty(&result)?);
-    if !trace.is_empty() {
+    if let Some(out) = trace_out {
+        let pretty = serde_json::to_string_pretty(&serde_json::Value::Array(trace))
+            .map_err(|e| anyhow::anyhow!("serializing trace: {e}"))?;
+        std::fs::write(out, format!("{pretty}\n")).map_err(|e| anyhow::anyhow!("writing {}: {e}", out.display()))?;
+    } else if !trace.is_empty() {
         eprintln!("effect trace ({} event{}):", trace.len(), if trace.len() == 1 { "" } else { "s" });
         for ev in &trace {
             eprintln!("  {}", serde_json::to_string(ev)?);
