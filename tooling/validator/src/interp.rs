@@ -342,35 +342,132 @@ fn as_str_list(v: &Val) -> Result<Vec<String>> {
 /// Returns the response body (after the header block). Backs `http_get` (net.read) / `http_post`
 /// (net.write); the gating + record/replay live in `effect_op`.
 fn http_request(method: &str, url: &str, body: Option<&str>) -> Result<String> {
-    use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::Duration;
 
-    let rest = url
-        .strip_prefix("http://")
-        .ok_or_else(|| anyhow!("only http:// URLs are supported (no TLS in this build): {url}"))?;
+    // Scheme: https:// goes over TLS (rustls + ring + Mozilla webpki roots); http:// is plaintext.
+    let (tls, rest, default_port) = if let Some(r) = url.strip_prefix("https://") {
+        (true, r, 443u16)
+    } else if let Some(r) = url.strip_prefix("http://") {
+        (false, r, 80u16)
+    } else {
+        bail!("only http:// and https:// URLs are supported: {url}");
+    };
     let (authority, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
     };
     let (host, port) = match authority.rsplit_once(':') {
         Some((h, p)) => (h, p.parse::<u16>().map_err(|_| anyhow!("bad port in {url}"))?),
-        None => (authority, 80),
+        None => (authority, default_port),
     };
 
-    let mut stream = TcpStream::connect((host, port)).map_err(|e| anyhow!("connect {host}:{port}: {e}"))?;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
+    let tcp = TcpStream::connect((host, port)).map_err(|e| anyhow!("connect {host}:{port}: {e}"))?;
+    let _ = tcp.set_read_timeout(Some(Duration::from_secs(15)));
+    let _ = tcp.set_write_timeout(Some(Duration::from_secs(15)));
     let payload = body.unwrap_or("");
     let req = format!(
         "{method} {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: nl-validator\r\nAccept: */*\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{payload}",
         payload.len()
     );
-    stream.write_all(req.as_bytes()).map_err(|e| anyhow!("writing request: {e}"))?;
+
+    let raw = if tls {
+        tls_roundtrip(host, tcp, req.as_bytes())?
+    } else {
+        plain_roundtrip(tcp, req.as_bytes())?
+    };
+    decode_http_response(&raw)
+}
+
+/// Read a stream to EOF, tolerating an unclean close (a server that drops the connection without a
+/// graceful shutdown is the norm with `Connection: close`, and TLS surfaces it as `UnexpectedEof`).
+fn read_to_close<R: std::io::Read>(mut r: R) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
-    stream.read_to_end(&mut buf).map_err(|e| anyhow!("reading response: {e}"))?;
-    let text = String::from_utf8_lossy(&buf);
-    Ok(text.split_once("\r\n\r\n").map(|(_, b)| b.to_string()).unwrap_or_else(|| text.into_owned()))
+    match r.read_to_end(&mut buf) {
+        Ok(_) => Ok(buf),
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(buf),
+        Err(e) => Err(anyhow!("reading response: {e}")),
+    }
+}
+
+fn plain_roundtrip(mut stream: std::net::TcpStream, req: &[u8]) -> Result<Vec<u8>> {
+    use std::io::Write;
+    stream.write_all(req).map_err(|e| anyhow!("writing request: {e}"))?;
+    read_to_close(stream)
+}
+
+fn tls_roundtrip(host: &str, tcp: std::net::TcpStream, req: &[u8]) -> Result<Vec<u8>> {
+    use std::io::Write;
+    use std::sync::Arc;
+    let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_safe_default_protocol_versions()
+        .map_err(|e| anyhow!("tls config: {e}"))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
+        .map_err(|e| anyhow!("invalid TLS server name {host}: {e}"))?;
+    let conn = rustls::ClientConnection::new(Arc::new(config), server_name)
+        .map_err(|e| anyhow!("tls setup: {e}"))?;
+    let mut stream = rustls::StreamOwned::new(conn, tcp);
+    stream.write_all(req).map_err(|e| anyhow!("writing request: {e}"))?;
+    read_to_close(stream)
+}
+
+/// Split an HTTP/1.1 response into its body, de-chunking a `Transfer-Encoding: chunked` payload so the
+/// caller never sees chunk-size markers. Returns the body as a (lossy) UTF-8 string.
+fn decode_http_response(raw: &[u8]) -> Result<String> {
+    let idx = raw.windows(4).position(|w| w == b"\r\n\r\n");
+    let (headers, mut body): (&[u8], &[u8]) = match idx {
+        Some(i) => (&raw[..i], &raw[i + 4..]),
+        None => return Ok(String::from_utf8_lossy(raw).into_owned()),
+    };
+    let chunked = String::from_utf8_lossy(headers).lines().any(|l| {
+        let l = l.to_ascii_lowercase();
+        l.starts_with("transfer-encoding:") && l.contains("chunked")
+    });
+    if chunked {
+        let decoded = dechunk(body)?;
+        return Ok(String::from_utf8_lossy(&decoded).into_owned());
+    }
+    // A defensive nicety: some servers still emit a stray trailing CRLF.
+    if body.ends_with(b"\r\n") {
+        body = &body[..body.len() - 2];
+    }
+    Ok(String::from_utf8_lossy(body).into_owned())
+}
+
+/// Decode an HTTP/1.1 chunked transfer body: a sequence of `<hex-size>[;ext]CRLF<data>CRLF`, ending at a
+/// zero-size chunk. Trailers after the final chunk are ignored.
+fn dechunk(body: &[u8]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < body.len() {
+        let nl = body[i..]
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or_else(|| anyhow!("malformed chunked body: missing chunk-size CRLF"))?;
+        let line = &body[i..i + nl];
+        let hex_end = line.iter().position(|&b| b == b';').unwrap_or(line.len());
+        let hex = std::str::from_utf8(&line[..hex_end]).map_err(|_| anyhow!("non-UTF-8 chunk size"))?.trim();
+        let size = usize::from_str_radix(hex, 16).map_err(|_| anyhow!("bad chunk size: {hex:?}"))?;
+        i += nl + 2;
+        if size == 0 {
+            break; // last chunk; ignore any trailers
+        }
+        if i + size > body.len() {
+            bail!("chunked body truncated: declared {size} bytes, {} remain", body.len() - i);
+        }
+        out.extend_from_slice(&body[i..i + size]);
+        i += size;
+        // each chunk's data is terminated by CRLF
+        if body.get(i..i + 2) == Some(b"\r\n".as_slice()) {
+            i += 2;
+        } else {
+            break;
+        }
+    }
+    Ok(out)
 }
 
 fn as_bool(v: &Val) -> Result<bool> {
@@ -1215,6 +1312,26 @@ mod tests {
     }
 
     #[test]
+    fn http_response_decoding_dechunks() {
+        // A plain (non-chunked) response: body returned verbatim past the header separator.
+        let plain = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello";
+        assert_eq!(super::decode_http_response(plain).unwrap(), "hello");
+
+        // A chunked response: "Wiki" + "pedia" + " in chunks." across three chunks, then a 0-chunk.
+        let chunked = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n\
+                        4\r\nWiki\r\n5\r\npedia\r\nE\r\n in\r\n\r\nchunks.\r\n0\r\n\r\n";
+        assert_eq!(super::decode_http_response(chunked).unwrap(), "Wikipedia in\r\n\r\nchunks.");
+
+        // Chunk-size extensions (after ';') are ignored; the size still governs.
+        let ext = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3;foo=bar\r\nabc\r\n0\r\n\r\n";
+        assert_eq!(super::decode_http_response(ext).unwrap(), "abc");
+
+        // Header match is case-insensitive (HTTP header names/values are not case-sensitive here).
+        let mixed = b"HTTP/1.1 200 OK\r\ntransfer-encoding: Chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n";
+        assert_eq!(super::decode_http_response(mixed).unwrap(), "hi");
+    }
+
+    #[test]
     fn fs_read_write_are_gated_and_replayable() {
         let path = std::env::temp_dir().join("nl-fs-roundtrip.txt");
         let path_s = path.to_str().unwrap().to_string();
@@ -1272,11 +1389,12 @@ mod tests {
         assert_eq!(eval_body(&spawn_body, &[s("/no/such/cmd"), args]).unwrap(), s("hi\n"));
         clear_effects();
 
-        // net.read: https is rejected (no TLS); replay returns the recorded body without any network.
+        // net.read: an unsupported scheme is rejected (http:// and https:// are the only ones);
+        // replay returns the recorded body without any network (so http:// and https:// alike replay).
         let get_body = json!({ "kind": "lambda", "params": [{ "name": "u" }],
             "body": { "kind": "app", "fn": { "kind": "var", "name": "http_get" }, "args": [{ "kind": "var", "name": "u" }] } });
         set_effect_grants(vec!["net.read".to_string()]);
-        assert!(eval_body(&get_body, &[s("https://example.com")]).is_err());
+        assert!(eval_body(&get_body, &[s("ftp://example.com")]).is_err());
         clear_effects();
         set_effect_replay(vec![json!({ "effect": "net.read", "detail": { "url": "http://x" }, "result": s("BODY") })]);
         assert_eq!(eval_body(&get_body, &[s("http://anything")]).unwrap(), s("BODY"));
