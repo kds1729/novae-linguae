@@ -296,6 +296,20 @@ fn builtin_arity(name: &str) -> Option<usize> {
     })
 }
 
+/// The effect an effectful builtin performs, or `None` if pure. Mirrors the gating in `run_builtin`.
+pub fn builtin_effect(name: &str) -> Option<&'static str> {
+    match name {
+        "print" => Some("io.console"),
+        "rand" => Some("random"),
+        _ => None,
+    }
+}
+
+/// Whether `name` is a known builtin (incl. `nil`) — i.e. its meaning and effects are known statically.
+pub fn is_builtin(name: &str) -> bool {
+    name == "nil" || builtin_arity(name).is_some()
+}
+
 /// Resolve a `var` name: lexical environment first, then the builtin library, then the `nil` constant.
 fn resolve_var(name: &str, env: &Env) -> Result<Val> {
     if let Some(v) = env.get(name) {

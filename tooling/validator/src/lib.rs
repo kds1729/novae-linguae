@@ -27,6 +27,9 @@ pub use eval::{check_properties, evaluate_property, Verdict};
 
 pub mod proptest;
 
+pub mod effects;
+pub use effects::{check_effects, infer_effects};
+
 pub mod interp;
 pub use interp::{
     clear_effects, clear_resolver, eval_body, run_examples, runtime_verdict, self_fn_from_body,

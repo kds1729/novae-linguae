@@ -187,6 +187,17 @@ enum Commands {
         #[arg(long)]
         records: Option<PathBuf>,
     },
+    /// Statically infer a function record's effects from its `body` and check them against the
+    /// declared `signature.effects` — the verification counterpart to runtime enforcement (no
+    /// execution). Prints SOUND / UNVERIFIABLE (an opaque higher-order/`fn_ref` call could do more) /
+    /// UNDER-DECLARED (exit 1 — the body performs an effect the record doesn't declare).
+    CheckEffects {
+        /// Path to the function record (provides signature.effects).
+        record: PathBuf,
+        /// Path to the body-expression JSON AST.
+        #[arg(long)]
+        body: PathBuf,
+    },
     /// Type-check a function record's body against its declared `signature.type`
     /// (Hindley-Milner inference; spec/type-expression.schema.json). The second
     /// pillar of "verified by default": confirms the body actually has its
@@ -324,6 +335,7 @@ fn main() -> ExitCode {
         }
         Commands::Eval { body, args, grants } => (cmd_eval(&body, &args, &grants), false),
         Commands::Run { record, body, records } => (cmd_run(&record, body.as_ref(), records.as_ref()), false),
+        Commands::CheckEffects { record, body } => (cmd_check_effects(&record, &body), false),
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
         Commands::Respond { request, records, seed, timestamp } => {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
@@ -482,6 +494,12 @@ fn cmd_check_properties(
     let value = nl_validator::read_json(record)?;
     let body = body.map(|p| nl_validator::read_json(p)).transpose()?;
     nl_validator::check_properties(&value, body.as_ref(), generate)
+}
+
+fn cmd_check_effects(record: &PathBuf, body: &PathBuf) -> Result<()> {
+    let record = nl_validator::read_json(record)?;
+    let body = nl_validator::read_json(body)?;
+    nl_validator::check_effects(&record, &body)
 }
 
 fn cmd_typecheck(record: &PathBuf, body: &PathBuf) -> Result<()> {

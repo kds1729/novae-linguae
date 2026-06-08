@@ -118,7 +118,17 @@ Worked example: [`greet.v0.2.json`](examples/greet.v0.2.json) (`\msg -> print(ms
 `string -> unit`, declaring `effects: ["io.console"]`) runs clean under `run`; the same body under
 `eval` is **rejected** without `--grant io.console` and emits a one-event trace with it.
 
+**Static inference.** `nl-validator check-effects <record> --body <body>` is the verification
+counterpart: it infers a body's effects *without running it* by walking the AST for the effectful
+builtins it names, and reports **SOUND** (inferred ⊆ declared), **UNDER-DECLARED** (the body performs
+an effect the record omits — exit 1, caught before execution), or **UNVERIFIABLE** (the body directly
+applies an opaque callee — a parameter / `fn_ref` in function position — whose effects can't be seen
+statically, so the inferred set is only a lower bound). A function's *own* effects are what it
+performs directly; a higher-order argument's effects belong to the caller (effect polymorphism), so
+`map`'s declared `[]` is SOUND even though `map(f, xs)` runs `f`. Worked: `greet` → SOUND
+`[io.console]`; `double` → SOUND `[]`; `double`'s record against the `print` body → UNDER-DECLARED.
+
 **Scope (v0.1, honest).** Two effectful builtins stand in for the ten-effect vocabulary — enough to
-make enforcement and tracing real and end-to-end. Effects are gated at the point an effectful builtin
-runs; *static* effect inference (proving a body's effects ⊆ its declaration without running it) and
-the remaining effect kinds are the next rung.
+make enforcement, tracing, and inference real and end-to-end. The remaining effect kinds, and
+resolving `fn_ref` callees to their declared effects (so a composed body is verifiable, not
+UNVERIFIABLE), are the next rung.
