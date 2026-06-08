@@ -280,7 +280,15 @@ pub fn evaluate_property(expr: &Value, examples: &[Value]) -> Verdict {
 /// apply), and `forall`/`exists` quantifiers (ranged over the examples) all become decidable, so laws
 /// that are UNVERIFIABLE statically are actually checked. Without a body, the static example evaluator
 /// is used (its honest UNVERIFIABLE boundary).
-pub fn check_properties(record: &Value, body: Option<&Value>) -> Result<()> {
+///
+/// When `generate` is `Some(n)`, each property additionally gets a **generative** pass
+/// (crate::proptest): `n` inputs are sampled for the quantified variables, the body is run, and the
+/// property HOLDs (no counterexample in n decidable cases), is REFUTED (with a shrunk counterexample —
+/// stronger than example-CONTRADICTED), or is UNGENERATABLE (quantifies over a function, etc.). A
+/// REFUTED property fails the check.
+pub fn check_properties(record: &Value, body: Option<&Value>, generate: Option<usize>) -> Result<()> {
+    use crate::proptest::{generative_check, GenOutcome};
+
     let props = record
         .get("properties")
         .and_then(|v| v.as_array())
@@ -297,7 +305,8 @@ pub fn check_properties(record: &Value, body: Option<&Value>) -> Result<()> {
     }
     let self_fn = body.and_then(crate::interp::self_fn_from_body);
     let mut contradicted = Vec::new();
-    for prop in &props {
+    let mut refuted = Vec::new();
+    for (i, prop) in props.iter().enumerate() {
         let name = prop.get("name").and_then(|v| v.as_str()).unwrap_or("<unnamed>");
         let expr = prop
             .get("expr")
@@ -312,18 +321,39 @@ pub fn check_properties(record: &Value, body: Option<&Value>) -> Result<()> {
             Verdict::Unverifiable => "UNVERIFIABLE",
             Verdict::Consistent => "CONSISTENT",
         };
-        println!("{name}: {label}");
+        if let Some(cases) = generate {
+            // Deterministic, per-property seed (principle 5): same record → same verdict.
+            let outcome = generative_check(expr, &self_fn, cases, 0x5eed_0000 + i as u64);
+            let gen_label = match &outcome {
+                GenOutcome::Held(n) => format!("HELD ({n} cases)"),
+                GenOutcome::Refuted(binding) => {
+                    let cx = binding.iter().map(|(k, v)| format!("{k} = {v}")).collect::<Vec<_>>().join(", ");
+                    format!("REFUTED  counterexample: {cx}")
+                }
+                GenOutcome::Ungeneratable(why) => format!("UNGENERATABLE ({why})"),
+            };
+            println!("{name}: {label}  |  generative: {gen_label}");
+            if matches!(outcome, GenOutcome::Refuted(_)) {
+                refuted.push(name.to_string());
+            }
+        } else {
+            println!("{name}: {label}");
+        }
         if verdict == Verdict::Contradicted {
             contradicted.push(name.to_string());
         }
     }
-    if contradicted.is_empty() {
+    if contradicted.is_empty() && refuted.is_empty() {
         Ok(())
     } else {
-        Err(anyhow!(
-            "properties contradicted by worked examples: {}",
-            contradicted.join(", ")
-        ))
+        let mut parts = Vec::new();
+        if !contradicted.is_empty() {
+            parts.push(format!("contradicted by worked examples: {}", contradicted.join(", ")));
+        }
+        if !refuted.is_empty() {
+            parts.push(format!("refuted by generated counterexample: {}", refuted.join(", ")));
+        }
+        Err(anyhow!("properties {}", parts.join("; ")))
     }
 }
 

@@ -568,7 +568,9 @@ fn eval_predicate(node: &J, env: &Env, self_fn: &Option<Val>) -> Option<Val> {
             if name == "self" {
                 self_fn.clone()
             } else {
-                env.get(name).cloned()
+                // Bound var first; otherwise a bare builtin/`nil` used as an argument (e.g. `id` in
+                // `map(id, xs)`), so functor laws over known builtins become decidable.
+                env.get(name).cloned().or_else(|| resolve_var(name, &Env::new()).ok())
             }
         }
         "lit" => {
@@ -665,6 +667,19 @@ pub fn self_fn_from_body(body: &J) -> Option<Val> {
 /// re-runs the claim instead of trusting the asserter (principle 3 — verification is re-execution).
 pub fn eval_claim(expr: &J) -> Option<Val> {
     eval_predicate(expr, &Env::new(), &None)
+}
+
+/// Evaluate a predicate-expression node under explicit variable bindings, for the generative
+/// property-testing engine (`proptest.rs`): `bindings` supplies the quantified variables' sampled
+/// values and `self_fn` the function-under-test (`self`). `None` if undecidable on these inputs
+/// (e.g. the input is outside the function's domain) — the caller treats that as a skipped case, not
+/// a counterexample.
+pub fn eval_predicate_env(
+    node: &J,
+    bindings: &BTreeMap<String, Val>,
+    self_fn: &Option<Val>,
+) -> Option<Val> {
+    eval_predicate(node, bindings, self_fn)
 }
 
 #[cfg(test)]

@@ -163,6 +163,8 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 ./tooling/validator/target/release/nl-validator run        spec/examples/double.v0.2.json --records spec/examples/
 ./tooling/validator/target/release/nl-validator typecheck  spec/examples/double.v0.2.json --body spec/examples/body-double.json
 ./tooling/validator/target/release/nl-validator check-properties spec/examples/double.v0.2.json --body spec/examples/body-double.json
+# Generative property testing: search for a counterexample (HELD / REFUTED+shrunk / UNGENERATABLE).
+./tooling/validator/target/release/nl-validator check-properties spec/examples/double.v0.2.json --body spec/examples/body-double.json --generate --cases 300
 
 # The Nova Locutio agent loop (spec/agent-loop.md): answer a request by running the
 # target, then re-run the resulting assert's claim to confirm it.

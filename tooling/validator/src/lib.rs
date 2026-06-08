@@ -25,6 +25,8 @@ pub mod surface;
 mod eval;
 pub use eval::{check_properties, evaluate_property, Verdict};
 
+pub mod proptest;
+
 pub mod interp;
 pub use interp::{
     clear_resolver, eval_body, run_examples, runtime_verdict, self_fn_from_body, set_resolver,

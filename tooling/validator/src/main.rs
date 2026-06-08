@@ -141,6 +141,15 @@ enum Commands {
         /// examples) instead of the static example evaluator.
         #[arg(long)]
         body: Option<PathBuf>,
+        /// Additionally run a GENERATIVE pass: sample inputs for each property's quantified
+        /// variables, run the body, and report HELD / REFUTED (with a shrunk counterexample) /
+        /// UNGENERATABLE. A refuted property fails (exit 1). Deterministic (principle 5); most
+        /// useful with --body.
+        #[arg(long)]
+        generate: bool,
+        /// Cases to sample per property when --generate is set.
+        #[arg(long, default_value_t = 100)]
+        cases: usize,
     },
     /// Evaluate a Nova Lingua body-expression AST and apply it to zero or more
     /// argument values, printing the resulting value AST. This *executes* the
@@ -304,7 +313,9 @@ fn main() -> ExitCode {
         Commands::CheckPredicate { record } => (cmd_check_predicate(&record), true),
         Commands::CheckValue { record } => (cmd_check_value(&record), true),
         Commands::CheckBody { record } => (cmd_check_body(&record), true),
-        Commands::CheckProperties { record, body } => (cmd_check_properties(&record, body.as_ref()), true),
+        Commands::CheckProperties { record, body, generate, cases } => {
+            (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases)), true)
+        }
         Commands::Eval { body, args } => (cmd_eval(&body, &args), false),
         Commands::Run { record, body, records } => (cmd_run(&record, body.as_ref(), records.as_ref()), false),
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
@@ -457,10 +468,14 @@ fn cmd_check_body(record: &PathBuf) -> Result<()> {
     nl_validator::check_body_well_formed(&value)
 }
 
-fn cmd_check_properties(record: &PathBuf, body: Option<&PathBuf>) -> Result<()> {
+fn cmd_check_properties(
+    record: &PathBuf,
+    body: Option<&PathBuf>,
+    generate: Option<usize>,
+) -> Result<()> {
     let value = nl_validator::read_json(record)?;
     let body = body.map(|p| nl_validator::read_json(p)).transpose()?;
-    nl_validator::check_properties(&value, body.as_ref())
+    nl_validator::check_properties(&value, body.as_ref(), generate)
 }
 
 fn cmd_typecheck(record: &PathBuf, body: &PathBuf) -> Result<()> {

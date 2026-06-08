@@ -67,4 +67,30 @@ honest about its limits (UNVERIFIABLE for anything needing to re-apply a functio
 `--body`, those become decidable by **running**: the function-under-test `self` is the executable
 body, `map`/`filter`/`fold`/`compose`/`apply` are the builtins, and a `forall` ranges over the worked
 examples' arguments. A **CONSISTENT** verdict then means "ran true on every example and false on none"
-— still example-bound, not a proof (a generative property-testing engine is the next rung).
+— still example-bound, not a proof.
+
+## Generative property testing
+
+`check-properties --generate [--cases N]` is the rung above example-bound CONSISTENT: instead of
+ranging a `forall` over the worked examples, it **searches** for a counterexample. For each quantified
+variable it infers a value generator from how the variable is used in the predicate (a list argument
+of `length`/`map`/`reverse`/… → a list; an arithmetic/comparison operand → an integer; a boolean
+connective operand → a bool), samples `N` inputs (default 100), runs the body, and reports per
+property:
+
+- **HELD (n cases)** — no counterexample found in `n` decidable cases;
+- **REFUTED** — with a **shrunk**, minimal counterexample (e.g. `n = 0`); fails the check (exit 1),
+  a strictly stronger signal than example-CONTRADICTED;
+- **UNGENERATABLE** — the property quantifies over a *function* (the higher-order argument of
+  `map`/`filter`/`fold`/`compose`/`apply`, which we do not synthesize), so it is honestly skipped
+  rather than silently passed.
+
+The sampler is a fixed-seeded xorshift PRNG — no clock, no OS randomness — so a run is deterministic
+(principle 5): the same record and `N` give the same verdict and the same counterexample, and a
+REFUTED is replayable. Generation ranges over the inferred *type*, ignoring refinements and
+preconditions; an input the body rejects at runtime is a **skipped** case, never a counterexample, so
+a partial function's domain gaps don't manufacture false refutations. A CONSISTENT/UNVERIFIABLE law
+that quantifies only over first-order data (e.g. `map`'s `forall xs. eq(map(id, xs), xs)`, which the
+example path cannot reach because the worked examples bind `xs` to the wrong shape) becomes a real
+HELD over hundreds of generated inputs. This is still sampling, not a proof — but it is a search, and
+it finds counterexamples the examples never would.
