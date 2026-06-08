@@ -197,6 +197,10 @@ enum Commands {
         /// Path to the body-expression JSON AST.
         #[arg(long)]
         body: PathBuf,
+        /// Directory of records to resolve `fn_ref` callees against, folding in their declared
+        /// effects (so a composed body verifies as SOUND rather than reading UNVERIFIABLE).
+        #[arg(long)]
+        records: Option<PathBuf>,
     },
     /// Type-check a function record's body against its declared `signature.type`
     /// (Hindley-Milner inference; spec/type-expression.schema.json). The second
@@ -335,7 +339,9 @@ fn main() -> ExitCode {
         }
         Commands::Eval { body, args, grants } => (cmd_eval(&body, &args, &grants), false),
         Commands::Run { record, body, records } => (cmd_run(&record, body.as_ref(), records.as_ref()), false),
-        Commands::CheckEffects { record, body } => (cmd_check_effects(&record, &body), false),
+        Commands::CheckEffects { record, body, records } => {
+            (cmd_check_effects(&record, &body, records.as_ref()), false)
+        }
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
         Commands::Respond { request, records, seed, timestamp } => {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
@@ -496,10 +502,14 @@ fn cmd_check_properties(
     nl_validator::check_properties(&value, body.as_ref(), generate)
 }
 
-fn cmd_check_effects(record: &PathBuf, body: &PathBuf) -> Result<()> {
+fn cmd_check_effects(record: &PathBuf, body: &PathBuf, records: Option<&PathBuf>) -> Result<()> {
     let record = nl_validator::read_json(record)?;
     let body = nl_validator::read_json(body)?;
-    nl_validator::check_effects(&record, &body)
+    let map = match records {
+        Some(dir) => nl_validator::build_record_map(dir)?,
+        None => std::collections::HashMap::new(),
+    };
+    nl_validator::check_effects(&record, &body, &map)
 }
 
 fn cmd_typecheck(record: &PathBuf, body: &PathBuf) -> Result<()> {
