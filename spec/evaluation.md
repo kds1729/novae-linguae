@@ -79,7 +79,11 @@ of `length`/`map`/`reverse`/… → a list; an arithmetic/comparison operand →
 connective operand → a bool), samples `N` inputs (default 100), runs the body, and reports per
 property:
 
-- **HELD (n cases)** — no counterexample found in `n` decidable cases;
+- **EXHAUSTIVE (n cases)** — when the inferred domain is finite and small (booleans, a bounded int
+  range, short lists), *every* case is enumerated rather than sampled: a proof over that domain
+  (total for an all-boolean property; exhaustive over the bounded range for ints/lists);
+- **HELD (n cases)** — the domain was too large to enumerate, so `n` inputs were sampled with no
+  counterexample;
 - **REFUTED** — with a **shrunk**, minimal counterexample (e.g. `n = 0`); fails the check (exit 1),
   a strictly stronger signal than example-CONTRADICTED;
 - **UNGENERATABLE** — the property quantifies over a *function* (the higher-order argument of
@@ -93,8 +97,9 @@ preconditions; an input the body rejects at runtime is a **skipped** case, never
 a partial function's domain gaps don't manufacture false refutations. A CONSISTENT/UNVERIFIABLE law
 that quantifies only over first-order data (e.g. `map`'s `forall xs. eq(map(id, xs), xs)`, which the
 example path cannot reach because the worked examples bind `xs` to the wrong shape) becomes a real
-HELD over hundreds of generated inputs. This is still sampling, not a proof — but it is a search, and
-it finds counterexamples the examples never would.
+HELD over hundreds of generated inputs (or EXHAUSTIVE when its domain is small). For a large domain
+it remains a sampled search rather than a proof — but it finds counterexamples the examples never
+would, and over a small domain it *is* a proof.
 
 ## Effect enforcement
 

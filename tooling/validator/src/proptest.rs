@@ -32,7 +32,12 @@ enum GenKind {
 
 /// The outcome of a generative check of one property.
 pub enum GenOutcome {
-    /// No counterexample found in this many decidable cases.
+    /// Every case in the (finite, bounded) domain was checked — a proof over that domain. Stronger
+    /// than `Held`: for an all-boolean property it is total; for bounded int/list domains it is
+    /// exhaustive over the enumerated range.
+    Exhaustive(usize),
+    /// No counterexample found in this many *sampled* decidable cases (the domain was too large to
+    /// enumerate exhaustively).
     Held(usize),
     /// A counterexample: the variable bindings (as value-expression ASTs) that falsify the property.
     Refuted(Vec<(String, J)>),
@@ -222,9 +227,76 @@ fn shrink(
     binding
 }
 
+// Bounded-exhaustive enumeration: when the whole domain is finite and small, check *every* case
+// instead of sampling. `bool` is total; `int`/`list` use a bounded range so the verdict is exhaustive
+// over that range (not a universal proof — see GenOutcome::Exhaustive).
+const EXHAUSTIVE_BUDGET: usize = 4096;
+const INT_LO: i128 = -4;
+const INT_HI: i128 = 4;
+const LIST_MAX_LEN: usize = 3;
+
+/// The finite value list of a kind for exhaustive enumeration.
+fn domain_of(kind: &GenKind) -> Vec<Val> {
+    match kind {
+        GenKind::Bool => vec![Val::Bool(false), Val::Bool(true)],
+        GenKind::Int => (INT_LO..=INT_HI).map(Val::Int).collect(),
+        GenKind::List(elem) => {
+            let ev = domain_of(elem);
+            let mut out = vec![Val::List(vec![])];
+            let mut current = vec![Vec::<Val>::new()]; // lists of the current length
+            for _ in 0..LIST_MAX_LEN {
+                let mut next = Vec::new();
+                for prefix in &current {
+                    for v in &ev {
+                        let mut l = prefix.clone();
+                        l.push(v.clone());
+                        next.push(l);
+                    }
+                }
+                out.extend(next.iter().map(|l| Val::List(l.clone())));
+                current = next;
+            }
+            out
+        }
+    }
+}
+
+/// Every binding in the cross-product of the variables' finite domains, or `None` if that product
+/// exceeds `budget` (then the caller samples instead).
+fn enumerate_domain(names: &[String], kinds: &BTreeMap<String, GenKind>, budget: usize) -> Option<Vec<BTreeMap<String, Val>>> {
+    let per_var: Vec<Vec<Val>> = names.iter().map(|n| domain_of(&kinds[n])).collect();
+    let mut total: usize = 1;
+    for d in &per_var {
+        total = total.checked_mul(d.len())?;
+        if total > budget {
+            return None;
+        }
+    }
+    if total == 0 {
+        return None;
+    }
+    let mut acc: Vec<BTreeMap<String, Val>> = vec![BTreeMap::new()];
+    for (name, dom) in names.iter().zip(&per_var) {
+        let mut next = Vec::with_capacity(acc.len() * dom.len());
+        for binding in &acc {
+            for v in dom {
+                let mut b = binding.clone();
+                b.insert(name.clone(), v.clone());
+                next.push(b);
+            }
+        }
+        acc = next;
+    }
+    Some(acc)
+}
+
+fn report_binding(names: &[String], binding: &BTreeMap<String, Val>) -> Vec<(String, J)> {
+    names.iter().map(|n| (n.clone(), encode_value(&binding[n]))).collect()
+}
+
 /// Generatively check one property's predicate. `expr` is the property AST; `self_fn` is the
-/// executable function-under-test (bound to `self`); `cases` is how many inputs to sample; `seed`
-/// makes the run deterministic.
+/// executable function-under-test (bound to `self`); `cases` is how many inputs to sample when the
+/// domain is too large to enumerate; `seed` makes a sampled run deterministic.
 pub fn generative_check(expr: &J, self_fn: &Option<Val>, cases: usize, seed: u64) -> GenOutcome {
     // Only a `forall` gives a domain to range over.
     if expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
@@ -244,6 +316,27 @@ pub fn generative_check(expr: &J, self_fn: &Option<Val>, cases: usize, seed: u64
         Err(reason) => return GenOutcome::Ungeneratable(reason),
     };
 
+    // Prefer EXHAUSTIVE checking when the bounded domain fits the budget — a proof over that domain.
+    if let Some(domain) = enumerate_domain(&names, &kinds, EXHAUSTIVE_BUDGET) {
+        let mut decided = 0usize;
+        for binding in domain {
+            match eval_predicate_env(body, &binding, self_fn) {
+                Some(Val::Bool(true)) => decided += 1,
+                Some(Val::Bool(false)) => {
+                    let minimal = shrink(body, self_fn, &names, binding);
+                    return GenOutcome::Refuted(report_binding(&names, &minimal));
+                }
+                _ => {}
+            }
+        }
+        return if decided == 0 {
+            GenOutcome::Ungeneratable("no case was decidable (predicate never evaluated to a bool)")
+        } else {
+            GenOutcome::Exhaustive(decided)
+        };
+    }
+
+    // Otherwise SAMPLE the (too-large) domain.
     let mut rng = Rng::new(seed);
     let mut decided = 0usize;
     for _ in 0..cases {
@@ -253,11 +346,7 @@ pub fn generative_check(expr: &J, self_fn: &Option<Val>, cases: usize, seed: u64
             Some(Val::Bool(true)) => decided += 1,
             Some(Val::Bool(false)) => {
                 let minimal = shrink(body, self_fn, &names, binding);
-                let report = names
-                    .iter()
-                    .map(|n| (n.clone(), encode_value(&minimal[n])))
-                    .collect();
-                return GenOutcome::Refuted(report);
+                return GenOutcome::Refuted(report_binding(&names, &minimal));
             }
             _ => {} // undecidable on this input (out of domain / unresolved) — skip
         }
@@ -290,9 +379,10 @@ mod tests {
                 { "kind": "app", "op": "apply", "args": [{ "kind": "var", "name": "self" }, { "kind": "var", "name": "n" }] },
                 { "kind": "app", "op": "add", "args": [{ "kind": "var", "name": "n" }, { "kind": "var", "name": "n" }] }] } });
         let self_fn = self_fn_from_body(&double_body());
+        // `n` is an int → the bounded domain is small, so this is checked EXHAUSTIVELY.
         match generative_check(&expr, &self_fn, 200, 1) {
-            GenOutcome::Held(n) => assert!(n > 0),
-            _ => panic!("double's doubling law should HOLD"),
+            GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
+            _ => panic!("double's doubling law should hold"),
         }
     }
 
@@ -324,8 +414,8 @@ mod tests {
                     { "kind": "app", "op": "reverse", "args": [{ "kind": "var", "name": "xs" }] }] },
                 { "kind": "var", "name": "xs" }] } });
         match generative_check(&expr, &None, 200, 7) {
-            GenOutcome::Held(n) => assert!(n > 0),
-            _ => panic!("reverse∘reverse = id should HOLD"),
+            GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
+            _ => panic!("reverse∘reverse = id should hold"),
         }
     }
 
@@ -338,5 +428,35 @@ mod tests {
                     { "kind": "app", "op": "map", "args": [{ "kind": "var", "name": "f" }, { "kind": "var", "name": "xs" }] }] },
                 { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "xs" }] }] } });
         assert!(matches!(generative_check(&expr, &None, 50, 1), GenOutcome::Ungeneratable(_)));
+    }
+
+    #[test]
+    fn small_boolean_domain_is_exhaustive() {
+        // forall b. eq(not(not(b)), b): `b` is a bool, so both cases are enumerated — a real proof.
+        let expr = json!({ "kind": "forall", "vars": ["b"], "body": {
+            "kind": "app", "op": "eq", "args": [
+                { "kind": "app", "op": "not", "args": [
+                    { "kind": "app", "op": "not", "args": [{ "kind": "var", "name": "b" }] }] },
+                { "kind": "var", "name": "b" }] } });
+        match generative_check(&expr, &None, 200, 1) {
+            GenOutcome::Exhaustive(n) => assert_eq!(n, 2),
+            _ => panic!("a boolean law should be checked exhaustively over both cases"),
+        }
+    }
+
+    #[test]
+    fn large_domain_falls_back_to_sampling() {
+        // forall a b c d. eq(add(add(add(a,b),c),d), add(add(add(d,c),b),a)) — 4 ints exceed the
+        // exhaustive budget, so it is SAMPLED (still holds).
+        let sum = |order: [&str; 4]| {
+            let mut acc = json!({ "kind": "var", "name": order[0] });
+            for v in &order[1..] {
+                acc = json!({ "kind": "app", "op": "add", "args": [acc, { "kind": "var", "name": v }] });
+            }
+            acc
+        };
+        let expr = json!({ "kind": "forall", "vars": ["a", "b", "c", "d"],
+            "body": { "kind": "app", "op": "eq", "args": [sum(["a", "b", "c", "d"]), sum(["d", "c", "b", "a"])] } });
+        assert!(matches!(generative_check(&expr, &None, 200, 1), GenOutcome::Held(_)));
     }
 }
