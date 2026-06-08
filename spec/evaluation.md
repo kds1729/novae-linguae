@@ -2,7 +2,7 @@
 
 *Status: v0.1, implemented in [`tooling/validator`](../tooling/validator/src/) — `interp.rs`
 (evaluator) and `typecheck.rs` (type checker), exposed by `nl-validator eval` / `run` / `typecheck`
-/ `check-properties --body`.*
+/ `check-properties --body` / `prove` (SMT, `prove.rs`).*
 
 This is the language's **semantic core**: the rules by which a Nova Lingua body
 ([`body-expression.schema.json`](body-expression.schema.json)) *computes* a value, and by which a
@@ -100,6 +100,31 @@ example path cannot reach because the worked examples bind `xs` to the wrong sha
 HELD over hundreds of generated inputs (or EXHAUSTIVE when its domain is small). For a large domain
 it remains a sampled search rather than a proof — but it finds counterexamples the examples never
 would, and over a small domain it *is* a proof.
+
+## SMT proof (the unbounded rung)
+
+`nl-validator prove <record> --body <body>` discharges a `forall` law over the **unbounded** domain,
+the rung above sampling and bounded enumeration. Each property and the function body are translated to
+**SMT-LIB 2** (the `Int`/`Bool` fragment: arithmetic, comparisons, boolean connectives, `let`, boolean
+`case` → `ite`, and `self` inlined as a `define-fun`); the tool asserts the **negation** of the law and
+asks a solver (z3 by default, anything that speaks SMT-LIB on `--solver`) whether it is satisfiable:
+
+- **PROVED** — the solver returns `unsat`: no counterexample exists *anywhere*, a real proof over all
+  inputs (not just a sampled range). E.g. `double`'s `forall n. eq(self(n), add(n,n))` is proved for
+  every integer; a four-variable commutativity law that the bounded enumerator can't cover is proved
+  outright.
+- **REFUTED** — `sat`: the solver's model is a concrete counterexample (e.g. `n = 0`); exit 1.
+- **UNKNOWN** — the solver gave up.
+- **UNSUPPORTED** — the property or body is outside the `Int`/`Bool` fragment (lists, higher-order
+  arguments, recursion, opaque callees). Reported honestly, never silently "proved" — the same
+  boundary the generative checker draws as UNGENERATABLE.
+
+The emitted SMT-LIB script **is the proof certificate** (`--smt-out <dir>` writes one per property):
+any SMT solver re-checks it independently, so a receiver verifies by re-checking the certificate
+rather than trusting this tool (principles 3, 5). Solving is deterministic for a given script + solver,
+so the certificate is the replay log. Honest scope: this is decidable quantifier-free linear/nonlinear
+integer + boolean reasoning, not inductive proof over recursive structures — unbounded lists and
+recursion remain future work (an inductive backend).
 
 ## Effect enforcement
 

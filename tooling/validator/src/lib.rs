@@ -27,6 +27,9 @@ pub use eval::{check_properties, evaluate_property, Verdict};
 
 pub mod proptest;
 
+pub mod prove;
+pub use prove::{build_certificate, prove_property, Certificate, ProofOutcome, Sort};
+
 pub mod effects;
 pub use effects::{check_effects, infer_effects};
 

@@ -221,6 +221,25 @@ enum Commands {
         #[arg(long)]
         body: PathBuf,
     },
+    /// Prove a record's `forall` `properties[]` over the UNBOUNDED domain with an SMT solver — the rung
+    /// above bounded `check-properties`. Each property + the function body is translated to SMT-LIB 2
+    /// (the Int/Bool fragment); the solver checks the negation of the law. Reports PROVED (unsat — holds
+    /// for all inputs), REFUTED (sat — with a counterexample, exit 1), UNKNOWN, UNSUPPORTED (out of the
+    /// fragment, e.g. lists/higher-order), or NO-SOLVER. The emitted SMT-LIB is a re-checkable proof
+    /// certificate; `--smt-out <dir>` writes one per property.
+    Prove {
+        /// Path to the function record (provides `properties[]`).
+        record: PathBuf,
+        /// Body-expression AST of the function under test (required if a property references `self`).
+        #[arg(long)]
+        body: Option<PathBuf>,
+        /// Directory to write each property's SMT-LIB certificate into (created if absent).
+        #[arg(long = "smt-out")]
+        smt_out: Option<PathBuf>,
+        /// SMT solver binary to invoke (must accept SMT-LIB 2 on stdin via `-in`).
+        #[arg(long, default_value = "z3")]
+        solver: String,
+    },
     /// Nova Locutio agent loop: consume a signed message and emit a signed reply (spec/agent-loop.md).
     /// Handles `request`/`apply` (run the target on the value-expression args → an `assert` whose
     /// `predicate` claim is `eq(target(args…), result)`, self-verifiable by re-running),
@@ -407,6 +426,9 @@ fn main() -> ExitCode {
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
         Commands::Respond { request, records, seed, timestamp } => {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
+        }
+        Commands::Prove { record, body, smt_out, solver } => {
+            (cmd_prove(&record, body.as_ref(), smt_out.as_ref(), &solver), false)
         }
         Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
@@ -604,6 +626,59 @@ fn cmd_respond(
     std::io::stdout().write_all(pretty.as_bytes())?;
     std::io::stdout().write_all(b"\n")?;
     Ok(())
+}
+
+fn cmd_prove(
+    record: &PathBuf,
+    body: Option<&PathBuf>,
+    smt_out: Option<&PathBuf>,
+    solver: &str,
+) -> Result<()> {
+    use nl_validator::ProofOutcome;
+    let value = nl_validator::read_json(record)?;
+    let body_ast = body.map(|p| nl_validator::read_json(p)).transpose()?;
+    let props = value.get("properties").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    if props.is_empty() {
+        println!("no properties to prove");
+        return Ok(());
+    }
+    if let Some(dir) = smt_out {
+        std::fs::create_dir_all(dir).map_err(|e| anyhow::anyhow!("creating {}: {e}", dir.display()))?;
+    }
+    let mut refuted = Vec::new();
+    let mut no_solver = false;
+    for (i, prop) in props.iter().enumerate() {
+        let name = prop.get("name").and_then(|v| v.as_str()).unwrap_or("<unnamed>").to_string();
+        let expr = prop.get("expr").ok_or_else(|| anyhow::anyhow!("property `{name}` missing `expr`"))?;
+        let (outcome, cert) = nl_validator::prove_property(expr, body_ast.as_ref(), solver);
+        // Write the certificate (the re-checkable proof obligation) regardless of the verdict.
+        if let (Some(dir), Some(cert)) = (smt_out, &cert) {
+            let safe: String = name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
+            let path = dir.join(format!("{i:02}-{safe}.smt2"));
+            std::fs::write(&path, &cert.smt).map_err(|e| anyhow::anyhow!("writing {}: {e}", path.display()))?;
+        }
+        let label = match &outcome {
+            ProofOutcome::Proved => "PROVED       holds for all inputs (unsat negation)".to_string(),
+            ProofOutcome::Refuted(model) => {
+                refuted.push(name.clone());
+                format!("REFUTED      counterexample: {}", if model.is_empty() { "(model)" } else { model })
+            }
+            ProofOutcome::Unknown => "UNKNOWN      solver could not decide".to_string(),
+            ProofOutcome::NoSolver => {
+                no_solver = true;
+                format!("NO-SOLVER    `{solver}` not found; certificate emitted, re-check elsewhere")
+            }
+            ProofOutcome::Unsupported(why) => format!("UNSUPPORTED  {why}"),
+        };
+        println!("{name}: {label}");
+    }
+    if !refuted.is_empty() {
+        Err(anyhow::anyhow!("properties refuted by SMT counterexample: {}", refuted.join(", ")))
+    } else if no_solver {
+        Err(anyhow::anyhow!("no SMT solver available — obligations emitted but not discharged"))
+    } else {
+        Ok(())
+    }
 }
 
 fn cmd_verify_claim(assert: &PathBuf, records: &PathBuf) -> Result<()> {
