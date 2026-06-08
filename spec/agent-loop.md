@@ -107,9 +107,11 @@ conversation end to end: the orchestrator **discovers** a function by intent (`q
 **proposes** applying it (`propose` → `commit`), the committer **fulfils** it (`commit` → `assert`),
 and the orchestrator **verifies** the result by re-running the claim. The agent never names the
 function — it finds one (principle 4, made autonomous). Every message is signed and threaded; the run
-prints the transcript and exits non-zero unless the final claim is CONFIRMED. Worked: intent
-`arithmetic` over `[21]` discovers `double`, applies it, and confirms `double(21) = 42` across a
-five-message signed exchange.
+prints the transcript and exits non-zero unless every stage's claim is CONFIRMED. **Each `--intent` is
+a pipeline stage** — the result of one feeds the next — so the orchestrator *composes* multiple
+discovered functions. Worked: a single `--intent arithmetic` over `[21]` discovers `double` and
+confirms `double(21) = 42` (five messages); `--intent arithmetic --intent arithmetic` discovers and
+composes `double` twice, confirming `double(double(21)) = 84` (ten messages).
 
 ## Scope (v0.2, honest)
 
@@ -121,8 +123,8 @@ five-message signed exchange.
   `apply`/`propose` are **capability-gated**: a target whose record declares required
   `signature.capabilities` is fulfilled only if the request presents them (in
   `constraints.capabilities`), else `not_authorized` — the point where a *delegated* capability is
-  honored. What remains is richer discovery (compose multiple found functions rather than apply one)
-  and a real delegation-chain verifier behind the gate.
+  honored. What remains is a real delegation-chain verifier behind the gate: the gate checks the
+  capabilities a request presents; verifying the signed `delegate` chain that granted them is next.
 - **Pure targets.** The target must be a body the v0.1 evaluator handles (`spec/evaluation.md`):
   effects are not modelled, so an effectful target is out of scope. An unresolvable target or args
   that don't decode are an honest error, never a silent empty assert.

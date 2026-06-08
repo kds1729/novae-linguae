@@ -8,7 +8,7 @@
 //! This is "assemble, don't write" (principle 4) made autonomous — the agent never names the
 //! function, it discovers one.
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use serde_json::{json, Value as J};
 use std::path::Path;
@@ -30,13 +30,14 @@ pub struct Run {
     pub confirmed: bool,
 }
 
-/// Drive a `query → propose → commit → assert → verify` conversation. `intent_tags` selects the target
-/// by `intent_tags` containment; `args` are the value-expression arguments to apply. `orchestrator`
-/// signs the outbound query/propose; `responder` signs the replies. `timestamp` is advisory (None →
-/// deterministic per seed).
+/// Drive a multi-stage `query → propose → commit → assert → verify` pipeline. `stages` is one intent
+/// tag per stage: each stage discovers a function by that intent and applies it to the previous
+/// stage's result (the first stage to `args`), composing the discovered functions. Every stage's
+/// claim is verified; `Run.confirmed` is true iff all did. `orchestrator` signs the outbound
+/// query/propose; `responder` signs the replies. `timestamp` is advisory (None → deterministic).
 pub fn orchestrate(
     records_dir: &Path,
-    intent_tags: &[String],
+    stages: &[String],
     args: Vec<J>,
     orchestrator: &SigningKey,
     responder: &SigningKey,
@@ -46,48 +47,59 @@ pub fn orchestrate(
     let records = build_record_map(records_dir)?;
     let responder_did = did_nova_from_pubkey(&responder.verifying_key());
     let mut steps = Vec::new();
+    let mut stage_args = args; // stage 0 gets the initial args; each later stage gets [prev result]
+    let mut confirmed = !stages.is_empty();
+    let multi = stages.len() > 1;
 
-    // 1. QUERY the commons for a function matching the intent.
-    let mut query = json!({
-        "schema_version": "0.2.0", "kind": "query", "to": responder_did,
-        "in_reply_to": null, "timestamp": timestamp, "constraints": null,
-        "body": { "pattern": { "intent_tags": intent_tags } }
-    });
-    sign_message(&mut query, orchestrator)?;
-    steps.push(Step { label: "query".into(), message: query.clone() });
+    for (i, intent) in stages.iter().enumerate() {
+        let pfx = if multi { format!("{i}:") } else { String::new() };
 
-    let ack = respond_to_message(&query, link.clone(), records.clone(), responder, timestamp)?;
-    let target = ack
-        .pointer("/body/result/matches/0")
-        .and_then(|m| m.as_str())
-        .ok_or_else(|| anyhow!("no commons function matched intent {intent_tags:?}"))?
-        .to_string();
-    steps.push(Step { label: "ack".into(), message: ack });
+        // QUERY the commons for a function matching this stage's intent.
+        let mut query = json!({
+            "schema_version": "0.2.0", "kind": "query", "to": responder_did,
+            "in_reply_to": null, "timestamp": timestamp, "constraints": null,
+            "body": { "pattern": { "intent_tags": [intent] } }
+        });
+        sign_message(&mut query, orchestrator)?;
+        steps.push(Step { label: format!("{pfx}query"), message: query.clone() });
 
-    // 2. PROPOSE applying the discovered function to the args.
-    let mut propose = json!({
-        "schema_version": "0.2.0", "kind": "propose", "to": responder_did,
-        "in_reply_to": null, "timestamp": timestamp, "constraints": null,
-        "body": { "action": "apply", "target": target, "args": args }
-    });
-    sign_message(&mut propose, orchestrator)?;
-    steps.push(Step { label: "propose".into(), message: propose.clone() });
+        let ack = respond_to_message(&query, link.clone(), records.clone(), responder, timestamp)?;
+        let target = match ack.pointer("/body/result/matches/0").and_then(|m| m.as_str()) {
+            Some(t) => t.to_string(),
+            None => {
+                steps.push(Step { label: format!("{pfx}ack"), message: ack });
+                return Ok(Run { steps, confirmed: false }); // nothing discovered for this intent
+            }
+        };
+        steps.push(Step { label: format!("{pfx}ack"), message: ack });
 
-    // 3. The responder COMMITs (or rejects).
-    let commit = respond_to_message(&propose, link.clone(), records.clone(), responder, timestamp)?;
-    let committed = commit.get("kind").and_then(|k| k.as_str()) == Some("commit");
-    let label = commit.get("kind").and_then(|k| k.as_str()).unwrap_or("?").to_string();
-    steps.push(Step { label, message: commit.clone() });
-    if !committed {
-        return Ok(Run { steps, confirmed: false });
+        // PROPOSE applying the discovered function to this stage's args.
+        let mut propose = json!({
+            "schema_version": "0.2.0", "kind": "propose", "to": responder_did,
+            "in_reply_to": null, "timestamp": timestamp, "constraints": null,
+            "body": { "action": "apply", "target": target, "args": stage_args }
+        });
+        sign_message(&mut propose, orchestrator)?;
+        steps.push(Step { label: format!("{pfx}propose"), message: propose.clone() });
+
+        // The responder COMMITs (or rejects), then fulfils → ASSERT.
+        let commit = respond_to_message(&propose, link.clone(), records.clone(), responder, timestamp)?;
+        let kind = commit.get("kind").and_then(|k| k.as_str()).unwrap_or("?").to_string();
+        steps.push(Step { label: format!("{pfx}{kind}"), message: commit.clone() });
+        if kind != "commit" {
+            return Ok(Run { steps, confirmed: false });
+        }
+        let assert = respond_to_message(&commit, link.clone(), records.clone(), responder, timestamp)?;
+
+        // Verify this stage's claim, and thread its result into the next stage.
+        confirmed = confirmed && verify_claim(&assert, link.clone()).unwrap_or(false);
+        match assert.pointer("/body/claim/expr/args/1/value").cloned() {
+            Some(result) => stage_args = vec![result],
+            None => confirmed = false,
+        }
+        steps.push(Step { label: format!("{pfx}assert"), message: assert });
     }
 
-    // 4. The committer fulfils the commitment → ASSERT the result.
-    let assert = respond_to_message(&commit, link.clone(), records.clone(), responder, timestamp)?;
-    steps.push(Step { label: "assert".into(), message: assert.clone() });
-
-    // 5. The orchestrator VERIFIES the claim by re-running it against the commons.
-    let confirmed = verify_claim(&assert, link).unwrap_or(false);
     Ok(Run { steps, confirmed })
 }
 
@@ -110,5 +122,20 @@ mod tests {
         assert_eq!(labels, ["query", "ack", "propose", "commit", "assert"]);
         let result = run.steps.last().unwrap().message.pointer("/body/claim/expr/args/1/value").unwrap();
         assert_eq!(result, &json!({ "kind": "int", "value": 42 }));
+    }
+
+    #[test]
+    fn orchestrate_pipelines_multiple_discovered_functions() {
+        // Two `arithmetic` stages each discover `double` and compose: double(double(21)) = 84.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec/examples");
+        let orch = signing_key_from_seed("test-orchestrator");
+        let resp = signing_key_from_seed("test-responder");
+        let stages = ["arithmetic".to_string(), "arithmetic".to_string()];
+        let run = orchestrate(&dir, &stages, vec![json!({ "kind": "nat", "value": 21 })], &orch, &resp, None).unwrap();
+
+        assert!(run.confirmed, "every stage's claim must verify");
+        assert_eq!(run.steps.len(), 10); // 2 stages × 5 messages
+        let final_result = run.steps.last().unwrap().message.pointer("/body/claim/expr/args/1/value").unwrap();
+        assert_eq!(final_result, &json!({ "kind": "int", "value": 84 }));
     }
 }

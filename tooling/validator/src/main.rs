@@ -241,7 +241,8 @@ enum Commands {
         /// Directory of records/bodies (the commons view).
         #[arg(long)]
         records: PathBuf,
-        /// Intent tag the target function must carry (repeatable; containment match).
+        /// Intent tag for a pipeline stage (repeatable). Each `--intent` discovers a function by that
+        /// intent and applies it to the previous stage's result — composing the discovered functions.
         #[arg(long = "intent")]
         intents: Vec<String>,
         /// Argument value (a value-expression JSON file). Repeatable, positional order.
@@ -592,8 +593,9 @@ fn cmd_orchestrate(
         let m = &step.message;
         let hash = m.get("hash").and_then(|h| h.as_str()).unwrap_or("");
         let short = &hash[..hash.len().min(18)];
-        let detail = match step.label.as_str() {
-            "query" => format!("intent {intents:?}"),
+        let kind = step.label.rsplit(':').next().unwrap_or(&step.label);
+        let detail = match kind {
+            "query" => format!("intent {}", m.pointer("/body/pattern/intent_tags").map(|v| v.to_string()).unwrap_or_default()),
             "ack" => format!("matches {}", m.pointer("/body/result/matches").map(|v| v.to_string()).unwrap_or_default()),
             "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
             "commit" => format!("commit apply {}", m.pointer("/body/commitment/fn").and_then(|t| t.as_str()).unwrap_or_default()),
