@@ -279,6 +279,12 @@ class SearchTests(TestCase):
         self.assertIn(self.map_hash, hashes)
         self.assertNotIn(self.b64_hash, hashes)
 
+    def test_malformed_filter_is_400(self):
+        # The typed filter follows the same contract as /v0/query: a bare list is a clean 400.
+        resp = self._search({"query": "encode", "filter": {"effects": ["io.console"]}})
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.json()["error"], "malformed_filter")
+
     def test_k_caps_results(self):
         resp = self._search({"query": "list", "k": 1})
         self.assertEqual(len(resp.json()["results"]), 1)

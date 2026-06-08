@@ -12,6 +12,7 @@ typed `filter` means exactly what it does in `POST /v0/query` (shared via query.
 
 from .embedding import get_embedder
 from .models import Record
+from .query import QueryError, validate_filter
 from .vectorindex import get_vector_index
 
 _DEFAULT_K = 20
@@ -55,6 +56,10 @@ def run_search(body):
     flt = body.get("filter") or {}
     if not isinstance(flt, dict):
         raise SearchError("bad_request", "'filter' must be an object")
+    try:
+        validate_filter(flt)  # same typed-filter contract as POST /v0/query
+    except QueryError as exc:
+        raise SearchError("malformed_filter", str(exc), status=400) from exc
 
     # Ranking is delegated to the active backend (pgvector ANN on Postgres, Python cosine on SQLite).
     # Only vectors from the same model are comparable, so the model id is passed through.
