@@ -1,0 +1,18 @@
+{
+  "body": {
+    "claim": {
+      "expires_at": null,
+      "kind": "attestation",
+      "subject": "did:nova:9c1456c0e620785fec83caaa78e803ce720afa780135fc6298d4b89953143224",
+      "verb": "vouches-for"
+    },
+    "subject": "did:nova:9c1456c0e620785fec83caaa78e803ce720afa780135fc6298d4b89953143224"
+  },
+  "from": "did:nova:0700db5231c241577a4c2b8c228e1ba93ebbbf9fbb9a1d617b762079bf1c2ea8",
+  "hash": "msg_81cb5000c15e1d4d629d0ea40fa7ea4902a611d7c96ee31e19ba9da79da8556a",
+  "in_reply_to": null,
+  "kind": "assert",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:wmTNpvn4W7P2uy0j5ctpEcz6ExWZfvfb1umEojkxLVXfTTRbR8aIh35MMF1l6LeDNL/J1LFAtKPFk17Td4VzAg==",
+  "to": null
+}

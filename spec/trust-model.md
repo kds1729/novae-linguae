@@ -192,13 +192,11 @@ Most of the trust model is *already expressible* in v0.1 of the schemas. The rel
 | `retract` speech act | `message.schema.json` | Revocation |
 | `query` speech act | `message.schema.json` | Discovering attestations |
 
-**No new schema is required to implement v0.1 of the trust model.** What is required:
+**No new schema is required to implement v0.1 of the trust model.** All three reference pieces are now built:
 
-- A reference policy engine (consumes local policy declarations and evaluates incoming attestations against them). *Not yet built.*
 - A capability verifier (validates token chains, attenuation, expiration, conditions). **Built** — `nl_validator::verify_delegation_chain` (`tooling/validator/src/delegation.rs`), exposed as `nl-validator verify-delegation`. It checks every token's Ed25519 signature, walks the chain back to a recognized root, enforces attenuation (no link may widen the grant — capability covering is prefix-on-segments), skips expired tokens (against a supplied verification instant), honours bearer tokens (`to: null`), terminates on cyclic delegations, and collects every `condition` along the chain for the policy layer to enforce. It is wired **behind the capability gate**: a responder configured with a `TrustPolicy` (recognized roots + a token pool) fulfils a capability-gated `apply`/`propose` only when the sender can exhibit a valid chain — listing the capability string no longer suffices.
-- An attestation-graph query layer over the commons. *Not yet built.*
-
-The remaining two are tier-2 implementation work — see the project README for the rough roadmap.
+- An attestation-graph query layer over the commons. **Built** — `nl_validator::AttestationGraph` (`tooling/validator/src/attestation.rs`). An attestation is a signed `assert` whose claim is of kind `attestation` (`<attester> <verb> <subject>`, verb ∈ {`vouches-for`, `trusts-claims-about`, `distrusts`} — open question 1 resolved, see [`claim-expression.schema.json`](claim-expression.schema.json)). The graph verifies each attestation's signature, drops the targets of authentic `retract`s, prunes expired edges, and answers structural queries (about a subject, by an attester, positive/negative edges).
+- A reference policy engine (consumes local policy declarations and evaluates incoming attestations against them). **Built** — `nl_validator::Policy` (`tooling/validator/src/policy.rs`), exposed as `nl-validator evaluate-trust` and `nl-validator authorize`. A small JSON policy declares `trusted_roots`, `max_depth`, `min_distinct_paths` (diversity / Sybil mitigation), `allow_distrust_override`, and `satisfied_conditions`. **Trust derivation** spreads trust transitively from the roots over the attestation graph and admits the queried subject only when ≥ `min_distinct_paths` distinct trusted agents attest to it (scoped to a `domain` if given) and no trusted agent `distrusts` it. **Capability authorization** wraps the delegation verifier with the policy's roots and then *enforces* the chain's conditions — a condition the policy does not declare satisfiable is grounds for refusal (this is what finally enforces, rather than merely surfaces, delegation conditions).
 
 ---
 
@@ -206,7 +204,7 @@ The remaining two are tier-2 implementation work — see the project README for 
 
 Tracked for v0.2+; not blockers for v0.1.
 
-1. **Standard "trust verbs."** Should there be a controlled vocabulary of attestation predicates (e.g., `vouches-for`, `verified-by`, `trusts-claims-about`, `revokes-trust-in`) so two agents naming the same trust relation use the same predicate? Lean yes for v0.2 — fits principle 7 (minimal orthogonal vocabulary).
+1. **Standard "trust verbs."** ~~Should there be a controlled vocabulary of attestation predicates so two agents naming the same trust relation use the same predicate?~~ **RESOLVED (v0.2):** yes. The `attestation` claim kind in [`claim-expression.schema.json`](claim-expression.schema.json) fixes a closed verb vocabulary — `vouches-for` (general positive trust), `trusts-claims-about` (positive, scoped to a `domain`), `distrusts` (negative). `verified-by` is already covered by the separate `verified` claim kind (artifact verification). The reference policy engine reasons over exactly these verbs.
 2. **Capability default expiration.** Should capabilities expire by default if no expiration is specified? Lean yes for safety; v0.2 to decide whether the default is enforced at the schema layer or the policy layer.
 3. **Revocation propagation.** Push-style (broadcast retractions reach everyone), pull-style (consumers periodically re-query), or hybrid? Hybrid is most realistic. v0.2.
 4. **Cross-policy interoperability.** Two agents with incompatible local policies still need a shared baseline to negotiate. A small interoperability spec ("here is the minimum information any policy must produce when refusing a request") is worth writing in v0.2.

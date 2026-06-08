@@ -2,14 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://novae-linguae.org/spec/v0.1/claim-expression.schema.json",
   "title": "Nova Locutio Claim Expression",
-  "description": "Structured AST for claims made by the `assert` speech act. The v0.1 message schema's `assert.claim` is a string in surface syntax; this schema defines the structured form that v0.2+ of the message schema will require. Three kinds in v0.1: `predicate` (wraps an arbitrary predicate-expression), `satisfies` (subject satisfies a named property — the common case, sugar for a `predicate` with the equivalent `app('satisfies', subject, property)` shape), and `verified` (subject has been verified by some agent, optionally with a proof certificate). The predicate sub-tree is opaque at this layer; it must validate independently against predicate-expression.schema.json. Higher-level reasoning over claims (e.g. consequence-of, contradicts-with, supports) is the verifier's job and not part of this schema.",
+  "description": "Structured AST for claims made by the `assert` speech act. The v0.1 message schema's `assert.claim` is a string in surface syntax; this schema defines the structured form that v0.2+ of the message schema will require. Kinds: `predicate` (wraps an arbitrary predicate-expression), `satisfies` (subject satisfies a named property — the common case, sugar for a `predicate` with the equivalent `app('satisfies', subject, property)` shape), `verified` (subject artifact has been verified by some agent, optionally with a proof certificate), and `attestation` (a trust statement *about an agent or artifact* — the building block of the trust graph; see trust-model.md). The predicate sub-tree is opaque at this layer; it must validate independently against predicate-expression.schema.json. Higher-level reasoning over claims (e.g. consequence-of, contradicts-with, supports) is the verifier's job and not part of this schema.",
   "$ref": "#/$defs/claim",
   "$defs": {
     "claim": {
       "oneOf": [
         { "$ref": "#/$defs/predicate" },
         { "$ref": "#/$defs/satisfies" },
-        { "$ref": "#/$defs/verified" }
+        { "$ref": "#/$defs/verified" },
+        { "$ref": "#/$defs/attestation" }
       ]
     },
     "predicate": {
@@ -74,6 +75,45 @@
         }
       },
       "description": "A meta-claim: 'this artifact has been verified by this agent (optionally with proof X).' Lets agents build attestation chains where one verifier vouches for the work of another."
+    },
+    "attestation": {
+      "type": "object",
+      "required": ["kind", "subject", "verb"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "attestation" },
+        "subject": {
+          "type": "string",
+          "pattern": "^(did:[a-z0-9]+:[A-Za-z0-9._:-]+|(fn|expr|type|proof|msg)_[0-9a-f]{64})$",
+          "description": "What the attestation is about: an agent DID, or the content-address of an artifact."
+        },
+        "verb": {
+          "enum": ["vouches-for", "trusts-claims-about", "distrusts"],
+          "description": "The closed trust-verb vocabulary (trust-model.md open question 1, resolved): `vouches-for` is general positive trust in the subject; `trusts-claims-about` is positive trust scoped to a `domain`; `distrusts` is negative (a recipient's policy may let it override a positive path)."
+        },
+        "domain": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "The area the trust is scoped to (e.g. `rust_ingestion`). Required meaning for `trusts-claims-about`; advisory otherwise."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Optional strength of the attestation in [0,1]; a receiver's local policy decides how to weight it."
+        },
+        "expires_at": {
+          "oneOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ],
+          "default": null,
+          "description": "Optional expiry; absent, the attestation SHOULD decay in influence per the receiver's local policy (trust-model.md)."
+        }
+      },
+      "description": "A trust statement about an agent (or artifact): `<attester> <verb> <subject>`. The attester is the enclosing `assert` message's signer (`from`). Edges of the trust graph the reference policy engine reasons over (nl-validator evaluate-trust). Retractable via the `retract` speech act referencing the attestation's hash."
     }
   }
 }

@@ -50,6 +50,12 @@ pub mod seal;
 pub mod delegation;
 pub use delegation::{capability_covers, verify_delegation_chain, ChainLink, ChainVerdict};
 
+pub mod attestation;
+pub use attestation::{Attestation, AttestationGraph};
+
+pub mod policy;
+pub use policy::{CapabilityVerdict, Policy, TrustVerdict};
+
 pub mod respond;
 pub use respond::{
     respond_to_message, respond_to_message_with_trust, respond_to_request, verify_claim, TrustPolicy,

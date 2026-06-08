@@ -244,8 +244,11 @@
       "additionalProperties": false,
       "properties": {
         "subject": {
-          "$ref": "#/$defs/content_address",
-          "description": "What the assertion is about."
+          "oneOf": [
+            { "$ref": "#/$defs/content_address" },
+            { "$ref": "#/$defs/did" }
+          ],
+          "description": "What the assertion is about: an artifact's content-address, or — for an `attestation` claim about an agent — a DID."
         },
         "claim": {
           "$ref": "https://novae-linguae.org/spec/v0.1/claim-expression.schema.json",

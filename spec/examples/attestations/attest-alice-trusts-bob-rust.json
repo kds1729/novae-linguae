@@ -1,0 +1,19 @@
+{
+  "body": {
+    "claim": {
+      "domain": "rust_ingestion",
+      "expires_at": null,
+      "kind": "attestation",
+      "subject": "did:nova:07ae3533e750e7f9df816098568f1e4dd026d8426410446da08938ba46f2641e",
+      "verb": "trusts-claims-about"
+    },
+    "subject": "did:nova:07ae3533e750e7f9df816098568f1e4dd026d8426410446da08938ba46f2641e"
+  },
+  "from": "did:nova:9c1456c0e620785fec83caaa78e803ce720afa780135fc6298d4b89953143224",
+  "hash": "msg_42db7b4f4e2624eec99187547cddb9575386ba61209d7934368e6e2df55b71c5",
+  "in_reply_to": null,
+  "kind": "assert",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:XnBtKAfKgvru5ooGOf1vIMWonLzEJ0xfxwaGzx7YL/MIlvG9ZzEL1HKLxyBm8j37orm/g7BgbcwYidySaM8vAQ==",
+  "to": null
+}

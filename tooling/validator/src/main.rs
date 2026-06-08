@@ -323,6 +323,49 @@ enum Commands {
         #[arg(long)]
         at: Option<String>,
     },
+    /// Evaluate trust under a local policy (spec/trust-model.md): is `--subject` trusted, given the
+    /// attestation graph built from `--attestations` (signed `assert`/attestation + `retract`
+    /// messages)? The reference policy engine spreads trust from the policy's `trusted_roots`, requires
+    /// `min_distinct_paths` distinct trusted attesters for the subject (diversity / Sybil mitigation),
+    /// honors `distrusts` and retractions, and prunes expired attestations. Exit 0 if TRUSTED.
+    EvaluateTrust {
+        /// Path to the local policy JSON (`trusted_roots`, `max_depth`, `min_distinct_paths`, …).
+        #[arg(long)]
+        policy: PathBuf,
+        /// Directory/file of attestation + retract messages forming the graph. Repeatable.
+        #[arg(long = "attestations")]
+        attestations: Vec<PathBuf>,
+        /// The agent DID (or artifact address) whose trust to evaluate.
+        #[arg(long)]
+        subject: String,
+        /// Optional domain to scope the query to (matches `trusts-claims-about` attestations).
+        #[arg(long)]
+        domain: Option<String>,
+        /// Optional verification instant (RFC 3339 UTC) for pruning expired attestations.
+        #[arg(long)]
+        at: Option<String>,
+    },
+    /// Authorize a capability under a local policy: verify a signed delegation chain back to one of the
+    /// policy's `trusted_roots`, then enforce that every condition the chain carries is one the policy
+    /// declares it can satisfy (`satisfied_conditions`). Exit 0 if AUTHORIZED. The policy-aware
+    /// counterpart to `verify-delegation`.
+    Authorize {
+        /// Path to the local policy JSON (`trusted_roots`, `satisfied_conditions`, …).
+        #[arg(long)]
+        policy: PathBuf,
+        /// The capability the action requires (e.g. `cap:apply/double`).
+        #[arg(long)]
+        capability: String,
+        /// The DID that must end up authorized (the presenter).
+        #[arg(long)]
+        grantee: String,
+        /// Directory/file of `delegate` tokens forming the available pool. Repeatable.
+        #[arg(long = "delegations")]
+        delegations: Vec<PathBuf>,
+        /// Optional verification instant (RFC 3339 UTC) for expiry checks.
+        #[arg(long)]
+        at: Option<String>,
+    },
     /// Parse a Nova Lingua type-expression surface string into its JSON AST.
     /// Reads the surface string from the `input` argument, or from stdin when
     /// omitted. Writes the AST as pretty JSON to stdout. See
@@ -433,6 +476,12 @@ fn main() -> ExitCode {
         Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
             (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
+        }
+        Commands::EvaluateTrust { policy, attestations, subject, domain, at } => {
+            (cmd_evaluate_trust(&policy, &attestations, &subject, domain.as_deref(), at.as_deref()), false)
+        }
+        Commands::Authorize { policy, capability, grantee, delegations, at } => {
+            (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
         Commands::Orchestrate { records, intents, args, seed, responder_seed, timestamp } => {
             (cmd_orchestrate(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
@@ -725,25 +774,20 @@ fn cmd_verify_claim(assert: &PathBuf, records: &PathBuf) -> Result<()> {
     }
 }
 
-fn cmd_verify_delegation(
-    capability: &str,
-    grantee: &str,
-    roots: &[String],
-    delegations: &[PathBuf],
-    at: Option<&str>,
-) -> Result<()> {
-    use std::collections::BTreeSet;
-    // Each --delegations path may be a single delegate file or a directory of them; collect every
-    // JSON object whose `kind` is `delegate`.
-    let mut tokens: Vec<serde_json::Value> = Vec::new();
-    for path in delegations {
+/// Load JSON messages from a list of paths (each a `.json` file or a directory of them). When
+/// `kind_filter` is `Some(k)`, only messages whose `kind` is `k` are kept; `None` keeps all. Directory
+/// entries are read in sorted order for determinism.
+fn load_json_messages(paths: &[PathBuf], kind_filter: Option<&str>) -> Result<Vec<serde_json::Value>> {
+    let mut out = Vec::new();
+    for path in paths {
         let mut consider = |p: &Path| -> Result<()> {
             if p.extension().and_then(|e| e.to_str()) != Some("json") {
                 return Ok(());
             }
             let v = nl_validator::read_json(&p.to_path_buf())?;
-            if v.get("kind").and_then(|k| k.as_str()) == Some("delegate") {
-                tokens.push(v);
+            let keep = kind_filter.is_none_or(|k| v.get("kind").and_then(|x| x.as_str()) == Some(k));
+            if keep {
+                out.push(v);
             }
             Ok(())
         };
@@ -752,7 +796,7 @@ fn cmd_verify_delegation(
                 .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?
                 .filter_map(|e| e.ok().map(|e| e.path()))
                 .collect();
-            entries.sort(); // deterministic order
+            entries.sort();
             for p in entries {
                 consider(&p)?;
             }
@@ -760,6 +804,18 @@ fn cmd_verify_delegation(
             consider(path)?;
         }
     }
+    Ok(out)
+}
+
+fn cmd_verify_delegation(
+    capability: &str,
+    grantee: &str,
+    roots: &[String],
+    delegations: &[PathBuf],
+    at: Option<&str>,
+) -> Result<()> {
+    use std::collections::BTreeSet;
+    let tokens = load_json_messages(delegations, Some("delegate"))?;
     let roots: BTreeSet<String> = roots.iter().cloned().collect();
     let verdict = nl_validator::verify_delegation_chain(capability, grantee, &tokens, &roots, at);
     if verdict.authorized {
@@ -771,6 +827,44 @@ fn cmd_verify_delegation(
         if !verdict.conditions.is_empty() {
             println!("  conditions (enforce in policy): {}", verdict.conditions.join("; "));
         }
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("UNAUTHORIZED  {}", verdict.reason))
+    }
+}
+
+fn cmd_evaluate_trust(
+    policy: &PathBuf,
+    attestations: &[PathBuf],
+    subject: &str,
+    domain: Option<&str>,
+    at: Option<&str>,
+) -> Result<()> {
+    let policy = nl_validator::Policy::from_json(&nl_validator::read_json(policy)?)?;
+    let messages = load_json_messages(attestations, None)?; // asserts + retracts
+    let graph = nl_validator::AttestationGraph::from_messages(&messages, at);
+    let verdict = policy.evaluate_trust(&graph, subject, domain);
+    let scope = domain.map(|d| format!(" for domain `{d}`")).unwrap_or_default();
+    if verdict.trusted {
+        println!("TRUSTED      `{subject}`{scope}: {}", verdict.reason);
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("UNTRUSTED    `{subject}`{scope}: {}", verdict.reason))
+    }
+}
+
+fn cmd_authorize(
+    policy: &PathBuf,
+    capability: &str,
+    grantee: &str,
+    delegations: &[PathBuf],
+    at: Option<&str>,
+) -> Result<()> {
+    let policy = nl_validator::Policy::from_json(&nl_validator::read_json(policy)?)?;
+    let tokens = load_json_messages(delegations, Some("delegate"))?;
+    let verdict = policy.authorize_capability(capability, grantee, &tokens, at);
+    if verdict.authorized {
+        println!("AUTHORIZED  {}", verdict.reason);
         Ok(())
     } else {
         Err(anyhow::anyhow!("UNAUTHORIZED  {}", verdict.reason))

@@ -35,6 +35,8 @@ const VALID_PAIRS: &[(&str, &str)] = &[
     ("message.v0.2.schema.json", "commit-apply.v0.2.json"),
     ("message.v0.2.schema.json", "delegation/delegate-root-to-alice.json"),
     ("message.v0.2.schema.json", "delegation/delegate-alice-to-bob.json"),
+    ("message.v0.2.schema.json", "attestations/attest-root-vouches-alice.json"),
+    ("message.v0.2.schema.json", "attestations/attest-alice-trusts-bob-rust.json"),
     ("type-expression.schema.json", "type-map.json"),
     ("predicate-expression.schema.json", "predicate-identity.json"),
     ("value-expression.schema.json", "value-list-int.json"),

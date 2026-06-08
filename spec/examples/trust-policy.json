@@ -1,0 +1,7 @@
+{
+  "trusted_roots": ["did:nova:0700db5231c241577a4c2b8c228e1ba93ebbbf9fbb9a1d617b762079bf1c2ea8"],
+  "max_depth": 5,
+  "min_distinct_paths": 1,
+  "allow_distrust_override": true,
+  "satisfied_conditions": ["only the `double` function"]
+}
