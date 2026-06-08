@@ -102,11 +102,13 @@ nl-validator respond spec/examples/query.v0.2.json            --records spec/exa
 
 ## Scope (v0.2, honest)
 
-- **`apply` / `validate` / `query` / `propose`.** The responder handles the `apply` and `validate`
-  request actions, the `query` speech act, and `propose` (→ `commit`/`reject`). The `store` action,
-  the remaining negotiating acts (`delegate` / `retract` / acting on a received `commit`), and a
-  driver that *orchestrates* a multi-step `query → propose → commit → assert` conversation
-  autonomously build on the same substrate and are the next step.
+- **The inbound speech acts are wired.** Beyond `apply`/`validate`/`query`/`propose`, the responder
+  also handles: the `store` request action (verify the inline payload's content-address →
+  `ack`/`reject`); **acting on a received `commit`** (fulfil an `apply` commitment — resolve + run the
+  function → `assert` the result, closing `propose → commit → assert`); and `delegate` / `retract`
+  (acknowledged). What remains is a driver that *orchestrates* a multi-step `query → propose → commit
+  → assert` conversation autonomously, and effect/capability *gating* of what a delegation actually
+  authorizes.
 - **Pure targets.** The target must be a body the v0.1 evaluator handles (`spec/evaluation.md`):
   effects are not modelled, so an effectful target is out of scope. An unresolvable target or args
   that don't decode are an honest error, never a silent empty assert.

@@ -63,44 +63,41 @@ pub fn respond_to_request(
         .and_then(|h| h.as_str())
         .ok_or_else(|| anyhow!("request has no `hash` to thread `in_reply_to`"))?;
 
-    // 2. Resolve the target's body from the commons.
+    // Resolve, run, and assert the result (shared with acting on an `apply` commitment).
+    assert_application(requester, req_hash, target, &args, link_map, signing_key, timestamp)
+}
+
+/// Resolve `target`, run it on `args`, and return a signed `assert` whose predicate claim is
+/// `eq(target(args…), result)`. Shared by `request`/`apply` and acting on an `apply` commitment.
+fn assert_application(
+    requester: &str,
+    in_reply_to: &str,
+    target: &str,
+    args: &[J],
+    link_map: HashMap<String, J>,
+    signing_key: &SigningKey,
+    timestamp: Option<&str>,
+) -> Result<J> {
     let target_body = link_map
         .get(target)
         .cloned()
         .ok_or_else(|| anyhow!("cannot resolve target `{target}`: no body for it in the provided records"))?;
-
-    // 3. Execute: install the link map so the target body and its `fn_ref` args compose, run, clear.
     set_resolver(link_map);
-    let computed = eval_body(&target_body, &args);
+    let computed = eval_body(&target_body, args);
     clear_resolver();
-    let result = computed.with_context(|| format!("running target `{target}` on the request arguments"))?;
+    let result = computed.with_context(|| format!("running target `{target}` on the arguments"))?;
 
-    // 4. Build the predicate claim: eq( target(arg0, arg1, …), result ). Each request arg is a
-    //    value-expression carried as a predicate `lit`; the target is an `app` op by content-address.
+    // The predicate claim: eq( target(arg0, …), result ). Each arg is a value-expression `lit`; the
+    // target is an `app` op by content-address.
     let app_args: Vec<J> = args.iter().map(|a| json!({ "kind": "lit", "value": a })).collect();
     let claim_expr = json!({
-        "kind": "app",
-        "op": "eq",
-        "args": [
+        "kind": "app", "op": "eq", "args": [
             { "kind": "app", "op": target, "args": app_args },
             { "kind": "lit", "value": result }
         ]
     });
-
-    // 5. Assemble and sign the `assert`. `sign_message` fills `from`/`hash`/`signature`.
-    let mut assert = json!({
-        "schema_version": "0.2.0",
-        "kind": "assert",
-        "to": requester,
-        "in_reply_to": req_hash,
-        "timestamp": timestamp,
-        "constraints": null,
-        "body": {
-            "subject": target,
-            "claim": { "kind": "predicate", "expr": claim_expr },
-            "evidence": null
-        }
-    });
+    let mut assert = build_envelope("assert", requester, in_reply_to, timestamp,
+        json!({ "subject": target, "claim": { "kind": "predicate", "expr": claim_expr }, "evidence": null }));
     sign_message(&mut assert, signing_key).context("signing the assert reply")?;
     Ok(assert)
 }
@@ -167,13 +164,93 @@ pub fn respond_to_message(
             match action {
                 "apply" => respond_to_request(message, link_map, signing_key, timestamp),
                 "validate" => validate_reply(message, link_map, record_map, signing_key, timestamp),
-                other => bail!("respond handles the `apply` and `validate` request actions, not `{other}`"),
+                "store" => store_reply(message, signing_key, timestamp),
+                other => bail!("respond handles the `apply`/`validate`/`store` request actions, not `{other}`"),
             }
         }
         "query" => query_reply(message, record_map, signing_key, timestamp),
         "propose" => propose_reply(message, link_map, signing_key, timestamp),
-        other => bail!("respond handles `request`, `query`, and `propose` speech acts, not `{other}`"),
+        "commit" => commit_reply(message, link_map, signing_key, timestamp),
+        "delegate" => delegate_reply(message, signing_key, timestamp),
+        "retract" => retract_reply(message, signing_key, timestamp),
+        other => bail!("respond handles request/query/propose/commit/delegate/retract, not `{other}`"),
     }
+}
+
+/// `(from, hash)` of a message, for replies threaded back to the sender.
+fn envelope_ids(message: &J) -> Result<(&str, &str)> {
+    let from = message.get("from").and_then(|f| f.as_str()).ok_or_else(|| anyhow!("message has no `from`"))?;
+    let hash = message.get("hash").and_then(|h| h.as_str()).ok_or_else(|| anyhow!("message has no `hash`"))?;
+    Ok((from, hash))
+}
+
+/// `request`/`store`: verify the inline payload artifact is self-consistent (its content-address
+/// recomputes), then `ack` that it was admitted, else `reject`.
+fn store_reply(message: &J, signing_key: &SigningKey, timestamp: Option<&str>) -> Result<J> {
+    let (requester, req_hash) = envelope_ids(message)?;
+    let reject = |code: &str, reason: String| {
+        sign_envelope(build_envelope("reject", requester, req_hash, timestamp,
+            json!({ "rejects": req_hash, "code": code, "reason": reason })), signing_key)
+    };
+    let Some(payload) = message.pointer("/body/payload") else {
+        return reject("malformed", "a `store` request must carry a `payload`".into());
+    };
+    match crate::verify_artifact_hash(payload) {
+        Ok(v) if v.matches => {
+            let stored = payload.get("hash").and_then(|h| h.as_str()).unwrap_or_default();
+            sign_envelope(build_envelope("ack", requester, req_hash, timestamp,
+                json!({ "acks": req_hash, "result": { "stored": stored } })), signing_key)
+        }
+        _ => reject("constraint_violated", "payload failed content-address verification".into()),
+    }
+}
+
+/// Acting on a received `commit`: an `apply` commitment is fulfilled (resolve + run the function →
+/// `assert` the result); a `provide`/`refrain` commitment is acknowledged.
+fn commit_reply(
+    message: &J,
+    link_map: HashMap<String, J>,
+    signing_key: &SigningKey,
+    timestamp: Option<&str>,
+) -> Result<J> {
+    let (requester, commit_hash) = envelope_ids(message)?;
+    let reject = |code: &str, reason: String| {
+        sign_envelope(build_envelope("reject", requester, commit_hash, timestamp,
+            json!({ "rejects": commit_hash, "code": code, "reason": reason })), signing_key)
+    };
+    let kind = message.pointer("/body/commitment/kind").and_then(|k| k.as_str()).unwrap_or_default();
+    if kind != "apply" {
+        // provide / refrain: acknowledge the commitment.
+        return sign_envelope(build_envelope("ack", requester, commit_hash, timestamp,
+            json!({ "acks": commit_hash, "result": { "acknowledged": kind } })), signing_key);
+    }
+    let Some(target) = message.pointer("/body/commitment/fn").and_then(|t| t.as_str()) else {
+        return reject("malformed", "an `apply` commitment must carry `fn`".into());
+    };
+    let args = message.pointer("/body/commitment/args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    if !link_map.contains_key(target) {
+        return reject("unknown_target", format!("cannot resolve commitment target `{target}`"));
+    }
+    match assert_application(requester, commit_hash, target, &args, link_map, signing_key, timestamp) {
+        Ok(assert) => Ok(assert),
+        Err(e) => reject("constraint_violated", format!("cannot fulfil commitment: {e:#}")),
+    }
+}
+
+/// `delegate`: acknowledge the capability grant.
+fn delegate_reply(message: &J, signing_key: &SigningKey, timestamp: Option<&str>) -> Result<J> {
+    let (requester, h) = envelope_ids(message)?;
+    let cap = message.pointer("/body/capability").and_then(|c| c.as_str()).unwrap_or_default();
+    sign_envelope(build_envelope("ack", requester, h, timestamp,
+        json!({ "acks": h, "result": { "delegated": cap } })), signing_key)
+}
+
+/// `retract`: acknowledge the retraction.
+fn retract_reply(message: &J, signing_key: &SigningKey, timestamp: Option<&str>) -> Result<J> {
+    let (requester, h) = envelope_ids(message)?;
+    let retracts = message.pointer("/body/retracts").and_then(|r| r.as_str()).unwrap_or_default();
+    sign_envelope(build_envelope("ack", requester, h, timestamp,
+        json!({ "acks": h, "result": { "retracted": retracts } })), signing_key)
 }
 
 /// `propose`/`apply`: a proposal invites action with refusal allowed. The responder verifies it can
@@ -536,5 +613,47 @@ mod tests {
         let reply = respond_to_message(&prop, link, recs, &key, None).unwrap();
         assert_eq!(reply["kind"], "reject");
         assert_eq!(reply["body"]["code"], "unknown_target");
+    }
+
+    #[test]
+    fn acting_on_an_apply_commit_asserts_the_result() {
+        // A commit to apply double(21): the responder fulfils it and asserts eq(double(21), 42).
+        let commit = json!({ "schema_version": "0.2.0", "kind": "commit", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null, "body": {
+                "commitment": { "kind": "apply", "fn": double_addr(), "args": [{ "kind": "nat", "value": 21 }] },
+                "conditions": [], "expires_at": null } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&commit, link, recs, &key, None).unwrap();
+        assert_eq!(reply["kind"], "assert");
+        assert_eq!(reply["body"]["claim"]["expr"]["args"][1]["value"], json!({ "kind": "int", "value": 42 }));
+        verify_signature(&reply).unwrap();
+    }
+
+    #[test]
+    fn store_verifies_payload_and_acks() {
+        // Storing a self-consistent record acks with its address.
+        let req = json!({ "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null,
+            "body": { "action": "store", "payload_kind": "function-record-v0.2", "payload": load("double.v0.2.json") } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&req, link, recs, &key, None).unwrap();
+        assert_eq!(reply["kind"], "ack");
+        assert_eq!(reply["body"]["result"]["stored"], double_addr().as_str());
+        verify_signature(&reply).unwrap();
+    }
+
+    #[test]
+    fn delegate_and_retract_are_acked() {
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let del = json!({ "schema_version": "0.2.0", "kind": "delegate", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null, "body": { "capability": "cap:apply/double" } });
+        let (l1, r1) = maps();
+        assert_eq!(respond_to_message(&del, l1, r1, &key, None).unwrap()["kind"], "ack");
+        let ret = json!({ "schema_version": "0.2.0", "kind": "retract", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null, "body": { "retracts": A_MSG, "reason": "superseded" } });
+        let (l2, r2) = maps();
+        assert_eq!(respond_to_message(&ret, l2, r2, &key, None).unwrap()["kind"], "ack");
     }
 }
