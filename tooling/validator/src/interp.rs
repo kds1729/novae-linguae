@@ -331,6 +331,48 @@ fn as_str(v: &Val) -> Result<String> {
     }
 }
 
+fn as_str_list(v: &Val) -> Result<Vec<String>> {
+    match v {
+        Val::List(xs) => xs.iter().map(as_str).collect(),
+        _ => bail!("expected a list of strings, got {}", encode_value(v)),
+    }
+}
+
+/// A minimal, dependency-free HTTP/1.1 request over a raw TCP socket — `http://` only (no TLS).
+/// Returns the response body (after the header block). Backs `http_get` (net.read) / `http_post`
+/// (net.write); the gating + record/replay live in `effect_op`.
+fn http_request(method: &str, url: &str, body: Option<&str>) -> Result<String> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    let rest = url
+        .strip_prefix("http://")
+        .ok_or_else(|| anyhow!("only http:// URLs are supported (no TLS in this build): {url}"))?;
+    let (authority, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, "/"),
+    };
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((h, p)) => (h, p.parse::<u16>().map_err(|_| anyhow!("bad port in {url}"))?),
+        None => (authority, 80),
+    };
+
+    let mut stream = TcpStream::connect((host, port)).map_err(|e| anyhow!("connect {host}:{port}: {e}"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
+    let payload = body.unwrap_or("");
+    let req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: nl-validator\r\nAccept: */*\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{payload}",
+        payload.len()
+    );
+    stream.write_all(req.as_bytes()).map_err(|e| anyhow!("writing request: {e}"))?;
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).map_err(|e| anyhow!("reading response: {e}"))?;
+    let text = String::from_utf8_lossy(&buf);
+    Ok(text.split_once("\r\n\r\n").map(|(_, b)| b.to_string()).unwrap_or_else(|| text.into_owned()))
+}
+
 fn as_bool(v: &Val) -> Result<bool> {
     match v {
         Val::Bool(b) => Ok(*b),
@@ -349,10 +391,10 @@ fn as_list(v: &Val) -> Result<Vec<Val>> {
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
         "neg" | "abs" | "not" | "id" | "head" | "tail" | "length" | "null" | "reverse" | "fst"
-        | "snd" | "print" | "rand" | "now" | "panic" | "read_file" => 1,
+        | "snd" | "print" | "rand" | "now" | "panic" | "read_file" | "http_get" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
-        | "apply" | "write_file" => 2,
+        | "apply" | "write_file" | "http_post" | "spawn" => 2,
         "foldl" | "foldr" | "compose" => 3,
         _ => return None,
     })
@@ -367,6 +409,9 @@ pub fn builtin_effect(name: &str) -> Option<&'static str> {
         "panic" => Some("panic"),
         "read_file" => Some("fs.read"),
         "write_file" => Some("fs.write"),
+        "http_get" => Some("net.read"),
+        "http_post" => Some("net.write"),
+        "spawn" => Some("process.spawn"),
         _ => None,
     }
 }
@@ -673,6 +718,33 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             let contents = as_str(&a[1])?;
             effect_op("fs.write", json!({ "path": path.as_str() }), move || {
                 std::fs::write(&path, &contents).map(|_| Val::Unit).map_err(|e| anyhow!("write_file {path}: {e}"))
+            })?
+        }
+        "http_get" => {
+            // net.read: a real http:// GET (live), or the recorded body (replay).
+            let url = as_str(&a[0])?;
+            effect_op("net.read", json!({ "url": url.as_str() }), move || {
+                http_request("GET", &url, None).map(Val::Str)
+            })?
+        }
+        "http_post" => {
+            // net.write: a real http:// POST (live), or the recorded response (replay).
+            let url = as_str(&a[0])?;
+            let body = as_str(&a[1])?;
+            effect_op("net.write", json!({ "url": url.as_str() }), move || {
+                http_request("POST", &url, Some(&body)).map(Val::Str)
+            })?
+        }
+        "spawn" => {
+            // process.spawn: run a real subprocess and return its stdout (live), or recorded (replay).
+            let cmd = as_str(&a[0])?;
+            let args = as_str_list(&a[1])?;
+            effect_op("process.spawn", json!({ "cmd": cmd.as_str(), "args": args }), move || {
+                let out = std::process::Command::new(&cmd)
+                    .args(&args)
+                    .output()
+                    .map_err(|e| anyhow!("spawn {cmd}: {e}"))?;
+                Ok(Val::Str(String::from_utf8_lossy(&out.stdout).into_owned()))
             })?
         }
         other => bail!("unknown builtin: {other}"),
@@ -1135,5 +1207,38 @@ mod tests {
         clear_effects();
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn spawn_and_net_effects_gate_trace_and_replay() {
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+
+        // process.spawn: real `echo hi` -> "hi\n"; ungranted rejected; replay reproduces (no spawn).
+        let spawn_body = json!({ "kind": "lambda", "params": [{ "name": "c" }, { "name": "a" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "spawn" },
+                      "args": [{ "kind": "var", "name": "c" }, { "kind": "var", "name": "a" }] } });
+        let args = json!({ "kind": "list", "elems": [s("hi")] });
+        set_effect_grants(Vec::<String>::new());
+        assert!(eval_body(&spawn_body, &[s("echo"), args.clone()]).is_err());
+        clear_effects();
+        set_effect_grants(vec!["process.spawn".to_string()]);
+        let out = eval_body(&spawn_body, &[s("echo"), args.clone()]).unwrap();
+        let trace = take_effect_trace();
+        clear_effects();
+        assert_eq!(out, s("hi\n"));
+        assert_eq!(trace[0]["effect"], "process.spawn");
+        set_effect_replay(trace);
+        assert_eq!(eval_body(&spawn_body, &[s("/no/such/cmd"), args]).unwrap(), s("hi\n"));
+        clear_effects();
+
+        // net.read: https is rejected (no TLS); replay returns the recorded body without any network.
+        let get_body = json!({ "kind": "lambda", "params": [{ "name": "u" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "http_get" }, "args": [{ "kind": "var", "name": "u" }] } });
+        set_effect_grants(vec!["net.read".to_string()]);
+        assert!(eval_body(&get_body, &[s("https://example.com")]).is_err());
+        clear_effects();
+        set_effect_replay(vec![json!({ "effect": "net.read", "detail": { "url": "http://x" }, "result": s("BODY") })]);
+        assert_eq!(eval_body(&get_body, &[s("http://anything")]).unwrap(), s("BODY"));
+        clear_effects();
     }
 }

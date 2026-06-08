@@ -259,6 +259,9 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
         }
         "read_file" => Ty::Fun(vec![con("string")], Box::new(con("string"))),
         "write_file" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("unit"))),
+        "http_get" => Ty::Fun(vec![con("string")], Box::new(con("string"))),
+        "http_post" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("string"))),
+        "spawn" => Ty::Fun(vec![con("string"), list(con("string"))], Box::new(con("string"))),
         "lt" | "le" | "gt" | "ge" => Ty::Fun(vec![con("int"), con("int")], Box::new(con("bool"))),
         "and" | "or" | "xor" => Ty::Fun(vec![con("bool"), con("bool")], Box::new(con("bool"))),
         "not" => Ty::Fun(vec![con("bool")], Box::new(con("bool"))),
