@@ -525,12 +525,35 @@ fn references_self(node: &J) -> bool {
     false
 }
 
-/// Run a solver on a certificate. Returns the parsed outcome. Spawning failure (no binary) maps to
-/// `NoSolver`; any other I/O failure is an error.
-pub fn run_solver(cert: &Certificate, solver: &str) -> Result<ProofOutcome> {
-    use std::io::Write;
+/// A solver's verdict on one `(check-sat)` script.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SatAnswer {
+    /// `unsat` — the asserted constraints are unsatisfiable.
+    Unsat,
+    /// `sat` — satisfiable, with the model text that followed (if any).
+    Sat(String),
+    /// `unknown`, or the solver hit its time limit (recursive defs + quantifiers can make a query
+    /// non-terminating; we bound it so an undecidable query reports `unknown` rather than hanging).
+    Unknown,
+    /// The solver binary was not found on PATH.
+    NoSolver,
+}
+
+const SOLVER_TIMEOUT_SECS: u64 = 10;
+
+/// Run an SMT-LIB 2 script through `solver` (reading from stdin via `-in`), bounded by a wall-clock
+/// timeout so an undecidable query becomes `Unknown` instead of hanging. z3's own `-t:` soft limit is
+/// passed too (it returns `unknown` cleanly); the process kill is the backstop for any solver.
+pub fn run_smt(script: &str, solver: &str) -> Result<SatAnswer> {
+    use std::io::{Read, Write};
     use std::process::{Command, Stdio};
-    let mut child = match Command::new(solver)
+    use std::time::{Duration, Instant};
+
+    let mut cmd = Command::new(solver);
+    if solver == "z3" || solver.ends_with("/z3") {
+        cmd.arg(format!("-t:{}", SOLVER_TIMEOUT_SECS * 1000)); // per-check soft timeout (ms)
+    }
+    let mut child = match cmd
         .arg("-in")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -538,27 +561,53 @@ pub fn run_solver(cert: &Certificate, solver: &str) -> Result<ProofOutcome> {
         .spawn()
     {
         Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(ProofOutcome::NoSolver),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(SatAnswer::NoSolver),
         Err(e) => return Err(anyhow!("spawning solver `{solver}`: {e}")),
     };
     child
         .stdin
         .take()
         .ok_or_else(|| anyhow!("solver stdin unavailable"))?
-        .write_all(cert.smt.as_bytes())
-        .map_err(|e| anyhow!("writing to solver: {e}"))?;
-    let out = child.wait_with_output().map_err(|e| anyhow!("waiting on solver: {e}"))?;
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let first = stdout.split_whitespace().next().unwrap_or("");
-    Ok(match first {
-        "unsat" => ProofOutcome::Proved,
-        "sat" => {
-            // Everything after the first line is the model.
-            let model = stdout.splitn(2, '\n').nth(1).unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
-            ProofOutcome::Refuted(model)
+        .write_all(script.as_bytes())
+        .map_err(|e| anyhow!("writing to solver: {e}"))?; // dropping the handle closes stdin (EOF)
+
+    // Poll for completion, killing the process if it overruns the timeout backstop.
+    let deadline = Instant::now() + Duration::from_secs(SOLVER_TIMEOUT_SECS + 5);
+    loop {
+        match child.try_wait().map_err(|e| anyhow!("waiting on solver: {e}"))? {
+            Some(_) => break,
+            None => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Ok(SatAnswer::Unknown); // timed out ⇒ undecided
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
         }
-        "unknown" => ProofOutcome::Unknown,
-        _ => return Err(anyhow!("unexpected solver output: {}", stdout.trim())),
+    }
+    let mut stdout = String::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = out.read_to_string(&mut stdout);
+    }
+    match stdout.split_whitespace().next().unwrap_or("") {
+        "unsat" => Ok(SatAnswer::Unsat),
+        "sat" => {
+            let model = stdout.splitn(2, '\n').nth(1).unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
+            Ok(SatAnswer::Sat(model))
+        }
+        "unknown" | "timeout" | "" => Ok(SatAnswer::Unknown),
+        _ => Err(anyhow!("unexpected solver output: {}", stdout.trim())),
+    }
+}
+
+/// Run a solver on a certificate, mapping the SAT answer to a proof outcome.
+pub fn run_solver(cert: &Certificate, solver: &str) -> Result<ProofOutcome> {
+    Ok(match run_smt(&cert.smt, solver)? {
+        SatAnswer::Unsat => ProofOutcome::Proved,
+        SatAnswer::Sat(model) => ProofOutcome::Refuted(model),
+        SatAnswer::Unknown => ProofOutcome::Unknown,
+        SatAnswer::NoSolver => ProofOutcome::NoSolver,
     })
 }
 

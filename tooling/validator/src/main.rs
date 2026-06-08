@@ -650,25 +650,58 @@ fn cmd_prove(
     for (i, prop) in props.iter().enumerate() {
         let name = prop.get("name").and_then(|v| v.as_str()).unwrap_or("<unnamed>").to_string();
         let expr = prop.get("expr").ok_or_else(|| anyhow::anyhow!("property `{name}` missing `expr`"))?;
+        let safe: String = name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
+        let write_cert = |suffix: &str, smt: &str| -> Result<()> {
+            if let Some(dir) = smt_out {
+                let path = dir.join(format!("{i:02}-{safe}{suffix}.smt2"));
+                std::fs::write(&path, smt).map_err(|e| anyhow::anyhow!("writing {}: {e}", path.display()))?;
+            }
+            Ok(())
+        };
+
         let (outcome, cert) = nl_validator::prove_property(expr, body_ast.as_ref(), solver);
-        // Write the certificate (the re-checkable proof obligation) regardless of the verdict.
-        if let (Some(dir), Some(cert)) = (smt_out, &cert) {
-            let safe: String = name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
-            let path = dir.join(format!("{i:02}-{safe}.smt2"));
-            std::fs::write(&path, &cert.smt).map_err(|e| anyhow::anyhow!("writing {}: {e}", path.display()))?;
+        if let Some(cert) = &cert {
+            write_cert("", &cert.smt)?;
         }
-        let label = match &outcome {
-            ProofOutcome::Proved => "PROVED       holds for all inputs (unsat negation)".to_string(),
-            ProofOutcome::Refuted(model) => {
-                refuted.push(name.clone());
-                format!("REFUTED      counterexample: {}", if model.is_empty() { "(model)" } else { model })
+        // First-order SMT can't reach list/recursion laws — fall back to structural induction.
+        let label = if matches!(outcome, ProofOutcome::Unsupported(_)) {
+            use nl_validator::InductionOutcome;
+            let (iout, icert) = nl_validator::prove_by_induction(expr, body_ast.as_ref(), solver);
+            if let Some(c) = &icert {
+                write_cert(".base", &c.base)?;
+                write_cert(".step", &c.step)?;
             }
-            ProofOutcome::Unknown => "UNKNOWN      solver could not decide".to_string(),
-            ProofOutcome::NoSolver => {
-                no_solver = true;
-                format!("NO-SOLVER    `{solver}` not found; certificate emitted, re-check elsewhere")
+            match iout {
+                InductionOutcome::Proved => {
+                    let v = icert.as_ref().map(|c| c.var.as_str()).unwrap_or("?");
+                    format!("PROVED       by structural induction on `{v}` (base + step both unsat)")
+                }
+                InductionOutcome::Failed(why) => format!("NOT-PROVED   induction did not close: {why}"),
+                InductionOutcome::Unknown => "UNKNOWN      induction step needs a lemma (solver undecided)".to_string(),
+                InductionOutcome::NoSolver => {
+                    no_solver = true;
+                    format!("NO-SOLVER    `{solver}` not found; obligations emitted, re-check elsewhere")
+                }
+                // Neither engine applies — report the first-order reason (the more general one).
+                InductionOutcome::Unsupported(_) => match &outcome {
+                    ProofOutcome::Unsupported(why) => format!("UNSUPPORTED  {why}"),
+                    _ => "UNSUPPORTED".to_string(),
+                },
             }
-            ProofOutcome::Unsupported(why) => format!("UNSUPPORTED  {why}"),
+        } else {
+            match &outcome {
+                ProofOutcome::Proved => "PROVED       holds for all inputs (unsat negation)".to_string(),
+                ProofOutcome::Refuted(model) => {
+                    refuted.push(name.clone());
+                    format!("REFUTED      counterexample: {}", if model.is_empty() { "(model)" } else { model })
+                }
+                ProofOutcome::Unknown => "UNKNOWN      solver could not decide".to_string(),
+                ProofOutcome::NoSolver => {
+                    no_solver = true;
+                    format!("NO-SOLVER    `{solver}` not found; certificate emitted, re-check elsewhere")
+                }
+                ProofOutcome::Unsupported(why) => format!("UNSUPPORTED  {why}"),
+            }
         };
         println!("{name}: {label}");
     }

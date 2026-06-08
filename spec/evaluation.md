@@ -122,9 +122,34 @@ asks a solver (z3 by default, anything that speaks SMT-LIB on `--solver`) whethe
 The emitted SMT-LIB script **is the proof certificate** (`--smt-out <dir>` writes one per property):
 any SMT solver re-checks it independently, so a receiver verifies by re-checking the certificate
 rather than trusting this tool (principles 3, 5). Solving is deterministic for a given script + solver,
-so the certificate is the replay log. Honest scope: this is decidable quantifier-free linear/nonlinear
-integer + boolean reasoning, not inductive proof over recursive structures — unbounded lists and
-recursion remain future work (an inductive backend).
+so the certificate is the replay log. Scope of this first-order pass: decidable quantifier-free
+linear/nonlinear integer + boolean reasoning. Laws over recursive structures (lists) are handled by the
+inductive backend below.
+
+## Inductive proof (unbounded recursive structures)
+
+When the first-order pass reports UNSUPPORTED because a law ranges over lists, `prove` falls back to a
+**structural-induction** backend (`prove.rs` → `induct.rs`). A plain SMT query over recursively-defined
+functions plus a universal quantifier is undecidable — the solver will not invent the induction — so
+the tool supplies the induction principle and lets the solver discharge each case. For
+`forall xs. P(xs)` over `Lst = nil | cons(Int, Lst)`:
+
+- **base** — prove `P(nil)`;
+- **step** — for fresh `h`, `t`, *assume* `P(t)` (the induction hypothesis) and prove `P(cons(h, t))`.
+
+Each case is an SMT-LIB obligation: the list operations the law uses (`length`, `append`, `reverse`,
+`map`, `filter`, `cons`, …) are emitted as z3 `define-fun-rec` definitions over the `Lst` datatype, the
+case substitution is applied, the IH is asserted (step only), and the negated goal is checked. **Both
+`unsat` ⇒ PROVED by induction.** `map`/`filter` take at most one function/predicate, modelled as `id`
+or a single uninterpreted symbol — so `forall f xs. length(map(f, xs)) = length(xs)` is proved with `f`
+*uninterpreted* (i.e. for every f). The base and step scripts together are the re-checkable certificate.
+
+Where one unfold of the definitions plus the IH does not close the step — a law that needs an auxiliary
+lemma, classically `reverse(reverse(xs)) = xs` — the solver (run under a wall-clock timeout, so an
+undecidable query can never hang) returns UNKNOWN. That is reported honestly, never as a false PROVED.
+Proved live: `map(id, xs) = xs`, `length(map(f, xs)) = length(xs)`, `length(append(xs, ys)) =
+length(xs) + length(ys)` — each by induction; `reverse∘reverse = id` → UNKNOWN. Lemma discovery,
+`foldl`/`foldr`, and induction over user-defined recursive bodies (`self`) remain future work.
 
 ## Effect enforcement
 
