@@ -1,0 +1,77 @@
+{
+  "body": {
+    "claim": {
+      "expr": {
+        "args": [
+          {
+            "args": [
+              {
+                "kind": "lit",
+                "value": {
+                  "kind": "fn_ref",
+                  "target": "fn_0d7bd32d7d3ff63299e4139b051ffcc6e18a0ef23b670feb186dd0262c511c8e"
+                }
+              },
+              {
+                "kind": "lit",
+                "value": {
+                  "elems": [
+                    {
+                      "kind": "nat",
+                      "value": 1
+                    },
+                    {
+                      "kind": "nat",
+                      "value": 2
+                    },
+                    {
+                      "kind": "nat",
+                      "value": 3
+                    }
+                  ],
+                  "kind": "list"
+                }
+              }
+            ],
+            "kind": "app",
+            "op": "fn_a61dc022499f34d61b491402961d3d76833916ae5f214c887f50567d82e7f229"
+          },
+          {
+            "kind": "lit",
+            "value": {
+              "elems": [
+                {
+                  "kind": "int",
+                  "value": 2
+                },
+                {
+                  "kind": "int",
+                  "value": 4
+                },
+                {
+                  "kind": "int",
+                  "value": 6
+                }
+              ],
+              "kind": "list"
+            }
+          }
+        ],
+        "kind": "app",
+        "op": "eq"
+      },
+      "kind": "predicate"
+    },
+    "evidence": null,
+    "subject": "fn_a61dc022499f34d61b491402961d3d76833916ae5f214c887f50567d82e7f229"
+  },
+  "constraints": null,
+  "from": "did:nova:16efab1d73f507584ef08f79c72b16b988d02868e2eb02686a61a9db0076518a",
+  "hash": "msg_2900ef9c7dbf38aea65a225224e0f76819c645c0239fd6216db35704866bf6e4",
+  "in_reply_to": "msg_3efb4fd79c4f4b81f8430baeb301be9d8a19841e0c5725c9e853796441414d05",
+  "kind": "assert",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:fsm/xN3kHoZmm8Eco5n9Be4z+Fe9cbdWaQg5od7tulglL8pAxr4G3nrO2U/zX7AoB0i5Q3Pee12CYHLlJ4paCQ==",
+  "timestamp": "2026-06-08T12:00:05Z",
+  "to": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e"
+}

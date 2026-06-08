@@ -571,7 +571,12 @@ fn eval_predicate(node: &J, env: &Env, self_fn: &Option<Val>) -> Option<Val> {
                 env.get(name).cloned()
             }
         }
-        "lit" => decode_pred_lit(node.get("value")?),
+        "lit" => {
+            // A bare scalar JSON literal, or a structured value-expression payload (the schema
+            // allows the latter for compound literals — lists, fn_refs, records, …).
+            let v = node.get("value")?;
+            decode_pred_lit(v).or_else(|| decode_value(v).ok())
+        }
         "forall" | "exists" => {
             // Range the quantifier over THIS example: bind the bound vars positionally to arg0..argN.
             let mut env2 = env.clone();
@@ -599,6 +604,13 @@ fn eval_predicate(node: &J, env: &Env, self_fn: &Option<Val>) -> Option<Val> {
                     (Val::Bool(a), Val::Bool(b)) => Some(Val::Bool(a == b)),
                     _ => None,
                 },
+                // A content-address op (`fn_…`/`expr_…`) is a commons function referenced by hash —
+                // apply it as a `fn_ref` so the thread-local resolver links it (set during claim
+                // verification, see `eval_claim`). If no resolver is installed the apply errors →
+                // None → undecidable, so this never silently passes.
+                _ if op.starts_with("fn_") || op.starts_with("expr_") => {
+                    apply(Val::FnRef(op.to_string()), args).ok()
+                }
                 // Everything else — eq/neq/and/or/not, arithmetic, comparisons, list ops, and the
                 // higher-order map/filter/fold/compose/apply — IS a builtin. Run it.
                 _ => {
@@ -645,6 +657,14 @@ pub fn runtime_verdict(expr: &J, examples: &[J], self_fn: &Option<Val>) -> Verdi
 /// Build the executable function-under-test from a body AST (for `self`), if it evaluates.
 pub fn self_fn_from_body(body: &J) -> Option<Val> {
     eval(body, &Env::new()).ok()
+}
+
+/// Evaluate a closed predicate-expression — a Nova Locutio `assert` claim — to a runtime value,
+/// resolving any content-addressed function ops (`fn_…`/`expr_…`) through the installed resolver
+/// (set via [`set_resolver`]). `None` if undecidable. Used by claim verification: the receiver
+/// re-runs the claim instead of trusting the asserter (principle 3 — verification is re-execution).
+pub fn eval_claim(expr: &J) -> Option<Val> {
+    eval_predicate(expr, &Env::new(), &None)
 }
 
 #[cfg(test)]

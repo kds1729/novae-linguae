@@ -1,6 +1,6 @@
 {
   "schema_version": "0.2.0",
-  "hash": "fn_c81d8dbfa3c91e953d911cca506f6980da5281f63c4541f340771f4b61a7d6eb",
+  "hash": "fn_a61dc022499f34d61b491402961d3d76833916ae5f214c887f50567d82e7f229",
   "name_hints": ["map", "fmap", "list_map"],
   "signature": {
     "type": {
@@ -185,5 +185,5 @@
   "intent_tags": ["transform/list", "elementwise"],
   "derived_from": null,
   "supersedes": "fn_fd20f137d331c42953ad164bd22cd1e6141cf310999818682832da4eb5fa8b66",
-  "body_hash": "expr_8f2c7d6e5b4a392817160f0e0d0c0b0a09080706050403020100ffeeddccbbaa"
+  "body_hash": "expr_cb87c2fd6337a6bc5d20b4de7d82dfb2b4de4317c56d69df82efae2cd88106c2"
 }

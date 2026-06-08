@@ -1,0 +1,15 @@
+{
+  "kind": "lambda",
+  "params": [
+    { "name": "f" },
+    { "name": "xs" }
+  ],
+  "body": {
+    "kind": "app",
+    "fn": { "kind": "var", "name": "map" },
+    "args": [
+      { "kind": "var", "name": "f" },
+      { "kind": "var", "name": "xs" }
+    ]
+  }
+}

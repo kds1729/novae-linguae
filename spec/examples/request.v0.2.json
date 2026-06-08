@@ -1,0 +1,42 @@
+{
+  "body": {
+    "action": "apply",
+    "args": [
+      {
+        "kind": "fn_ref",
+        "target": "fn_0d7bd32d7d3ff63299e4139b051ffcc6e18a0ef23b670feb186dd0262c511c8e"
+      },
+      {
+        "elems": [
+          {
+            "kind": "nat",
+            "value": 1
+          },
+          {
+            "kind": "nat",
+            "value": 2
+          },
+          {
+            "kind": "nat",
+            "value": 3
+          }
+        ],
+        "kind": "list"
+      }
+    ],
+    "target": "fn_a61dc022499f34d61b491402961d3d76833916ae5f214c887f50567d82e7f229"
+  },
+  "constraints": {
+    "budget_tokens": 1000,
+    "capabilities": [],
+    "deadline_ms": 5000
+  },
+  "from": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+  "hash": "msg_3efb4fd79c4f4b81f8430baeb301be9d8a19841e0c5725c9e853796441414d05",
+  "in_reply_to": null,
+  "kind": "request",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:amyYJ8CH3dNOD0dELt0bJMfEOQ5oE84plpW4lCPl6sImrtIkmprEbAofy3jZcDIYb1xGXnrVh92m8Z+2gGidAw==",
+  "timestamp": "2026-06-08T12:00:00Z",
+  "to": "did:nova:16efab1d73f507584ef08f79c72b16b988d02868e2eb02686a61a9db0076518a"
+}

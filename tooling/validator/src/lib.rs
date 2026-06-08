@@ -36,6 +36,9 @@ pub use typecheck::{typecheck, typecheck_record};
 
 pub mod seal;
 
+pub mod respond;
+pub use respond::{respond_to_request, verify_claim};
+
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {
     let text = std::fs::read_to_string(path)
@@ -285,6 +288,44 @@ pub fn hash_artifact_with_kind(value: &Value, kind: ArtifactKind) -> Result<Stri
 pub fn hash_artifact(value: &Value) -> Result<String> {
     let kind = ArtifactKind::detect(value)?;
     hash_artifact_with_kind(value, kind)
+}
+
+/// Build an address → body-AST link map from a directory of records / body-expression files, for
+/// composition and the agent loop (`run --records`, `respond --records`).
+///
+/// A body-expression file (top-level `kind` is one of the seven body kinds) is indexed by its own
+/// `expr_…` content-address. A function record (`hash` starts `fn_`) whose `body_hash` resolves to
+/// one of those bodies is additionally indexed by its `fn_…` address. So both a record's `body_hash`
+/// and a `fn_ref` to the record itself resolve to the same body — that's what lets composites run
+/// end-to-end (principle 4: assemble from existing records).
+pub fn build_link_map(dir: &Path) -> Result<std::collections::HashMap<String, Value>> {
+    use std::collections::HashMap;
+    const BODY_KINDS: [&str; 7] = ["lambda", "var", "lit", "app", "let", "case", "field"];
+    let mut bodies_by_expr: HashMap<String, Value> = HashMap::new();
+    let mut records = vec![];
+    for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let v = read_json(&path)?;
+        let is_record = v.get("hash").and_then(|h| h.as_str()).is_some_and(|h| h.starts_with("fn_"));
+        if is_record {
+            records.push(v);
+        } else if v.get("kind").and_then(|k| k.as_str()).is_some_and(|k| BODY_KINDS.contains(&k)) {
+            let addr = hash_artifact_with_kind(&v, ArtifactKind::BodyExpression)?;
+            bodies_by_expr.insert(addr, v);
+        }
+    }
+    let mut map = bodies_by_expr.clone();
+    for r in records {
+        if let (Some(h), Some(bh)) = (r["hash"].as_str(), r.get("body_hash").and_then(|b| b.as_str())) {
+            if let Some(b) = bodies_by_expr.get(bh) {
+                map.insert(h.to_string(), b.clone());
+            }
+        }
+    }
+    Ok(map)
 }
 
 // ---- hash verification ----

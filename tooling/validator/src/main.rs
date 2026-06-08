@@ -1,6 +1,6 @@
 //! `nl-validator`: reference CLI for validating Novae Linguae artifacts.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -184,6 +184,36 @@ enum Commands {
         #[arg(long)]
         body: PathBuf,
     },
+    /// Nova Locutio agent loop: consume a signed `request` (action `apply`), resolve and run the
+    /// target against the request's value-expression args, and emit a signed `assert` whose
+    /// `predicate` claim states `eq(target(args…), result)`, threaded to the request by
+    /// `in_reply_to` and addressed back to the sender (spec/agent-loop.md). The result is
+    /// self-verifying: any receiver re-runs the claim to confirm. Prints the signed assert JSON.
+    Respond {
+        /// Path to the `request` message to answer.
+        request: PathBuf,
+        /// Directory of records/bodies to resolve the target body and `fn_ref` args against.
+        #[arg(long)]
+        records: PathBuf,
+        /// Seed string used to derive the responder's Ed25519 signing identity.
+        #[arg(long)]
+        seed: String,
+        /// Optional ISO 8601 timestamp for the assert (default: null, keeping the reply
+        /// deterministic for a given seed).
+        #[arg(long)]
+        timestamp: Option<String>,
+    },
+    /// Verify a Nova Locutio `assert` by RE-RUNNING its `predicate` claim against the commons:
+    /// resolve the claim's content-addressed function(s) from `--records` and evaluate it. The
+    /// receiver half of the agent loop — trust nothing, re-execute (principle 3). Exit 0 if the
+    /// claim re-runs true (CONFIRMED), 1 if false (REFUTED) or undecidable.
+    VerifyClaim {
+        /// Path to the `assert` message whose claim to re-run.
+        assert: PathBuf,
+        /// Directory of records/bodies to resolve the claim's functions against.
+        #[arg(long)]
+        records: PathBuf,
+    },
     /// Parse a Nova Lingua type-expression surface string into its JSON AST.
     /// Reads the surface string from the `input` argument, or from stdin when
     /// omitted. Writes the AST as pretty JSON to stdout. See
@@ -278,6 +308,10 @@ fn main() -> ExitCode {
         Commands::Eval { body, args } => (cmd_eval(&body, &args), false),
         Commands::Run { record, body, records } => (cmd_run(&record, body.as_ref(), records.as_ref()), false),
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
+        Commands::Respond { request, records, seed, timestamp } => {
+            (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
+        }
+        Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
         #[cfg(feature = "surface")]
         Commands::ParseType { input } => (cmd_parse_type(input), false),
         #[cfg(feature = "surface")]
@@ -436,45 +470,41 @@ fn cmd_typecheck(record: &PathBuf, body: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+fn cmd_respond(
+    request: &PathBuf,
+    records: &PathBuf,
+    seed: &str,
+    timestamp: Option<&str>,
+) -> Result<()> {
+    use std::io::Write;
+    let request = nl_validator::read_json(request)?;
+    let link_map = nl_validator::build_link_map(records)?;
+    let key = nl_validator::signing_key_from_seed(seed);
+    let assert = nl_validator::respond_to_request(&request, link_map, &key, timestamp)?;
+    let pretty = serde_json::to_string_pretty(&assert)
+        .map_err(|e| anyhow::anyhow!("serializing assert reply: {e}"))?;
+    std::io::stdout().write_all(pretty.as_bytes())?;
+    std::io::stdout().write_all(b"\n")?;
+    Ok(())
+}
+
+fn cmd_verify_claim(assert: &PathBuf, records: &PathBuf) -> Result<()> {
+    let assert = nl_validator::read_json(assert)?;
+    let link_map = nl_validator::build_link_map(records)?;
+    if nl_validator::verify_claim(&assert, link_map)? {
+        println!("CONFIRMED  the claim re-ran true against the commons");
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("REFUTED  the claim re-ran false"))
+    }
+}
+
 fn cmd_eval(body: &PathBuf, args: &[PathBuf]) -> Result<()> {
     let body = nl_validator::read_json(body)?;
     let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
     let result = nl_validator::eval_body(&body, &argv)?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
-}
-
-/// Build an address → body-AST link map from a directory of records / body-expression files. A
-/// function record's content-address (`fn_…`) maps to its `body_hash`'s body; a body's own `expr_…`
-/// address maps to itself. Used to resolve `body_hash` and `fn_ref`s during a linked run.
-fn build_link_map(dir: &PathBuf) -> Result<std::collections::HashMap<String, serde_json::Value>> {
-    use std::collections::HashMap;
-    const BODY_KINDS: [&str; 7] = ["lambda", "var", "lit", "app", "let", "case", "field"];
-    let mut bodies_by_expr: HashMap<String, serde_json::Value> = HashMap::new();
-    let mut records = vec![];
-    for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
-        let path = entry?.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let v = nl_validator::read_json(&path)?;
-        let is_record = v.get("hash").and_then(|h| h.as_str()).is_some_and(|h| h.starts_with("fn_"));
-        if is_record {
-            records.push(v);
-        } else if v.get("kind").and_then(|k| k.as_str()).is_some_and(|k| BODY_KINDS.contains(&k)) {
-            let addr = nl_validator::hash_artifact_with_kind(&v, nl_validator::ArtifactKind::BodyExpression)?;
-            bodies_by_expr.insert(addr, v);
-        }
-    }
-    let mut map = bodies_by_expr.clone();
-    for r in records {
-        if let (Some(h), Some(bh)) = (r["hash"].as_str(), r.get("body_hash").and_then(|b| b.as_str())) {
-            if let Some(b) = bodies_by_expr.get(bh) {
-                map.insert(h.to_string(), b.clone());
-            }
-        }
-    }
-    Ok(map)
 }
 
 fn cmd_run(record: &PathBuf, body: Option<&PathBuf>, records: Option<&PathBuf>) -> Result<()> {
@@ -484,7 +514,7 @@ fn cmd_run(record: &PathBuf, body: Option<&PathBuf>, records: Option<&PathBuf>) 
         (None, Some(dir)) => {
             // Link: resolve the record's body_hash from the directory, and set the resolver so that
             // fn_ref arguments resolve to their referenced bodies (composition).
-            let map = build_link_map(dir)?;
+            let map = nl_validator::build_link_map(dir)?;
             let bh = record
                 .get("body_hash")
                 .and_then(|b| b.as_str())

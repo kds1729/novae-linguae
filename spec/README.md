@@ -18,6 +18,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `commitment-expression.schema.json` | v0.1 draft | Structured AST for `commit.commitment` (apply / provide / refrain) |
 | `surface-syntax.md` | v0.1 | Concrete syntax for all four expression sub-languages (type, predicate, value, body): grammar, infix-to-AST mapping, canonical pretty-print rules, and round-trip requirement. Parser/pretty-printer shipped in `nl-validator` (`parse-*`/`unparse-*` subcommands), with round-trip conformance vectors for all four sub-languages |
 | `evaluation.md` | v0.1 | Normative-by-reference spec for the semantic core: how a body **executes** (call-by-value, closures, currying, `case`, builtins incl. map/filter/fold/compose, `fn_ref` composition) and how it is **type-checked** (Hindley-Milner, skolemized `forall`). Implemented in `nl-validator` (`eval`/`run`/`typecheck`/`check-properties --body`). Load-bearing for principles 3 and 9. |
+| `agent-loop.md` | v0.2 | Normative-by-reference spec for the **Nova Locutio agent loop**: a responder consumes a signed `request` (`apply`), resolves + **runs** the target over its value-expression args (joining a Nova Locutio message to a Nova Lingua evaluation), and emits a signed `assert` whose `predicate` claim is the computed equation `eq(target(args…), result)`; any receiver **re-runs** the claim to confirm it (verification is re-execution — no privileged party). Implemented in `nl-validator` (`respond` / `verify-claim`). Load-bearing for principles 1, 3, 4, 6, 7. |
 | `canonical-serialization.md` | v0.1 | Normative spec for canonical form (JCS RFC 8785) and hashing (BLAKE3-256) |
 | `trust-model.md` | v0.1 | Normative spec for the trust model: local trust policy + capability tokens + attestations, no central authority. Built on already-shipped *Nova Locutio* primitives. |
 | `intent-tag-vocabulary.md` | v0.1 | Controlled vocabulary for `intent_tags`: 16 top-level categories (`transform`, `predicate`, `aggregate`, `filter`, `query`, `parse`, `serialize`, `io`, `arithmetic`, `math`, `logical`, `string`, `concurrent`, `crypto`, `time`, `coll`) plus property-modifier tags (`pure`, `elementwise`, `idempotent`, …). Non-vocab tags still validate; cross-agent agreement is the benefit. |
@@ -29,16 +30,19 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `commons.md` | v0.2 | Normative spec for the commons: a content-addressed, self-verifying, federatable store + discovery protocol (publish / resolve / query / search / sync). Engine-agnostic — the store is untrusted infrastructure (clients verify by hash + signature), with no central authority (principle 7). Reference node (Django + Postgres/pgvector + Redis) is the planned implementation. |
 | `resilience.md` | design | Forward-looking (not yet implemented) availability/anti-sabotage design for the public service **Arca**: the "transport is untrusted" property, seed bundles, the standard `.nlb` commons-bundle release-artifact format, and a pluggable censorship-resistant bootstrap (blockchain anchor / Nostr / IPNS / DNS). Deployment + cost-control counterpart at [`../tooling/commons-node/DEPLOYMENT.md`](../tooling/commons-node/DEPLOYMENT.md). |
 | `examples/map.json` | example | Concrete v0.1 function record for `map` (string surface form for type / predicate / value fields) |
-| `examples/map.v0.2.json` | example | Concrete v0.2 function record for `map` (structured ASTs throughout); `supersedes` points at the v0.1 record |
+| `examples/map.v0.2.json` | example | Concrete v0.2 function record for `map` (structured ASTs throughout); `supersedes` points at the v0.1 record. `body_hash` resolves to the committed [`body-map.json`](examples/body-map.json), so `map` is fully runnable/typecheckable (`run --records`, `typecheck`) like `double` |
 | `examples/double.v0.2.json` | example | Concrete v0.2 function record for `double` (a `nat -> nat` function); referenced by `map.v0.2.json`'s `examples.args[].fn_ref` |
 | `examples/type-map.json` | example | The type of `map` (`forall a b. (a -> b) -> List a -> List b`) as a standalone structured type-expression AST |
 | `examples/predicate-identity.json` | example | The identity property of `map` as a standalone structured predicate AST |
 | `examples/value-list-int.json` | example | The list `[1, 2, 3]` of natural numbers as a standalone structured value AST |
 | `examples/body-double.json` | example | The body of `double` as a structured body-expression AST: `\n -> add(n, n)` |
 | `examples/body-is-zero.json` | example | A `case`-using body: `\n -> case n of 0 -> True; _ -> False` (exercises pattern matching and literal/wildcard patterns) |
+| `examples/body-map.json` | example | The body of `map` as a structured body-expression AST: `\f xs -> map(f, xs)` (the commons `map` over the primitive `map`, as `double` is over the primitive `add`). `map.v0.2.json`'s `body_hash` resolves to it; `typecheck` confirms it against the declared `forall a b. (a -> b) -> List a -> List b` |
 | `examples/claim-satisfies-identity.json` | example | A `satisfies` claim asserting that the v0.2 map record satisfies its `identity` property |
 | `examples/commitment-apply-double.json` | example | An `apply` commitment to call `double(42)` by end of 2026 |
 | `examples/request.json` | example | Concrete `request` message (apply `map` to `[1,2,3]`); signed with deterministic seed `novae-linguae-example-claude` |
+| `examples/request.v0.2.json` | example | Concrete **v0.2** `request` (the agent-loop input): apply `map` to (`double` as a `fn_ref`, `[1,2,3]`) with **value-expression** args; signed by `novae-linguae-example-claude` (`did:nova:ea9b…505e`), addressed to the example responder. Driven by `nl-validator respond` ([`agent-loop.md`](agent-loop.md)) |
+| `examples/assert-result.v0.2.json` | example | The responder's signed `assert` reply to `request.v0.2.json`, produced by `nl-validator respond`: a `predicate` claim `eq( map(double, [1,2,3]), [2,4,6] )`, threaded by `in_reply_to` and addressed back to the requester. `nl-validator verify-claim … --records examples/` re-runs it to CONFIRMED |
 | `examples/assert.json` | example | Concrete `assert` message (v0.1 — string claim) claiming an identity property; signed with deterministic seed `novae-linguae-example-verifier` |
 | `examples/assert.v0.2.json` | example | Concrete `assert` message (v0.2 — structured `satisfies` claim against `map.json`); signed with deterministic seed `test-agent-v02` |
 | `examples/commit.v0.2.json` | example | Concrete `commit` message (v0.2 — structured `apply` commitment to run `map` on `[1,2,3]` by end of 2026); signed with deterministic seed `test-agent-v02` |
@@ -159,6 +163,11 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 ./tooling/validator/target/release/nl-validator run        spec/examples/double.v0.2.json --records spec/examples/
 ./tooling/validator/target/release/nl-validator typecheck  spec/examples/double.v0.2.json --body spec/examples/body-double.json
 ./tooling/validator/target/release/nl-validator check-properties spec/examples/double.v0.2.json --body spec/examples/body-double.json
+
+# The Nova Locutio agent loop (spec/agent-loop.md): answer a request by running the
+# target, then re-run the resulting assert's claim to confirm it.
+./tooling/validator/target/release/nl-validator respond      spec/examples/request.v0.2.json --records spec/examples/ --seed novae-linguae-example-responder
+./tooling/validator/target/release/nl-validator verify-claim spec/examples/assert-result.v0.2.json --records spec/examples/
 ```
 
 Cross-file `$ref`s resolve against sibling schema files: when a schema references another by its `https://novae-linguae.org/spec/<version>/<file>` identifier, `nl-validator validate` maps that to `<file>` in the schema's own directory. The version path segment is logical only — all schema files live flat in `spec/`. Any JSON Schema 2020-12 validator can also be used for structural checks; the reference is byte-equality of hash and JCS form across implementations.
