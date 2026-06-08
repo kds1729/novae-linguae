@@ -41,7 +41,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingest-common"))
-from nl_core import build_record, build_v2_record, name_hints as _name_hints  # noqa: E402
+from nl_core import (  # noqa: E402
+    build_record, build_v2_record, expr_address, name_hints as _name_hints, write_runnable_dir,
+)
 from nl_effects import effects_from_tokens, terminates_from_tokens  # noqa: E402
 from nl_body import body_ast_from_ts  # noqa: E402
 from nl_toolchain import run_enricher, tool_on_path  # noqa: E402
@@ -546,12 +548,14 @@ def ts_examples(name, pairs, param_types, result_type):
 
 
 def _build_ts_record(name, typevars, params, rettype, slice_text, module_name, v2, examples_map,
-                     with_properties=False):
+                     with_properties=False, bodies=None):
     if v2:
         type_ast, param_types, result_type = ts_function_type(typevars, params, rettype)
         examples = ts_examples(name, examples_map.get(name, []), param_types, result_type)
         if examples:
             body_repr = body_ast_from_ts(name, slice_text) or slice_text
+            if bodies is not None and isinstance(body_repr, dict):
+                bodies[expr_address(body_repr)] = body_repr  # collect executable bodies for --emit-dir
             props, tags = (match_catalog(_name_hints(name, module_name), len(param_types))
                            if with_properties else ([], []))
             return build_v2_record(name, type_ast, examples, body_repr, module_name=module_name,
@@ -723,7 +727,7 @@ def _scan_to_assign(s: str, i: int):
 
 
 def _parse_export(s: str, export_start: int, module_name, v2=False, examples_map=None,
-                  with_properties=False):
+                  with_properties=False, bodies=None):
     """export_start points at 'export'. Returns (record | None, end_index)."""
     examples_map = examples_map or {}
     i = _skip_ws(s, export_start + len("export"))
@@ -742,7 +746,7 @@ def _parse_export(s: str, export_start: int, module_name, v2=False, examples_map
             return None, i
         name, typevars, params, rettype, end = parsed
         rec = _build_ts_record(name, typevars, params, rettype, s[export_start:end],
-                               module_name, v2, examples_map, with_properties)
+                               module_name, v2, examples_map, with_properties, bodies=bodies)
         return rec, end
 
     for word in ("const", "let", "var"):
@@ -770,14 +774,14 @@ def _parse_export(s: str, export_start: int, module_name, v2=False, examples_map
             return None, j
         typevars, params, rettype, end = parsed
         rec = _build_ts_record(name, typevars, params, rettype, s[export_start:end],
-                               module_name, v2, examples_map, with_properties)
+                               module_name, v2, examples_map, with_properties, bodies=bodies)
         return rec, end
 
     return None, i
 
 
 def records_from_source(source: str, module_name: str | None = None, v2: bool = False,
-                        enrich=None, with_properties: bool = False):
+                        enrich=None, with_properties: bool = False, bodies=None):
     """``enrich``: an optional source -> source transform applied before scanning (the toolchain
     seam, see nl_toolchain). None = scanner only — the deterministic, zero-dependency default."""
     if enrich is not None:
@@ -789,7 +793,7 @@ def records_from_source(source: str, module_name: str | None = None, v2: bool = 
     while i < n:
         if (s[i] == "e" and (i == 0 or not _IDENT_CHAR.match(s[i - 1]))
                 and _kw(s, i, "export") is not None):
-            rec, end = _parse_export(s, i, module_name, v2, examples_map, with_properties)
+            rec, end = _parse_export(s, i, module_name, v2, examples_map, with_properties, bodies=bodies)
             if rec is not None:
                 records.append(rec)
             i = max(end, i + 1)
@@ -821,6 +825,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--properties", action="store_true",
                    help="attach curated algebraic laws (property_catalog.json) to recognised functions; "
                         "implies --v2. Verify with `nl-validator check-properties`")
+    p.add_argument("--emit-dir", dest="emit_dir", type=Path, default=None,
+                   help="also write a runnable directory (records + executable bodies as "
+                        "<hash>.json), so `nl-validator run --records <dir>` can execute the functions")
     return p
 
 
@@ -839,8 +846,12 @@ def main(argv=None) -> int:
             continue
         enrich = ts_enrich if args.toolchain else None
         v2 = args.v2 or args.properties  # --properties implies --v2
-        for record in records_from_source(source, args.module, v2=v2, enrich=enrich,
-                                          with_properties=args.properties):
+        bodies = {} if args.emit_dir else None
+        records = records_from_source(source, args.module, v2=v2, enrich=enrich,
+                                      with_properties=args.properties, bodies=bodies)
+        if args.emit_dir:
+            write_runnable_dir(args.emit_dir, records, bodies)
+        for record in records:
             if args.pretty:
                 print(json.dumps(record, indent=2, ensure_ascii=False))
             else:

@@ -39,7 +39,9 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingest-common"))
-from nl_core import build_record, build_v2_record, find_matching, split_top, count_top  # noqa: E402
+from nl_core import (  # noqa: E402
+    build_record, build_v2_record, count_top, expr_address, find_matching, split_top, write_runnable_dir,
+)
 from nl_effects import effects_from_tokens, terminates_from_tokens  # noqa: E402
 from nl_body import body_ast_from_hs  # noqa: E402
 from nl_toolchain import tool_on_path  # noqa: E402
@@ -538,6 +540,23 @@ def records_from_source(source: str, module_override: str | None, include_privat
     return records
 
 
+def bodies_from_source(source: str, include_private: bool) -> dict:
+    """Map expr-address -> executable body AST for each Haskell function whose body is in the subset
+    (for --emit-dir). Functions outside the subset keep a synthetic body_hash and contribute none."""
+    src = strip_comments(source)
+    _, exports = parse_module(src)
+    lines = src.split("\n")
+    out: dict = {}
+    for names, type_str in parse_signatures(src):
+        for name in names:
+            if not include_private and exports is not None and name not in exports:
+                continue
+            ast = body_ast_from_hs(name, equations_for(name, lines) or type_str)
+            if ast is not None:
+                out[expr_address(ast)] = ast
+    return out
+
+
 # ---------------------------------------------------------------------------
 # CLI.
 # ---------------------------------------------------------------------------
@@ -563,6 +582,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--properties", action="store_true",
                    help="attach curated algebraic laws (property_catalog.json) to recognised functions; "
                         "implies --v2. Verify with `nl-validator check-properties`")
+    p.add_argument("--emit-dir", dest="emit_dir", type=Path, default=None,
+                   help="also write a runnable directory (records + executable bodies as "
+                        "<hash>.json), so `nl-validator run --records <dir>` can execute the functions")
     return p
 
 
@@ -581,8 +603,11 @@ def main(argv=None) -> int:
             continue
         enrich = hs_enrich if args.toolchain else None
         v2 = args.v2 or args.properties  # --properties implies --v2
-        for record in records_from_source(source, args.module, args.include_private, v2=v2,
-                                          enrich=enrich, with_properties=args.properties):
+        records = records_from_source(source, args.module, args.include_private, v2=v2,
+                                      enrich=enrich, with_properties=args.properties)
+        if args.emit_dir:
+            write_runnable_dir(args.emit_dir, records, bodies_from_source(source, args.include_private))
+        for record in records:
             if args.pretty:
                 print(json.dumps(record, indent=2, ensure_ascii=False))
             else:

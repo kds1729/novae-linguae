@@ -318,12 +318,14 @@ def body_ast_from_hs(name, equation_text):
 
 
 def _ts_params(prefix):
-    """Parameter names of a TS arrow from the text before `=>` — `(x, y)` / `(x: T)` / bare `x`. Type
-    annotations and defaults are stripped. None if a parameter isn't a simple identifier."""
+    """Parameter names of a TS arrow from the text before `=>` — `(x, y)` / `(x: T): R` / bare `x`.
+    A trailing return-type annotation (`): R`) is ignored; per-parameter type annotations and defaults
+    are stripped. None if a parameter isn't a simple identifier."""
     p = prefix.strip()
-    if p.endswith(")"):
+    rp = p.rfind(")")  # close of the parameter list (a `): R` return type may follow it)
+    if rp != -1:
         depth, start = 0, None
-        for i in range(len(p) - 1, -1, -1):
+        for i in range(rp, -1, -1):
             if p[i] == ")":
                 depth += 1
             elif p[i] == "(":
@@ -333,7 +335,7 @@ def _ts_params(prefix):
                     break
         if start is None:
             return None
-        inner = p[start + 1:-1].strip()
+        inner = p[start + 1:rp].strip()
         if not inner:
             return []
         names = []

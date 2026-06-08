@@ -411,6 +411,30 @@ def build_v2_record(name: str, type_ast: dict, examples: list, body_text: str,
     return record
 
 
+def expr_address(body_ast: dict) -> str:
+    """Content-address (``expr_`` prefix) of a body-expression AST — the address a record's
+    ``body_hash`` points to. Matches the dict branch of ``build_v2_record``'s ``body_hash``."""
+    return format_hash("expr", blake3_256(canonicalize(body_ast)))
+
+
+def write_runnable_dir(dir_path, records: list, bodies: dict) -> None:
+    """Write a runnable directory: each record as ``<fn_hash>.json`` and each executable body as
+    ``<expr_hash>.json``, so ``nl-validator run --records <dir>`` can execute the ingested functions
+    against their examples. ``bodies`` maps an ``expr_`` address to its body AST."""
+    import json
+    import os
+
+    os.makedirs(dir_path, exist_ok=True)
+    for addr, body in bodies.items():
+        with open(os.path.join(dir_path, f"{addr}.json"), "w", encoding="utf-8") as fh:
+            json.dump(body, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+    for rec in records:
+        with open(os.path.join(dir_path, f"{rec['hash']}.json"), "w", encoding="utf-8") as fh:
+            json.dump(rec, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+
+
 # ---------------------------------------------------------------------------
 # Bracket-aware string helpers shared by the per-language parsers.
 # ---------------------------------------------------------------------------

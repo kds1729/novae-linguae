@@ -269,6 +269,15 @@ fn as_int(v: &Val) -> Result<i128> {
     }
 }
 
+/// Coerce an `Int` or `Float` to `f64` (for mixed-numeric arithmetic / comparison).
+fn as_f64n(v: &Val) -> Result<f64> {
+    match v {
+        Val::Int(i) => Ok(*i as f64),
+        Val::Float(f) => Ok(*f),
+        _ => bail!("expected a number, got {}", encode_value(v)),
+    }
+}
+
 fn as_bool(v: &Val) -> Result<bool> {
     match v {
         Val::Bool(b) => Ok(*b),
@@ -456,36 +465,53 @@ pub fn apply(f: Val, mut args: Vec<Val>) -> Result<Val> {
 }
 
 fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
-    let int2 = |f: fn(i128, i128) -> i128| -> Result<Val> { Ok(Val::Int(f(as_int(&a[0])?, as_int(&a[1])?))) };
-    let cmp = |f: fn(i128, i128) -> bool| -> Result<Val> { Ok(Val::Bool(f(as_int(&a[0])?, as_int(&a[1])?))) };
+    // Arithmetic stays exact on two ints; if either operand is a float, promote to f64 (so `number`
+    // bodies from TS/JS, which carry floats, run). Comparison always compares numerically.
+    let num2 = |fi: fn(i128, i128) -> i128, ff: fn(f64, f64) -> f64| -> Result<Val> {
+        Ok(match (&a[0], &a[1]) {
+            (Val::Int(x), Val::Int(y)) => Val::Int(fi(*x, *y)),
+            _ => Val::Float(ff(as_f64n(&a[0])?, as_f64n(&a[1])?)),
+        })
+    };
+    let numcmp = |f: fn(f64, f64) -> bool| -> Result<Val> { Ok(Val::Bool(f(as_f64n(&a[0])?, as_f64n(&a[1])?))) };
     Ok(match name {
-        "add" => int2(|x, y| x + y)?,
-        "sub" => int2(|x, y| x - y)?,
-        "mul" => int2(|x, y| x * y)?,
-        "div" => {
-            let d = as_int(&a[1])?;
-            if d == 0 {
-                bail!("division by zero");
+        "add" => num2(|x, y| x + y, |x, y| x + y)?,
+        "sub" => num2(|x, y| x - y, |x, y| x - y)?,
+        "mul" => num2(|x, y| x * y, |x, y| x * y)?,
+        "div" => match (&a[0], &a[1]) {
+            (Val::Int(x), Val::Int(y)) => {
+                if *y == 0 {
+                    bail!("division by zero");
+                }
+                Val::Int(x.div_euclid(*y))
             }
-            Val::Int(as_int(&a[0])?.div_euclid(d))
-        }
-        "mod" => {
-            let d = as_int(&a[1])?;
-            if d == 0 {
-                bail!("modulo by zero");
+            _ => Val::Float(as_f64n(&a[0])? / as_f64n(&a[1])?),
+        },
+        "mod" => match (&a[0], &a[1]) {
+            (Val::Int(x), Val::Int(y)) => {
+                if *y == 0 {
+                    bail!("modulo by zero");
+                }
+                Val::Int(x.rem_euclid(*y))
             }
-            Val::Int(as_int(&a[0])?.rem_euclid(d))
-        }
-        "neg" => Val::Int(-as_int(&a[0])?),
-        "abs" => Val::Int(as_int(&a[0])?.abs()),
-        "min" => int2(std::cmp::min)?,
-        "max" => int2(std::cmp::max)?,
+            _ => Val::Float(as_f64n(&a[0])? % as_f64n(&a[1])?),
+        },
+        "neg" => match &a[0] {
+            Val::Int(i) => Val::Int(-i),
+            v => Val::Float(-as_f64n(v)?),
+        },
+        "abs" => match &a[0] {
+            Val::Int(i) => Val::Int(i.abs()),
+            v => Val::Float(as_f64n(v)?.abs()),
+        },
+        "min" => num2(std::cmp::min, f64::min)?,
+        "max" => num2(std::cmp::max, f64::max)?,
         "eq" => Val::Bool(val_eq(&a[0], &a[1])),
         "neq" => Val::Bool(!val_eq(&a[0], &a[1])),
-        "lt" => cmp(|x, y| x < y)?,
-        "le" => cmp(|x, y| x <= y)?,
-        "gt" => cmp(|x, y| x > y)?,
-        "ge" => cmp(|x, y| x >= y)?,
+        "lt" => numcmp(|x, y| x < y)?,
+        "le" => numcmp(|x, y| x <= y)?,
+        "gt" => numcmp(|x, y| x > y)?,
+        "ge" => numcmp(|x, y| x >= y)?,
         "and" => Val::Bool(as_bool(&a[0])? && as_bool(&a[1])?),
         "or" => Val::Bool(as_bool(&a[0])? || as_bool(&a[1])?),
         "xor" => Val::Bool(as_bool(&a[0])? ^ as_bool(&a[1])?),
