@@ -17,8 +17,8 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `claim-expression.schema.json` | v0.1 draft | Structured AST for `assert.claim` (predicate / satisfies / verified) |
 | `commitment-expression.schema.json` | v0.1 draft | Structured AST for `commit.commitment` (apply / provide / refrain) |
 | `surface-syntax.md` | v0.1 | Concrete syntax for all four expression sub-languages (type, predicate, value, body): grammar, infix-to-AST mapping, canonical pretty-print rules, and round-trip requirement. Parser/pretty-printer shipped in `nl-validator` (`parse-*`/`unparse-*` subcommands), with round-trip conformance vectors for all four sub-languages |
-| `evaluation.md` | v0.1 | Normative-by-reference spec for the semantic core: how a body **executes** (call-by-value, closures, currying, `case`, builtins incl. map/filter/fold/compose, `fn_ref` composition) and how it is **type-checked** (Hindley-Milner, skolemized `forall`). Implemented in `nl-validator` (`eval`/`run`/`typecheck`/`check-properties --body`). Load-bearing for principles 3 and 9. |
-| `agent-loop.md` | v0.2 | Normative-by-reference spec for the **Nova Locutio agent loop**: a responder consumes a signed `request` (`apply`), resolves + **runs** the target over its value-expression args (joining a Nova Locutio message to a Nova Lingua evaluation), and emits a signed `assert` whose `predicate` claim is the computed equation `eq(target(args…), result)`; any receiver **re-runs** the claim to confirm it (verification is re-execution — no privileged party). Implemented in `nl-validator` (`respond` / `verify-claim`). Load-bearing for principles 1, 3, 4, 6, 7. |
+| `evaluation.md` | v0.1 | Normative-by-reference spec for the semantic core: how a body **executes** (call-by-value, closures, currying, `case`, builtins incl. map/filter/fold/compose, `fn_ref` composition) and how it is **type-checked** (Hindley-Milner, skolemized `forall`), how effects are **enforced + statically inferred** (a capability sandbox over real-I/O builtins — `fs`/`net`/`process` — with record/replay), and how properties are checked **generatively / bounded-exhaustively**. Implemented in `nl-validator` (`eval`/`run`/`typecheck`/`check-properties`/`check-effects`). Load-bearing for principles 3, 5, and 9. |
+| `agent-loop.md` | v0.2 | Normative-by-reference spec for the **Nova Locutio agent loop**: a responder consumes a signed `request` (`apply`), resolves + **runs** the target over its value-expression args (joining a Nova Locutio message to a Nova Lingua evaluation), and emits a signed `assert` whose `predicate` claim is the computed equation `eq(target(args…), result)`; any receiver **re-runs** the claim to confirm it (verification is re-execution — no privileged party). `respond` also answers `validate`/`query`/`propose`/`store`/`commit`/`delegate`/`retract` and **capability-gates** `apply`/`propose`; `orchestrate` drives a full multi-stage `query → propose → commit → assert → verify` pipeline autonomously, composing discovered functions. Implemented in `nl-validator` (`respond` / `orchestrate` / `verify-claim`). Load-bearing for principles 1, 3, 4, 6, 7. |
 | `canonical-serialization.md` | v0.1 | Normative spec for canonical form (JCS RFC 8785) and hashing (BLAKE3-256) |
 | `trust-model.md` | v0.1 | Normative spec for the trust model: local trust policy + capability tokens + attestations, no central authority. Built on already-shipped *Nova Locutio* primitives. |
 | `intent-tag-vocabulary.md` | v0.1 | Controlled vocabulary for `intent_tags`: 16 top-level categories (`transform`, `predicate`, `aggregate`, `filter`, `query`, `parse`, `serialize`, `io`, `arithmetic`, `math`, `logical`, `string`, `concurrent`, `crypto`, `time`, `coll`) plus property-modifier tags (`pure`, `elementwise`, `idempotent`, …). Non-vocab tags still validate; cross-agent agreement is the benefit. |
@@ -171,18 +171,26 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 ./tooling/validator/target/release/nl-validator run        spec/examples/double.v0.2.json --records spec/examples/
 ./tooling/validator/target/release/nl-validator typecheck  spec/examples/double.v0.2.json --body spec/examples/body-double.json
 ./tooling/validator/target/release/nl-validator check-properties spec/examples/double.v0.2.json --body spec/examples/body-double.json
-# Generative property testing: search for a counterexample (HELD / REFUTED+shrunk / UNGENERATABLE).
+# Generative property testing: enumerate a small domain EXHAUSTIVELY, else sample for a
+# counterexample (EXHAUSTIVE / HELD / REFUTED+shrunk / UNGENERATABLE).
 ./tooling/validator/target/release/nl-validator check-properties spec/examples/double.v0.2.json --body spec/examples/body-double.json --generate --cases 300
+# Static effect inference: prove the body's effects ⊆ its declared signature.effects, without running.
+./tooling/validator/target/release/nl-validator check-effects spec/examples/greet.v0.2.json --body spec/examples/body-greet.json --records spec/examples/
 
 # Effect enforcement (spec/evaluation.md): `run` grants exactly the record's declared effects;
-# a standalone body needs --grant for any effect its builtins perform.
+# a standalone body needs --grant for any effect its builtins perform (io.console / random / time /
+# panic / fs.read / fs.write / net.read / net.write / process.spawn — net/process off by default).
 ./tooling/validator/target/release/nl-validator run  spec/examples/greet.v0.2.json --records spec/examples/
 ./tooling/validator/target/release/nl-validator eval spec/examples/body-greet.json --arg <str.json> --grant io.console
+# Real I/O is replayable: capture the trace, then replay it with no grant and no I/O (principle 5).
+./tooling/validator/target/release/nl-validator eval <body> --arg <path.json> --grant fs.read --trace-out trace.json
+./tooling/validator/target/release/nl-validator eval <body> --arg <path.json> --replay trace.json
 
-# The Nova Locutio agent loop (spec/agent-loop.md): answer a request by running the
-# target, then re-run the resulting assert's claim to confirm it.
+# The Nova Locutio agent loop (spec/agent-loop.md): answer a request by running the target, then
+# re-run the resulting assert's claim to confirm it; or orchestrate the whole conversation.
 ./tooling/validator/target/release/nl-validator respond      spec/examples/request.v0.2.json --records spec/examples/ --seed novae-linguae-example-responder
 ./tooling/validator/target/release/nl-validator verify-claim spec/examples/assert-result.v0.2.json --records spec/examples/
+./tooling/validator/target/release/nl-validator orchestrate  --records spec/examples/ --intent arithmetic --arg <nat.json> --seed novae-linguae-example-claude
 ```
 
 Cross-file `$ref`s resolve against sibling schema files: when a schema references another by its `https://novae-linguae.org/spec/<version>/<file>` identifier, `nl-validator validate` maps that to `<file>` in the schema's own directory. The version path segment is logical only — all schema files live flat in `spec/`. Any JSON Schema 2020-12 validator can also be used for structural checks; the reference is byte-equality of hash and JCS form across implementations.

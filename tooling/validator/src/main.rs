@@ -224,11 +224,15 @@ enum Commands {
     /// Nova Locutio agent loop: consume a signed message and emit a signed reply (spec/agent-loop.md).
     /// Handles `request`/`apply` (run the target on the value-expression args → an `assert` whose
     /// `predicate` claim is `eq(target(args…), result)`, self-verifiable by re-running),
-    /// `request`/`validate` (typecheck + run the target → `assert` it `verified`, else `reject`), and
-    /// `query` (search the records → `ack` with the matches). Threaded by `in_reply_to`, addressed
+    /// `request`/`validate` (typecheck + run the target → `assert` it `verified`, else `reject`),
+    /// `request`/`store` (verify the payload's content-address → `ack`/`reject`), `query` (search the
+    /// records → `ack` with the matches), `propose` (test-run, then `commit` or `reject`), a received
+    /// `commit` (fulfil it → `assert`), and `delegate`/`retract` (`ack`). `apply`/`propose` are
+    /// capability-gated: a target declaring required `signature.capabilities` is fulfilled only if the
+    /// request presents them, else `reject` `not_authorized`. Threaded by `in_reply_to`, addressed
     /// back to the sender. Prints the signed reply JSON.
     Respond {
-        /// Path to the message to answer (a `request` or `query`).
+        /// Path to the message to answer (a `request`/`query`/`propose`/`commit`/`delegate`/`retract`).
         request: PathBuf,
         /// Directory of records/bodies to resolve the target body and `fn_ref` args against.
         #[arg(long)]
