@@ -1,0 +1,13 @@
+{
+  "kind": "lambda",
+  "params": [
+    { "name": "msg" }
+  ],
+  "body": {
+    "kind": "app",
+    "fn": { "kind": "var", "name": "print" },
+    "args": [
+      { "kind": "var", "name": "msg" }
+    ]
+  }
+}

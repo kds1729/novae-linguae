@@ -29,8 +29,8 @@ pub mod proptest;
 
 pub mod interp;
 pub use interp::{
-    clear_resolver, eval_body, run_examples, runtime_verdict, self_fn_from_body, set_resolver,
-    ExampleRun,
+    clear_effects, clear_resolver, eval_body, run_examples, runtime_verdict, self_fn_from_body,
+    set_effect_grants, set_resolver, take_effect_trace, ExampleRun,
 };
 
 pub mod typecheck;

@@ -1,0 +1,28 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_ae0ec70dade48ea2aaf3366278a5eb8248e3feb3b10a38c28b2078041c604ec9",
+  "name_hints": ["greet", "print_line", "puts"],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [{ "kind": "builtin", "name": "string" }],
+      "result": { "kind": "builtin", "name": "unit" }
+    },
+    "refinements": [],
+    "effects": ["io.console"],
+    "capabilities": [],
+    "complexity": "O(1)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [{ "kind": "string", "value": "hi" }],
+      "result": { "kind": "unit" }
+    }
+  ],
+  "properties": [],
+  "intent_tags": ["io"],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_dfcb0b8a099ac0c5e2ba51b3d420f67693309b14c7bdd7214bb2feb4360977b4"
+}

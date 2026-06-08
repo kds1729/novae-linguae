@@ -242,6 +242,13 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
     Some(match name {
         "add" | "sub" | "mul" | "div" | "mod" | "min" | "max" => Ty::Fun(vec![con("int"), con("int")], Box::new(con("int"))),
         "neg" | "abs" => Ty::Fun(vec![con("int")], Box::new(con("int"))),
+        // Effectful builtins (effects tracked at eval, not in this checker): `print : forall a. a ->
+        // unit`, `rand : int -> int`.
+        "print" => {
+            let a = inf.fresh();
+            Ty::Fun(vec![a], Box::new(con("unit")))
+        }
+        "rand" => Ty::Fun(vec![con("int")], Box::new(con("int"))),
         "lt" | "le" | "gt" | "ge" => Ty::Fun(vec![con("int"), con("int")], Box::new(con("bool"))),
         "and" | "or" | "xor" => Ty::Fun(vec![con("bool"), con("bool")], Box::new(con("bool"))),
         "not" => Ty::Fun(vec![con("bool")], Box::new(con("bool"))),

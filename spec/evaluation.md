@@ -39,9 +39,10 @@ body's own `expr_` address) against a link map and runs the referenced body — 
 run end-to-end (principle 4). `nl-validator run --records <dir>` builds the link map from a directory
 and resolves both a record's `body_hash` and its `fn_ref` arguments.
 
-**Scope (v0.1, honest).** Integers are 128-bit and `nat` is a non-negative `int`. Effects are not
-modelled — a body that would perform I/O is outside this pure evaluator. The evaluator does not enforce
-exhaustiveness or types; those are the checker's job.
+**Scope (v0.1, honest).** Integers are 128-bit and `nat` is a non-negative `int`. Most builtins are
+pure; the two effectful ones (`print` → `io.console`, `rand` → `random`) are gated by a capability
+sandbox (see **Effect enforcement** below). The evaluator does not enforce exhaustiveness or types;
+those are the checker's job.
 
 ## Type checking
 
@@ -94,3 +95,30 @@ that quantifies only over first-order data (e.g. `map`'s `forall xs. eq(map(id, 
 example path cannot reach because the worked examples bind `xs` to the wrong shape) becomes a real
 HELD over hundreds of generated inputs. This is still sampling, not a proof — but it is a search, and
 it finds counterexamples the examples never would.
+
+## Effect enforcement
+
+A function record *declares* its effects (`signature.effects`, the closed ten-effect vocabulary:
+`fs.read`/`fs.write`/`net.read`/`net.write`/`alloc`/`time`/`random`/`io.console`/`process.spawn`/
+`panic`). Effect **enforcement** makes that declaration a capability the runtime checks, not just
+metadata. The evaluator runs against a *granted* effect set; the two effectful builtins — `print`
+(`io.console`) and `rand` (`random`) — gate on it, and each performed effect is appended to a
+structured **trace** (principle 9: an AI-ingestible record of what the body did).
+
+- `nl-validator run <record> --records <dir>` grants exactly the record's declared
+  `signature.effects`. A body that performs an effect it didn't declare is rejected at eval time — so
+  a record that *under-declares* its effects fails its own examples. (Pure records declare `[]`,
+  perform nothing, and are unaffected.)
+- `nl-validator eval <body> --grant <effect>…` runs a standalone body with an explicit grant; an
+  ungranted effect is rejected, and the trace of granted effects is printed.
+
+Determinism (principle 5): `rand` draws from a fixed-seeded per-evaluation PRNG — same body, same
+sequence — so an effectful run is as replayable as a pure one, and the trace *is* the replay log.
+Worked example: [`greet.v0.2.json`](examples/greet.v0.2.json) (`\msg -> print(msg)` :
+`string -> unit`, declaring `effects: ["io.console"]`) runs clean under `run`; the same body under
+`eval` is **rejected** without `--grant io.console` and emits a one-event trace with it.
+
+**Scope (v0.1, honest).** Two effectful builtins stand in for the ten-effect vocabulary — enough to
+make enforcement and tracing real and end-to-end. Effects are gated at the point an effectful builtin
+runs; *static* effect inference (proving a body's effects ⊆ its declaration without running it) and
+the remaining effect kinds are the next rung.

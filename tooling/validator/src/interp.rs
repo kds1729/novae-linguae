@@ -48,6 +48,77 @@ fn resolve_fn_ref(addr: &str) -> Option<J> {
     RESOLVER.with(|r| r.borrow().get(addr).cloned())
 }
 
+// Effect enforcement: a scoped capability sandbox. Effectful builtins (`print` → io.console, `rand`
+// → random) gate on a *granted* effect set and append to a structured trace — so a body may only
+// perform effects its grant permits (e.g. a function record's declared `signature.effects`), and the
+// trace is a replayable record of what it did (principles 5 + 9). Pure bodies touch none of this.
+thread_local! {
+    static EFFECTS: RefCell<EffectState> = RefCell::new(EffectState::new());
+}
+
+struct EffectState {
+    granted: std::collections::HashSet<String>,
+    trace: Vec<J>,
+    rng: u64,
+}
+
+impl EffectState {
+    fn new() -> Self {
+        EffectState { granted: std::collections::HashSet::new(), trace: Vec::new(), rng: 0x1234_5678_9abc_def0 }
+    }
+}
+
+/// Install the granted effect set for the next evaluation; resets the trace and the effect PRNG so a
+/// run is reproducible. An effectful builtin not in this set is rejected at eval time.
+pub fn set_effect_grants<I: IntoIterator<Item = String>>(granted: I) {
+    EFFECTS.with(|e| {
+        let mut e = e.borrow_mut();
+        e.granted = granted.into_iter().collect();
+        e.trace.clear();
+        e.rng = 0x1234_5678_9abc_def0;
+    });
+}
+
+/// Reset the effect sandbox (empty grant, empty trace).
+pub fn clear_effects() {
+    EFFECTS.with(|e| *e.borrow_mut() = EffectState::new());
+}
+
+/// Drain the structured effect trace collected during evaluation (principle 9: AI-ingestible trace).
+pub fn take_effect_trace() -> Vec<J> {
+    EFFECTS.with(|e| std::mem::take(&mut e.borrow_mut().trace))
+}
+
+/// Gate and record an effect. Errors if `effect` is not in the granted set — this is the enforcement:
+/// declared effects become a capability the runtime checks, not just metadata.
+fn perform_effect(effect: &str, detail: J) -> Result<()> {
+    EFFECTS.with(|e| {
+        let mut e = e.borrow_mut();
+        if !e.granted.contains(effect) {
+            bail!("ungranted effect `{effect}`: the body performed it, but it is not in the granted capability set (declare it in signature.effects or pass --grant {effect})");
+        }
+        e.trace.push(json!({ "effect": effect, "detail": detail }));
+        Ok(())
+    })
+}
+
+/// Deterministic per-evaluation PRNG draw in `[0, bound)` for the `rand` effect.
+fn effect_rand(bound: i128) -> Result<i128> {
+    if bound <= 0 {
+        bail!("rand bound must be positive, got {bound}");
+    }
+    let r = EFFECTS.with(|e| {
+        let mut e = e.borrow_mut();
+        let mut x = e.rng | 1;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        e.rng = x;
+        x.wrapping_mul(0x2545f4914f6cdd1d)
+    });
+    Ok((r % bound as u64) as i128)
+}
+
 /// A runtime value. Mirrors the value-expression kinds, plus the two callable forms (`Closure`,
 /// `Builtin`) that only exist at runtime.
 #[derive(Clone, Debug)]
@@ -216,7 +287,7 @@ fn as_list(v: &Val) -> Result<Vec<Val>> {
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
         "neg" | "abs" | "not" | "id" | "head" | "tail" | "length" | "null" | "reverse" | "fst"
-        | "snd" => 1,
+        | "snd" | "print" | "rand" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
         | "apply" => 2,
@@ -481,6 +552,18 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             apply(a[0].clone(), vec![inner])?
         }
         "apply" => apply(a[0].clone(), vec![a[1].clone()])?,
+        // Effectful builtins — gated by the capability sandbox (see EFFECTS above).
+        "print" => {
+            // io.console: emit the argument to the trace, return unit.
+            perform_effect("io.console", encode_value(&a[0]))?;
+            Val::Unit
+        }
+        "rand" => {
+            // random: a deterministic draw in [0, n) recorded as an effect.
+            let n = as_int(&a[0])?;
+            perform_effect("random", json!({ "bound": n.to_string() }))?;
+            Val::Int(effect_rand(n)?)
+        }
         other => bail!("unknown builtin: {other}"),
     })
 }
@@ -833,5 +916,53 @@ mod tests {
             "fields": [{ "name": "a", "value": nat(1) }, { "name": "b", "value": nat(2) }] } });
         let proj = json!({ "kind": "field", "record": rec, "name": "b" });
         assert!(val_eq(&eval(&proj, &Env::new()).unwrap(), &Val::Int(2)));
+    }
+
+    #[test]
+    fn effect_enforcement_gates_print() {
+        // \msg -> print(msg)
+        let body = json!({ "kind": "lambda", "params": [{ "name": "msg" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "print" },
+                      "args": [{ "kind": "var", "name": "msg" }] } });
+        let arg = json!({ "kind": "string", "value": "hi" });
+
+        // Ungranted: the io.console effect is rejected at eval time.
+        set_effect_grants(Vec::<String>::new());
+        assert!(eval_body(&body, &[arg.clone()]).is_err(), "print must be rejected without io.console");
+        clear_effects();
+
+        // Granted: runs, returns unit, and the structured trace records the effect.
+        set_effect_grants(vec!["io.console".to_string()]);
+        let out = eval_body(&body, &[arg]).unwrap();
+        let trace = take_effect_trace();
+        clear_effects();
+        assert_eq!(out, json!({ "kind": "unit" }));
+        assert_eq!(trace.len(), 1);
+        assert_eq!(trace[0]["effect"], "io.console");
+        assert_eq!(trace[0]["detail"], json!({ "kind": "string", "value": "hi" }));
+    }
+
+    #[test]
+    fn rand_is_deterministic_and_gated() {
+        // \n -> rand(n)
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "rand" },
+                      "args": [{ "kind": "var", "name": "n" }] } });
+        let n = json!({ "kind": "nat", "value": 100 });
+
+        set_effect_grants(vec!["random".to_string()]);
+        let a = eval_body(&body, &[n.clone()]).unwrap();
+        clear_effects();
+        set_effect_grants(vec!["random".to_string()]);
+        let b = eval_body(&body, &[n.clone()]).unwrap();
+        clear_effects();
+        assert_eq!(a, b, "rand must be deterministic across runs (same fixed seed)");
+        let v = a["value"].as_i64().unwrap();
+        assert!((0..100).contains(&v), "rand(100) in [0,100)");
+
+        // Ungranted: random is rejected.
+        set_effect_grants(Vec::<String>::new());
+        assert!(eval_body(&body, &[n]).is_err(), "rand must be rejected without the random grant");
+        clear_effects();
     }
 }

@@ -162,6 +162,11 @@ enum Commands {
         /// Argument value (a value-expression JSON file). Repeatable, positional order.
         #[arg(long = "arg")]
         args: Vec<PathBuf>,
+        /// Grant an effect the body may perform (e.g. `io.console`, `random`). Repeatable. An
+        /// effectful builtin (`print`/`rand`) whose effect is not granted is rejected at eval time;
+        /// pure bodies need no grants. The performed effects are printed as a trace.
+        #[arg(long = "grant")]
+        grants: Vec<String>,
     },
     /// Run a function record's worked `examples[]` through its `body`: bind each
     /// example's args, evaluate the body, and check the result equals the claimed
@@ -316,7 +321,7 @@ fn main() -> ExitCode {
         Commands::CheckProperties { record, body, generate, cases } => {
             (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases)), true)
         }
-        Commands::Eval { body, args } => (cmd_eval(&body, &args), false),
+        Commands::Eval { body, args, grants } => (cmd_eval(&body, &args, &grants), false),
         Commands::Run { record, body, records } => (cmd_run(&record, body.as_ref(), records.as_ref()), false),
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
         Commands::Respond { request, records, seed, timestamp } => {
@@ -514,11 +519,22 @@ fn cmd_verify_claim(assert: &PathBuf, records: &PathBuf) -> Result<()> {
     }
 }
 
-fn cmd_eval(body: &PathBuf, args: &[PathBuf]) -> Result<()> {
+fn cmd_eval(body: &PathBuf, args: &[PathBuf], grants: &[String]) -> Result<()> {
     let body = nl_validator::read_json(body)?;
     let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
-    let result = nl_validator::eval_body(&body, &argv)?;
+    // Effect sandbox: the body may only perform effects in the granted set.
+    nl_validator::set_effect_grants(grants.iter().cloned());
+    let result = nl_validator::eval_body(&body, &argv);
+    let trace = nl_validator::take_effect_trace();
+    nl_validator::clear_effects();
+    let result = result?;
     println!("{}", serde_json::to_string_pretty(&result)?);
+    if !trace.is_empty() {
+        eprintln!("effect trace ({} event{}):", trace.len(), if trace.len() == 1 { "" } else { "s" });
+        for ev in &trace {
+            eprintln!("  {}", serde_json::to_string(ev)?);
+        }
+    }
     Ok(())
 }
 
@@ -543,8 +559,17 @@ fn cmd_run(record: &PathBuf, body: Option<&PathBuf>, records: Option<&PathBuf>) 
         }
         (None, None) => bail!("provide --body <body.json> or --records <dir> to resolve the body"),
     };
+    // Enforce effects: the body may only perform effects the record declares in signature.effects.
+    let declared_effects: Vec<String> = record
+        .get("signature")
+        .and_then(|s| s.get("effects"))
+        .and_then(|e| e.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    nl_validator::set_effect_grants(declared_effects);
     let runs = nl_validator::run_examples(&record, &body);
     nl_validator::clear_resolver();
+    nl_validator::clear_effects();
     let runs = runs?;
     if runs.is_empty() {
         println!("run: no examples to execute");

@@ -32,12 +32,14 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `examples/map.json` | example | Concrete v0.1 function record for `map` (string surface form for type / predicate / value fields) |
 | `examples/map.v0.2.json` | example | Concrete v0.2 function record for `map` (structured ASTs throughout); `supersedes` points at the v0.1 record. `body_hash` resolves to the committed [`body-map.json`](examples/body-map.json), so `map` is fully runnable/typecheckable (`run --records`, `typecheck`) like `double` |
 | `examples/double.v0.2.json` | example | Concrete v0.2 function record for `double` (a `nat -> nat` function); referenced by `map.v0.2.json`'s `examples.args[].fn_ref` |
+| `examples/greet.v0.2.json` | example | Concrete **effectful** v0.2 function record: `greet : string -> unit`, declaring `effects: ["io.console"]`, body [`body-greet.json`](examples/body-greet.json). Demonstrates effect *enforcement* — `run` grants exactly its declared effects; the same body under `eval` is rejected without `--grant io.console` ([`evaluation.md`](evaluation.md)) |
 | `examples/type-map.json` | example | The type of `map` (`forall a b. (a -> b) -> List a -> List b`) as a standalone structured type-expression AST |
 | `examples/predicate-identity.json` | example | The identity property of `map` as a standalone structured predicate AST |
 | `examples/value-list-int.json` | example | The list `[1, 2, 3]` of natural numbers as a standalone structured value AST |
 | `examples/body-double.json` | example | The body of `double` as a structured body-expression AST: `\n -> add(n, n)` |
 | `examples/body-is-zero.json` | example | A `case`-using body: `\n -> case n of 0 -> True; _ -> False` (exercises pattern matching and literal/wildcard patterns) |
 | `examples/body-map.json` | example | The body of `map` as a structured body-expression AST: `\f xs -> map(f, xs)` (the commons `map` over the primitive `map`, as `double` is over the primitive `add`). `map.v0.2.json`'s `body_hash` resolves to it; `typecheck` confirms it against the declared `forall a b. (a -> b) -> List a -> List b` |
+| `examples/body-greet.json` | example | The body of `greet`: `\msg -> print(msg)` — exercises the effectful `print` builtin (`io.console`). Runs only when the effect is granted (`run greet.v0.2.json` / `eval … --grant io.console`) |
 | `examples/claim-satisfies-identity.json` | example | A `satisfies` claim asserting that the v0.2 map record satisfies its `identity` property |
 | `examples/commitment-apply-double.json` | example | An `apply` commitment to call `double(42)` by end of 2026 |
 | `examples/request.json` | example | Concrete `request` message (apply `map` to `[1,2,3]`); signed with deterministic seed `novae-linguae-example-claude` |
@@ -165,6 +167,11 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 ./tooling/validator/target/release/nl-validator check-properties spec/examples/double.v0.2.json --body spec/examples/body-double.json
 # Generative property testing: search for a counterexample (HELD / REFUTED+shrunk / UNGENERATABLE).
 ./tooling/validator/target/release/nl-validator check-properties spec/examples/double.v0.2.json --body spec/examples/body-double.json --generate --cases 300
+
+# Effect enforcement (spec/evaluation.md): `run` grants exactly the record's declared effects;
+# a standalone body needs --grant for any effect its builtins perform.
+./tooling/validator/target/release/nl-validator run  spec/examples/greet.v0.2.json --records spec/examples/
+./tooling/validator/target/release/nl-validator eval spec/examples/body-greet.json --arg <str.json> --grant io.console
 
 # The Nova Locutio agent loop (spec/agent-loop.md): answer a request by running the
 # target, then re-run the resulting assert's claim to confirm it.
