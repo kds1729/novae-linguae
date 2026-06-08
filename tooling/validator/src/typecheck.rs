@@ -262,6 +262,11 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
         "http_get" => Ty::Fun(vec![con("string")], Box::new(con("string"))),
         "http_post" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("string"))),
         "spawn" => Ty::Fun(vec![con("string"), list(con("string"))], Box::new(con("string"))),
+        // `replicate : forall a. int -> a -> List a` — the heap-allocating builtin (effect `alloc`).
+        "replicate" => {
+            let a = inf.fresh();
+            Ty::Fun(vec![con("int"), a.clone()], Box::new(list(a)))
+        }
         "lt" | "le" | "gt" | "ge" => Ty::Fun(vec![con("int"), con("int")], Box::new(con("bool"))),
         "and" | "or" | "xor" => Ty::Fun(vec![con("bool"), con("bool")], Box::new(con("bool"))),
         "not" => Ty::Fun(vec![con("bool")], Box::new(con("bool"))),

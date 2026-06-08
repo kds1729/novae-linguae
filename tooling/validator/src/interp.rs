@@ -394,7 +394,7 @@ fn builtin_arity(name: &str) -> Option<usize> {
         | "snd" | "print" | "rand" | "now" | "panic" | "read_file" | "http_get" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
-        | "apply" | "write_file" | "http_post" | "spawn" => 2,
+        | "apply" | "write_file" | "http_post" | "spawn" | "replicate" => 2,
         "foldl" | "foldr" | "compose" => 3,
         _ => return None,
     })
@@ -412,6 +412,7 @@ pub fn builtin_effect(name: &str) -> Option<&'static str> {
         "http_get" => Some("net.read"),
         "http_post" => Some("net.write"),
         "spawn" => Some("process.spawn"),
+        "replicate" => Some("alloc"),
         _ => None,
     }
 }
@@ -745,6 +746,17 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
                     .output()
                     .map_err(|e| anyhow!("spawn {cmd}: {e}"))?;
                 Ok(Val::Str(String::from_utf8_lossy(&out.stdout).into_owned()))
+            })?
+        }
+        "replicate" => {
+            // alloc: allocate a list of `n` copies of `x` on the heap. The canonical heap-allocating
+            // builtin — the one effect kind with no external I/O, so it is fully deterministic and
+            // replays identically (the trace records only the requested size). Negative n yields [].
+            let n = as_int(&a[0])?;
+            let x = a[1].clone();
+            effect_op("alloc", json!({ "size": n.to_string() }), move || {
+                let count = if n < 0 { 0usize } else { n as usize };
+                Ok(Val::List(std::iter::repeat(x).take(count).collect()))
             })?
         }
         other => bail!("unknown builtin: {other}"),
@@ -1170,6 +1182,35 @@ mod tests {
         clear_effects();
         set_effect_grants(vec!["panic".to_string()]);
         assert!(eval_body(&unary("panic"), &[nat(1)]).is_err()); // granted but aborts
+        clear_effects();
+    }
+
+    #[test]
+    fn replicate_is_a_gated_alloc_effect() {
+        // \n -> replicate(n, 7): ungranted rejected; granted allocates a list and traces `alloc`.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "replicate" },
+                "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 7 } }] } });
+
+        // Ungranted: alloc is rejected at eval time.
+        set_effect_grants(Vec::<String>::new());
+        assert!(eval_body(&body, &[nat(3)]).is_err(), "replicate must be rejected without the alloc grant");
+        clear_effects();
+
+        // Granted: allocates [7,7,7] and records one `alloc` effect carrying the requested size.
+        set_effect_grants(vec!["alloc".to_string()]);
+        let got = eval_body(&body, &[nat(3)]).unwrap();
+        assert_eq!(got, json!({ "kind": "list", "elems": [
+            { "kind": "int", "value": 7 }, { "kind": "int", "value": 7 }, { "kind": "int", "value": 7 }] }));
+        let trace = take_effect_trace();
+        clear_effects();
+        assert_eq!(trace[0]["effect"], "alloc");
+        assert_eq!(trace[0]["detail"]["size"], "3");
+
+        // Negative size allocates nothing but still performs the effect.
+        set_effect_grants(vec!["alloc".to_string()]);
+        let empty = eval_body(&body, &[json!({ "kind": "int", "value": -2 })]).unwrap();
+        assert_eq!(empty, json!({ "kind": "list", "elems": [] }));
         clear_effects();
     }
 

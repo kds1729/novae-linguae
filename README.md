@@ -321,7 +321,7 @@ What landed since (the "remaining fidelity / hardening" pass):
 
 What is next:
 - **An even fuller agent loop** — the responder answers `apply`, `validate`, `query`, `propose`, the `store` action, a received `commit`, and `delegate`/`retract`, `nl-validator orchestrate` drives the full `query → propose → commit → assert → verify` pipeline autonomously (composing multiple discovered functions), and `apply`/`propose` are capability-gated; still ahead: a real delegation-chain verifier behind the gate (it checks presented capabilities; verifying the signed `delegate` chain that granted them is next)
-- **Deeper ingestion + a richer runtime (v0.3+)** — a TLS + de-chunking net client (today's is plain `http://` and returns chunked bodies raw) and modelling `alloc` (the one effect kind without a builtin); a real delegation-chain verifier behind the capability gate; and verification beyond *bounded* checks — full quantified proof over unbounded domains (an SMT / inductive backend) and machine-checkable proof certificates (today: example-bound, sampled, or bounded-exhaustive)
+- **Deeper ingestion + a richer runtime (v0.3+)** — a TLS + de-chunking net client (today's is plain `http://` and returns chunked bodies raw); a real delegation-chain verifier behind the capability gate; and verification beyond *bounded* checks — full quantified proof over unbounded domains (an SMT / inductive backend) and machine-checkable proof certificates (today: example-bound, sampled, or bounded-exhaustive)
 
 Looking for collaborators on all of the above.
 

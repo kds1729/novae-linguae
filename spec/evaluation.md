@@ -109,7 +109,8 @@ A function record *declares* its effects (`signature.effects`, the closed ten-ef
 metadata. The evaluator runs against a *granted* effect set; the effectful builtins — `print`
 (`io.console`), `rand` (`random`), `now` (`time`), `panic` (`panic`), and the **real-I/O** ones
 `read_file`/`write_file` (`fs.read`/`fs.write`), `http_get`/`http_post` (`net.read`/`net.write`; plain
-`http://` only, no TLS), and `spawn` (`process.spawn`) — gate on it, and each performed effect is
+`http://` only, no TLS), `spawn` (`process.spawn`), and `replicate` (`alloc` — allocate a list of
+`n` copies, the heap-allocating builtin with no external I/O) — gate on it, and each performed effect is
 appended to a structured **trace** (principle 9: an AI-ingestible record of what the body did). Adding
 an effect kind is just an entry in `builtin_effect`; enforcement, tracing, and inference follow
 automatically.
@@ -151,9 +152,10 @@ a higher-order *argument's* effects belong to the caller (effect polymorphism), 
 the `print` body against a no-effects record → UNDER-DECLARED; a body applying `greet` by `fn_ref` →
 UNVERIFIABLE bare, SOUND with `--records` (its `io.console` folded in).
 
-**Scope (v0.1, honest).** Nine effectful builtins exercise **nine of the ten** effect kinds (all but
-`alloc`, which is implicit allocation, not a callable), each performing real I/O and recorded for
-replay. Net and process are gated **off by default** (must be granted). Two honest limits on the net
-client: it is plain `http://` only (no TLS — `https://` is rejected) and it does not de-chunk
-`Transfer-Encoding: chunked` responses (the raw body, chunk markers included, is returned). A TLS +
-de-chunking net client, and modelling `alloc`, are the remaining polish.
+**Scope (v0.1, honest).** Ten effectful builtins exercise **all ten** effect kinds, each recorded for
+replay. Nine perform real I/O; the tenth, `replicate` (`alloc`), allocates a list of `n` copies on the
+heap — the one effect kind with no external I/O, so it is fully deterministic and replays identically
+(the trace records only the requested size; a negative size yields `[]`). Net and process are gated
+**off by default** (must be granted). Two honest limits on the net client: it is plain `http://` only
+(no TLS — `https://` is rejected) and it does not de-chunk `Transfer-Encoding: chunked` responses (the
+raw body, chunk markers included, is returned). A TLS + de-chunking net client is the remaining polish.

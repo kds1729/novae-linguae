@@ -179,7 +179,7 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 
 # Effect enforcement (spec/evaluation.md): `run` grants exactly the record's declared effects;
 # a standalone body needs --grant for any effect its builtins perform (io.console / random / time /
-# panic / fs.read / fs.write / net.read / net.write / process.spawn — net/process off by default).
+# panic / fs.read / fs.write / net.read / net.write / process.spawn / alloc — net/process off by default).
 ./tooling/validator/target/release/nl-validator run  spec/examples/greet.v0.2.json --records spec/examples/
 ./tooling/validator/target/release/nl-validator eval spec/examples/body-greet.json --arg <str.json> --grant io.console
 # Real I/O is replayable: capture the trace, then replay it with no grant and no I/O (principle 5).
