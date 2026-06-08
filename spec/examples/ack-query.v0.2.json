@@ -1,0 +1,20 @@
+{
+  "body": {
+    "acks": "msg_502f1b4abcecf87ec654585e1a059519e9643fc5dc8b95a1aec20452edfa9f69",
+    "result": {
+      "count": 1,
+      "matches": [
+        "fn_ae0ec70dade48ea2aaf3366278a5eb8248e3feb3b10a38c28b2078041c604ec9"
+      ]
+    }
+  },
+  "constraints": null,
+  "from": "did:nova:16efab1d73f507584ef08f79c72b16b988d02868e2eb02686a61a9db0076518a",
+  "hash": "msg_813f5ca8820c735d2d89ccb3f9a80e44a4cceeb90b400af14dee711f256e23fb",
+  "in_reply_to": "msg_502f1b4abcecf87ec654585e1a059519e9643fc5dc8b95a1aec20452edfa9f69",
+  "kind": "ack",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:djq790lohhuDKKwficiAQDswva8yzv6BYswBZR/b8UbwCmopWijmCKJALXNv55gFdXmF0RhngWEUEdZl89KqAw==",
+  "timestamp": "2026-06-08T13:05:05Z",
+  "to": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e"
+}

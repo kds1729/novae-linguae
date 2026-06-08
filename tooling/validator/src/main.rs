@@ -198,13 +198,14 @@ enum Commands {
         #[arg(long)]
         body: PathBuf,
     },
-    /// Nova Locutio agent loop: consume a signed `request` (action `apply`), resolve and run the
-    /// target against the request's value-expression args, and emit a signed `assert` whose
-    /// `predicate` claim states `eq(target(args…), result)`, threaded to the request by
-    /// `in_reply_to` and addressed back to the sender (spec/agent-loop.md). The result is
-    /// self-verifying: any receiver re-runs the claim to confirm. Prints the signed assert JSON.
+    /// Nova Locutio agent loop: consume a signed message and emit a signed reply (spec/agent-loop.md).
+    /// Handles `request`/`apply` (run the target on the value-expression args → an `assert` whose
+    /// `predicate` claim is `eq(target(args…), result)`, self-verifiable by re-running),
+    /// `request`/`validate` (typecheck + run the target → `assert` it `verified`, else `reject`), and
+    /// `query` (search the records → `ack` with the matches). Threaded by `in_reply_to`, addressed
+    /// back to the sender. Prints the signed reply JSON.
     Respond {
-        /// Path to the `request` message to answer.
+        /// Path to the message to answer (a `request` or `query`).
         request: PathBuf,
         /// Directory of records/bodies to resolve the target body and `fn_ref` args against.
         #[arg(long)]
@@ -497,12 +498,13 @@ fn cmd_respond(
     timestamp: Option<&str>,
 ) -> Result<()> {
     use std::io::Write;
-    let request = nl_validator::read_json(request)?;
+    let message = nl_validator::read_json(request)?;
     let link_map = nl_validator::build_link_map(records)?;
+    let record_map = nl_validator::build_record_map(records)?;
     let key = nl_validator::signing_key_from_seed(seed);
-    let assert = nl_validator::respond_to_request(&request, link_map, &key, timestamp)?;
-    let pretty = serde_json::to_string_pretty(&assert)
-        .map_err(|e| anyhow::anyhow!("serializing assert reply: {e}"))?;
+    let reply = nl_validator::respond_to_message(&message, link_map, record_map, &key, timestamp)?;
+    let pretty = serde_json::to_string_pretty(&reply)
+        .map_err(|e| anyhow::anyhow!("serializing reply: {e}"))?;
     std::io::stdout().write_all(pretty.as_bytes())?;
     std::io::stdout().write_all(b"\n")?;
     Ok(())

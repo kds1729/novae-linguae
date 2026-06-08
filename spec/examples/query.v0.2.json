@@ -1,0 +1,19 @@
+{
+  "body": {
+    "limit": 50,
+    "pattern": {
+      "effects": [
+        "io.console"
+      ]
+    }
+  },
+  "constraints": null,
+  "from": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+  "hash": "msg_502f1b4abcecf87ec654585e1a059519e9643fc5dc8b95a1aec20452edfa9f69",
+  "in_reply_to": null,
+  "kind": "query",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:6za6fyF43yOQhf4N+C1IM26/ieMpHh30Z/NJ6Bs0hBMlWEfcotfsEYSHblEzKHGyTAX2LoxTyr0JDg0tHdkXDg==",
+  "timestamp": "2026-06-08T13:05:00Z",
+  "to": "did:nova:16efab1d73f507584ef08f79c72b16b988d02868e2eb02686a61a9db0076518a"
+}

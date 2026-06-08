@@ -39,7 +39,7 @@ pub use typecheck::{typecheck, typecheck_record};
 pub mod seal;
 
 pub mod respond;
-pub use respond::{respond_to_request, verify_claim};
+pub use respond::{respond_to_message, respond_to_request, verify_claim};
 
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {
@@ -325,6 +325,25 @@ pub fn build_link_map(dir: &Path) -> Result<std::collections::HashMap<String, Va
             if let Some(b) = bodies_by_expr.get(bh) {
                 map.insert(h.to_string(), b.clone());
             }
+        }
+    }
+    Ok(map)
+}
+
+/// Build an address → function-record map from a directory (every `fn_…`-hashed JSON file). Backs
+/// the agent loop's `validate` (resolve the target's record for typecheck/run) and `query` (the
+/// searchable record set).
+pub fn build_record_map(dir: &Path) -> Result<std::collections::HashMap<String, Value>> {
+    use std::collections::HashMap;
+    let mut map: HashMap<String, Value> = HashMap::new();
+    for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let v = read_json(&path)?;
+        if let Some(h) = v.get("hash").and_then(|h| h.as_str()).filter(|h| h.starts_with("fn_")) {
+            map.insert(h.to_string(), v);
         }
     }
     Ok(map)

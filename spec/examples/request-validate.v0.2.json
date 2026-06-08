@@ -1,0 +1,15 @@
+{
+  "body": {
+    "action": "validate",
+    "target": "fn_0d7bd32d7d3ff63299e4139b051ffcc6e18a0ef23b670feb186dd0262c511c8e"
+  },
+  "constraints": null,
+  "from": "did:nova:ea9b49af638db86bff90080c8f1800535182ae30564132fb24276f06904e505e",
+  "hash": "msg_6946864bcc8e40435de35dac2364281a695583d480648ce297821bef439d3a6c",
+  "in_reply_to": null,
+  "kind": "request",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:JpYB00DJO/ocuxTOES7cH/U5LoQQMI9idcA59vXmvzv+FSk7s4hd4UyJA3fXImm+nhHT6nlx1pzzKyVIrmDwDQ==",
+  "timestamp": "2026-06-08T13:00:00Z",
+  "to": "did:nova:16efab1d73f507584ef08f79c72b16b988d02868e2eb02686a61a9db0076518a"
+}

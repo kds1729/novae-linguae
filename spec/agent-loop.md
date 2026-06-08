@@ -68,10 +68,37 @@ Worked example: [`request.v0.2.json`](examples/request.v0.2.json) asks the respo
 real hashes and Ed25519 signatures that `nl-validator verify` passes; the request is signed by the
 example "claude" identity (`did:nova:ea9b…505e`), the assert by an example responder identity.
 
+## Beyond `apply`: validate and query
+
+The responder dispatches on the message: it also handles a `request` to **validate** and a **query**.
+
+- **`request` / `validate`** — *"is this target sound?"* The responder resolves the target's record
+  and body, **typechecks** the body against the declared `signature.type` and **runs** its worked
+  examples (the same checks as `nl-validator typecheck` / `run`), and replies with an `assert` whose
+  claim is `verified` (subject verified *by* the responder's DID) when both pass, or a `reject`
+  (`code: constraint_violated`, with the reason; `unknown_target` if it can't resolve it). This is
+  validation-as-a-service: the verdict is re-execution, signed and attributable. Worked example:
+  [`request-validate.json`](examples/request-validate.v0.2.json) → [`assert-verified.json`](examples/assert-verified.v0.2.json)
+  (validate `double` → `verified`).
+
+- **`query`** — *"what do you have that matches?"* The responder searches its records for those
+  matching the query `pattern` (`effects` / `intent_tags` as containment, `terminates` as equality;
+  `signature_type` matching is deferred) and replies with an `ack` carrying the sorted matching
+  content-addresses. This is discovery over Nova Locutio — the precondition for principle 4 (assemble
+  from what exists). Worked example: [`query.json`](examples/query.v0.2.json) (effects `io.console`) →
+  [`ack-query.json`](examples/ack-query.v0.2.json) (the one match: `greet`).
+
+```bash
+nl-validator respond spec/examples/request-validate.v0.2.json --records spec/examples/ --seed <s>  # -> assert verified / reject
+nl-validator respond spec/examples/query.v0.2.json            --records spec/examples/ --seed <s>  # -> ack with matches
+```
+
 ## Scope (v0.2, honest)
 
-- **`apply` only.** The responder handles `action: "apply"`. `store` / `validate` requests, and the
-  other speech acts (propose/commit/delegate/…), are separate flows not driven here.
+- **`apply` / `validate` / `query`.** The responder handles the `apply` and `validate` request
+  actions and the `query` speech act. The `store` action and the negotiating acts
+  (propose/commit/delegate/retract) — and multi-step conversations that chain query → compose →
+  commit — build on the same substrate and are the next step.
 - **Pure targets.** The target must be a body the v0.1 evaluator handles (`spec/evaluation.md`):
   effects are not modelled, so an effectful target is out of scope. An unresolvable target or args
   that don't decode are an honest error, never a silent empty assert.

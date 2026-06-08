@@ -130,10 +130,167 @@ pub fn verify_claim(assert: &J, link_map: HashMap<String, J>) -> Result<bool> {
     }
 }
 
+/// The common reply envelope; `sign_message` fills `from`/`hash`/`signature`.
+fn build_envelope(kind: &str, to: &str, in_reply_to: &str, timestamp: Option<&str>, body: J) -> J {
+    json!({
+        "schema_version": "0.2.0",
+        "kind": kind,
+        "to": to,
+        "in_reply_to": in_reply_to,
+        "timestamp": timestamp,
+        "constraints": null,
+        "body": body
+    })
+}
+
+fn sign_envelope(mut envelope: J, key: &SigningKey) -> Result<J> {
+    sign_message(&mut envelope, key).context("signing the reply")?;
+    Ok(envelope)
+}
+
+/// The fuller agent loop: dispatch a consumed message to the right handler and return a signed reply.
+/// Handles `request`/`apply` (assert a computed result — see [`respond_to_request`]),
+/// `request`/`validate` (typecheck + run the target, then assert it `verified` or `reject`), and
+/// `query` (search the records, `ack` with the matches). `link_map` resolves bodies (apply/validate);
+/// `record_map` (address → function record) backs validate and query.
+pub fn respond_to_message(
+    message: &J,
+    link_map: HashMap<String, J>,
+    record_map: HashMap<String, J>,
+    signing_key: &SigningKey,
+    timestamp: Option<&str>,
+) -> Result<J> {
+    let kind = message.get("kind").and_then(|k| k.as_str()).unwrap_or_default();
+    match kind {
+        "request" => {
+            let action = message.pointer("/body/action").and_then(|a| a.as_str()).unwrap_or_default();
+            match action {
+                "apply" => respond_to_request(message, link_map, signing_key, timestamp),
+                "validate" => validate_reply(message, link_map, record_map, signing_key, timestamp),
+                other => bail!("respond handles the `apply` and `validate` request actions, not `{other}`"),
+            }
+        }
+        "query" => query_reply(message, record_map, signing_key, timestamp),
+        other => bail!("respond handles `request` and `query` speech acts, not `{other}`"),
+    }
+}
+
+/// `request`/`validate`: typecheck the target's body and run its examples; assert it `verified` (by
+/// the responder's identity) if both pass, otherwise `reject` with a reason.
+fn validate_reply(
+    message: &J,
+    link_map: HashMap<String, J>,
+    record_map: HashMap<String, J>,
+    signing_key: &SigningKey,
+    timestamp: Option<&str>,
+) -> Result<J> {
+    let requester = message.get("from").and_then(|f| f.as_str()).ok_or_else(|| anyhow!("message has no `from`"))?;
+    let req_hash = message.get("hash").and_then(|h| h.as_str()).ok_or_else(|| anyhow!("message has no `hash`"))?;
+    let target = message
+        .pointer("/body/target")
+        .and_then(|t| t.as_str())
+        .ok_or_else(|| anyhow!("a `validate` request must carry a `target` content-address"))?;
+
+    let reject = |code: &str, reason: String| {
+        sign_envelope(
+            build_envelope("reject", requester, req_hash, timestamp,
+                json!({ "rejects": req_hash, "code": code, "reason": reason })),
+            signing_key,
+        )
+    };
+
+    let (record, body) = match (record_map.get(target), link_map.get(target)) {
+        (Some(r), Some(b)) => (r, b),
+        _ => return reject("unknown_target", format!("no resolvable record + body for `{target}`")),
+    };
+
+    // Verify the target the same way `nl-validator typecheck`/`run` do — re-execution, not trust.
+    set_resolver(link_map.clone());
+    let typed = crate::typecheck_record(record, body);
+    let runs = crate::run_examples(record, body);
+    clear_resolver();
+
+    if let Err(e) = &typed {
+        return reject("constraint_violated", format!("ill-typed: {e:#}"));
+    }
+    match runs {
+        Ok(rs) if rs.iter().all(|r| r.passed) => {}
+        Ok(rs) => {
+            let failed = rs.iter().filter(|r| !r.passed).count();
+            return reject("constraint_violated", format!("{failed}/{} examples failed", rs.len()));
+        }
+        Err(e) => return reject("constraint_violated", format!("evaluation error: {e:#}")),
+    }
+
+    let responder = crate::did_nova_from_pubkey(&signing_key.verifying_key());
+    sign_envelope(
+        build_envelope("assert", requester, req_hash, timestamp,
+            json!({ "subject": target, "claim": { "kind": "verified", "subject": target, "by": responder }, "evidence": null })),
+        signing_key,
+    )
+}
+
+/// `query`: `ack` with the records matching the query pattern (effects / intent_tags as containment,
+/// terminates as equality; signature_type matching is deferred). Matches are sorted for determinism.
+fn query_reply(
+    message: &J,
+    record_map: HashMap<String, J>,
+    signing_key: &SigningKey,
+    timestamp: Option<&str>,
+) -> Result<J> {
+    let requester = message.get("from").and_then(|f| f.as_str()).ok_or_else(|| anyhow!("message has no `from`"))?;
+    let q_hash = message.get("hash").and_then(|h| h.as_str()).ok_or_else(|| anyhow!("message has no `hash`"))?;
+    let pattern = message.pointer("/body/pattern").cloned().unwrap_or_else(|| json!({}));
+    let limit = message.pointer("/body/limit").and_then(|l| l.as_u64()).unwrap_or(50) as usize;
+
+    let mut matches: Vec<String> = record_map
+        .iter()
+        .filter(|(_, rec)| record_matches(rec, &pattern))
+        .map(|(addr, _)| addr.clone())
+        .collect();
+    matches.sort();
+    matches.truncate(limit);
+
+    sign_envelope(
+        build_envelope("ack", requester, q_hash, timestamp,
+            json!({ "acks": q_hash, "result": { "matches": matches, "count": matches.len() } })),
+        signing_key,
+    )
+}
+
+/// True if `record` satisfies every constraint present in the query `pattern`.
+fn record_matches(record: &J, pattern: &J) -> bool {
+    let str_set = |v: Option<&J>| -> Vec<String> {
+        v.and_then(|x| x.as_array())
+            .map(|a| a.iter().filter_map(|e| e.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+    let want_effects = str_set(pattern.get("effects"));
+    if !want_effects.is_empty() {
+        let have = str_set(record.pointer("/signature/effects"));
+        if !want_effects.iter().all(|e| have.contains(e)) {
+            return false;
+        }
+    }
+    let want_tags = str_set(pattern.get("intent_tags"));
+    if !want_tags.is_empty() {
+        let have = str_set(record.get("intent_tags"));
+        if !want_tags.iter().all(|t| have.contains(t)) {
+            return false;
+        }
+    }
+    if let Some(want) = pattern.get("terminates").and_then(|t| t.as_str()) {
+        if record.pointer("/signature/terminates").and_then(|t| t.as_str()) != Some(want) {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{build_link_map, signing_key_from_seed, verify_signature};
+    use crate::{build_link_map, build_record_map, signing_key_from_seed, verify_signature};
     use std::path::{Path, PathBuf};
 
     fn examples_dir() -> PathBuf {
@@ -253,5 +410,56 @@ mod tests {
         // apply to a target with no body in the (empty) link map.
         let req = apply_request("did:nova:x", "msg_y", "fn_deadbeef", json!([]));
         assert!(respond_to_request(&req, HashMap::new(), &key, None).is_err());
+    }
+
+    const REQUESTER: &str = "did:nova:11112222333344445555666677778888999900001111222233334444555566aa";
+    const A_MSG: &str = "msg_2222222222222222222222222222222222222222222222222222222222222222";
+
+    fn maps() -> (std::collections::HashMap<String, J>, std::collections::HashMap<String, J>) {
+        (build_link_map(&examples_dir()).unwrap(), build_record_map(&examples_dir()).unwrap())
+    }
+
+    #[test]
+    fn validate_request_asserts_verified() {
+        // `validate` double: it typechecks and its examples run, so the reply asserts it `verified`.
+        let req = json!({ "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null, "body": { "action": "validate", "target": double_addr() } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&req, link, recs, &key, None).unwrap();
+        assert_eq!(reply["kind"], "assert");
+        assert_eq!(reply["body"]["claim"]["kind"], "verified");
+        assert_eq!(reply["body"]["claim"]["subject"], double_addr().as_str());
+        assert_eq!(reply["in_reply_to"], A_MSG);
+        verify_signature(&reply).expect("verified-assert signature must check");
+    }
+
+    #[test]
+    fn validate_unknown_target_rejects() {
+        let bad = "fn_0000000000000000000000000000000000000000000000000000000000000000";
+        let req = json!({ "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null, "body": { "action": "validate", "target": bad } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&req, link, recs, &key, None).unwrap();
+        assert_eq!(reply["kind"], "reject");
+        assert_eq!(reply["body"]["code"], "unknown_target");
+        verify_signature(&reply).unwrap();
+    }
+
+    #[test]
+    fn query_acks_matching_records() {
+        // Query for io.console effects: greet is the only such record.
+        let q = json!({ "schema_version": "0.2.0", "kind": "query", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null, "body": { "pattern": { "effects": ["io.console"] } } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&q, link, recs, &key, None).unwrap();
+        assert_eq!(reply["kind"], "ack");
+        assert_eq!(reply["body"]["acks"], A_MSG);
+        let greet = load("greet.v0.2.json")["hash"].as_str().unwrap().to_string();
+        let matches = reply["body"]["result"]["matches"].as_array().unwrap();
+        assert!(matches.iter().any(|m| m == &json!(greet)), "greet should match the io.console query");
+        verify_signature(&reply).unwrap();
     }
 }
