@@ -22,28 +22,70 @@ def py_body(src):
 
 
 class PythonBodyTests(unittest.TestCase):
-    def test_arithmetic_expression(self):
+    def test_arithmetic_expression_wraps_in_lambda(self):
         self.assertEqual(
             py_body("def f(n):\n    return n * 2"),
-            {"kind": "app", "fn": {"kind": "var", "name": "mul"},
-             "args": [{"kind": "var", "name": "n"}, {"kind": "lit", "value": {"kind": "int", "value": 2}}]},
+            {"kind": "lambda", "params": [{"name": "n"}], "body":
+                {"kind": "app", "fn": {"kind": "var", "name": "mul"},
+                 "args": [{"kind": "var", "name": "n"}, {"kind": "lit", "value": {"kind": "int", "value": 2}}]}},
         )
 
-    def test_call_and_var(self):
-        self.assertEqual(py_body("def f(x):\n    return x"), {"kind": "var", "name": "x"})
+    def test_var_and_call(self):
+        self.assertEqual(
+            py_body("def f(x):\n    return x"),
+            {"kind": "lambda", "params": [{"name": "x"}], "body": {"kind": "var", "name": "x"}},
+        )
         self.assertEqual(
             py_body("def f(x):\n    return g(x)"),
-            {"kind": "app", "fn": {"kind": "var", "name": "g"}, "args": [{"kind": "var", "name": "x"}]},
+            {"kind": "lambda", "params": [{"name": "x"}], "body":
+                {"kind": "app", "fn": {"kind": "var", "name": "g"}, "args": [{"kind": "var", "name": "x"}]}},
         )
 
+    def test_zero_arg_is_a_bare_expression(self):
+        # A 0-param function emits no lambda — applying it to [] still evaluates.
+        self.assertEqual(py_body("def f():\n    return 1"), {"kind": "lit", "value": {"kind": "int", "value": 1}})
+
     def test_docstring_is_skipped(self):
-        self.assertEqual(py_body('def f(x):\n    "doc"\n    return x'), {"kind": "var", "name": "x"})
+        self.assertEqual(
+            py_body('def f(x):\n    "doc"\n    return x'),
+            {"kind": "lambda", "params": [{"name": "x"}], "body": {"kind": "var", "name": "x"}},
+        )
+
+    def test_local_binding_becomes_let(self):
+        self.assertEqual(
+            py_body("def f(x):\n    y = x\n    return y"),
+            {"kind": "lambda", "params": [{"name": "x"}], "body":
+                {"kind": "let", "name": "y", "value": {"kind": "var", "name": "x"},
+                 "body": {"kind": "var", "name": "y"}}},
+        )
+
+    def test_boolean_if_becomes_case(self):
+        body = py_body("def f(n):\n    if n > 0:\n        return 1\n    return 0")
+        self.assertEqual(body["kind"], "lambda")
+        case = body["body"]
+        self.assertEqual(case["kind"], "case")
+        self.assertEqual(
+            case["scrutinee"],
+            {"kind": "app", "fn": {"kind": "var", "name": "gt"},
+             "args": [{"kind": "var", "name": "n"}, {"kind": "lit", "value": {"kind": "int", "value": 0}}]},
+        )
+        self.assertEqual(case["arms"][0]["pattern"], {"kind": "lit", "value": {"kind": "bool", "value": True}})
+        self.assertEqual(case["arms"][1]["pattern"], {"kind": "wildcard"})
+
+    def test_ternary_becomes_case(self):
+        self.assertEqual(py_body("def f(n):\n    return 1 if n > 0 else 0")["body"]["kind"], "case")
+
+    def test_len_maps_to_length(self):
+        self.assertEqual(
+            py_body("def f(xs):\n    return len(xs)")["body"],
+            {"kind": "app", "fn": {"kind": "var", "name": "length"}, "args": [{"kind": "var", "name": "xs"}]},
+        )
 
     def test_out_of_subset_returns_none(self):
-        self.assertIsNone(py_body("def f(x):\n    y = x\n    return y"))   # local binding
-        self.assertIsNone(py_body("def f(x):\n    if x:\n        return 1\n    return 0"))  # control flow
+        self.assertIsNone(py_body("def f(x):\n    if x:\n        return 1\n    return 0"))  # truthy non-bool test
         self.assertIsNone(py_body("def f(x):\n    return [i for i in x]"))  # comprehension
         self.assertIsNone(py_body("def f(x):\n    return"))  # bare return
+        self.assertIsNone(py_body("def f(x):\n    for i in x:\n        return i\n    return 0"))  # loop
 
 
 class TokenBodyTests(unittest.TestCase):

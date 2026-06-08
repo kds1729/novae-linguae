@@ -1,18 +1,23 @@
 """Pragmatic body-expression AST builder (spec/body-expression.schema.json).
 
-v1 SUBSET — only a *single result expression* built exclusively from `var` / `lit` / `app` /
-`field` is translated to a real Nova Lingua body AST. Anything with control flow, local bindings,
-lambdas, pattern matching, comprehensions, multiple statements/equations, or any unrepresentable
-sub-expression yields None, and the adapter keeps its synthetic source-hash body (byte-identical to
-before). This mirrors the adapters' existing "fall back to v0.1 when there are no examples" pattern.
-
-Parameters appear as FREE `var`s — the schema explicitly sanctions this ("the function's parameter
-binding is on the OUTSIDE"); we emit no wrapping `lambda`. Operators (`a + b`, `!x`, `a == b`)
-become an `app` whose `fn` is a `var` naming the builtin (add / sub / mul / div / mod / neg / not /
-and / or / eq / neq / lt / le / gt / ge) — the same operator vocabulary the predicate layer uses.
+The Python front-end (`body_ast_from_py`) translates a usefully-large pure subset to a real,
+**executable** Nova Lingua body — a `lambda` over the function's parameters (the canonical runnable
+form, matching `spec/examples/body-double.json`) whose body is built from:
+  * expressions — `var` / `lit` / `app` / `field`, operators (`a + b`, `!x`, `a == b` → `add`/`not`/
+    `eq`/…, the predicate-layer vocabulary), a few mapped Python builtins (`len` → `length`,
+    `abs` → `abs`), and the conditional expression `a if c else b`;
+  * local bindings — `x = expr; …; return r` → nested `let`;
+  * conditionals — `if c: …` / `elif` / `else` and early `return` → `case` on the boolean test
+    (the schema has no `if`; it is `case` on a `bool`).
+Conditionals are only translated when the test is genuinely boolean (a comparison / boolean
+connective / `not` / bool literal) so Python truthiness is never silently mistranslated. Anything
+outside the subset (loops, comprehensions, `with`/`try`, truthy non-bool tests, unrepresentable
+sub-expressions) yields None, and the adapter keeps its synthetic source-hash body — byte-identical
+to before. A zero-parameter function emits the bare result expression (no `lambda`), so applying it
+to `[]` still evaluates.
 
 Front-ends:
-  * `body_ast_from_py` — real Python `ast` (nl-ingest-py); full subset support.
+  * `body_ast_from_py` — real Python `ast` (nl-ingest-py): the executable subset above.
   * `body_ast_from_hs` / `body_ast_from_ts` — conservative recognizers for the string-scanner
     adapters, handling only a bare variable or a flat application of atoms (no operators); they
     almost always return None, which is the documented expected behaviour.
@@ -32,6 +37,8 @@ _FIELD = re.compile(r"^[a-z][a-zA-Z0-9_]*$")
 _PY_CMP = {ast.Lt: "lt", ast.LtE: "le", ast.Gt: "gt", ast.GtE: "ge", ast.Eq: "eq", ast.NotEq: "neq"}
 _PY_BIN = {ast.Add: "add", ast.Sub: "sub", ast.Mult: "mul", ast.Div: "div", ast.Mod: "mod"}
 _PY_BOOL = {ast.And: "and", ast.Or: "or"}
+# Python builtin call -> Nova builtin (unary, unambiguous; arity-ambiguous ones like min/max excluded).
+_PY_CALL = {"len": "length", "abs": "abs"}
 
 
 class BodyError(Exception):
@@ -60,6 +67,31 @@ def b_field(record, name):
     return {"kind": "field", "record": record, "name": name}
 
 
+def b_let(name, value, body):
+    if not _VAR.match(name):
+        raise BodyError(f"{name!r} is not a valid let-binding name")
+    return {"kind": "let", "name": name, "value": value, "body": body}
+
+
+def b_lambda(params, body):
+    for p in params:
+        if not _VAR.match(p):
+            raise BodyError(f"{p!r} is not a valid parameter name")
+    return {"kind": "lambda", "params": [{"name": p} for p in params], "body": body}
+
+
+# A `case` on a boolean test: `true -> then`, wildcard `-> else` (the schema has no `if`).
+def b_if(test, then_expr, else_expr):
+    return {
+        "kind": "case",
+        "scrutinee": test,
+        "arms": [
+            {"pattern": {"kind": "lit", "value": {"kind": "bool", "value": True}}, "body": then_expr},
+            {"pattern": {"kind": "wildcard"}, "body": else_expr},
+        ],
+    }
+
+
 def _op_app(op, args):
     return b_app(b_var(op), args)
 
@@ -81,7 +113,25 @@ def _fold(op, terms):
 
 # --- Python front-end ---------------------------------------------------------------------------
 
+def _is_boolish(node):
+    """True if `node` is a genuinely boolean expression — so a Python `if`/ternary test can be a
+    `case` on a `bool` without silently mistranslating truthiness of non-bool values."""
+    if isinstance(node, ast.Compare):
+        return True
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return True
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return _is_boolish(node.operand)
+    if isinstance(node, ast.BoolOp):
+        return all(_is_boolish(v) for v in node.values)
+    return False
+
+
 def _expr_from_py(node):
+    if isinstance(node, ast.IfExp):
+        if not _is_boolish(node.test):
+            raise BodyError("non-boolean ternary test (Python truthiness is not representable)")
+        return b_if(_expr_from_py(node.test), _expr_from_py(node.body), _expr_from_py(node.orelse))
     if isinstance(node, ast.BoolOp):
         return _fold(_PY_BOOL[type(node.op)], [_expr_from_py(v) for v in node.values])
     if isinstance(node, ast.UnaryOp):
@@ -110,7 +160,7 @@ def _expr_from_py(node):
             raise BodyError("calls with keyword/starred args are out of subset")
         fn = node.func
         if isinstance(fn, ast.Name):
-            fnexpr = b_var(fn.id)
+            fnexpr = b_var(_PY_CALL.get(fn.id, fn.id))  # map len->length, abs->abs; else as-named
         elif isinstance(fn, ast.Attribute):
             fnexpr = _expr_from_py(fn)  # qualified/method call -> app over a field projection
         else:
@@ -125,18 +175,55 @@ def _expr_from_py(node):
     raise BodyError(f"unsupported expression {type(node).__name__}")
 
 
+def _block_from_py(stmts):
+    """Translate a statement sequence that must produce a value into an expression: `return r` is the
+    result; `x = e; …` becomes `let x = e in …`; `if c: …`/`else`/early-return becomes `case`."""
+    if not stmts:
+        raise BodyError("block falls off the end without returning a value")
+    head, tail = stmts[0], stmts[1:]
+    if isinstance(head, ast.Return):
+        if head.value is None:
+            raise BodyError("bare `return` (no value)")
+        return _expr_from_py(head.value)  # statements after a return are dead
+    if isinstance(head, ast.Assign):
+        if len(head.targets) != 1 or not isinstance(head.targets[0], ast.Name):
+            raise BodyError("only single-name assignment targets are in subset")
+        return b_let(head.targets[0].id, _expr_from_py(head.value), _block_from_py(tail))
+    if isinstance(head, ast.AnnAssign):
+        if not isinstance(head.target, ast.Name) or head.value is None:
+            raise BodyError("annotated assignment must be `name: T = value`")
+        return b_let(head.target.id, _expr_from_py(head.value), _block_from_py(tail))
+    if isinstance(head, ast.If):
+        if not _is_boolish(head.test):
+            raise BodyError("non-boolean `if` test (Python truthiness is not representable)")
+        then_expr = _block_from_py(head.body)
+        # An `else`/`elif` block is the false branch; without one, the rest of the function is.
+        else_expr = _block_from_py(head.orelse if head.orelse else tail)
+        return b_if(_expr_from_py(head.test), then_expr, else_expr)
+    raise BodyError(f"unsupported statement {type(head).__name__}")
+
+
+def _fixed_param_names(func):
+    a = func.args
+    return [p.arg for p in (list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs))]
+
+
 def body_ast_from_py(func):
-    """A body AST for a single-`return`-expression Python function (after an optional docstring), or
-    None if the body falls outside the v1 subset."""
+    """An *executable* body AST for a Python function whose body is in the supported subset (a
+    `lambda` over its parameters; a bare expression for a 0-parameter function), or None otherwise."""
     body = func.body
     start = 1 if (body and isinstance(body[0], ast.Expr)
                   and isinstance(body[0].value, ast.Constant)
                   and isinstance(body[0].value.value, str)) else 0
     stmts = body[start:]
-    if len(stmts) != 1 or not isinstance(stmts[0], ast.Return) or stmts[0].value is None:
+    if not stmts:
         return None
     try:
-        return _expr_from_py(stmts[0].value)
+        expr = _block_from_py(stmts)
+        params = _fixed_param_names(func)
+        # A 0-arg function is its bare result (applying it to [] still evaluates); else wrap in a
+        # lambda so `run` can apply the example's arguments.
+        return expr if not params else b_lambda(params, expr)
     except BodyError:
         return None
 

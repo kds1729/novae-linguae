@@ -738,6 +738,20 @@ def records_from_source(source: str, module_name: str | None, include_private: b
     return out
 
 
+def bodies_from_source(source: str, include_private: bool) -> dict:
+    """Map of body content-address -> executable body AST for every function whose body is in the
+    supported subset. Used by ``--emit-dir`` to write the runnable bodies alongside the records so
+    ``nl-validator run --records <dir>`` can execute the ingested functions against their examples.
+    Functions outside the subset keep a synthetic ``body_hash`` and contribute no entry here."""
+    tree = ast.parse(source)
+    out: dict = {}
+    for fn in iter_functions(tree, include_private):
+        body_ast = body_ast_from_py(fn)
+        if body_ast is not None:
+            out[format_hash("expr", blake3_256(canonicalize(body_ast)))] = body_ast
+    return out
+
+
 # ---------------------------------------------------------------------------
 # CLI.
 # ---------------------------------------------------------------------------
@@ -761,6 +775,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="attach curated algebraic laws (property_catalog.json) to recognised functions "
                         "(map/filter/sort/reverse/id, ...) — implies --v2. Verify with "
                         "`nl-validator check-properties`")
+    p.add_argument("--emit-dir", dest="emit_dir", type=Path, default=None,
+                   help="also write a runnable directory: each record as <fn_hash>.json and each "
+                        "executable body as <expr_hash>.json, so `nl-validator run --records <dir>` "
+                        "can execute the ingested functions against their examples")
     return p
 
 
@@ -786,6 +804,18 @@ def main(argv=None) -> int:
             print(f"nl-ingest-py: parsing {path}: {e}", file=sys.stderr)
             exit_code = 1
             continue
+        if args.emit_dir:
+            try:
+                args.emit_dir.mkdir(parents=True, exist_ok=True)
+                for h, b in bodies_from_source(source, args.include_private).items():
+                    (args.emit_dir / f"{h}.json").write_text(
+                        json.dumps(b, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                for record in records:
+                    (args.emit_dir / f"{record['hash']}.json").write_text(
+                        json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            except OSError as e:
+                print(f"nl-ingest-py: writing emit dir {args.emit_dir}: {e}", file=sys.stderr)
+                exit_code = 1
         for record in records:
             if args.pretty:
                 print(json.dumps(record, indent=2, ensure_ascii=False))

@@ -309,5 +309,35 @@ class TestV2Records(unittest.TestCase):
         self.assertEqual(self._run("check-predicate", pp).returncode, 0)
 
 
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class TestExecutableCorpus(unittest.TestCase):
+    """End-to-end: ingest real-shaped library functions (conditionals → case, local bindings → let,
+    a mapped `abs` builtin) to v0.2 records with doctest examples AND executable body ASTs, then
+    RUN them with `nl-validator run --records` — the ingested corpus actually executes."""
+
+    def test_ingested_functions_run_against_their_doctests(self):
+        src = (Path(__file__).resolve().parent / "sample_executable.py").read_text(encoding="utf-8")
+        records = n.records_from_source(src, "sample", include_private=False, v2=True)
+        bodies = n.bodies_from_source(src, include_private=False)
+        self.assertEqual(len(records), 3)               # clamp / sign / abs_diff
+        self.assertEqual(len(bodies), 3)                # all three bodies are in the executable subset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            for h, body in bodies.items():
+                (d / f"{h}.json").write_text(json.dumps(body))
+            for rec in records:
+                (d / f"{rec['hash']}.json").write_text(json.dumps(rec))
+            for rec in records:
+                name = rec["name_hints"][0]
+                # The record's body_hash is a real emitted body, not a synthetic source-hash fallback.
+                self.assertIn(rec["body_hash"], bodies, name)
+                out = subprocess.run(
+                    [str(VALIDATOR), "run", str(d / f"{rec['hash']}.json"), "--records", str(d)],
+                    capture_output=True, text=True)
+                self.assertEqual(out.returncode, 0, f"{name}: {out.stdout}{out.stderr}")
+                self.assertIn("examples passed", out.stdout, name)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
