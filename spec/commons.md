@@ -281,9 +281,10 @@ and cannot suppress content that another node will serve.
 - **Resource exhaustion.** Bodies and embeddings dominate storage; a node bounds its own footprint
   via local policy and tiering. None of this is protocol-visible.
 
-## Engine-agnostic: the planned reference node
+## Engine-agnostic: the reference node
 
-The first reference node is a Django service:
+The first reference node is a Django service (built and deployed — **Arca**, live at
+https://nl.1105software.com; see [`../tooling/commons-node/`](../tooling/commons-node/)):
 
 - **Postgres** as the durable system of record — JSONB for the raw record plus extracted, indexed
   columns (effects, capabilities, intent_tags, terminates, complexity, normalized signature) for
