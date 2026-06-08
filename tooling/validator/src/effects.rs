@@ -37,11 +37,14 @@ pub struct EffectInference {
 /// to skip resolution (every `fn_ref` then counts as `unresolved`).
 pub fn infer_effects(body: &J, records: &HashMap<String, J>) -> EffectInference {
     let mut inf = EffectInference { effects: BTreeSet::new(), opaque: false, unresolved: false };
-    walk(body, records, &mut inf);
+    walk(body, records, &[], &mut inf);
     inf
 }
 
-fn walk(node: &J, records: &HashMap<String, J>, inf: &mut EffectInference) {
+/// `bound` is the names in lexical scope (lambda params, `let` and `case`-`bind` names). Applying a
+/// bound name is effect-polymorphic (its effects belong to the caller, like `map`); applying a
+/// *free* non-builtin name is a genuinely external opaque callee.
+fn walk(node: &J, records: &HashMap<String, J>, bound: &[String], inf: &mut EffectInference) {
     let Some(kind) = node.get("kind").and_then(|k| k.as_str()) else { return };
     match kind {
         "var" => {
@@ -72,42 +75,51 @@ fn walk(node: &J, records: &HashMap<String, J>, inf: &mut EffectInference) {
         }
         "app" => {
             if let Some(f) = node.get("fn") {
-                if applies_opaque(f) {
-                    inf.opaque = true;
+                // A var callee that is neither a builtin nor a name in scope is an external opaque
+                // function; a bound name is effect-polymorphic (the caller supplies it).
+                if f.get("kind").and_then(|k| k.as_str()) == Some("var") {
+                    let n = f.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+                    if !is_builtin(n) && !bound.iter().any(|b| b == n) {
+                        inf.opaque = true;
+                    }
                 }
-                walk(f, records, inf);
+                walk(f, records, bound, inf);
             }
-            if let Some(args) = node.get("args").and_then(|a| a.as_array()) {
-                for a in args {
-                    walk(a, records, inf);
-                }
+            for a in node.get("args").and_then(|a| a.as_array()).into_iter().flatten() {
+                walk(a, records, bound, inf);
             }
         }
         "let" => {
-            walk(&node["value"], records, inf);
-            walk(&node["body"], records, inf);
+            walk(&node["value"], records, bound, inf);
+            let mut b2 = bound.to_vec();
+            if let Some(name) = node.get("name").and_then(|n| n.as_str()) {
+                b2.push(name.to_string());
+            }
+            walk(&node["body"], records, &b2, inf);
         }
-        "lambda" => walk(&node["body"], records, inf),
-        "case" => {
-            walk(&node["scrutinee"], records, inf);
-            if let Some(arms) = node.get("arms").and_then(|a| a.as_array()) {
-                for arm in arms {
-                    walk(&arm["body"], records, inf);
+        "lambda" => {
+            let mut b2 = bound.to_vec();
+            for p in node.get("params").and_then(|p| p.as_array()).into_iter().flatten() {
+                if let Some(name) = p.get("name").and_then(|n| n.as_str()) {
+                    b2.push(name.to_string());
                 }
             }
+            walk(&node["body"], records, &b2, inf);
         }
-        "field" => walk(&node["record"], records, inf),
+        "case" => {
+            walk(&node["scrutinee"], records, bound, inf);
+            for arm in node.get("arms").and_then(|a| a.as_array()).into_iter().flatten() {
+                let mut b2 = bound.to_vec();
+                if arm.pointer("/pattern/kind").and_then(|k| k.as_str()) == Some("bind") {
+                    if let Some(pn) = arm.pointer("/pattern/name").and_then(|n| n.as_str()) {
+                        b2.push(pn.to_string());
+                    }
+                }
+                walk(&arm["body"], records, &b2, inf);
+            }
+        }
+        "field" => walk(&node["record"], records, bound, inf),
         _ => {}
-    }
-}
-
-/// Is the callee of an `app` a non-builtin `var` (a higher-order parameter / external name applied as
-/// a function)? Its effects can't be seen statically. A `fn_ref` callee is resolved by the `lit` walk
-/// (not opaque); a `lambda` head (IIFE) or a curried `app` head is analyzed by the normal walk.
-fn applies_opaque(f: &J) -> bool {
-    match f.get("kind").and_then(|k| k.as_str()) {
-        Some("var") => f.get("name").and_then(|n| n.as_str()).map(|n| !is_builtin(n)).unwrap_or(true),
-        _ => false,
     }
 }
 
@@ -189,10 +201,18 @@ mod tests {
     }
 
     #[test]
-    fn applying_a_parameter_is_opaque() {
-        // \f x -> f(x): the head `f` is not a builtin, so effects are UNVERIFIABLE.
+    fn applying_a_parameter_is_effect_polymorphic_not_opaque() {
+        // \f x -> f(x): `f` is a bound parameter, so its effects belong to the caller (like `map`).
         let body = json!({ "kind": "lambda", "params": [{ "name": "f" }, { "name": "x" }],
             "body": { "kind": "app", "fn": { "kind": "var", "name": "f" }, "args": [{ "kind": "var", "name": "x" }] } });
+        assert!(!infer_effects(&body, &no_records()).opaque);
+    }
+
+    #[test]
+    fn applying_a_free_name_is_opaque() {
+        // \x -> g(x): `g` is free (not a param / builtin / fn_ref) — a genuinely external callee.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "x" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "g" }, "args": [{ "kind": "var", "name": "x" }] } });
         assert!(infer_effects(&body, &no_records()).opaque);
     }
 

@@ -122,9 +122,10 @@ Worked example: [`greet.v0.2.json`](examples/greet.v0.2.json) (`\msg -> print(ms
 verification counterpart: it infers a body's effects *without running it* by walking the AST for the
 effectful builtins it names, folding in the **declared effects of any `fn_ref` callee** resolved from
 `--records`, and reports **SOUND** (inferred ⊆ declared), **UNDER-DECLARED** (the body performs an
-effect the record omits — exit 1, caught before execution), or **UNVERIFIABLE** (the body applies an
-*opaque* higher-order parameter, or references a `fn_ref` callee not resolvable without `--records` —
-so the inferred set is only a lower bound). A function's *own* effects are what it performs directly;
+effect the record omits — exit 1, caught before execution), or **UNVERIFIABLE** (the body applies a
+*free* external callee, or references a `fn_ref` callee not resolvable without `--records` — so the
+inferred set is only a lower bound; a *bound* parameter applied directly is effect-polymorphic, not
+opaque). A function's *own* effects are what it performs directly;
 a higher-order *argument's* effects belong to the caller (effect polymorphism), so `map`'s declared
 `[]` is SOUND even though `map(f, xs)` runs `f` — but a concrete `fn_ref` the body itself references
 *does* contribute its declared effects. Worked: `greet` → SOUND `[io.console]`; `double` → SOUND `[]`;
@@ -132,6 +133,5 @@ the `print` body against a no-effects record → UNDER-DECLARED; a body applying
 UNVERIFIABLE bare, SOUND with `--records` (its `io.console` folded in).
 
 **Scope (v0.1, honest).** Two effectful builtins stand in for the ten-effect vocabulary — enough to
-make enforcement, tracing, and inference (including `fn_ref`-callee resolution) real and end-to-end.
-The remaining effect kinds, and scope-aware analysis that distinguishes an effect-polymorphic
-parameter applied directly (`\f x -> f(x)`) from a genuinely external callee, are the next rung.
+make enforcement, tracing, and scope-aware inference (with `fn_ref`-callee resolution) real and
+end-to-end. The remaining effect kinds are the next rung.
