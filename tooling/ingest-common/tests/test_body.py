@@ -103,20 +103,36 @@ class PythonBodyTests(unittest.TestCase):
 
 
 class TokenBodyTests(unittest.TestCase):
-    def test_haskell_bare_and_application(self):
-        self.assertEqual(body_ast_from_hs("f", "f x = x"), {"kind": "var", "name": "x"})
+    def test_haskell_bare_and_application_wrap_in_lambda(self):
         self.assertEqual(
-            body_ast_from_hs("f", "f x = g x"),
+            body_ast_from_hs("f", "f x = x"),
+            {"kind": "lambda", "params": [{"name": "x"}], "body": {"kind": "var", "name": "x"}},
+        )
+        self.assertEqual(
+            body_ast_from_hs("f", "f x = g x")["body"],
             {"kind": "app", "fn": {"kind": "var", "name": "g"}, "args": [{"kind": "var", "name": "x"}]},
         )
-        self.assertIsNone(body_ast_from_hs("f", "f x = x + 1"))         # operator: out of subset
+        self.assertIsNone(body_ast_from_hs("f", "f x = x + 1"))         # operator: out of HS subset
         self.assertIsNone(body_ast_from_hs("f", "f x\n  | x > 0 = 1"))  # guard
 
-    def test_typescript_arrow(self):
-        self.assertEqual(body_ast_from_ts("f", "export const f = (x) => x"), {"kind": "var", "name": "x"})
+    def test_typescript_arrow_reuses_python_expr(self):
         self.assertEqual(
-            body_ast_from_ts("f", "export const f = (x) => g(x)"),
+            body_ast_from_ts("f", "export const f = (x) => x"),
+            {"kind": "lambda", "params": [{"name": "x"}], "body": {"kind": "var", "name": "x"}},
+        )
+        self.assertEqual(
+            body_ast_from_ts("f", "export const f = (x) => g(x)")["body"],
             {"kind": "app", "fn": {"kind": "var", "name": "g"}, "args": [{"kind": "var", "name": "x"}]},
+        )
+        # Operators now translate (TS expression syntax == Python here).
+        self.assertEqual(
+            body_ast_from_ts("f", "export const f = (x) => x * 2")["body"],
+            {"kind": "app", "fn": {"kind": "var", "name": "mul"},
+             "args": [{"kind": "var", "name": "x"}, {"kind": "lit", "value": {"kind": "int", "value": 2}}]},
+        )
+        self.assertEqual(  # multi-param + comparison
+            body_ast_from_ts("f", "export const f = (a, b) => a > b")["params"],
+            [{"name": "a"}, {"name": "b"}],
         )
         self.assertIsNone(body_ast_from_ts("f", "export function f(x) { return x; }"))  # block body
 

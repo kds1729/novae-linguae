@@ -21,9 +21,12 @@ evaluates.
 
 Front-ends:
   * `body_ast_from_py` — real Python `ast` (nl-ingest-py): the executable subset above.
-  * `body_ast_from_hs` / `body_ast_from_ts` — conservative recognizers for the string-scanner
-    adapters, handling only a bare variable or a flat application of atoms (no operators); they
-    almost always return None, which is the documented expected behaviour.
+  * `body_ast_from_hs` — string-scanner recognizer (a bare variable or a flat application of atoms,
+    `f a b`), now `lambda`-wrapped over the equation's parameters so it is executable.
+  * `body_ast_from_ts` — a TS arrow's expression body is parsed with Python's `ast` (TS expression
+    syntax coincides with Python's for the supported subset — identifiers, literals, arithmetic /
+    comparison operators, calls, member access) and reused via `_expr_from_py`, `lambda`-wrapped over
+    the arrow's parameters. TS-only syntax (`?:`, `===`, `!`) and block bodies yield None.
 The Rust adapter has its own parallel `body_ast` over `syn` in nl_ingest.rs.
 """
 
@@ -282,8 +285,9 @@ def _atom(tok):
 
 
 def body_ast_from_hs(name, equation_text):
-    """A body AST for a single-clause Haskell equation whose RHS is a bare variable or a flat
-    application of atoms (`f a b`). Guards, operators, multi-line / multi-clause bodies -> None."""
+    """An *executable* body AST (a `lambda` over the equation's parameters) for a single-clause Haskell
+    equation whose RHS is a bare variable or a flat application of atoms (`f a b`). Guards, operators,
+    multi-line / multi-clause bodies -> None."""
     if not equation_text or "\n" in equation_text:
         return None
     text = equation_text.strip()
@@ -293,25 +297,62 @@ def body_ast_from_hs(name, equation_text):
     if len(parts) != 2:
         return None
     lhs, rhs = parts[0].strip(), parts[1].strip()
-    if not lhs.split() or lhs.split()[0] != name:
+    lhs_toks = lhs.split()
+    if not lhs_toks or lhs_toks[0] != name:
         return None
+    params = lhs_toks[1:]  # the equation's parameters, e.g. `f x y = …` -> [x, y]
     try:
         toks = [t for t in split_top(rhs, " ") if t.strip()]
         if not toks:
             return None
         if len(toks) == 1:
-            return _atom(toks[0])
-        fn = _atom(toks[0])
-        if fn["kind"] != "var":
-            return None
-        return b_app(fn, [_atom(t) for t in toks[1:]])
+            expr = _atom(toks[0])
+        else:
+            fn = _atom(toks[0])
+            if fn["kind"] != "var":
+                return None
+            expr = b_app(fn, [_atom(t) for t in toks[1:]])
+        return b_lambda(params, expr) if params else expr
     except BodyError:
         return None
 
 
+def _ts_params(prefix):
+    """Parameter names of a TS arrow from the text before `=>` — `(x, y)` / `(x: T)` / bare `x`. Type
+    annotations and defaults are stripped. None if a parameter isn't a simple identifier."""
+    p = prefix.strip()
+    if p.endswith(")"):
+        depth, start = 0, None
+        for i in range(len(p) - 1, -1, -1):
+            if p[i] == ")":
+                depth += 1
+            elif p[i] == "(":
+                depth -= 1
+                if depth == 0:
+                    start = i
+                    break
+        if start is None:
+            return None
+        inner = p[start + 1:-1].strip()
+        if not inner:
+            return []
+        names = []
+        for part in split_top(inner, ","):
+            nm = part.split(":")[0].split("=")[0].strip()
+            if not _VAR.match(nm):
+                return None
+            names.append(nm)
+        return names
+    last = p.split()[-1] if p.split() else ""
+    return [last] if _VAR.match(last) else None
+
+
 def body_ast_from_ts(name, slice_text):
-    """A body AST for a TypeScript arrow function with an *expression* body (`(x) => expr`) where
-    expr is a bare identifier or a flat call `g(a, b)`. Block bodies / operators -> None."""
+    """An *executable* body AST (a `lambda` over the arrow's parameters) for a TypeScript arrow with an
+    *expression* body (`(x) => expr`). TypeScript expression syntax coincides with Python's for the
+    supported subset (identifiers, literals, arithmetic / comparison operators, calls, member access,
+    parens), so the body is parsed with Python's `ast` and reused via `_expr_from_py`. Block bodies,
+    and TS-only syntax (`?:`, `===`, `!`) that doesn't parse as a Python expression, -> None."""
     if not slice_text:
         return None
     idx = slice_text.find("=>")
@@ -320,18 +361,12 @@ def body_ast_from_ts(name, slice_text):
     rhs = slice_text[idx + 2:].strip().rstrip(";").strip()
     if not rhs or rhs.startswith("{"):
         return None
-    try:
-        if _VAR.match(rhs):
-            return b_var(rhs)
-        m = re.match(r"^([A-Za-z_$][\w$]*)\((.*)\)$", rhs, re.S)
-        if not m:
-            return _atom(rhs)
-        callee, inner = m.group(1), m.group(2).strip()
-        if not _VAR.match(callee):
-            return None
-        fn = b_var(callee)
-        if inner == "":
-            return b_app(fn, [])
-        return b_app(fn, [_atom(a) for a in split_top(inner, ",")])
-    except BodyError:
+    params = _ts_params(slice_text[:idx])
+    if params is None:
         return None
+    try:
+        node = ast.parse(rhs, mode="eval").body
+        expr = _expr_from_py(node)
+    except (SyntaxError, ValueError, BodyError):
+        return None
+    return b_lambda(params, expr) if params else expr
