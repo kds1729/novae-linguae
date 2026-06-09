@@ -113,6 +113,19 @@ discovered functions. Worked: a single `--intent arithmetic` over `[21]` discove
 confirms `double(21) = 42` (five messages); `--intent arithmetic --intent arithmetic` discovers and
 composes `double` twice, confirming `double(double(21)) = 84` (ten messages).
 
+### Verified orchestration (`--verify`)
+
+`nl-validator orchestrate --verify [--policy <p> --attestation <a>…]` folds verification into the loop —
+the project's thesis in one autonomous run: **discover** a function by intent, decide whether to
+**trust** it from the receiver's *local* policy over an attestation graph (no central authority —
+principle 7; an untrusted function aborts the run before it is touched), **prove** the function's own
+declared property over the unbounded domain (don't trust the record's claim — re-prove it with the SMT
++ induction + lemma-discovery engine), then **apply** it and **re-verify** the result by re-running
+(principle 3). The transcript gains `trust` and `prove` steps between `ack` and `propose`. Worked: with
+a trusted root vouching for `double`, `--verify --intent arithmetic` over `[21]` discovers `double`,
+confirms it trusted, proves its `doubles` property, applies it, and re-verifies `21 → 42` (CONFIRMED);
+drop the vouching attestation and the same run ABORTS at the trust gate.
+
 ## Scope (v0.2, honest)
 
 - **The inbound speech acts are wired.** Beyond `apply`/`validate`/`query`/`propose`, the responder

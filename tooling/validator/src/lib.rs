@@ -72,7 +72,7 @@ pub use respond::{
 };
 
 pub mod orchestrate;
-pub use orchestrate::{orchestrate, Run, Step};
+pub use orchestrate::{orchestrate, orchestrate_verified, Run, Step, VerifiedRun};
 
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {

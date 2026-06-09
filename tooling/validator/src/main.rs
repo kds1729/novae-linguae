@@ -304,6 +304,19 @@ enum Commands {
         /// Optional ISO 8601 timestamp for the messages (default: null, deterministic per seed).
         #[arg(long)]
         timestamp: Option<String>,
+        /// Run the *verified* loop: after discovering the function, prove its declared property and
+        /// (with `--policy`) trust-gate it before applying. Single `--intent` only.
+        #[arg(long)]
+        verify: bool,
+        /// Local trust policy (JSON) for the `--verify` trust gate; an untrusted function aborts the run.
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Signed attestation messages backing the trust gate (repeatable).
+        #[arg(long = "attestation")]
+        attestations: Vec<PathBuf>,
+        /// SMT solver for the `--verify` proof step.
+        #[arg(long, default_value = "z3")]
+        solver: String,
     },
     /// Verify a Nova Locutio `assert` by RE-RUNNING its `predicate` claim against the commons:
     /// resolve the claim's content-addressed function(s) from `--records` and evaluate it. The
@@ -500,8 +513,12 @@ fn main() -> ExitCode {
         Commands::Authorize { policy, capability, grantee, delegations, at } => {
             (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
-        Commands::Orchestrate { records, intents, args, seed, responder_seed, timestamp } => {
-            (cmd_orchestrate(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
+        Commands::Orchestrate { records, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver } => {
+            if verify {
+                (cmd_orchestrate_verified(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver), false)
+            } else {
+                (cmd_orchestrate(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
+            }
         }
         #[cfg(feature = "surface")]
         Commands::ParseType { input } => (cmd_parse_type(input), false),
@@ -965,6 +982,56 @@ fn cmd_orchestrate(
     if run.confirmed {
         println!("CONFIRMED  discovered the function, applied it, and re-verified the result");
         Ok(())
+    } else {
+        Err(anyhow::anyhow!("orchestration did not confirm (rejected, or the claim failed to re-run)"))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_orchestrate_verified(
+    records: &PathBuf,
+    intents: &[String],
+    args: &[PathBuf],
+    seed: &str,
+    responder_seed: &str,
+    timestamp: Option<&str>,
+    policy: Option<&PathBuf>,
+    attestations: &[PathBuf],
+    solver: &str,
+) -> Result<()> {
+    if intents.len() != 1 {
+        anyhow::bail!("--verify supports exactly one --intent (got {})", intents.len());
+    }
+    let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
+    let orch = nl_validator::signing_key_from_seed(seed);
+    let resp = nl_validator::signing_key_from_seed(responder_seed);
+    let pol = policy.map(|p| nl_validator::read_json(p).and_then(|j| nl_validator::Policy::from_json(&j))).transpose()?;
+    let atts = attestations.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
+    let run = nl_validator::orchestrate_verified(records, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp)?;
+
+    for step in &run.steps {
+        let m = &step.message;
+        let detail = match step.label.as_str() {
+            "query" => format!("intent {}", m.pointer("/body/pattern/intent_tags").map(|v| v.to_string()).unwrap_or_default()),
+            "ack" => format!("matches {}", m.pointer("/body/result/matches").map(|v| v.to_string()).unwrap_or_default()),
+            "trust" => format!("trusted={} — {}", m.get("trusted").map(|v| v.to_string()).unwrap_or_default(), m.get("reason").and_then(|r| r.as_str()).unwrap_or("")),
+            "prove" => format!("property `{}` proved={}", m.get("property").and_then(|p| p.as_str()).unwrap_or(""), m.get("proved").map(|v| v.to_string()).unwrap_or_default()),
+            "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
+            "assert" => format!("result {}", m.pointer("/body/claim/expr/args/1/value").map(|v| v.to_string()).unwrap_or_default()),
+            other => other.to_string(),
+        };
+        println!("{:>8}  {detail}", step.label);
+    }
+
+    let property_ok = run.property.as_ref().map(|(_, p)| *p).unwrap_or(true);
+    let trust_ok = run.trusted != Some(false);
+    if run.confirmed && property_ok && trust_ok {
+        println!("CONFIRMED  trusted, its property proved, applied, and re-verified");
+        Ok(())
+    } else if run.trusted == Some(false) {
+        Err(anyhow::anyhow!("ABORTED    the discovered function is not trusted under the policy"))
+    } else if !property_ok {
+        Err(anyhow::anyhow!("NOT-PROVEN the discovered function's own property did not prove"))
     } else {
         Err(anyhow::anyhow!("orchestration did not confirm (rejected, or the claim failed to re-run)"))
     }
