@@ -862,7 +862,7 @@ fn cmd_evaluate_trust(
     let policy = nl_validator::Policy::from_json(&nl_validator::read_json(policy)?)?;
     let messages = load_json_messages(attestations, None)?; // asserts + retracts
     let graph = nl_validator::AttestationGraph::from_messages(&messages, at);
-    let verdict = policy.evaluate_trust(&graph, subject, domain);
+    let verdict = policy.evaluate_trust(&graph, subject, domain, at);
     let scope = domain.map(|d| format!(" for domain `{d}`")).unwrap_or_default();
     if verdict.trusted {
         println!("TRUSTED      `{subject}`{scope}: {}", verdict.reason);

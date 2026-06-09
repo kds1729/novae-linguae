@@ -26,6 +26,8 @@ pub struct Attestation {
     pub verb: String,
     pub domain: Option<String>,
     pub confidence: Option<f64>,
+    /// When the attestation was issued (RFC 3339 UTC). Drives recency decay in the policy engine.
+    pub issued_at: Option<String>,
     pub expires_at: Option<String>,
     /// The `assert` message's content-address — what a `retract` targets.
     pub hash: String,
@@ -118,6 +120,7 @@ impl AttestationGraph {
                 verb: verb.to_string(),
                 domain: claim.get("domain").and_then(|d| d.as_str()).map(String::from),
                 confidence: claim.get("confidence").and_then(|c| c.as_f64()),
+                issued_at: claim.get("issued_at").and_then(|t| t.as_str()).map(String::from),
                 expires_at,
                 hash,
             });
@@ -158,6 +161,12 @@ impl AttestationGraph {
             .filter(|e| e.subject == subject && e.is_distrust())
             .map(|e| e.attester.clone())
             .collect()
+    }
+
+    /// Positive edges applying to `domain`, with their metadata (confidence/issued_at) — the policy
+    /// engine needs these for confidence-weighting, recency decay, and vertex-disjoint path counting.
+    pub(crate) fn positive_edges(&self, domain: Option<&str>) -> Vec<&Attestation> {
+        self.edges.iter().filter(|e| e.is_positive() && e.applies_to_domain(domain)).collect()
     }
 
     /// Map of subject → distinct positive attesters, for the policy engine's fixpoint.
