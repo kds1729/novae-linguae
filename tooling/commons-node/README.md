@@ -133,7 +133,10 @@ curl -X POST http://127.0.0.1:8000/v0/prove -H 'content-type: application/json' 
 **Needs a solver.** It invokes `COMMONS_SOLVER` (default `z3`); without one on PATH every property
 reports `NO-SOLVER`. `/v0/info` advertises `prove.solver` and `prove.available` so a client can tell
 before asking. Work is bounded by `COMMONS_PROVE_TIMEOUT` (default 60 s) and `COMMONS_PROVE_MAX_PROPERTIES`
-(default 32). The production image installs `z3`.
+(default 32). The production image installs `z3`. In the production stack the public Caddy edge also
+**rate-limits** `/v0/prove` strictly per client IP (default 10/min, vs. 300/min for everything else),
+via the [`caddy-ratelimit`](Caddy.Dockerfile) plugin — see the `rate_limit` zones in [`Caddyfile`](Caddyfile),
+tunable with the `ARCA_PROVE_RATE` / `ARCA_GENERAL_RATE` env (no rebuild needed).
 
 ## Seed bundles (`.nlb`)
 

@@ -69,7 +69,11 @@ services:
   # Public TLS edge (automatic Let's Encrypt). Include this only when Arca owns ports 80/443 on the
   # host; on a shared host, omit it and front `web` (127.0.0.1:8001) with the existing edge instead.
   proxy:
-    image: caddy:2-alpine
+    # Custom Caddy with the caddy-ratelimit plugin (stock caddy has no rate_limit handler).
+    build:
+      context: .
+      dockerfile: Caddy.Dockerfile
+    image: arca-caddy:latest
     ports:
       - "80:80"
       - "443:443"
@@ -77,6 +81,12 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data            # persists issued certs across restarts (avoid LE rate limits)
       - caddy_config:/config
+    # Per-IP rate limits (Caddyfile defaults shown); override to retune without a rebuild.
+    environment:
+      ARCA_PROVE_RATE: "10"         # /v0/prove requests per window per IP (z3 is expensive)
+      ARCA_PROVE_WINDOW: "1m"
+      ARCA_GENERAL_RATE: "300"      # all other requests per window per IP
+      ARCA_GENERAL_WINDOW: "1m"
     depends_on:
       web: { condition: service_started }
     restart: unless-stopped

@@ -3,7 +3,36 @@
 # domain (the DNS A record must point at this host and 80/443 must be free), redirects http→https, and
 # reverse-proxies to the web container. On a *shared* host where another service owns 443, drop this
 # proxy and instead add a vhost to that edge pointing at web's 127.0.0.1:8001.
+#
+# Rate limiting (per client IP, sliding window) is handled here at the edge via the caddy-ratelimit
+# plugin baked into the image (Caddy.Dockerfile). Two zones: a strict one on the CPU-heavy /v0/prove
+# (it spawns z3 per request), and a general one protecting the origin from floods. Limits are tunable
+# via env on the proxy container with sane defaults; over-limit clients get HTTP 429.
+{
+	order rate_limit before reverse_proxy
+}
+
 nl.1105software.com {
 	encode zstd gzip
+
+	# Strict cap on the prover — expensive, so a low ceiling per IP.
+	@prove path /v0/prove
+	rate_limit @prove {
+		zone prove {
+			key {remote_host}
+			events {$ARCA_PROVE_RATE:10}
+			window {$ARCA_PROVE_WINDOW:1m}
+		}
+	}
+
+	# General per-IP cap across all endpoints (resolve/query/search/sync/info/records).
+	rate_limit {
+		zone general {
+			key {remote_host}
+			events {$ARCA_GENERAL_RATE:300}
+			window {$ARCA_GENERAL_WINDOW:1m}
+		}
+	}
+
 	reverse_proxy web:8000
 }
