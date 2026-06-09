@@ -6,9 +6,9 @@ If you find anything here unclear, opening an issue (once the public repo exists
 
 ---
 
-## Project status (day zero)
+## Project status
 
-The public GitHub repository does not yet exist. The project is currently in the design-phase: schemas, specifications, and a manifesto. Day-to-day work happens in a private working copy.
+The public GitHub repository does not yet exist; day-to-day work happens in a private working copy. The project is well past the design phase, though: alongside the schemas, specifications, and manifesto there is a working reference implementation — the `nl-validator` toolchain (canonical form, signing, encryption, a tree-walking evaluator + Hindley-Milner type checker, an SMT + structural-induction prover with lemma discovery, equivalence proving and clustering, effect enforcement, the trust model, and the Nova Locutio agent loop), four ingestion adapters, and a reference commons node deployed live as **Arca**. See the README's Status section for the full inventory.
 
 This document describes the protocol that will apply when the public repo opens. During the design phase, contributions are coordinated directly with the maintainer (see *Communication* below).
 
