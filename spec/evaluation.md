@@ -188,9 +188,18 @@ append(reverse(ys), xs)` — which needs `reverse_append` (catalogued) **and** r
 catalogued) — is **UNKNOWN under the catalog alone but PROVED once exploration discovers the involution
 lemma**; the whole proof tree (the goal plus every discovered and catalog lemma's base/step) re-checks.
 
-`foldl`/`foldr`, `map`/`filter` exploration (the SMT backend models their function argument as an
-uninterpreted symbol and rarely discharges such laws even when handed the lemma), and induction over
-user-defined recursive bodies (`self`) remain future work.
+### Induction over user-defined recursive bodies
+
+The same machinery proves laws about a **user-defined** recursive function, not just the built-in list
+ops. Supply the function as `self` (a body); the prover encodes that body as its own `define-fun-rec
+self` — the body branches with a boolean `case` on `null(xs)` and recurses via `self`/`apply(self, …)`
+(the language has no native `cons`/`nil` patterns) — and the induction discharges it exactly as it does
+`reverse`/`append`. Demonstrated live: a user-defined recursive `length` is **proved to distribute over
+`append`** (`self(append(xs, ys)) = self(xs) + self(ys)`); a false law over the same `self` (e.g.
+`self(xs) = 0`) is correctly NOT-PROVED. Scope: `self` is a single-list-parameter recursive function.
+
+`foldl`/`foldr` and `map`/`filter` exploration (the SMT backend models their function argument as an
+uninterpreted symbol and rarely discharges such laws even when handed the lemma) remain future work.
 
 ## Effect enforcement
 

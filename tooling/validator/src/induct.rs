@@ -41,12 +41,18 @@
 //! instantly. Proofs are **memoized**, so a shared lemma (e.g. `reverse_append`) is discharged once and
 //! reused across the whole search.
 //!
+//! **User-defined recursion (`self`).** A law over a user-defined recursive function — `self`, supplied
+//! as a body — is handled by encoding that body as its own `define-fun-rec self` (the body branches with
+//! a boolean `case` on `null(xs)` and recurses via `self`/`apply(self, …)`, since the language has no
+//! native `cons`/`nil` patterns). The induction then discharges it exactly as it does the built-in
+//! recursive list ops. So e.g. a user-defined recursive `length` is proved to distribute over `append`.
+//!
 //! Honest scope (v0.1). Element sort is `Int`; the list is `Lst`. Supported operations: `length`,
 //! `append`, `reverse`, `map`, `filter`, `cons`, `head`, `tail`, `null`, plus the `Int`/`Bool`
 //! element algebra. `map`/`filter` take at most one function/predicate, modelled as `id` or a single
 //! uninterpreted symbol (so `forall f xs. length(map(f, xs)) = length(xs)` is provable with `f`
-//! uninterpreted). `foldl`/`foldr`, `self`, lists-of-lists, and multiple distinct function arguments
-//! are out of scope and reported UNSUPPORTED.
+//! uninterpreted). `self` must be a single-list-parameter recursive function. `foldl`/`foldr`,
+//! lists-of-lists, and multiple distinct function arguments are out of scope and reported UNSUPPORTED.
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value as J;
@@ -242,6 +248,18 @@ fn walk_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Option<Sor
                     }
                 }
             }
+            // `self` recurses on a list, so its argument is a list. Both call forms: `self(xs)` and the
+            // curried `apply(self, xs)`.
+            "self" => {
+                if let Some(n) = args.first().and_then(|a| var_name(a)) {
+                    assign(n, Sort3::Lst, vars, sorts)?;
+                }
+            }
+            "apply" if args.first().and_then(|a| var_name(a)) == Some("self") => {
+                if let Some(n) = args.get(1).and_then(|a| var_name(a)) {
+                    assign(n, Sort3::Lst, vars, sorts)?;
+                }
+            }
             "foldl" | "foldr" => bail!("predicate uses `{op}` (fold is out of the inductive fragment)"),
             _ => {}
         }
@@ -317,6 +335,14 @@ fn collect_ops(node: &J, used: &mut BTreeSet<String>) {
             collect_ops(c, used);
         }
     }
+    // Descend into `case` arms (a recursive `self` body branches here).
+    if let Some(arms) = node.get("arms").and_then(|a| a.as_array()) {
+        for arm in arms {
+            if let Some(b) = arm.get("body") {
+                collect_ops(b, used);
+            }
+        }
+    }
 }
 
 // --- lowering -------------------------------------------------------------------------------------
@@ -336,8 +362,35 @@ fn lower(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
             Ok(env.get(name).cloned().unwrap_or_else(|| name.to_string()))
         }
         "app" => lower_app(node, env),
+        "case" => lower_case(node, env),
         other => bail!("unsupported expression kind `{other}` (out of fragment)"),
     }
+}
+
+/// Lower a `case` to an SMT `ite`. Supported scope: a boolean scrutinee with `true`/`false` literal
+/// arms (the `case null(xs) of true -> … | false -> …` idiom that recursion over lists is written
+/// with, since the language has no native `cons`/`nil` patterns), plus an optional wildcard/bind
+/// default. This is exactly what a recursive `self` body needs lowered for its `define-fun-rec`.
+fn lower_case(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
+    let scrut = node.get("scrutinee").ok_or_else(|| anyhow!("case has no scrutinee"))?;
+    let scrut_smt = lower(scrut, env)?;
+    let arms = node.get("arms").and_then(|a| a.as_array()).ok_or_else(|| anyhow!("case has no arms"))?;
+    let (mut t_arm, mut f_arm, mut default) = (None, None, None);
+    for arm in arms {
+        let abody = arm.get("body").ok_or_else(|| anyhow!("arm has no body"))?;
+        match arm.get("pattern").and_then(|p| p.get("kind")).and_then(|k| k.as_str()) {
+            Some("wildcard") | Some("bind") => default = Some(lower(abody, env)?),
+            Some("lit") => match arm.pointer("/pattern/value/value").and_then(|v| v.as_bool()) {
+                Some(true) => t_arm = Some(lower(abody, env)?),
+                Some(false) => f_arm = Some(lower(abody, env)?),
+                None => bail!("case over non-boolean literal patterns (out of fragment)"),
+            },
+            other => bail!("unsupported case pattern {other:?} (out of fragment)"),
+        }
+    }
+    let t = t_arm.or_else(|| default.clone()).ok_or_else(|| anyhow!("case has no true/default arm"))?;
+    let f = f_arm.or(default).ok_or_else(|| anyhow!("case has no false/default arm"))?;
+    Ok(format!("(ite {scrut_smt} {t} {f})"))
 }
 
 /// Lower a value-expression AST (literals, including list literals → cons spine).
@@ -410,10 +463,14 @@ fn lower_app(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
             let (a, b) = (l(0)?, l(1)?);
             format!("(ite (>= {a} {b}) {a} {b})")
         }
-        // Applying the modelled map-function directly (rare, e.g. element-wise laws).
+        // The recursive function under test, as an SMT `define-fun-rec` named `self`.
+        "self" => format!("(self {})", l(0)?),
+        // Curried application: `apply(self, x)` → recursive call; `apply(f, x)` for any other function
+        // variable → the modelled global `mapfn`.
         "apply" => {
-            if let Some(f) = args.first().and_then(|a| var_name(a)) {
-                let _ = f; // the symbol is global `mapfn`
+            if args.first().and_then(|a| var_name(a)) == Some("self") {
+                format!("(self {})", l(1)?)
+            } else if args.first().and_then(|a| var_name(a)).is_some() {
                 format!("(mapfn {})", l(1)?)
             } else {
                 bail!("unsupported application form (out of fragment)")
@@ -421,6 +478,59 @@ fn lower_app(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
         }
         other => bail!("unsupported operator `{other}` (out of fragment)"),
     })
+}
+
+// --- user-defined recursive function (`self`) ------------------------------------------------------
+
+/// Best-effort sort of an expression's result, used to pick `self`'s SMT return sort. Defaults to `Int`.
+fn infer_result_sort(node: &J) -> Sort3 {
+    match node.get("kind").and_then(|k| k.as_str()) {
+        Some("lit") => match node.pointer("/value/kind").and_then(|k| k.as_str()) {
+            Some("bool") => Sort3::Bool,
+            Some("list") => Sort3::Lst,
+            _ => Sort3::Int,
+        },
+        Some("case") => {
+            // Infer from a *non-recursive* (base) arm, which has a concrete sort; fall back to the first.
+            let arms = node.get("arms").and_then(|a| a.as_array());
+            let base = arms.and_then(|arms| {
+                arms.iter()
+                    .find(|a| a.get("body").map(|b| !references_self(b)).unwrap_or(false))
+                    .or_else(|| arms.first())
+            });
+            base.and_then(|a| a.get("body")).map(infer_result_sort).unwrap_or(Sort3::Int)
+        }
+        Some("app") => match head_op(node).as_deref().unwrap_or_default() {
+            "append" | "reverse" | "cons" | "tail" | "map" | "filter" => Sort3::Lst,
+            "and" | "or" | "xor" | "not" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "null" => Sort3::Bool,
+            _ => Sort3::Int, // length, head, add, sub, mul, …, and recursive `self`
+        },
+        _ => Sort3::Int,
+    }
+}
+
+/// Lower a single-list-parameter recursive lambda body to an SMT `(define-fun-rec self …)`. The body
+/// recurses on its parameter via `self`/`apply(self, …)`, branches with a boolean `case`, and uses the
+/// list selectors/builtins — all of which [`lower`] now handles. Errors if the body is outside this
+/// shape (the caller maps that to UNSUPPORTED).
+fn lower_self_def(body: &J) -> Result<String> {
+    if body.get("kind").and_then(|k| k.as_str()) != Some("lambda") {
+        bail!("`self` body is not a lambda");
+    }
+    let params = body.get("params").and_then(|p| p.as_array()).ok_or_else(|| anyhow!("lambda has no params"))?;
+    if params.len() != 1 {
+        bail!("self-induction supports a single-parameter recursive function (got {} params)", params.len());
+    }
+    let param = params[0].get("name").and_then(|n| n.as_str()).ok_or_else(|| anyhow!("param has no name"))?;
+    let inner = body.get("body").ok_or_else(|| anyhow!("lambda has no body"))?;
+    let ret = match infer_result_sort(inner) {
+        Sort3::Int => "Int",
+        Sort3::Bool => "Bool",
+        Sort3::Lst => "Lst",
+        Sort3::Func | Sort3::Pred => bail!("`self` returns a function/predicate sort (out of fragment)"),
+    };
+    let lowered = lower(inner, &BTreeMap::new())?; // the param lowers to itself, scoped by the define-fun-rec
+    Ok(format!("(define-fun-rec self (({param} Lst)) {ret} {lowered})\n"))
 }
 
 // --- prelude (datatype + recursive definitions) ---------------------------------------------------
@@ -500,13 +610,17 @@ pub fn build_induction(prop_expr: &J, body: Option<&J>) -> Result<InductionCerti
 /// union of operations used by the goal and the lemmas, so a lemma may mention an operation the goal
 /// does not. `lemmas` must already be proved — see [`prove_by_induction_with_lemmas`].
 fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<InductionCertificate> {
-    let _ = body; // self-defined recursive functions are future work (see module docs).
     if prop_expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
         bail!("not a `forall` — no induction to perform");
     }
-    if references_self(prop_expr) {
-        bail!("law references `self` — inductive proof of user-defined recursion is out of scope");
-    }
+    // A law over a user-defined recursive function: encode the body as a `define-fun-rec self`, and the
+    // induction discharges it just like the built-in recursive list ops. Without a body we can't.
+    let self_def = if references_self(prop_expr) {
+        let b = body.ok_or_else(|| anyhow!("law references `self` but no body was supplied"))?;
+        Some(lower_self_def(b)?)
+    } else {
+        None
+    };
     let vars: Vec<String> = prop_expr
         .get("vars")
         .and_then(|v| v.as_array())
@@ -530,7 +644,7 @@ fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<I
     // against the goal's global `mapfn` is sound regardless of which the goal uses.
     let map_fn = model_of(pred, "map", &vars)?;
     let filter_pred = model_of(pred, "filter", &vars)?;
-    // Prelude covers the union of operations used by the goal and every assumed lemma.
+    // Prelude covers the union of operations used by the goal, every assumed lemma, and `self`'s body.
     let mut used = BTreeSet::new();
     collect_ops(pred, &mut used);
     for lem in lemmas {
@@ -538,8 +652,14 @@ fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<I
             collect_ops(lb, &mut used);
         }
     }
+    if self_def.is_some() {
+        if let Some(b) = body {
+            collect_ops(b, &mut used);
+        }
+    }
 
-    let prelude = build_prelude(&used, &map_fn, &filter_pred);
+    // `self`'s definition comes after the list-op defs it may call (SMT-LIB needs definitions first).
+    let prelude = format!("{}{}", build_prelude(&used, &map_fn, &filter_pred), self_def.unwrap_or_default());
     let free = declare_free(&var_sorts, &induction_var);
     // The proved lemmas, each as a quantified axiom asserted before the goal's negation.
     let axioms = lemmas.iter().map(|l| lemma_axiom(l)).collect::<Result<Vec<_>>>()?.join("");
@@ -1099,5 +1219,66 @@ mod tests {
             "a discovered (non-catalog) lemma must appear in the proof tree, got {:?}",
             cert.lemmas.iter().map(|l| &l.name).collect::<Vec<_>>()
         );
+    }
+
+    // ---- induction over user-defined recursive bodies (`self`) ----
+
+    fn lit_int(n: i64) -> J {
+        json!({ "kind": "lit", "value": { "kind": "int", "value": n } })
+    }
+    fn lit_bool(b: bool) -> J {
+        json!({ "kind": "lit", "value": { "kind": "bool", "value": b } })
+    }
+    fn call_self(x: J) -> J {
+        app("apply", vec![var("self"), x])
+    }
+    /// `self = \xs -> case null(xs) of true -> 0 | false -> add(1, self(tail(xs)))` — a recursive length.
+    fn recursive_length_body() -> J {
+        json!({
+            "kind": "lambda",
+            "params": [{ "name": "xs" }],
+            "body": {
+                "kind": "case",
+                "scrutinee": app("null", vec![var("xs")]),
+                "arms": [
+                    { "pattern": lit_bool(true),  "body": lit_int(0) },
+                    { "pattern": lit_bool(false), "body": app("add", vec![lit_int(1), call_self(app("tail", vec![var("xs")]))]) },
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn proves_user_recursive_length_distributes_over_append() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall xs ys. self(append(xs, ys)) = add(self(xs), self(ys)), for the user-defined recursive
+        // `self` above — induction over a *user-defined* recursive body, not a built-in op.
+        let prop = forall(&["xs", "ys"], app("eq", vec![
+            call_self(app("append", vec![var("xs"), var("ys")])),
+            app("add", vec![call_self(var("xs")), call_self(var("ys"))]),
+        ]));
+        let (o, _) = prove_by_induction(&prop, Some(&recursive_length_body()), solver);
+        assert_eq!(o, InductionOutcome::Proved, "self distributes over append should be proved, got {o:?}");
+    }
+
+    #[test]
+    fn false_self_law_is_not_proved() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall xs. self(xs) = 0 — false for non-empty lists (the base case holds, the step fails).
+        let prop = forall(&["xs"], app("eq", vec![call_self(var("xs")), lit_int(0)]));
+        let (o, _) = prove_by_induction(&prop, Some(&recursive_length_body()), solver);
+        assert!(matches!(o, InductionOutcome::Failed(_) | InductionOutcome::Unknown),
+            "a false self-law must not be PROVED, got {o:?}");
+    }
+
+    #[test]
+    fn self_law_without_a_body_is_unsupported() {
+        // A law mentioning `self` cannot be set up without the recursive body to encode.
+        let prop = forall(&["xs"], app("eq", vec![call_self(var("xs")), lit_int(0)]));
+        assert!(build_induction(&prop, None).is_err());
     }
 }
