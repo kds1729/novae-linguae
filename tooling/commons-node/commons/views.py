@@ -1,6 +1,7 @@
 """HTTP views implementing the commons protocol (spec/commons.md, /v0/ binding)."""
 
 import json
+import shutil
 
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
@@ -11,6 +12,7 @@ from .egress import usage as egress_usage
 from .embedding import get_embedder
 from .ingest import create_record
 from .models import Record
+from .prove import ProveError, run_prove
 from .query import QueryError, run_query
 from .search import run_search, SearchError
 
@@ -111,6 +113,47 @@ def search(request):
     return JsonResponse(payload)
 
 
+@csrf_exempt
+def prove(request):
+    """POST /v0/prove — prove a record's `forall` properties over the unbounded domain (best-effort,
+    node-local; not an admission gate). Target it with a stored `{"hash": ...}` or an inline
+    `{"record": {...}, "body": {...optional...}}`."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if len(request.body) > settings.COMMONS_MAX_RECORD_BYTES:
+        return JsonResponse({"error": "too_large"}, status=413)
+    try:
+        body = _json_body(request)
+    except ValueError as exc:
+        return JsonResponse({"error": "malformed_json", "detail": str(exc)}, status=400)
+
+    record, body_ast = None, None
+    address = body.get("hash")
+    if address:
+        row = Record.objects.filter(hash=address).first()
+        if row is None:
+            return JsonResponse({"error": "absent", "detail": f"no record {address}"}, status=404)
+        record = row.raw
+        # Resolve the function's body if this node happens to hold it (bodies are usually not stored).
+        body_hash = record.get("body_hash")
+        if body_hash:
+            brow = Record.objects.filter(hash=body_hash).first()
+            if brow is not None:
+                body_ast = brow.raw
+    else:
+        record = body.get("record")
+        body_ast = body.get("body")
+        if record is None:
+            return JsonResponse({"error": "bad_request",
+                                 "detail": "provide a stored `hash` or an inline `record`"}, status=400)
+
+    try:
+        result = run_prove(record, body_ast)
+    except ProveError as exc:
+        return JsonResponse({"error": exc.code, "detail": exc.detail}, status=exc.status)
+    return JsonResponse(result)
+
+
 def sync(request):
     """GET /v0/sync?since={cursor}&limit={n} — replication feed (hashes since a sequence cursor)."""
     if request.method != "GET":
@@ -140,6 +183,9 @@ def info(request):
         "record_count": Record.objects.count(),
         "peers": settings.COMMONS_PEERS,
         "retains_messages": "durable",    # MVP keeps everything; a TTL tier comes with Redis
+        # Optional /v0/prove service: which solver, and whether it's actually on PATH here (else every
+        # property would report NO-SOLVER). Best-effort and node-local — advertised so clients can tell.
+        "prove": {"solver": settings.COMMONS_SOLVER, "available": shutil.which(settings.COMMONS_SOLVER) is not None},
         # Egress-budget transparency (DEPLOYMENT.md): a node advertises its own cost posture so peers
         # can prefer a mirror before this one starts shedding load. budget_bytes 0 == no throttle.
         "egress": {"window": window, "used_bytes": used, "budget_bytes": budget},

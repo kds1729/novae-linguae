@@ -17,6 +17,10 @@ RUN cargo build --release --manifest-path validator/Cargo.toml --bin nl-validato
 FROM python:3.12-slim AS app
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 
+# z3 powers the optional /v0/prove service (commons/prove.py); without it every property is NO-SOLVER.
+RUN apt-get update && apt-get install -y --no-install-recommends z3 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY tooling/commons-node/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt

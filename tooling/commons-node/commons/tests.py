@@ -902,3 +902,84 @@ class BootstrapChannelTests(TestCase):
         self.assertEqual(body, b"HI")
         self.assertEqual(sent[0], b"\x05\x01\x00")           # SOCKS5 greeting
         self.assertIn(b"\x05\x01\x00\x03", sent[1])          # CONNECT with domain ATYP
+
+
+# --- /v0/prove (optional proof service) -----------------------------------------------------------
+
+import shutil as _shutil  # noqa: E402
+
+_HAS_SOLVER = _shutil.which("z3") is not None or _shutil.which("cvc5") is not None
+
+
+def _forall(vars, body):
+    return {"kind": "forall", "vars": vars, "body": body}
+
+
+def _ap(op, *args):
+    return {"kind": "app", "op": op, "args": list(args)}
+
+
+def _v(n):
+    return {"kind": "var", "name": n}
+
+
+def _int(n):
+    return {"kind": "lit", "value": {"kind": "int", "value": n}}
+
+
+# forall n. add(n, n) == mul(2, n) — first-order, PROVED by SMT (no body, no induction).
+DOUBLING_LAW = {
+    "schema_version": "0.2.0",
+    "properties": [{"name": "doubling", "expr": _forall(
+        ["n"], _ap("eq", _ap("add", _v("n"), _v("n")), _ap("mul", _int(2), _v("n"))))}],
+}
+
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class ProveEndpointTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+    def _prove(self, payload):
+        return self.client.post("/v0/prove", data=json.dumps(payload), content_type="application/json")
+
+    def test_inline_first_order_law(self):
+        r = self._prove({"record": DOUBLING_LAW})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(len(body["results"]), 1)
+        status = body["results"][0]["status"]
+        if _HAS_SOLVER:
+            self.assertEqual(status, "PROVED", msg=body)
+            self.assertEqual(body["summary"].get("proved"), 1)
+        else:
+            self.assertEqual(status, "NO-SOLVER")
+
+    @unittest.skipUnless(_HAS_SOLVER, "no SMT solver on PATH")
+    def test_refuted_law(self):
+        # forall n. add(n, n) == n — false except at n = 0.
+        false_law = {"schema_version": "0.2.0", "properties": [{"name": "bad", "expr": _forall(
+            ["n"], _ap("eq", _ap("add", _v("n"), _v("n")), _v("n")))}]}
+        r = self._prove({"record": false_law})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["results"][0]["status"], "REFUTED")
+
+    def test_record_without_properties_is_422(self):
+        r = self._prove({"record": {"schema_version": "0.2.0"}})
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(r.json()["error"], "no_properties")
+
+    def test_missing_target_is_400(self):
+        self.assertEqual(self._prove({}).status_code, 400)
+
+    def test_absent_hash_is_404(self):
+        r = self._prove({"hash": "fn_" + "0" * 64})
+        self.assertEqual(r.status_code, 404)
+
+    def test_get_not_allowed(self):
+        self.assertEqual(self.client.get("/v0/prove").status_code, 405)
+
+    def test_info_advertises_prove(self):
+        info = self.client.get("/v0/info").json()
+        self.assertIn("prove", info)
+        self.assertEqual(info["prove"]["available"], _HAS_SOLVER)

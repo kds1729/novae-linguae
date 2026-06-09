@@ -72,6 +72,14 @@ COMMONS_VALIDATOR = os.environ.get(
 )
 COMMONS_SPEC_DIR = os.environ.get("COMMONS_SPEC_DIR", str(REPO_ROOT / "spec"))
 
+# Optional proof service (/v0/prove): runs `nl-validator prove` over a record's forall properties[]
+# with an SMT solver. Node-local and best-effort (like search), never an admission gate; it needs a
+# solver on PATH or every property reports NO-SOLVER. The timeout caps the (occasionally solver-heavy)
+# request, and the property cap bounds work per call.
+COMMONS_SOLVER = os.environ.get("COMMONS_SOLVER", "z3")
+COMMONS_PROVE_TIMEOUT = float(os.environ.get("COMMONS_PROVE_TIMEOUT", "60"))  # wall-clock seconds
+COMMONS_PROVE_MAX_PROPERTIES = int(os.environ.get("COMMONS_PROVE_MAX_PROPERTIES", "32"))
+
 # Local mirroring policy (principle-7-permitted endpoint choices, never protocol gates).
 COMMONS_MAX_RECORD_BYTES = int(os.environ.get("COMMONS_MAX_RECORD_BYTES", str(1 << 20)))  # 1 MiB
 COMMONS_PEERS = [p for p in os.environ.get("COMMONS_PEERS", "").split(",") if p.strip()]

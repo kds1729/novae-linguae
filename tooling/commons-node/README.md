@@ -20,6 +20,7 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 | `GET /v0/sync` — replication feed (cursor) | ✅ |
 | `GET /v0/info` — node metadata | ✅ |
 | `POST /v0/search` — semantic discovery (stdlib lexical embedder) | ✅ |
+| `POST /v0/prove` — prove a record's properties (best-effort, SMT-backed) | ✅ |
 
 **Verification reuses the reference validator.** On ingest, the node shells out to `nl-validator`
 to (1) `validate` the record against the schema named by its `(kind, schema_version)` and (2)
@@ -103,6 +104,37 @@ python3 manage.py embedrecords          # embed rows missing the current model's
 python3 manage.py embedrecords --all    # re-embed everything
 ```
 
+## Proof service (`POST /v0/prove`)
+
+Proves a record's `forall` `properties[]` over the **unbounded** domain by shelling out to the
+reference validator's `prove` (the same SMT + structural-induction + lemma-discovery engine the CLI
+uses). Each property comes back `PROVED` / `REFUTED` (with a counterexample) / `UNKNOWN` / `NOT-PROVED`
+/ `UNSUPPORTED`. Like search this is **best-effort and node-local** — it is *not* part of the admission
+decision (principle 7): proving says nothing about whether a record is stored.
+
+Target it two ways — a record stored on this node, or an inline record (plus an optional `body` AST,
+needed only for properties that reference `self`, since bodies are not themselves stored):
+
+```bash
+# prove a stored record's properties by content-address
+curl -X POST http://127.0.0.1:8000/v0/prove -H 'content-type: application/json' \
+  -d '{"hash": "fn_…"}'
+
+# prove an inline record (first-order law: holds for all integers)
+curl -X POST http://127.0.0.1:8000/v0/prove -H 'content-type: application/json' -d '{"record": {
+  "schema_version": "0.2.0",
+  "properties": [{"name": "doubling", "expr": {"kind": "forall", "vars": ["n"], "body":
+    {"kind": "app", "op": "eq", "args": [
+      {"kind": "app", "op": "add", "args": [{"kind": "var", "name": "n"}, {"kind": "var", "name": "n"}]},
+      {"kind": "app", "op": "mul", "args": [{"kind": "lit", "value": {"kind": "int", "value": 2}}, {"kind": "var", "name": "n"}]}]}}}]}}'
+# → {"solver": "z3", "results": [{"name": "doubling", "status": "PROVED", "detail": "…"}], "summary": {"proved": 1}}
+```
+
+**Needs a solver.** It invokes `COMMONS_SOLVER` (default `z3`); without one on PATH every property
+reports `NO-SOLVER`. `/v0/info` advertises `prove.solver` and `prove.available` so a client can tell
+before asking. Work is bounded by `COMMONS_PROVE_TIMEOUT` (default 60 s) and `COMMONS_PROVE_MAX_PROPERTIES`
+(default 32). The production image installs `z3`.
+
 ## Seed bundles (`.nlb`)
 
 A portable, self-verifying archive of records for out-of-band distribution — cold-start, disaster
@@ -168,6 +200,9 @@ signature and bundle hash are the real checks.
 |-----|---------|---------|
 | `COMMONS_VALIDATOR` | repo's `nl-validator` release binary | verifier path |
 | `COMMONS_SPEC_DIR` | repo's `spec/` | schema directory |
+| `COMMONS_SOLVER` | `z3` | SMT solver for `/v0/prove` (must read SMT-LIB 2 on stdin via `-in`) |
+| `COMMONS_PROVE_TIMEOUT` | `60` | wall-clock seconds per `/v0/prove` request |
+| `COMMONS_PROVE_MAX_PROPERTIES` | `32` | per-call cap on properties to prove |
 | `COMMONS_DB_PATH` | `./db.sqlite3` | SQLite file |
 | `COMMONS_MAX_RECORD_BYTES` | 1 MiB | local size cap (a permitted endpoint policy) |
 | `COMMONS_PEERS` | empty | comma-separated peer hints for future replication |
