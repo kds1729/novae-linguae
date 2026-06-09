@@ -265,6 +265,18 @@ enum Commands {
         #[arg(required = true)]
         records: Vec<PathBuf>,
     },
+    /// **Cluster** a directory of function records into behavioral-equivalence classes (the rung above
+    /// hash equality), proving `∀x. f(x) = g(x)` pairwise within each signature-shape bucket. Prints each
+    /// class of ≥ 2 members with its canonical representative (smallest content-address). v0.1 follows
+    /// `equiv`: unary, at least one side of a pair non-recursive.
+    Cluster {
+        /// Directory of records (and their bodies) — the commons view to cluster.
+        #[arg(long)]
+        records: PathBuf,
+        /// SMT solver binary to invoke.
+        #[arg(long, default_value = "z3")]
+        solver: String,
+    },
     /// Nova Locutio agent loop: consume a signed message and emit a signed reply (spec/agent-loop.md).
     /// Handles `request`/`apply` (run the target on the value-expression args → an `assert` whose
     /// `predicate` claim is `eq(target(args…), result)`, self-verifiable by re-running),
@@ -513,6 +525,7 @@ fn main() -> ExitCode {
         }
         Commands::Equiv { body_f, body_g, solver } => (cmd_equiv(&body_f, &body_g, &solver), false),
         Commands::Compose { records } => (cmd_compose(&records), false),
+        Commands::Cluster { records, solver } => (cmd_cluster(&records, &solver), false),
         Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
             (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
@@ -869,6 +882,23 @@ fn cmd_compose(records: &[PathBuf]) -> Result<()> {
     } else {
         Err(anyhow::anyhow!("NOT-COMPOSABLE  {}", m.reason))
     }
+}
+
+fn cmd_cluster(records: &PathBuf, solver: &str) -> Result<()> {
+    let classes = nl_validator::cluster_dir(records, solver)?;
+    let multi: Vec<&Vec<String>> = classes.iter().filter(|c| c.len() > 1).collect();
+    if multi.is_empty() {
+        println!("no equivalence classes found ({} function(s), all distinct)", classes.len());
+    } else {
+        for class in &multi {
+            println!("class (canonical {}):", class[0]);
+            for m in class.iter().skip(1) {
+                println!("  ≡ {m}");
+            }
+        }
+    }
+    println!("{} class(es) over {} function(s)", classes.len(), classes.iter().map(|c| c.len()).sum::<usize>());
+    Ok(())
 }
 
 fn cmd_verify_claim(assert: &PathBuf, records: &PathBuf) -> Result<()> {

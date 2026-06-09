@@ -226,6 +226,16 @@ Proved live: `\xs. reverse(reverse(xs)) ≡ \xs. xs` (via lemma discovery), `dou
 double-via-mul`; `double ≢ \n. n + 1` is DISTINCT at `n = 1`. Scope (v0.1): unary functions, at least one
 side non-recursive. The node exposes this as `POST /v0/equiv`.
 
+`nl-validator cluster <dir>` lifts this to a whole record set — behavioral-equivalence **classes** with a
+canonical representative. To stay tractable it buckets functions by a coarse **signature shape** (arity +
+coarse parameter/result types, type variables as wildcards) so only same-shape functions are ever
+compared, then runs a union-find proving equivalence pairwise within each bucket (skipping pairs already
+merged). The canonical representative is the lexicographically smallest content-address. This is the
+deduplication-beyond-byte-identity that principle 2 calls for. Worked: a set with `\n. add(n,n)`,
+`\n. mul(2,n)`, `\n. mul(3,n)` clusters the first two together and leaves the tripling distinct. Scope
+follows equivalence (unary, at least one side of a pair non-recursive), and cost within a shape bucket of
+size *k* is up to O(*k*²) solver calls — the bucketing keeps that from being O(*n*²) over the whole set.
+
 ## Composition metadata
 
 `nl-validator compose <f1> <f2> …` derives the metadata of a sequential pipeline (each stage applied to
