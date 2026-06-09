@@ -143,6 +143,19 @@ fn best_trusted(
     (verdicts, best)
 }
 
+/// The arity of a function record from its signature type — the parameter count of the (optionally
+/// `forall`-wrapped) `fn` type; a non-function type is nullary (arity 0). `None` if there's no type.
+fn record_arity(record: &J) -> Option<usize> {
+    let mut t = record.pointer("/signature/type")?;
+    if t.get("kind").and_then(|k| k.as_str()) == Some("forall") {
+        t = t.get("body")?;
+    }
+    match t.get("kind").and_then(|k| k.as_str()) {
+        Some("fn") => Some(t.get("params").and_then(|p| p.as_array()).map_or(0, |a| a.len())),
+        _ => Some(0),
+    }
+}
+
 /// Try to prove a `forall` law: first-order SMT, then induction with lemma discovery (mirrors `prove`).
 fn prove_law(expr: &J, body: Option<&J>, solver: &str) -> bool {
     match prove_property(expr, body, solver).0 {
@@ -193,18 +206,25 @@ pub fn orchestrate_verified(
         .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
         .unwrap_or_default();
     steps.push(Step { label: "ack".into(), message: ack });
-    if matches.is_empty() {
+
+    // SIGNATURE FILTER: discovery matches by intent only, so drop candidates whose arity doesn't fit
+    // this application *before* trust-ranking the rest — a binary function is not a candidate for a
+    // unary apply, however trusted it is.
+    let want = args.len();
+    let compatible: Vec<String> =
+        matches.into_iter().filter(|m| records.get(m).and_then(record_arity) == Some(want)).collect();
+    if compatible.is_empty() {
         return Ok(VerifiedRun { steps, trusted: None, property: None, confirmed: false });
     }
 
-    // TRUST GATE + DISAMBIGUATION: discovery returns a *set*; rather than taking matches[0], rank the
-    // candidates by the local policy and use the most-trusted one (no central authority — principle 7).
-    // Without a policy there is no trust signal, so fall back to the first match.
+    // TRUST GATE + DISAMBIGUATION: among the signature-compatible candidates, rank by the local policy
+    // and use the most-trusted one (no central authority — principle 7). Without a policy there is no
+    // trust signal, so fall back to the first compatible match.
     let (target, trusted) = match policy {
         Some(p) => {
             let graph = AttestationGraph::from_messages(attestations, timestamp);
-            let (verdicts, best) = best_trusted(&matches, p, &graph, timestamp);
-            let candidates: Vec<J> = matches
+            let (verdicts, best) = best_trusted(&compatible, p, &graph, timestamp);
+            let candidates: Vec<J> = compatible
                 .iter()
                 .zip(&verdicts)
                 .map(|(m, v)| json!({ "function": m, "trusted": v.trusted, "confidence": v.confidence }))
@@ -213,9 +233,9 @@ pub fn orchestrate_verified(
                 Some(i) => {
                     steps.push(Step {
                         label: "trust".into(),
-                        message: json!({ "chosen": matches[i], "reason": verdicts[i].reason, "candidates": candidates }),
+                        message: json!({ "chosen": compatible[i], "reason": verdicts[i].reason, "candidates": candidates }),
                     });
-                    (matches[i].clone(), Some(true))
+                    (compatible[i].clone(), Some(true))
                 }
                 None => {
                     steps.push(Step {
@@ -227,7 +247,7 @@ pub fn orchestrate_verified(
                 }
             }
         }
-        None => (matches[0].clone(), None),
+        None => (compatible[0].clone(), None),
     };
 
     // PROVE the discovered function's own declared property — verify the *piece*, not just one result.
@@ -346,6 +366,34 @@ mod tests {
     }
     fn double_hash() -> String {
         crate::read_json(&examples().join("double.v0.2.json")).unwrap()["hash"].as_str().unwrap().to_string()
+    }
+    fn add_hash() -> String {
+        crate::read_json(&examples().join("add.json")).unwrap()["hash"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn record_arity_reads_the_signature() {
+        assert_eq!(record_arity(&crate::read_json(&examples().join("double.v0.2.json")).unwrap()), Some(1));
+        assert_eq!(record_arity(&crate::read_json(&examples().join("add.json")).unwrap()), Some(2));
+    }
+
+    #[test]
+    fn arity_filter_selects_the_compatible_function() {
+        let Some(s) = solver() else { return };
+        // A *two-argument* apply: `double` (arity 1) is dropped by the signature filter before ranking;
+        // `add` (arity 2, vouched) is selected, its property proved, and add(2,3) = 5 re-verified.
+        let atts = [vouch("root", &add_hash())];
+        let pol = policy(&[&did("root")]);
+        let run = orchestrate_verified(
+            &examples(), "arithmetic",
+            vec![json!({ "kind": "int", "value": 2 }), json!({ "kind": "int", "value": 3 })],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"), s, Some(&pol), &atts, None,
+        ).unwrap();
+        assert_eq!(run.trusted, Some(true));
+        assert!(run.property.map(|(_, p)| p).unwrap_or(false), "the chosen function's property proved");
+        assert!(run.confirmed, "add(2,3) = 5 re-verified");
+        let chosen = run.steps.iter().find(|s| s.label == "trust").unwrap().message.get("chosen").unwrap().as_str().unwrap().to_string();
+        assert_eq!(chosen, add_hash(), "the arity-2 function was selected, not the arity-1 double");
     }
 
     #[test]
