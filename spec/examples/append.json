@@ -1,0 +1,271 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_18fc8cfb530e1ff5b93996f4e9943f13df6d9a8af37fcd29c85bc907acf604f6",
+  "name_hints": [
+    "append",
+    "concat",
+    "list_append",
+    "plus_plus"
+  ],
+  "signature": {
+    "type": {
+      "kind": "forall",
+      "vars": [
+        "a"
+      ],
+      "body": {
+        "kind": "fn",
+        "params": [
+          {
+            "kind": "apply",
+            "ctor": {
+              "kind": "builtin",
+              "name": "List"
+            },
+            "args": [
+              {
+                "kind": "var",
+                "name": "a"
+              }
+            ]
+          },
+          {
+            "kind": "apply",
+            "ctor": {
+              "kind": "builtin",
+              "name": "List"
+            },
+            "args": [
+              {
+                "kind": "var",
+                "name": "a"
+              }
+            ]
+          }
+        ],
+        "result": {
+          "kind": "apply",
+          "ctor": {
+            "kind": "builtin",
+            "name": "List"
+          },
+          "args": [
+            {
+              "kind": "var",
+              "name": "a"
+            }
+          ]
+        }
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "nat",
+              "value": 1
+            },
+            {
+              "kind": "nat",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "nat",
+              "value": 3
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "list",
+        "elems": [
+          {
+            "kind": "nat",
+            "value": 1
+          },
+          {
+            "kind": "nat",
+            "value": 2
+          },
+          {
+            "kind": "nat",
+            "value": 3
+          }
+        ]
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": []
+        },
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "nat",
+              "value": 9
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "list",
+        "elems": [
+          {
+            "kind": "nat",
+            "value": 9
+          }
+        ]
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "nat",
+              "value": 4
+            }
+          ]
+        },
+        {
+          "kind": "list",
+          "elems": []
+        }
+      ],
+      "result": {
+        "kind": "list",
+        "elems": [
+          {
+            "kind": "nat",
+            "value": 4
+          }
+        ]
+      }
+    }
+  ],
+  "properties": [
+    {
+      "name": "associativity",
+      "expr": {
+        "kind": "forall",
+        "vars": [
+          "xs",
+          "ys",
+          "zs"
+        ],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "append",
+              "args": [
+                {
+                  "kind": "app",
+                  "op": "append",
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "xs"
+                    },
+                    {
+                      "kind": "var",
+                      "name": "ys"
+                    }
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "zs"
+                }
+              ]
+            },
+            {
+              "kind": "app",
+              "op": "append",
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "xs"
+                },
+                {
+                  "kind": "app",
+                  "op": "append",
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "ys"
+                    },
+                    {
+                      "kind": "var",
+                      "name": "zs"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "right_identity",
+      "expr": {
+        "kind": "forall",
+        "vars": [
+          "xs"
+        ],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "append",
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "xs"
+                },
+                {
+                  "kind": "var",
+                  "name": "nil"
+                }
+              ]
+            },
+            {
+              "kind": "var",
+              "name": "xs"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "intent_tags": [
+    "combine",
+    "list"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_9f23791f18576176fefa14d8ea3a21c37c9d178f8baa760e6b16c5b0d7d0fe70"
+}

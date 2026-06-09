@@ -1,0 +1,176 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_ade25a699ed01fa91342ceafe0c30638e3608ef39c2f0263d42ab90c816cdc9b",
+  "name_hints": [
+    "length",
+    "len",
+    "size",
+    "count"
+  ],
+  "signature": {
+    "type": {
+      "kind": "forall",
+      "vars": [
+        "a"
+      ],
+      "body": {
+        "kind": "fn",
+        "params": [
+          {
+            "kind": "apply",
+            "ctor": {
+              "kind": "builtin",
+              "name": "List"
+            },
+            "args": [
+              {
+                "kind": "var",
+                "name": "a"
+              }
+            ]
+          }
+        ],
+        "result": {
+          "kind": "builtin",
+          "name": "nat"
+        }
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "nat",
+              "value": 1
+            },
+            {
+              "kind": "nat",
+              "value": 2
+            },
+            {
+              "kind": "nat",
+              "value": 3
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "nat",
+        "value": 3
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": []
+        }
+      ],
+      "result": {
+        "kind": "nat",
+        "value": 0
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "nat",
+              "value": 5
+            },
+            {
+              "kind": "nat",
+              "value": 5
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "nat",
+        "value": 2
+      }
+    }
+  ],
+  "properties": [
+    {
+      "name": "length_append",
+      "expr": {
+        "kind": "forall",
+        "vars": [
+          "xs",
+          "ys"
+        ],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "length",
+              "args": [
+                {
+                  "kind": "app",
+                  "op": "append",
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "xs"
+                    },
+                    {
+                      "kind": "var",
+                      "name": "ys"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "app",
+              "op": "add",
+              "args": [
+                {
+                  "kind": "app",
+                  "op": "length",
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "xs"
+                    }
+                  ]
+                },
+                {
+                  "kind": "app",
+                  "op": "length",
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "ys"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "intent_tags": [
+    "measure",
+    "list"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_0b6aab1a22fef6d5532d4969f1fa5d020f42ac6f18ce46648c22fcc86e69b3fc"
+}

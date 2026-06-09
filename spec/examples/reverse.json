@@ -1,0 +1,172 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_049a710eccfe87af08eee873bbd81b000d502dd7ccebb2e86bacfff92c7d8a4d",
+  "name_hints": [
+    "reverse",
+    "rev",
+    "list_reverse"
+  ],
+  "signature": {
+    "type": {
+      "kind": "forall",
+      "vars": [
+        "a"
+      ],
+      "body": {
+        "kind": "fn",
+        "params": [
+          {
+            "kind": "apply",
+            "ctor": {
+              "kind": "builtin",
+              "name": "List"
+            },
+            "args": [
+              {
+                "kind": "var",
+                "name": "a"
+              }
+            ]
+          }
+        ],
+        "result": {
+          "kind": "apply",
+          "ctor": {
+            "kind": "builtin",
+            "name": "List"
+          },
+          "args": [
+            {
+              "kind": "var",
+              "name": "a"
+            }
+          ]
+        }
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "nat",
+              "value": 1
+            },
+            {
+              "kind": "nat",
+              "value": 2
+            },
+            {
+              "kind": "nat",
+              "value": 3
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "list",
+        "elems": [
+          {
+            "kind": "nat",
+            "value": 3
+          },
+          {
+            "kind": "nat",
+            "value": 2
+          },
+          {
+            "kind": "nat",
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": []
+        }
+      ],
+      "result": {
+        "kind": "list",
+        "elems": []
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "nat",
+              "value": 7
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "list",
+        "elems": [
+          {
+            "kind": "nat",
+            "value": 7
+          }
+        ]
+      }
+    }
+  ],
+  "properties": [
+    {
+      "name": "involution",
+      "expr": {
+        "kind": "forall",
+        "vars": [
+          "xs"
+        ],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "reverse",
+              "args": [
+                {
+                  "kind": "app",
+                  "op": "reverse",
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "xs"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "var",
+              "name": "xs"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "intent_tags": [
+    "transform",
+    "list",
+    "reorder"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_a92fec76a315ca9a45acca9d3cf8d88655ccaff9b67cb166d507793b99a206f2"
+}

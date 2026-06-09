@@ -1,0 +1,99 @@
+{
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "xs"
+    },
+    {
+      "name": "ys"
+    }
+  ],
+  "body": {
+    "kind": "case",
+    "scrutinee": {
+      "kind": "app",
+      "fn": {
+        "kind": "var",
+        "name": "null"
+      },
+      "args": [
+        {
+          "kind": "var",
+          "name": "xs"
+        }
+      ]
+    },
+    "arms": [
+      {
+        "pattern": {
+          "kind": "lit",
+          "value": {
+            "kind": "bool",
+            "value": true
+          }
+        },
+        "body": {
+          "kind": "var",
+          "name": "ys"
+        }
+      },
+      {
+        "pattern": {
+          "kind": "lit",
+          "value": {
+            "kind": "bool",
+            "value": false
+          }
+        },
+        "body": {
+          "kind": "app",
+          "fn": {
+            "kind": "var",
+            "name": "cons"
+          },
+          "args": [
+            {
+              "kind": "app",
+              "fn": {
+                "kind": "var",
+                "name": "head"
+              },
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "xs"
+                }
+              ]
+            },
+            {
+              "kind": "app",
+              "fn": {
+                "kind": "var",
+                "name": "self"
+              },
+              "args": [
+                {
+                  "kind": "app",
+                  "fn": {
+                    "kind": "var",
+                    "name": "tail"
+                  },
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "xs"
+                    }
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "ys"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
