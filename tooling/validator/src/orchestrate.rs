@@ -143,17 +143,96 @@ fn best_trusted(
     (verdicts, best)
 }
 
-/// The arity of a function record from its signature type — the parameter count of the (optionally
-/// `forall`-wrapped) `fn` type; a non-function type is nullary (arity 0). `None` if there's no type.
-fn record_arity(record: &J) -> Option<usize> {
-    let mut t = record.pointer("/signature/type")?;
+/// A coarse value type, for checking that an argument fits a parameter's declared type.
+#[derive(Clone, PartialEq)]
+enum Ty {
+    Int, // int and nat (nat ≡ int in the evaluator)
+    Bool,
+    Lst(Box<Ty>),
+    Fun,
+    Any, // unknown — unifies with anything (kept permissive to avoid dropping valid candidates)
+}
+
+/// The coarse type of a value-expression argument.
+fn value_ty(v: &J) -> Ty {
+    match v.get("kind").and_then(|k| k.as_str()) {
+        Some("int") | Some("nat") => Ty::Int,
+        Some("bool") => Ty::Bool,
+        Some("fn_ref") => Ty::Fun,
+        Some("list") => {
+            let elem = v.get("elems").and_then(|e| e.as_array()).and_then(|a| a.first()).map(value_ty);
+            Ty::Lst(Box::new(elem.unwrap_or(Ty::Any)))
+        }
+        _ => Ty::Any,
+    }
+}
+
+fn tys_match(a: &Ty, b: &Ty) -> bool {
+    match (a, b) {
+        (Ty::Any, _) | (_, Ty::Any) => true,
+        (Ty::Lst(x), Ty::Lst(y)) => tys_match(x, y),
+        _ => a == b,
+    }
+}
+
+/// Unify a parameter *type-expression* against an argument's coarse type, threading a type-variable
+/// substitution (so `forall a. (a, a) -> a` rejects mismatched args). Permissive on `Any`/unknown to
+/// avoid dropping valid candidates — under-rejection is caught later by re-verification, over-rejection
+/// would silently hide usable functions.
+fn unify_ty(ptype: &J, arg: &Ty, subst: &mut std::collections::HashMap<String, Ty>) -> bool {
+    if *arg == Ty::Any {
+        return true;
+    }
+    match ptype.get("kind").and_then(|k| k.as_str()) {
+        Some("var") => {
+            let name = ptype.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+            match subst.get(&name) {
+                Some(bound) => tys_match(&bound.clone(), arg),
+                None => {
+                    subst.insert(name, arg.clone());
+                    true
+                }
+            }
+        }
+        Some("builtin") => match ptype.get("name").and_then(|n| n.as_str()) {
+            Some("int") | Some("nat") => *arg == Ty::Int,
+            Some("bool") => *arg == Ty::Bool,
+            Some("List") => matches!(arg, Ty::Lst(_)),
+            _ => true, // unknown builtin sort: permissive
+        },
+        Some("apply") => {
+            if ptype.pointer("/ctor/name").and_then(|n| n.as_str()) == Some("List") {
+                match arg {
+                    Ty::Lst(e) => ptype.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()).map_or(true, |pe| unify_ty(pe, e, subst)),
+                    _ => false,
+                }
+            } else {
+                true // other type constructors: permissive
+            }
+        }
+        Some("fn") => *arg == Ty::Fun,
+        _ => true, // unknown type shape: permissive
+    }
+}
+
+/// Does the function record's signature accept these arguments — matching arity *and* parameter types?
+fn signature_fits(record: &J, args: &[J]) -> bool {
+    let Some(mut t) = record.pointer("/signature/type") else { return false };
     if t.get("kind").and_then(|k| k.as_str()) == Some("forall") {
-        t = t.get("body")?;
+        match t.get("body") {
+            Some(b) => t = b,
+            None => return false,
+        }
     }
-    match t.get("kind").and_then(|k| k.as_str()) {
-        Some("fn") => Some(t.get("params").and_then(|p| p.as_array()).map_or(0, |a| a.len())),
-        _ => Some(0),
+    let params: &[J] = match t.get("params").and_then(|p| p.as_array()) {
+        Some(p) => p,
+        None => &[], // a non-function type accepts only a nullary application
+    };
+    if params.len() != args.len() {
+        return false;
     }
+    let mut subst = std::collections::HashMap::new();
+    params.iter().zip(args).all(|(p, a)| unify_ty(p, &value_ty(a), &mut subst))
 }
 
 /// Try to prove a `forall` law: first-order SMT, then induction with lemma discovery (mirrors `prove`).
@@ -207,12 +286,12 @@ pub fn orchestrate_verified(
         .unwrap_or_default();
     steps.push(Step { label: "ack".into(), message: ack });
 
-    // SIGNATURE FILTER: discovery matches by intent only, so drop candidates whose arity doesn't fit
-    // this application *before* trust-ranking the rest — a binary function is not a candidate for a
-    // unary apply, however trusted it is.
-    let want = args.len();
+    // SIGNATURE FILTER: discovery matches by intent only, so drop candidates whose signature doesn't fit
+    // this application *before* trust-ranking the rest — arity AND parameter types must accept the
+    // arguments (a binary function, or one expecting a list where an int is passed, is no candidate,
+    // however trusted it is).
     let compatible: Vec<String> =
-        matches.into_iter().filter(|m| records.get(m).and_then(record_arity) == Some(want)).collect();
+        matches.into_iter().filter(|m| records.get(m).is_some_and(|r| signature_fits(r, &args))).collect();
     if compatible.is_empty() {
         return Ok(VerifiedRun { steps, trusted: None, property: None, confirmed: false });
     }
@@ -372,9 +451,22 @@ mod tests {
     }
 
     #[test]
-    fn record_arity_reads_the_signature() {
-        assert_eq!(record_arity(&crate::read_json(&examples().join("double.v0.2.json")).unwrap()), Some(1));
-        assert_eq!(record_arity(&crate::read_json(&examples().join("add.json")).unwrap()), Some(2));
+    fn signature_fits_checks_arity_and_types() {
+        let load = |n: &str| crate::read_json(&examples().join(n)).unwrap();
+        let (double, add, reverse) = (load("double.v0.2.json"), load("add.json"), load("reverse.json"));
+        let int = json!({ "kind": "int", "value": 5 });
+        let list = json!({ "kind": "list", "elems": [{ "kind": "int", "value": 1 }] });
+
+        // double : nat -> nat
+        assert!(signature_fits(&double, &[int.clone()]), "int fits a nat parameter");
+        assert!(!signature_fits(&double, &[list.clone()]), "a list does not fit a nat parameter");
+        assert!(!signature_fits(&double, &[int.clone(), int.clone()]), "arity 2 ≠ 1");
+        // add : (int, int) -> int
+        assert!(signature_fits(&add, &[int.clone(), int.clone()]));
+        assert!(!signature_fits(&add, &[int.clone(), list.clone()]), "second arg must be int, not a list");
+        // reverse : forall a. List a -> List a
+        assert!(signature_fits(&reverse, &[list.clone()]), "a list fits List a");
+        assert!(!signature_fits(&reverse, &[int.clone()]), "an int does not fit List a");
     }
 
     #[test]

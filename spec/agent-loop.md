@@ -117,8 +117,10 @@ composes `double` twice, confirming `double(double(21)) = 84` (ten messages).
 
 `nl-validator orchestrate --verify [--policy <p> --attestation <a>…]` folds verification into the loop —
 the project's thesis in one autonomous run: **discover** functions by intent (a query returns a *set*),
-keep only those whose **signature fits the application** (arity must match — a binary function is no
-candidate for a unary apply, however trusted), **rank the survivors by trust** and use the most-trusted —
+keep only those whose **signature fits the application** — arity *and* parameter types must accept the
+arguments (a binary function is no candidate for a unary apply; a function over lists is no candidate for
+an integer argument), with polymorphic type variables unified consistently across the parameters —
+**rank the survivors by trust** and use the most-trusted —
 the receiver's *local* policy over its own attestation
 graph (no central authority — principle 7), preferring higher aggregate confidence, then more
 vertex-disjoint paths, then more distinct attesters; if none is trusted the run aborts before any
