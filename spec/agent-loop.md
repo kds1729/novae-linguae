@@ -119,8 +119,11 @@ composes `double` twice, confirming `double(double(21)) = 84` (ten messages).
 the project's thesis in one autonomous run: **discover** functions by intent (a query returns a *set*),
 keep only those whose **signature fits the application** — arity *and* parameter types must accept the
 arguments (a binary function is no candidate for a unary apply; a function over lists is no candidate for
-an integer argument), with polymorphic type variables unified consistently across the parameters —
-**rank the survivors by trust** and use the most-trusted —
+an integer argument), with polymorphic type variables unified consistently across the parameters — and a
+**higher-order argument is checked too**: a `fn_ref` passed where a function is expected is resolved and
+its own signature unified against the expected function type, so a wrongly-shaped (e.g. unary) function
+can't be slipped into a higher-order slot (a `fn_ref` the node can't resolve is rejected, since it can't
+be type-checked) — **rank the survivors by trust** and use the most-trusted —
 the receiver's *local* policy over its own attestation
 graph (no central authority — principle 7), preferring higher aggregate confidence, then more
 vertex-disjoint paths, then more distinct attesters; if none is trusted the run aborts before any

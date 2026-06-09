@@ -215,8 +215,67 @@ fn unify_ty(ptype: &J, arg: &Ty, subst: &mut std::collections::HashMap<String, T
     }
 }
 
-/// Does the function record's signature accept these arguments — matching arity *and* parameter types?
-fn signature_fits(record: &J, args: &[J]) -> bool {
+/// Coarsen a *type-expression* (a parameter or result type) to a [`Ty`]. A type variable becomes `Any`
+/// (the referenced function's own polymorphism — left permissive); used to check a higher-order
+/// argument's declared signature against the expected function-parameter type.
+fn type_to_ty(t: &J) -> Ty {
+    let t = if t.get("kind").and_then(|k| k.as_str()) == Some("forall") {
+        t.get("body").unwrap_or(t)
+    } else {
+        t
+    };
+    match t.get("kind").and_then(|k| k.as_str()) {
+        Some("builtin") => match t.get("name").and_then(|n| n.as_str()) {
+            Some("int") | Some("nat") => Ty::Int,
+            Some("bool") => Ty::Bool,
+            Some("List") => Ty::Lst(Box::new(Ty::Any)),
+            _ => Ty::Any,
+        },
+        Some("apply") if t.pointer("/ctor/name").and_then(|n| n.as_str()) == Some("List") => {
+            Ty::Lst(Box::new(t.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()).map_or(Ty::Any, type_to_ty)))
+        }
+        Some("fn") => Ty::Fun,
+        _ => Ty::Any, // var or unknown
+    }
+}
+
+/// Does parameter type `ptype` accept argument value `arg`? For a **function parameter**, the argument
+/// must be a `fn_ref` whose target (resolved from `records`) is a function of matching arity whose
+/// parameter/result types unify with what's expected — closing the hole where any `fn_ref` was accepted
+/// for a higher-order slot. A `fn_ref` to a function this node can't resolve is rejected (it can't be
+/// type-checked, so it doesn't qualify). Non-function parameters use the coarse value type as before.
+fn arg_fits(ptype: &J, arg: &J, records: &std::collections::HashMap<String, J>, subst: &mut std::collections::HashMap<String, Ty>) -> bool {
+    if ptype.get("kind").and_then(|k| k.as_str()) != Some("fn") {
+        return unify_ty(ptype, &value_ty(arg), subst);
+    }
+    // Function parameter: require a resolvable fn_ref of matching shape.
+    if arg.get("kind").and_then(|k| k.as_str()) != Some("fn_ref") {
+        return false;
+    }
+    let Some(target) = arg.get("target").and_then(|t| t.as_str()) else { return false };
+    let Some(rec) = records.get(target) else { return false };
+    let Some(mut tt) = rec.pointer("/signature/type") else { return false };
+    if tt.get("kind").and_then(|k| k.as_str()) == Some("forall") {
+        match tt.get("body") {
+            Some(b) => tt = b,
+            None => return false,
+        }
+    }
+    let (Some(tparams), Some(tresult)) = (tt.get("params").and_then(|p| p.as_array()), tt.get("result")) else {
+        return false; // target isn't a function
+    };
+    let eparams = ptype.get("params").and_then(|p| p.as_array());
+    let eresult = ptype.get("result");
+    let (Some(eparams), Some(eresult)) = (eparams, eresult) else { return false };
+    if eparams.len() != tparams.len() {
+        return false; // arity of the supplied function doesn't match the expected function type
+    }
+    eparams.iter().zip(tparams).all(|(e, a)| unify_ty(e, &type_to_ty(a), subst)) && unify_ty(eresult, &type_to_ty(tresult), subst)
+}
+
+/// Does the function record's signature accept these arguments — matching arity *and* parameter types,
+/// including the signatures of higher-order (`fn_ref`) arguments? `records` resolves those targets.
+fn signature_fits(record: &J, args: &[J], records: &std::collections::HashMap<String, J>) -> bool {
     let Some(mut t) = record.pointer("/signature/type") else { return false };
     if t.get("kind").and_then(|k| k.as_str()) == Some("forall") {
         match t.get("body") {
@@ -232,7 +291,7 @@ fn signature_fits(record: &J, args: &[J]) -> bool {
         return false;
     }
     let mut subst = std::collections::HashMap::new();
-    params.iter().zip(args).all(|(p, a)| unify_ty(p, &value_ty(a), &mut subst))
+    params.iter().zip(args).all(|(p, a)| arg_fits(p, a, records, &mut subst))
 }
 
 /// Try to prove a `forall` law: first-order SMT, then induction with lemma discovery (mirrors `prove`).
@@ -291,7 +350,7 @@ pub fn orchestrate_verified(
     // arguments (a binary function, or one expecting a list where an int is passed, is no candidate,
     // however trusted it is).
     let compatible: Vec<String> =
-        matches.into_iter().filter(|m| records.get(m).is_some_and(|r| signature_fits(r, &args))).collect();
+        matches.into_iter().filter(|m| records.get(m).is_some_and(|r| signature_fits(r, &args, &records))).collect();
     if compatible.is_empty() {
         return Ok(VerifiedRun { steps, trusted: None, property: None, confirmed: false });
     }
@@ -452,21 +511,43 @@ mod tests {
 
     #[test]
     fn signature_fits_checks_arity_and_types() {
+        let records = crate::build_record_map(&examples()).unwrap();
         let load = |n: &str| crate::read_json(&examples().join(n)).unwrap();
         let (double, add, reverse) = (load("double.v0.2.json"), load("add.json"), load("reverse.json"));
         let int = json!({ "kind": "int", "value": 5 });
         let list = json!({ "kind": "list", "elems": [{ "kind": "int", "value": 1 }] });
 
         // double : nat -> nat
-        assert!(signature_fits(&double, &[int.clone()]), "int fits a nat parameter");
-        assert!(!signature_fits(&double, &[list.clone()]), "a list does not fit a nat parameter");
-        assert!(!signature_fits(&double, &[int.clone(), int.clone()]), "arity 2 ≠ 1");
+        assert!(signature_fits(&double, &[int.clone()], &records), "int fits a nat parameter");
+        assert!(!signature_fits(&double, &[list.clone()], &records), "a list does not fit a nat parameter");
+        assert!(!signature_fits(&double, &[int.clone(), int.clone()], &records), "arity 2 ≠ 1");
         // add : (int, int) -> int
-        assert!(signature_fits(&add, &[int.clone(), int.clone()]));
-        assert!(!signature_fits(&add, &[int.clone(), list.clone()]), "second arg must be int, not a list");
+        assert!(signature_fits(&add, &[int.clone(), int.clone()], &records));
+        assert!(!signature_fits(&add, &[int.clone(), list.clone()], &records), "second arg must be int, not a list");
         // reverse : forall a. List a -> List a
-        assert!(signature_fits(&reverse, &[list.clone()]), "a list fits List a");
-        assert!(!signature_fits(&reverse, &[int.clone()]), "an int does not fit List a");
+        assert!(signature_fits(&reverse, &[list.clone()], &records), "a list fits List a");
+        assert!(!signature_fits(&reverse, &[int.clone()], &records), "an int does not fit List a");
+    }
+
+    #[test]
+    fn higher_order_argument_signature_is_checked() {
+        // foldr : forall a b. ((a,b)->b, b, List a) -> b. Its first parameter is a *function*; a fn_ref
+        // there is type-checked against (a,b)->b, not waved through as opaque.
+        let records = crate::build_record_map(&examples()).unwrap();
+        let foldr = crate::read_json(&examples().join("foldr.json")).unwrap();
+        let zero = json!({ "kind": "int", "value": 0 });
+        let list = json!({ "kind": "list", "elems": [{ "kind": "int", "value": 1 }] });
+        let add_ref = json!({ "kind": "fn_ref", "target": add_hash() });
+        let double_ref = json!({ "kind": "fn_ref", "target": double_hash() });
+
+        // add is binary → fits the (a,b)->b fold function; the whole application type-checks.
+        assert!(signature_fits(&foldr, &[add_ref, zero.clone(), list.clone()], &records));
+        // double is UNARY → cannot stand in for the binary fold function (the closed hole).
+        assert!(!signature_fits(&foldr, &[double_ref, zero.clone(), list.clone()], &records),
+            "a unary fn_ref must not pass as the binary fold function");
+        // a non-function (an int) for the function parameter is rejected too.
+        assert!(!signature_fits(&foldr, &[zero.clone(), zero.clone(), list], &records),
+            "an int does not satisfy a function parameter");
     }
 
     #[test]
