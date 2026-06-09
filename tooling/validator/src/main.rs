@@ -716,7 +716,8 @@ fn cmd_prove(
         // (with auxiliary-lemma discovery for laws a single unfold + IH can't close).
         let label = if matches!(outcome, ProofOutcome::Unsupported(_)) {
             use nl_validator::InductionOutcome;
-            let (iout, icert) = nl_validator::prove_by_induction_with_lemmas(
+            // Catalog lemma discovery, then theory exploration when the catalog can't close it.
+            let (iout, icert) = nl_validator::prove_by_induction_with_exploration(
                 expr,
                 body_ast.as_ref(),
                 solver,

@@ -181,10 +181,11 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 ./tooling/validator/target/release/nl-validator check-properties spec/examples/double.v0.2.json --body spec/examples/body-double.json --generate --cases 300
 # SMT proof over the UNBOUNDED domain (the rung above bounded checks): translate each forall law to
 # SMT-LIB 2, prove the negation unsat (PROVED) or find a counterexample (REFUTED); list laws fall back
-# to structural INDUCTION (base + step), with auxiliary-LEMMA discovery from a curated catalog when a
-# single unfold + IH stalls (e.g. reverse∘reverse → PROVED via the discovered reverse_append lemma).
-# The emitted .smt2 files are re-checkable proof certificates (the goal's + each proved lemma's).
-# Needs an SMT solver (z3 by default); UNKNOWN only when no catalog lemma closes the induction.
+# to structural INDUCTION (base + step), with auxiliary-LEMMA discovery when a single unfold + IH stalls:
+# first a curated catalog (e.g. reverse∘reverse → PROVED via reverse_append), then THEORY EXPLORATION
+# (conjecture lemmas by enumerating+testing terms over the goal's ops, prove the survivors) for laws the
+# catalog lacks. The emitted .smt2 files are re-checkable certificates (the goal's + each proved lemma's).
+# Needs an SMT solver (z3 by default); UNKNOWN only when neither catalog nor exploration closes it.
 ./tooling/validator/target/release/nl-validator prove spec/examples/double.v0.2.json --body spec/examples/body-double.json --smt-out /tmp/certs
 # Static effect inference: prove the body's effects ⊆ its declared signature.effects, without running.
 ./tooling/validator/target/release/nl-validator check-effects spec/examples/greet.v0.2.json --body spec/examples/body-greet.json --records spec/examples/

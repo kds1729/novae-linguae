@@ -30,8 +30,16 @@
 //! The emitted scripts together **are the proof certificate**: the goal's base + step (assuming the
 //! lemmas as axioms) plus each lemma's own base + step. Any SMT solver re-checks the whole tree —
 //! every obligation `unsat` on its own — so the induction is re-checkable, not trusted (principles 3,
-//! 5). The generalizable follow-on (Layer B) is *theory exploration*: conjecturing lemmas by
-//! enumerating terms over the goal's operations and testing them before proof. The catalog is the seam.
+//! 5).
+//!
+//! **Theory exploration (Layer B).** When the curated catalog can't close the goal,
+//! [`prove_by_induction_with_exploration`] falls back to [`crate::explore`]: it *conjectures* fresh
+//! lemmas by enumerating and testing terms over the goal's operations, proves the survivors by
+//! induction (same machinery), and retries. To stay sound and fast it adds discovered lemmas one at a
+//! time, trying to close the goal with a **minimal** axiom set (catalog + a single discovered lemma) —
+//! piling every conjecture into one query overwhelms the solver even when a small subset closes
+//! instantly. Proofs are **memoized**, so a shared lemma (e.g. `reverse_append`) is discharged once and
+//! reused across the whole search.
 //!
 //! Honest scope (v0.1). Element sort is `Int`; the list is `Lst`. Supported operations: `length`,
 //! `append`, `reverse`, `map`, `filter`, `cons`, `head`, `tail`, `null`, plus the `Int`/`Bool`
@@ -42,7 +50,12 @@
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value as J;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+/// Memo of *proved* goals (keyed by canonical statement JSON), so an auxiliary lemma proved once — e.g.
+/// `reverse_append` and its sub-lemmas — is reused across every later proof instead of re-discharged.
+/// Only positive results are cached (sound to reuse at any depth); Unknown/Failed are recomputed.
+type Memo = HashMap<String, (InductionOutcome, Option<InductionCertificate>)>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InductionOutcome {
@@ -66,6 +79,7 @@ pub enum InductionOutcome {
 /// quantified axioms) and `lemmas` holds each lemma's own discharge, in dependency order — so the whole
 /// proof tree re-checks: each lemma's base/step is unsat on its own, then the goal's base/step is unsat
 /// given the lemmas as axioms.
+#[derive(Clone)]
 pub struct InductionCertificate {
     pub var: String,
     pub base: String,
@@ -617,9 +631,11 @@ pub fn prove_by_induction(prop_expr: &J, body: Option<&J>, solver: &str) -> (Ind
 pub const DEFAULT_LEMMA_DEPTH: usize = 3;
 
 /// Attempt to prove a law by structural induction, discovering and discharging auxiliary lemmas from
-/// the catalog ([`crate::lemmas`]) when a single unfold + IH stalls. Soundness is preserved: a lemma is
-/// assumed only after it is itself proved (to `max_depth` of nested discovery), so this never returns a
-/// false `Proved`/`ProvedWithLemmas`. Falls back to the bare engine's verdict when no lemma helps.
+/// the **curated catalog** ([`crate::lemmas`], Layer A) when a single unfold + IH stalls. Soundness is
+/// preserved: a lemma is assumed only after it is itself proved (to `max_depth` of nested discovery), so
+/// this never returns a false `Proved`/`ProvedWithLemmas`. Falls back to the bare verdict when no
+/// catalog lemma helps. (For catalog **plus theory exploration**, see
+/// [`prove_by_induction_with_exploration`].)
 pub fn prove_by_induction_with_lemmas(
     prop_expr: &J,
     body: Option<&J>,
@@ -627,17 +643,140 @@ pub fn prove_by_induction_with_lemmas(
     max_depth: usize,
 ) -> (InductionOutcome, Option<InductionCertificate>) {
     let mut in_progress = Vec::new();
-    prove_rec(prop_expr, body, solver, max_depth, &mut in_progress)
+    let mut memo = Memo::new();
+    prove_rec(prop_expr, body, solver, max_depth, false, &mut in_progress, &mut memo)
 }
 
-/// Recursive core of lemma discovery. `in_progress` carries the goals currently being proved up the
-/// stack, so a candidate identical to one already in flight is skipped (cycle guard).
+/// Like [`prove_by_induction_with_lemmas`], but when the curated catalog can't close the goal it falls
+/// back to **theory exploration** ([`crate::explore`], Layer B): conjecturing fresh lemmas by
+/// enumerating and testing terms over the goal's operations, then proving the survivors by induction.
+/// Strictly more powerful and equally sound (every conjecture is proved before use). Exploration runs
+/// only for the top-level goal; nested lemma proofs use the catalog alone, which bounds the search.
+pub fn prove_by_induction_with_exploration(
+    prop_expr: &J,
+    body: Option<&J>,
+    solver: &str,
+    max_depth: usize,
+) -> (InductionOutcome, Option<InductionCertificate>) {
+    let mut in_progress = Vec::new();
+    let mut memo = Memo::new();
+    prove_rec(prop_expr, body, solver, max_depth, true, &mut in_progress, &mut memo)
+}
+
+/// A proved candidate lemma: its statement (to assume as an axiom) plus its full sub-proof tree
+/// (dependency order, the lemma itself last) for the certificate.
+struct ProvedLemma {
+    stmt: J,
+    certs: Vec<LemmaCertificate>,
+}
+
+/// Append `b`'s certificates to a copy of `a`, deduplicating by lemma name.
+fn merge_certs(a: &[LemmaCertificate], b: &[LemmaCertificate]) -> Vec<LemmaCertificate> {
+    let mut out = a.to_vec();
+    for c in b {
+        if !out.iter().any(|p| p.name == c.name) {
+            out.push(c.clone());
+        }
+    }
+    out
+}
+
+/// Try to prove one candidate lemma by induction (recursively, **catalog-only** — nested proofs never
+/// explore, which bounds the search). Returns its proof bundle if it holds and is admissible (operations
+/// within `closure`) and not already in flight (cycle guard).
+fn prove_one(
+    name: &str,
+    stmt: &J,
+    solver: &str,
+    depth: usize,
+    closure: &BTreeSet<String>,
+    in_progress: &mut Vec<J>,
+    memo: &mut Memo,
+) -> Option<ProvedLemma> {
+    let mut lops = BTreeSet::new();
+    if let Some(b) = stmt.get("body") {
+        collect_ops(b, &mut lops);
+    }
+    if !lops.is_subset(closure) || in_progress.iter().any(|g| g == stmt) {
+        return None;
+    }
+    let (out, cert) = prove_rec(stmt, None, solver, depth - 1, false, in_progress, memo);
+    if !matches!(out, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_)) {
+        return None;
+    }
+    let mut certs = Vec::new();
+    if let Some(c) = cert {
+        certs.extend(c.lemmas.iter().cloned()); // sub-lemmas first (dependency order)
+        certs.push(LemmaCertificate { name: name.to_string(), var: c.var, base: c.base, step: c.step });
+    }
+    Some(ProvedLemma { stmt: stmt.clone(), certs })
+}
+
+/// Re-build the goal's obligations with `assumed` as axioms (attaching the proof tree `certs`) and
+/// discharge them. Returns ProvedWithLemmas on success; Unknown if the lemmas didn't close it; and
+/// surfaces NoSolver / Unsupported.
+fn close_with(
+    prop_expr: &J,
+    body: Option<&J>,
+    solver: &str,
+    assumed: &[J],
+    certs: Vec<LemmaCertificate>,
+) -> (InductionOutcome, Option<InductionCertificate>) {
+    let refs: Vec<&J> = assumed.iter().collect();
+    let aug = match build_obligations(prop_expr, body, &refs) {
+        Err(e) => return (InductionOutcome::Unsupported(format!("{e:#}")), None),
+        Ok(mut c) => {
+            c.lemmas = certs;
+            c
+        }
+    };
+    match discharge(&aug, solver) {
+        InductionOutcome::Proved => {
+            let names = aug.lemmas.iter().map(|l| l.name.clone()).collect();
+            (InductionOutcome::ProvedWithLemmas(names), Some(aug))
+        }
+        // The lemmas didn't close it (or the solver stalled / found the goal false): not proved here.
+        InductionOutcome::Failed(_) | InductionOutcome::Unknown => (InductionOutcome::Unknown, Some(aug)),
+        out @ (InductionOutcome::NoSolver | InductionOutcome::Unsupported(_)) => (out, Some(aug)),
+        InductionOutcome::ProvedWithLemmas(_) => unreachable!("discharge never returns ProvedWithLemmas"),
+    }
+}
+
+/// Memoizing wrapper over [`prove_rec_inner`]: a goal proved once is cached (by canonical statement) and
+/// its result reused, so a shared auxiliary lemma is discharged a single time across the whole search.
 fn prove_rec(
     prop_expr: &J,
     body: Option<&J>,
     solver: &str,
     depth: usize,
+    explore: bool,
     in_progress: &mut Vec<J>,
+    memo: &mut Memo,
+) -> (InductionOutcome, Option<InductionCertificate>) {
+    let key = prop_expr.to_string();
+    if let Some(hit) = memo.get(&key) {
+        if matches!(hit.0, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_)) {
+            return hit.clone();
+        }
+    }
+    let result = prove_rec_inner(prop_expr, body, solver, depth, explore, in_progress, memo);
+    if matches!(result.0, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_)) {
+        memo.insert(key, result.clone());
+    }
+    result
+}
+
+/// Recursive core of lemma discovery. `in_progress` carries the goals currently being proved up the
+/// stack, so a candidate identical to one already in flight is skipped (cycle guard). When `explore` is
+/// set and the catalog can't close the goal, theory exploration supplies extra candidate lemmas.
+fn prove_rec_inner(
+    prop_expr: &J,
+    body: Option<&J>,
+    solver: &str,
+    depth: usize,
+    explore: bool,
+    in_progress: &mut Vec<J>,
+    memo: &mut Memo,
 ) -> (InductionOutcome, Option<InductionCertificate>) {
     let bare = match build_induction(prop_expr, body) {
         Err(e) => return (InductionOutcome::Unsupported(format!("{e:#}")), None),
@@ -656,79 +795,84 @@ fn prove_rec(
         return (InductionOutcome::Unknown, Some(bare));
     }
 
-    // Select relevant catalog lemmas: those whose operations all fit within the goal's *prelude
-    // closure* (the recursive functions the goal already defines — and a `reverse` goal pulls in
-    // `append`, since reverse is defined via append), excluding the goal itself and any goal already
-    // being proved up the stack. The closure test is what keeps the search clean: a lemma over an
-    // operation the goal never touches (e.g. `length_append` for a pure `reverse` law) would only add
-    // an unused recursive definition and its quantifier, which derails z3 into a timeout.
+    // Candidate lemmas must fit the goal's *prelude closure* (the recursive functions the goal already
+    // defines — a `reverse` goal pulls in `append`). The closure test keeps the search clean: a lemma
+    // over an operation the goal never touches would only add an unused recursive definition and its
+    // quantifier, which derails z3 into a timeout.
     let mut goal_ops = BTreeSet::new();
     if let Some(b) = prop_expr.get("body") {
         collect_ops(b, &mut goal_ops);
     }
     let closure = prelude_closure(&goal_ops);
+
     in_progress.push(prop_expr.clone());
-    let mut assumed: Vec<J> = Vec::new(); // directly-assumed lemma statements
-    let mut proved_certs: Vec<LemmaCertificate> = Vec::new(); // full proof tree, dependency order
+
+    // Phase A — curated catalog (fast path). Prove every admissible catalog lemma, then try to close
+    // the goal with the lot. (Catalog lemmas are few and mutually consistent, so bloat isn't a concern.)
+    let mut base_assumed: Vec<J> = Vec::new();
+    let mut base_certs: Vec<LemmaCertificate> = Vec::new();
     for lemma in crate::lemmas::catalog() {
-        let lops = {
-            let mut s = BTreeSet::new();
-            if let Some(b) = lemma.stmt.get("body") {
-                collect_ops(b, &mut s);
-            }
-            s
-        };
-        if !lops.is_subset(&closure) || in_progress.iter().any(|g| g == &lemma.stmt) {
-            continue;
-        }
-        let (out, cert) = prove_rec(&lemma.stmt, None, solver, depth - 1, in_progress);
-        let proved = matches!(out, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_));
-        if proved {
-            if let Some(c) = cert {
-                // Record this lemma's sub-lemmas first (dependency order), then the lemma itself.
-                for sub in &c.lemmas {
-                    if !proved_certs.iter().any(|p| p.name == sub.name) {
-                        proved_certs.push(sub.clone());
-                    }
-                }
-                if !proved_certs.iter().any(|p| p.name == lemma.name) {
-                    proved_certs.push(LemmaCertificate {
-                        name: lemma.name.to_string(),
-                        var: c.var,
-                        base: c.base,
-                        step: c.step,
-                    });
-                }
-            }
-            assumed.push(lemma.stmt.clone());
+        if let Some(p) = prove_one(lemma.name, &lemma.stmt, solver, depth, &closure, in_progress, memo) {
+            base_assumed.push(p.stmt);
+            base_certs = merge_certs(&base_certs, &p.certs);
         }
     }
+    if !base_assumed.is_empty() {
+        match close_with(prop_expr, body, solver, &base_assumed, base_certs.clone()) {
+            (InductionOutcome::Unknown, _) => {} // catalog didn't close it — fall through to Phase B
+            (out, cert) => {
+                in_progress.pop();
+                return (out, cert);
+            }
+        }
+    }
+
+    // Phase B — theory exploration (only if enabled and the catalog left it open). Prove conjectures
+    // one at a time and, after each, try closing the goal with **just the catalog set plus that single
+    // discovered lemma** — a minimal axiom set. This both stops early (no need to prove the rest once one
+    // works) and avoids axiom bloat: piling every discovered lemma into one query overwhelms z3's
+    // quantifier instantiation and times out, even when a two-lemma subset closes instantly.
+    if explore {
+        let conjectures = crate::explore::explore_lemmas(&closure);
+        let mut extras: Vec<ProvedLemma> = Vec::new();
+        for (name, stmt) in &conjectures {
+            if base_assumed.iter().any(|a| a == stmt) {
+                continue;
+            }
+            let Some(p) = prove_one(name, stmt, solver, depth, &closure, in_progress, memo) else {
+                continue;
+            };
+            let mut assumed = base_assumed.clone();
+            assumed.push(p.stmt.clone());
+            let certs = merge_certs(&base_certs, &p.certs);
+            if let (out @ InductionOutcome::ProvedWithLemmas(_), cert) =
+                close_with(prop_expr, body, solver, &assumed, certs)
+            {
+                in_progress.pop();
+                return (out, cert);
+            }
+            extras.push(p);
+        }
+        // Last resort: catalog + every discovered lemma together (only helps if a goal needs two or more
+        // discovered lemmas at once; may bloat the query, but it's the final attempt before UNKNOWN).
+        if !extras.is_empty() {
+            let mut assumed = base_assumed.clone();
+            let mut certs = base_certs.clone();
+            for p in &extras {
+                assumed.push(p.stmt.clone());
+                certs = merge_certs(&certs, &p.certs);
+            }
+            if let (out @ InductionOutcome::ProvedWithLemmas(_), cert) =
+                close_with(prop_expr, body, solver, &assumed, certs)
+            {
+                in_progress.pop();
+                return (out, cert);
+            }
+        }
+    }
+
     in_progress.pop();
-
-    if assumed.is_empty() {
-        return (InductionOutcome::Unknown, Some(bare));
-    }
-
-    // Re-build the obligations with the proved lemmas as axioms, and retry.
-    let refs: Vec<&J> = assumed.iter().collect();
-    let aug = match build_obligations(prop_expr, body, &refs) {
-        Err(e) => return (InductionOutcome::Unsupported(format!("{e:#}")), Some(bare)),
-        Ok(mut c) => {
-            c.lemmas = proved_certs;
-            c
-        }
-    };
-    // `discharge` only ever returns Proved / Failed / Unknown / Unsupported / NoSolver.
-    match discharge(&aug, solver) {
-        InductionOutcome::Proved => {
-            let names = aug.lemmas.iter().map(|l| l.name.clone()).collect();
-            (InductionOutcome::ProvedWithLemmas(names), Some(aug))
-        }
-        // The lemmas did not close it (or the solver still stalled): honest UNKNOWN.
-        InductionOutcome::Failed(_) | InductionOutcome::Unknown => (InductionOutcome::Unknown, Some(aug)),
-        out @ (InductionOutcome::NoSolver | InductionOutcome::Unsupported(_)) => (out, Some(aug)),
-        InductionOutcome::ProvedWithLemmas(_) => unreachable!("discharge never returns ProvedWithLemmas"),
-    }
+    (InductionOutcome::Unknown, Some(bare))
 }
 
 #[cfg(test)]
@@ -926,5 +1070,34 @@ mod tests {
         ]));
         let (o, _) = prove_by_induction_with_lemmas(&prop, None, solver, DEFAULT_LEMMA_DEPTH);
         assert_eq!(o, InductionOutcome::Unknown, "no applicable lemma — expected UNKNOWN, got {o:?}");
+    }
+
+    // ---- theory exploration (Layer B) ----
+
+    #[test]
+    fn exploration_proves_a_law_the_catalog_cannot() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall xs ys. reverse(append(reverse(xs), ys)) = append(reverse(ys), xs).
+        // Needs `reverse_append` (catalog) AND reverse-involution (NOT in the catalog). Only theory
+        // exploration discovers the latter, so the catalog alone leaves it UNKNOWN while exploration
+        // closes it — the load-bearing demonstration that Layer B reaches beyond Layer A.
+        let goal = forall(&["xs", "ys"], app("eq", vec![
+            app("reverse", vec![app("append", vec![app("reverse", vec![var("xs")]), var("ys")])]),
+            app("append", vec![app("reverse", vec![var("ys")]), var("xs")]),
+        ]));
+        // Catalog-only: cannot close it.
+        let (cat, _) = prove_by_induction_with_lemmas(&goal, None, solver, DEFAULT_LEMMA_DEPTH);
+        assert_eq!(cat, InductionOutcome::Unknown, "catalog alone should leave it open, got {cat:?}");
+        // With theory exploration: PROVED, using a discovered (non-catalog) lemma.
+        let (exp, cert) = prove_by_induction_with_exploration(&goal, None, solver, DEFAULT_LEMMA_DEPTH);
+        assert!(matches!(exp, InductionOutcome::ProvedWithLemmas(_)), "exploration should close it, got {exp:?}");
+        let cert = cert.expect("certificate present");
+        assert!(
+            cert.lemmas.iter().any(|l| l.name.starts_with("discovered_")),
+            "a discovered (non-catalog) lemma must appear in the proof tree, got {:?}",
+            cert.lemmas.iter().map(|l| &l.name).collect::<Vec<_>>()
+        );
     }
 }

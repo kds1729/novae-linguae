@@ -31,11 +31,13 @@ pub mod prove;
 pub use prove::{build_certificate, prove_property, Certificate, ProofOutcome, Sort};
 
 pub mod lemmas;
+pub mod explore;
 
 pub mod induct;
 pub use induct::{
-    build_induction, prove_by_induction, prove_by_induction_with_lemmas, InductionCertificate,
-    InductionOutcome, LemmaCertificate, DEFAULT_LEMMA_DEPTH,
+    build_induction, prove_by_induction, prove_by_induction_with_exploration,
+    prove_by_induction_with_lemmas, InductionCertificate, InductionOutcome, LemmaCertificate,
+    DEFAULT_LEMMA_DEPTH,
 };
 
 pub mod effects;

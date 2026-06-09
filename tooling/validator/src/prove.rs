@@ -539,7 +539,10 @@ pub enum SatAnswer {
     NoSolver,
 }
 
-const SOLVER_TIMEOUT_SECS: u64 = 10;
+// Real proofs in our fragment return in well under a second; only a genuinely stuck (undecidable, or
+// lemma-needing) query runs to the limit. Lemma discovery issues many speculative queries, so a tight
+// budget keeps the whole search responsive while never changing a decidable query's verdict.
+const SOLVER_TIMEOUT_SECS: u64 = 5;
 
 /// Run an SMT-LIB 2 script through `solver` (reading from stdin via `-in`), bounded by a wall-clock
 /// timeout so an undecidable query becomes `Unknown` instead of hanging. z3's own `-t:` soft limit is

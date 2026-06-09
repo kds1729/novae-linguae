@@ -166,9 +166,30 @@ receiver re-checks the entire tree rather than trusting it (principles 3, 5). Th
 under a wall-clock timeout, so an undecidable query reports UNKNOWN rather than hanging.
 
 Proved live by induction: `map(id, xs) = xs`, `length(map(f, xs)) = length(xs)`, `length(append(xs, ys))
-= length(xs) + length(ys)`; **`reverse(reverse(xs)) = xs`** via lemma discovery. The generalizable
-follow-on (theory exploration — conjecturing lemmas by enumerating terms over the goal's operations and
-testing them before proof) plugs in at the catalog seam. `foldl`/`foldr` and induction over
+= length(xs) + length(ys)`; **`reverse(reverse(xs)) = xs`** via lemma discovery.
+
+### Theory exploration
+
+When the *curated* catalog can't close a goal, the prover (`explore.rs`) conjectures fresh lemmas the way
+QuickSpec / Hipster do — **theory exploration**: it enumerates well-typed terms over the goal's
+operations (within its prelude closure, in the first-order list fragment), tests each on a fixed battery
+of inputs, and **buckets terms by equal results** — terms that agree on every test are conjectured
+equal. The survivors are then **proved by induction** (the same Layer A machinery, recursively) before
+being assumed. Testing is only a *filter*; soundness still comes from the proof, so a conjecture that
+passes the tests but isn't a theorem is rejected when its induction fails — a false goal can never be
+closed. Enumeration and the test battery are fixed (no RNG), so exploration is deterministic and its
+certificates re-check (principle 5).
+
+To stay sound *and* fast, discovered lemmas are added one at a time and the goal is retried with a
+**minimal** axiom set (catalog + a single discovered lemma); piling every conjecture into one query
+overwhelms the solver's quantifier instantiation even when a small subset closes instantly. Proofs are
+memoized, so a shared lemma is discharged once. Demonstrated live: `reverse(append(reverse(xs), ys)) =
+append(reverse(ys), xs)` — which needs `reverse_append` (catalogued) **and** reverse-involution (not
+catalogued) — is **UNKNOWN under the catalog alone but PROVED once exploration discovers the involution
+lemma**; the whole proof tree (the goal plus every discovered and catalog lemma's base/step) re-checks.
+
+`foldl`/`foldr`, `map`/`filter` exploration (the SMT backend models their function argument as an
+uninterpreted symbol and rarely discharges such laws even when handed the lemma), and induction over
 user-defined recursive bodies (`self`) remain future work.
 
 ## Effect enforcement
