@@ -15,9 +15,9 @@
 nl.1105software.com {
 	encode zstd gzip
 
-	# Strict cap on the prover — expensive, so a low ceiling per IP.
-	@prove path /v0/prove
-	rate_limit @prove {
+	# Strict cap on the solver-backed endpoints (/v0/prove, /v0/equiv spawn z3) — low ceiling per IP.
+	@heavy path /v0/prove /v0/equiv
+	rate_limit @heavy {
 		zone prove {
 			key {remote_host}
 			events {$ARCA_PROVE_RATE:10}

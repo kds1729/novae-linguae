@@ -211,6 +211,21 @@ re-checking.
 `map`/`filter` exploration (the SMT backend models their function argument as an uninterpreted symbol
 and rarely discharges such laws even when handed the lemma) remains future work.
 
+## Semantic equivalence
+
+`nl-validator equiv` decides whether two functions compute the same thing — `∀x. f(x) = g(x)` over the
+unbounded domain — the operable form of *semantic equivalence vs hash equivalence* (two records can be
+hash-different yet behaviorally identical). It does not introduce a new two-function encoding: it reuses
+the property prover by **inlining**. When both sides are non-recursive it builds the law `eq(f(x), g(x))`
+with both bodies inlined (so all operations stay visible to lemma discovery); when one side recurses,
+that side becomes `self` (a `define-fun-rec`) and the other is inlined. The resulting law is discharged
+by the same first-order SMT → induction → lemma-discovery pipeline. **EQUIVALENT** (the law is proved),
+**DISTINCT** (a solver counterexample — only the first-order path yields one), **UNKNOWN** (a
+non-closing induction is *not* a refutation, so it is never reported as DISTINCT), or **UNSUPPORTED**.
+Proved live: `\xs. reverse(reverse(xs)) ≡ \xs. xs` (via lemma discovery), `double-via-add ≡
+double-via-mul`; `double ≢ \n. n + 1` is DISTINCT at `n = 1`. Scope (v0.1): unary functions, at least one
+side non-recursive. The node exposes this as `POST /v0/equiv`.
+
 ## Effect enforcement
 
 A function record *declares* its effects (`signature.effects`, the closed ten-effect vocabulary:

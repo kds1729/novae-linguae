@@ -21,6 +21,7 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 | `GET /v0/info` — node metadata | ✅ |
 | `POST /v0/search` — semantic discovery (stdlib lexical embedder) | ✅ |
 | `POST /v0/prove` — prove a record's properties (best-effort, SMT-backed) | ✅ |
+| `POST /v0/equiv` — prove two functions equivalent (best-effort, SMT-backed) | ✅ |
 
 **Verification reuses the reference validator.** On ingest, the node shells out to `nl-validator`
 to (1) `validate` the record against the schema named by its `(kind, schema_version)` and (2)
@@ -134,9 +135,25 @@ curl -X POST http://127.0.0.1:8000/v0/prove -H 'content-type: application/json' 
 reports `NO-SOLVER`. `/v0/info` advertises `prove.solver` and `prove.available` so a client can tell
 before asking. Work is bounded by `COMMONS_PROVE_TIMEOUT` (default 60 s) and `COMMONS_PROVE_MAX_PROPERTIES`
 (default 32). The production image installs `z3`. In the production stack the public Caddy edge also
-**rate-limits** `/v0/prove` strictly per client IP (default 10/min, vs. 300/min for everything else),
-via the [`caddy-ratelimit`](Caddy.Dockerfile) plugin — see the `rate_limit` zones in [`Caddyfile`](Caddyfile),
-tunable with the `ARCA_PROVE_RATE` / `ARCA_GENERAL_RATE` env (no rebuild needed).
+**rate-limits** the solver-backed endpoints (`/v0/prove`, `/v0/equiv`) strictly per client IP (default
+10/min, vs. 300/min for everything else), via the [`caddy-ratelimit`](Caddy.Dockerfile) plugin — see the
+`rate_limit` zones in [`Caddyfile`](Caddyfile), tunable with `ARCA_PROVE_RATE` / `ARCA_GENERAL_RATE`.
+
+## Equivalence service (`POST /v0/equiv`)
+
+Decides whether two functions are **semantically equivalent** — `∀x. f(x) = g(x)` over the unbounded
+domain — via the validator's `equiv` (reusing the prove engine). The operable form of "semantic
+equivalence vs hash equivalence": two records can be hash-different yet behaviorally identical. Takes two
+**inline** body-expression ASTs (bodies aren't stored, so there's no by-hash form); returns
+`{verdict: equivalent|distinct|unknown|unsupported, detail, solver}`. v0.1: unary functions with at
+least one side non-recursive.
+
+```bash
+# \n -> add(n,n)  ≡  \m -> mul(2,m)   → {"verdict": "equivalent", ...}
+curl -X POST http://127.0.0.1:8000/v0/equiv -H 'content-type: application/json' -d '{
+  "f": {"kind":"lambda","params":[{"name":"n"}],"body":{"kind":"app","fn":{"kind":"var","name":"add"},"args":[{"kind":"var","name":"n"},{"kind":"var","name":"n"}]}},
+  "g": {"kind":"lambda","params":[{"name":"m"}],"body":{"kind":"app","fn":{"kind":"var","name":"mul"},"args":[{"kind":"lit","value":{"kind":"int","value":2}},{"kind":"var","name":"m"}]}}}'
+```
 
 ## Seed bundles (`.nlb`)
 

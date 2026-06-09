@@ -240,6 +240,22 @@ enum Commands {
         #[arg(long, default_value = "z3")]
         solver: String,
     },
+    /// Prove two functions **semantically equivalent** — `∀x. f(x) = g(x)` over the unbounded domain
+    /// (the rung above hash equality: behaviorally-identical functions with different content-addresses).
+    /// Reuses the property prover by inlining the non-recursive side into a property of the other.
+    /// EQUIVALENT / DISTINCT (with a counterexample, exit 1) / UNKNOWN / UNSUPPORTED. v0.1: unary, with
+    /// at least one side non-recursive.
+    Equiv {
+        /// Body-expression AST of the first function (a `lambda`).
+        #[arg(long = "body-f")]
+        body_f: PathBuf,
+        /// Body-expression AST of the second function (a `lambda`).
+        #[arg(long = "body-g")]
+        body_g: PathBuf,
+        /// SMT solver binary to invoke.
+        #[arg(long, default_value = "z3")]
+        solver: String,
+    },
     /// Nova Locutio agent loop: consume a signed message and emit a signed reply (spec/agent-loop.md).
     /// Handles `request`/`apply` (run the target on the value-expression args → an `assert` whose
     /// `predicate` claim is `eq(target(args…), result)`, self-verifiable by re-running),
@@ -473,6 +489,7 @@ fn main() -> ExitCode {
         Commands::Prove { record, body, smt_out, solver } => {
             (cmd_prove(&record, body.as_ref(), smt_out.as_ref(), &solver), false)
         }
+        Commands::Equiv { body_f, body_g, solver } => (cmd_equiv(&body_f, &body_g, &solver), false),
         Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
             (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
@@ -779,6 +796,34 @@ fn cmd_prove(
         Err(anyhow::anyhow!("no SMT solver available — obligations emitted but not discharged"))
     } else {
         Ok(())
+    }
+}
+
+fn cmd_equiv(body_f: &PathBuf, body_g: &PathBuf, solver: &str) -> Result<()> {
+    use nl_validator::EquivVerdict;
+    let f = nl_validator::read_json(body_f)?;
+    let g = nl_validator::read_json(body_g)?;
+    match nl_validator::prove_equivalent(&f, &g, solver) {
+        EquivVerdict::Equivalent(lemmas) => {
+            if lemmas.is_empty() {
+                println!("EQUIVALENT   f ≡ g for all inputs (unsat negation)");
+            } else {
+                println!("EQUIVALENT   f ≡ g, using lemmas: {}", lemmas.join(", "));
+            }
+            Ok(())
+        }
+        EquivVerdict::Distinct(model) => {
+            Err(anyhow::anyhow!("DISTINCT     counterexample: {}", if model.is_empty() { "(model)".into() } else { model }))
+        }
+        EquivVerdict::Unknown => {
+            println!("UNKNOWN      could not decide equivalence");
+            Ok(())
+        }
+        EquivVerdict::Unsupported(why) => {
+            println!("UNSUPPORTED  {why}");
+            Ok(())
+        }
+        EquivVerdict::NoSolver => Err(anyhow::anyhow!("NO-SOLVER    `{solver}` not found")),
     }
 }
 

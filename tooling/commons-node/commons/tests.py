@@ -983,3 +983,46 @@ class ProveEndpointTests(TestCase):
         info = self.client.get("/v0/info").json()
         self.assertIn("prove", info)
         self.assertEqual(info["prove"]["available"], _HAS_SOLVER)
+
+
+# --- /v0/equiv (semantic-equivalence service) -----------------------------------------------------
+
+def _lam(param, body):
+    return {"kind": "lambda", "params": [{"name": param}], "body": body}
+def _bap(fn, *args):
+    return {"kind": "app", "fn": {"kind": "var", "name": fn}, "args": list(args)}
+def _bv(n):
+    return {"kind": "var", "name": n}
+def _bi(n):
+    return {"kind": "lit", "value": {"kind": "int", "value": n}}
+
+DOUBLE_ADD = _lam("n", _bap("add", _bv("n"), _bv("n")))        # \n -> add(n, n)
+DOUBLE_MUL = _lam("m", _bap("mul", _bi(2), _bv("m")))          # \m -> mul(2, m)
+SUCC = _lam("k", _bap("add", _bv("k"), _bi(1)))               # \k -> add(k, 1)
+
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class EquivEndpointTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+    def _equiv(self, f, g):
+        return self.client.post("/v0/equiv", data=json.dumps({"f": f, "g": g}), content_type="application/json")
+
+    def test_equivalent(self):
+        r = self._equiv(DOUBLE_ADD, DOUBLE_MUL)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["verdict"], "equivalent" if _HAS_SOLVER else "no_solver")
+
+    @unittest.skipUnless(_HAS_SOLVER, "no SMT solver on PATH")
+    def test_distinct(self):
+        r = self._equiv(DOUBLE_ADD, SUCC)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["verdict"], "distinct")
+
+    def test_missing_operand_is_400(self):
+        r = self.client.post("/v0/equiv", data=json.dumps({"f": DOUBLE_ADD}), content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_get_not_allowed(self):
+        self.assertEqual(self.client.get("/v0/equiv").status_code, 405)

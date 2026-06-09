@@ -11,6 +11,7 @@ from . import verify as V
 from .egress import usage as egress_usage
 from .embedding import get_embedder
 from .ingest import create_record
+from .equiv import EquivError, run_equiv
 from .models import Record
 from .prove import ProveError, run_prove
 from .query import QueryError, run_query
@@ -152,6 +153,28 @@ def prove(request):
     except ProveError as exc:
         return JsonResponse({"error": exc.code, "detail": exc.detail}, status=exc.status)
     return JsonResponse(result)
+
+
+@csrf_exempt
+def equiv(request):
+    """POST /v0/equiv — prove two functions semantically equivalent, `∀x. f(x) = g(x)` (best-effort,
+    node-local; not an admission gate). Body: `{"f": <body-expr>, "g": <body-expr>}` (inline bodies —
+    bodies are not stored in the commons)."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if len(request.body) > settings.COMMONS_MAX_RECORD_BYTES:
+        return JsonResponse({"error": "too_large"}, status=413)
+    try:
+        body = _json_body(request)
+    except ValueError as exc:
+        return JsonResponse({"error": "malformed_json", "detail": str(exc)}, status=400)
+    f, g = body.get("f"), body.get("g")
+    if f is None or g is None:
+        return JsonResponse({"error": "bad_request", "detail": "provide `f` and `g` body objects"}, status=400)
+    try:
+        return JsonResponse(run_equiv(f, g))
+    except EquivError as exc:
+        return JsonResponse({"error": exc.code, "detail": exc.detail}, status=exc.status)
 
 
 def sync(request):

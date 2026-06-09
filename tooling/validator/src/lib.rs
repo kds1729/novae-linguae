@@ -40,6 +40,9 @@ pub use induct::{
     DEFAULT_LEMMA_DEPTH,
 };
 
+pub mod equiv;
+pub use equiv::{prove_equivalent, EquivVerdict};
+
 pub mod effects;
 pub use effects::{check_effects, infer_effects};
 
