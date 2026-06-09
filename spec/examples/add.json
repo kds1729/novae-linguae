@@ -1,0 +1,172 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_1e4de6901d8ba3eef02cc6ece3ab969e343858b8674f645ac6139d592662a062",
+  "name_hints": [
+    "add",
+    "plus",
+    "sum2"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "int"
+        },
+        {
+          "kind": "builtin",
+          "name": "int"
+        }
+      ],
+      "result": {
+        "kind": "builtin",
+        "name": "int"
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "int",
+          "value": 2
+        },
+        {
+          "kind": "int",
+          "value": 3
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 5
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "int",
+          "value": 0
+        },
+        {
+          "kind": "int",
+          "value": 0
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 0
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "int",
+          "value": -1
+        },
+        {
+          "kind": "int",
+          "value": 1
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 0
+      }
+    }
+  ],
+  "properties": [
+    {
+      "name": "commutativity",
+      "expr": {
+        "kind": "forall",
+        "vars": [
+          "a",
+          "b"
+        ],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "add",
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "a"
+                },
+                {
+                  "kind": "var",
+                  "name": "b"
+                }
+              ]
+            },
+            {
+              "kind": "app",
+              "op": "add",
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "b"
+                },
+                {
+                  "kind": "var",
+                  "name": "a"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "right_identity",
+      "expr": {
+        "kind": "forall",
+        "vars": [
+          "a"
+        ],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "add",
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "a"
+                },
+                {
+                  "kind": "lit",
+                  "value": {
+                    "kind": "int",
+                    "value": 0
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "var",
+              "name": "a"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "intent_tags": [
+    "arithmetic",
+    "combine"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_64c8ceb2c6bfc8e580fc9733d378c00f4b4c428cb240df97db5ddbd335fe6af6"
+}

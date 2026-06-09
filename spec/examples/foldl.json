@@ -1,0 +1,209 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_33ea32b8bebc315bcef08a386d9de3e29c47089b86cc73beff1444e439c7b072",
+  "name_hints": [
+    "foldl",
+    "fold_left",
+    "reduce_left"
+  ],
+  "signature": {
+    "type": {
+      "kind": "forall",
+      "vars": [
+        "a",
+        "b"
+      ],
+      "body": {
+        "kind": "fn",
+        "params": [
+          {
+            "kind": "fn",
+            "params": [
+              {
+                "kind": "var",
+                "name": "b"
+              },
+              {
+                "kind": "var",
+                "name": "a"
+              }
+            ],
+            "result": {
+              "kind": "var",
+              "name": "b"
+            }
+          },
+          {
+            "kind": "var",
+            "name": "b"
+          },
+          {
+            "kind": "apply",
+            "ctor": {
+              "kind": "builtin",
+              "name": "List"
+            },
+            "args": [
+              {
+                "kind": "var",
+                "name": "a"
+              }
+            ]
+          }
+        ],
+        "result": {
+          "kind": "var",
+          "name": "b"
+        }
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "fn_ref",
+          "target": "fn_1e4de6901d8ba3eef02cc6ece3ab969e343858b8674f645ac6139d592662a062"
+        },
+        {
+          "kind": "int",
+          "value": 0
+        },
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "int",
+              "value": 1
+            },
+            {
+              "kind": "int",
+              "value": 2
+            },
+            {
+              "kind": "int",
+              "value": 3
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 6
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "fn_ref",
+          "target": "fn_1e4de6901d8ba3eef02cc6ece3ab969e343858b8674f645ac6139d592662a062"
+        },
+        {
+          "kind": "int",
+          "value": 0
+        },
+        {
+          "kind": "list",
+          "elems": []
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 0
+      }
+    }
+  ],
+  "properties": [
+    {
+      "name": "foldl_append",
+      "expr": {
+        "kind": "forall",
+        "vars": [
+          "f",
+          "z",
+          "xs",
+          "ys"
+        ],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "foldl",
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "f"
+                },
+                {
+                  "kind": "var",
+                  "name": "z"
+                },
+                {
+                  "kind": "app",
+                  "op": "append",
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "xs"
+                    },
+                    {
+                      "kind": "var",
+                      "name": "ys"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "app",
+              "op": "foldl",
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "f"
+                },
+                {
+                  "kind": "app",
+                  "op": "foldl",
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "f"
+                    },
+                    {
+                      "kind": "var",
+                      "name": "z"
+                    },
+                    {
+                      "kind": "var",
+                      "name": "xs"
+                    }
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "ys"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "intent_tags": [
+    "fold",
+    "reduce",
+    "list"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_dae023504c3c36fc27aed76d226187e1c7e79cee62413ff673ce344282ac1c5d"
+}

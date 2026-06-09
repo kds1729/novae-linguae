@@ -1,0 +1,106 @@
+{
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "f"
+    },
+    {
+      "name": "z"
+    },
+    {
+      "name": "xs"
+    }
+  ],
+  "body": {
+    "kind": "case",
+    "scrutinee": {
+      "kind": "app",
+      "fn": {
+        "kind": "var",
+        "name": "null"
+      },
+      "args": [
+        {
+          "kind": "var",
+          "name": "xs"
+        }
+      ]
+    },
+    "arms": [
+      {
+        "pattern": {
+          "kind": "lit",
+          "value": {
+            "kind": "bool",
+            "value": true
+          }
+        },
+        "body": {
+          "kind": "var",
+          "name": "z"
+        }
+      },
+      {
+        "pattern": {
+          "kind": "lit",
+          "value": {
+            "kind": "bool",
+            "value": false
+          }
+        },
+        "body": {
+          "kind": "app",
+          "fn": {
+            "kind": "var",
+            "name": "f"
+          },
+          "args": [
+            {
+              "kind": "app",
+              "fn": {
+                "kind": "var",
+                "name": "head"
+              },
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "xs"
+                }
+              ]
+            },
+            {
+              "kind": "app",
+              "fn": {
+                "kind": "var",
+                "name": "self"
+              },
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "f"
+                },
+                {
+                  "kind": "var",
+                  "name": "z"
+                },
+                {
+                  "kind": "app",
+                  "fn": {
+                    "kind": "var",
+                    "name": "tail"
+                  },
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "xs"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
