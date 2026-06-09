@@ -116,9 +116,13 @@ composes `double` twice, confirming `double(double(21)) = 84` (ten messages).
 ### Verified orchestration (`--verify`)
 
 `nl-validator orchestrate --verify [--policy <p> --attestation <a>…]` folds verification into the loop —
-the project's thesis in one autonomous run: **discover** a function by intent, decide whether to
-**trust** it from the receiver's *local* policy over an attestation graph (no central authority —
-principle 7; an untrusted function aborts the run before it is touched), **prove** the function's own
+the project's thesis in one autonomous run: **discover** functions by intent (a query returns a *set*),
+**rank them by trust** and use the most-trusted — the receiver's *local* policy over its own attestation
+graph (no central authority — principle 7), preferring higher aggregate confidence, then more
+vertex-disjoint paths, then more distinct attesters; if none is trusted the run aborts before any
+function is touched. (This replaces a naive "take matches[0]": discovery returns candidates, and *which*
+to use is the consumer's trust decision, not the order they came back in.) It then **proves** the chosen
+function's own
 declared property over the unbounded domain (don't trust the record's claim — re-prove it with the SMT
 + induction + lemma-discovery engine), then **apply** it and **re-verify** the result by re-running
 (principle 3). The transcript gains `trust` and `prove` steps between `ack` and `propose`. Worked: with

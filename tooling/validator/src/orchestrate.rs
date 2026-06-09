@@ -16,7 +16,7 @@ use std::path::Path;
 use crate::{
     build_link_map, build_record_map, did_nova_from_pubkey, prove_by_induction_with_exploration,
     prove_property, respond_to_message, sign_message, verify_claim, AttestationGraph, InductionOutcome,
-    Policy, ProofOutcome, DEFAULT_LEMMA_DEPTH,
+    Policy, ProofOutcome, TrustVerdict, DEFAULT_LEMMA_DEPTH,
 };
 
 /// One message in the orchestrated conversation.
@@ -117,6 +117,32 @@ pub struct VerifiedRun {
     pub confirmed: bool,
 }
 
+/// Trust-ranking key for a candidate: prefer higher aggregate confidence, then more vertex-disjoint
+/// paths, then more distinct attesters. Disambiguates functions that match the same intent.
+fn rank_key(v: &TrustVerdict) -> (f64, usize, usize) {
+    (v.confidence, v.disjoint_paths, v.supporting.len())
+}
+
+/// Evaluate every candidate under `policy` and return all verdicts plus the index of the **most-trusted**
+/// one (first-max on ties — earlier matches win equal trust; `None` if none is trusted). This is the
+/// consumer's *local* trust ranking: discovery returns a set, and the receiver — not any central
+/// authority (principle 7) — decides which to use, by its own policy over its own attestation graph.
+fn best_trusted(
+    candidates: &[String],
+    policy: &Policy,
+    graph: &AttestationGraph,
+    at: Option<&str>,
+) -> (Vec<TrustVerdict>, Option<usize>) {
+    let verdicts: Vec<TrustVerdict> = candidates.iter().map(|m| policy.evaluate_trust(graph, m, None, at)).collect();
+    let mut best: Option<usize> = None;
+    for (i, v) in verdicts.iter().enumerate() {
+        if v.trusted && best.map_or(true, |b| rank_key(v) > rank_key(&verdicts[b])) {
+            best = Some(i);
+        }
+    }
+    (verdicts, best)
+}
+
 /// Try to prove a `forall` law: first-order SMT, then induction with lemma discovery (mirrors `prove`).
 fn prove_law(expr: &J, body: Option<&J>, solver: &str) -> bool {
     match prove_property(expr, body, solver).0 {
@@ -161,30 +187,47 @@ pub fn orchestrate_verified(
     sign_message(&mut query, orchestrator)?;
     steps.push(Step { label: "query".into(), message: query.clone() });
     let ack = respond_to_message(&query, link.clone(), records.clone(), responder, timestamp)?;
-    let target = match ack.pointer("/body/result/matches/0").and_then(|m| m.as_str()) {
-        Some(t) => t.to_string(),
-        None => {
-            steps.push(Step { label: "ack".into(), message: ack });
-            return Ok(VerifiedRun { steps, trusted: None, property: None, confirmed: false });
-        }
-    };
+    let matches: Vec<String> = ack
+        .pointer("/body/result/matches")
+        .and_then(|m| m.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
     steps.push(Step { label: "ack".into(), message: ack });
+    if matches.is_empty() {
+        return Ok(VerifiedRun { steps, trusted: None, property: None, confirmed: false });
+    }
 
-    // TRUST GATE: only use a function the local policy trusts (no central authority — principle 7).
-    let trusted = match policy {
+    // TRUST GATE + DISAMBIGUATION: discovery returns a *set*; rather than taking matches[0], rank the
+    // candidates by the local policy and use the most-trusted one (no central authority — principle 7).
+    // Without a policy there is no trust signal, so fall back to the first match.
+    let (target, trusted) = match policy {
         Some(p) => {
             let graph = AttestationGraph::from_messages(attestations, timestamp);
-            let v = p.evaluate_trust(&graph, &target, None, timestamp);
-            steps.push(Step {
-                label: "trust".into(),
-                message: json!({ "subject": target, "trusted": v.trusted, "reason": v.reason }),
-            });
-            if !v.trusted {
-                return Ok(VerifiedRun { steps, trusted: Some(false), property: None, confirmed: false });
+            let (verdicts, best) = best_trusted(&matches, p, &graph, timestamp);
+            let candidates: Vec<J> = matches
+                .iter()
+                .zip(&verdicts)
+                .map(|(m, v)| json!({ "function": m, "trusted": v.trusted, "confidence": v.confidence }))
+                .collect();
+            match best {
+                Some(i) => {
+                    steps.push(Step {
+                        label: "trust".into(),
+                        message: json!({ "chosen": matches[i], "reason": verdicts[i].reason, "candidates": candidates }),
+                    });
+                    (matches[i].clone(), Some(true))
+                }
+                None => {
+                    steps.push(Step {
+                        label: "trust".into(),
+                        message: json!({ "chosen": null, "trusted": false,
+                            "reason": "no discovered function is trusted under the policy", "candidates": candidates }),
+                    });
+                    return Ok(VerifiedRun { steps, trusted: Some(false), property: None, confirmed: false });
+                }
             }
-            Some(true)
         }
-        None => None,
+        None => (matches[0].clone(), None),
     };
 
     // PROVE the discovered function's own declared property — verify the *piece*, not just one result.
@@ -323,6 +366,31 @@ mod tests {
         assert!(run.confirmed, "the applied result re-verifies");
         let labels: Vec<&str> = run.steps.iter().map(|x| x.label.as_str()).collect();
         assert_eq!(labels, ["query", "ack", "trust", "prove", "propose", "commit", "assert"]);
+    }
+
+    #[test]
+    fn trust_ranking_picks_the_trusted_candidate_not_the_first() {
+        // Two matched candidates; only the SECOND is vouched. Ranking must select index 1 — proving
+        // disambiguation is by trust, not by position (the old matches[0]).
+        let (a, b) = (format!("fn_{}", "a".repeat(64)), format!("fn_{}", "b".repeat(64)));
+        let graph = AttestationGraph::from_messages(&[vouch("root", &b)], None);
+        let (verdicts, best) = best_trusted(&[a, b], &policy(&[&did("root")]), &graph, None);
+        assert!(!verdicts[0].trusted && verdicts[1].trusted);
+        assert_eq!(best, Some(1), "the trusted second candidate is chosen over the untrusted first");
+    }
+
+    #[test]
+    fn trust_ranking_prefers_more_corroboration() {
+        // Both trusted, but `b` is vouched by two distinct roots vs `a`'s one → b ranks higher.
+        let (a, b) = (format!("fn_{}", "a".repeat(64)), format!("fn_{}", "b".repeat(64)));
+        let graph = AttestationGraph::from_messages(
+            &[vouch("r1", &a), vouch("r1", &b), vouch("r2", &b)],
+            None,
+        );
+        let (verdicts, best) = best_trusted(&[a, b], &policy(&[&did("r1"), &did("r2")]), &graph, None);
+        assert!(verdicts[0].trusted && verdicts[1].trusted);
+        assert!(verdicts[1].supporting.len() > verdicts[0].supporting.len());
+        assert_eq!(best, Some(1), "more distinct trusted attesters wins the tie");
     }
 
     #[test]
