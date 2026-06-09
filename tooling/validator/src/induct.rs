@@ -47,12 +47,19 @@
 //! native `cons`/`nil` patterns). The induction then discharges it exactly as it does the built-in
 //! recursive list ops. So e.g. a user-defined recursive `length` is proved to distribute over `append`.
 //!
+//! **Folds.** `foldr(f, z, xs)` and `foldl(f, z, xs)` are emitted as their own `define-fun-rec`s over a
+//! single global uninterpreted binary `foldfn` (so a law holds for *every* `f`). `foldr` discharges with
+//! the ordinary hypothesis; `foldl` threads its accumulator, so for fold laws the step also asserts the
+//! induction hypothesis **generalized over the non-induction variables** (`forall others. P(t, others)`)
+//! — letting the solver instantiate it at the changed accumulator. Both `foldr`/`foldl` are proved to
+//! distribute over `append`.
+//!
 //! Honest scope (v0.1). Element sort is `Int`; the list is `Lst`. Supported operations: `length`,
-//! `append`, `reverse`, `map`, `filter`, `cons`, `head`, `tail`, `null`, plus the `Int`/`Bool`
-//! element algebra. `map`/`filter` take at most one function/predicate, modelled as `id` or a single
-//! uninterpreted symbol (so `forall f xs. length(map(f, xs)) = length(xs)` is provable with `f`
-//! uninterpreted). `self` must be a single-list-parameter recursive function. `foldl`/`foldr`,
-//! lists-of-lists, and multiple distinct function arguments are out of scope and reported UNSUPPORTED.
+//! `append`, `reverse`, `map`, `filter`, `cons`, `head`, `tail`, `null`, `foldr`, `foldl`, plus the
+//! `Int`/`Bool` element algebra. `map`/`filter`/`fold` take at most one function/predicate, modelled as
+//! `id` or a single uninterpreted symbol (so `forall f xs. length(map(f, xs)) = length(xs)` is provable
+//! with `f` uninterpreted). `self` must be a single-list-parameter recursive function. Lists-of-lists
+//! and multiple distinct function arguments are out of scope and reported UNSUPPORTED.
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value as J;
@@ -165,7 +172,8 @@ fn references_self(node: &J) -> bool {
     false
 }
 
-const LIST_OPS: &[&str] = &["length", "append", "reverse", "map", "filter", "cons", "head", "tail", "null"];
+const LIST_OPS: &[&str] =
+    &["length", "append", "reverse", "map", "filter", "cons", "head", "tail", "null", "foldr", "foldl"];
 
 // --- sort inference -------------------------------------------------------------------------------
 
@@ -260,7 +268,19 @@ fn walk_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Option<Sor
                     assign(n, Sort3::Lst, vars, sorts)?;
                 }
             }
-            "foldl" | "foldr" => bail!("predicate uses `{op}` (fold is out of the inductive fragment)"),
+            // fold(f, z, xs): f is the (binary) fold function — modelled globally, so treated like a
+            // map function (skipped at declaration); z is the Int accumulator; xs is the list.
+            "foldl" | "foldr" => {
+                if let Some(n) = args.first().and_then(|a| var_name(a)) {
+                    assign(n, Sort3::Func, vars, sorts)?;
+                }
+                if let Some(n) = args.get(1).and_then(|a| var_name(a)) {
+                    assign(n, Sort3::Int, vars, sorts)?;
+                }
+                if let Some(n) = args.get(2).and_then(|a| var_name(a)) {
+                    assign(n, Sort3::Lst, vars, sorts)?;
+                }
+            }
             _ => {}
         }
         for a in &args {
@@ -432,6 +452,9 @@ fn lower_app(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
         "append" => format!("(append {} {})", l(0)?, l(1)?),
         "map" => format!("(mapf {})", l(1)?), // arg0 (the function) is modelled globally as `mapfn`
         "filter" => format!("(filterp {})", l(1)?),
+        // fold(f, z, xs): arg0 (f) is the global binary `foldfn`; arg1 is the accumulator, arg2 the list.
+        "foldr" => format!("(foldr_f {} {})", l(1)?, l(2)?),
+        "foldl" => format!("(foldl_f {} {})", l(1)?, l(2)?),
         "cons" => format!("(cons {} {})", l(0)?, l(1)?),
         "head" => format!("(hd {})", l(0)?),
         "tail" => format!("(tl {})", l(0)?),
@@ -575,6 +598,17 @@ fn build_prelude(used: &BTreeSet<String>, map_fn: &FnModel, filter_pred: &FnMode
         }
         s.push_str("(define-fun-rec filterp ((xs Lst)) Lst (ite ((_ is nil) xs) nil (ite (filterpred (hd xs)) (cons (hd xs) (filterp (tl xs))) (filterp (tl xs)))))\n");
     }
+    // fold: one global uninterpreted binary `foldfn` (covers `forall f`), and the recursive fold(s).
+    // foldr(f, z, xs) = f(x0, f(x1, … f(xn, z))); foldl(f, z, xs) threads the accumulator left-to-right.
+    if used.contains("foldr") || used.contains("foldl") {
+        s.push_str("(declare-fun foldfn (Int Int) Int)\n");
+    }
+    if used.contains("foldr") {
+        s.push_str("(define-fun-rec foldr_f ((z Int) (xs Lst)) Int (ite ((_ is nil) xs) z (foldfn (hd xs) (foldr_f z (tl xs)))))\n");
+    }
+    if used.contains("foldl") {
+        s.push_str("(define-fun-rec foldl_f ((z Int) (xs Lst)) Int (ite ((_ is nil) xs) z (foldl_f (foldfn z (hd xs)) (tl xs))))\n");
+    }
     s
 }
 
@@ -658,6 +692,7 @@ fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<I
         }
     }
 
+    let uses_fold = used.contains("foldl") || used.contains("foldr");
     // `self`'s definition comes after the list-op defs it may call (SMT-LIB needs definitions first).
     let prelude = format!("{}{}", build_prelude(&used, &map_fn, &filter_pred), self_def.unwrap_or_default());
     let free = declare_free(&var_sorts, &induction_var);
@@ -678,11 +713,35 @@ fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<I
         let mut ih_env = BTreeMap::new();
         ih_env.insert(induction_var.clone(), tv.clone());
         let ih = lower(pred, &ih_env)?;
+        // Accumulator-threading recursion (`foldl`) needs the IH *generalized over the non-induction
+        // variables*, so it can be instantiated at the changed accumulator — the ground instance below
+        // is only the hypothesis at the fixed free constants. Added only for fold laws; it never weakens
+        // the easy cases (the ground IH still drives them), and it is sound (it is exactly the structural
+        // induction hypothesis `forall others. P(t, others)`).
+        let qih = if uses_fold {
+            let binders: Vec<String> = var_sorts
+                .iter()
+                .filter(|(v, _)| **v != induction_var)
+                .filter_map(|(v, s)| match s {
+                    Sort3::Int => Some(format!("({v} Int)")),
+                    Sort3::Bool => Some(format!("({v} Bool)")),
+                    Sort3::Lst => Some(format!("({v} Lst)")),
+                    Sort3::Func | Sort3::Pred => None,
+                })
+                .collect();
+            if binders.is_empty() {
+                String::new()
+            } else {
+                format!("(assert (forall ({}) {ih}))\n", binders.join(" "))
+            }
+        } else {
+            String::new()
+        };
         let mut env = BTreeMap::new();
         env.insert(induction_var.clone(), format!("(cons {hv} {tv})"));
         let goal = lower(pred, &env)?;
         format!(
-            "{prelude}{free}{axioms}(declare-const {hv} Int)\n(declare-const {tv} Lst)\n; step case: assume IH for {tv}, prove for (cons {hv} {tv})\n(assert {ih})\n(assert (not {goal}))\n(check-sat)\n"
+            "{prelude}{free}{axioms}(declare-const {hv} Int)\n(declare-const {tv} Lst)\n; step case: assume IH for {tv}, prove for (cons {hv} {tv})\n{qih}(assert {ih})\n(assert (not {goal}))\n(check-sat)\n"
         )
     };
 
@@ -1280,5 +1339,40 @@ mod tests {
         // A law mentioning `self` cannot be set up without the recursive body to encode.
         let prop = forall(&["xs"], app("eq", vec![call_self(var("xs")), lit_int(0)]));
         assert!(build_induction(&prop, None).is_err());
+    }
+
+    // ---- foldl / foldr ----
+
+    #[test]
+    fn proves_foldr_append() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall f z xs ys. foldr(f, z, append(xs, ys)) = foldr(f, foldr(f, z, ys), xs).
+        // `f` is an uninterpreted binary fold function, so this holds for *every* f.
+        let prop = forall(&["f", "z", "xs", "ys"], app("eq", vec![
+            app("foldr", vec![var("f"), var("z"), app("append", vec![var("xs"), var("ys")])]),
+            app("foldr", vec![var("f"), app("foldr", vec![var("f"), var("z"), var("ys")]), var("xs")]),
+        ]));
+        let (o, _) = prove_by_induction_with_exploration(&prop, None, solver, DEFAULT_LEMMA_DEPTH);
+        assert!(matches!(o, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_)),
+            "foldr distributes over append, got {o:?}");
+    }
+
+    #[test]
+    fn proves_foldl_append() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall f z xs ys. foldl(f, z, append(xs, ys)) = foldl(f, foldl(f, z, xs), ys).
+        // foldl threads the accumulator, so the step needs the IH generalized over `z` — the
+        // accumulator-quantified induction hypothesis added for fold laws.
+        let prop = forall(&["f", "z", "xs", "ys"], app("eq", vec![
+            app("foldl", vec![var("f"), var("z"), app("append", vec![var("xs"), var("ys")])]),
+            app("foldl", vec![var("f"), app("foldl", vec![var("f"), var("z"), var("xs")]), var("ys")]),
+        ]));
+        let (o, _) = prove_by_induction_with_exploration(&prop, None, solver, DEFAULT_LEMMA_DEPTH);
+        assert!(matches!(o, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_)),
+            "foldl distributes over append (needs accumulator-generalized IH), got {o:?}");
     }
 }

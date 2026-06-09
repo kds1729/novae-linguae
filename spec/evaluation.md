@@ -198,8 +198,18 @@ self` — the body branches with a boolean `case` on `null(xs)` and recurses via
 `append`** (`self(append(xs, ys)) = self(xs) + self(ys)`); a false law over the same `self` (e.g.
 `self(xs) = 0`) is correctly NOT-PROVED. Scope: `self` is a single-list-parameter recursive function.
 
-`foldl`/`foldr` and `map`/`filter` exploration (the SMT backend models their function argument as an
-uninterpreted symbol and rarely discharges such laws even when handed the lemma) remain future work.
+### Folds
+
+`foldr(f, z, xs)` and `foldl(f, z, xs)` are each encoded as a `define-fun-rec` over one global
+uninterpreted binary `foldfn`, so a fold law is proved for **every** `f`. `foldr` discharges with the
+ordinary induction hypothesis; `foldl` threads its accumulator, so for fold laws the step additionally
+asserts the hypothesis **generalized over the non-induction variables** (`forall others. P(t, others)`),
+which the solver instantiates at the changed accumulator. Demonstrated live: both `foldr` and `foldl`
+are **proved to distribute over `append`** (`fold(f, z, append(xs, ys)) = …`), each certificate
+re-checking.
+
+`map`/`filter` exploration (the SMT backend models their function argument as an uninterpreted symbol
+and rarely discharges such laws even when handed the lemma) remains future work.
 
 ## Effect enforcement
 
