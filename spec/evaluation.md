@@ -226,6 +226,20 @@ Proved live: `\xs. reverse(reverse(xs)) ≡ \xs. xs` (via lemma discovery), `dou
 double-via-mul`; `double ≢ \n. n + 1` is DISTINCT at `n = 1`. Scope (v0.1): unary functions, at least one
 side non-recursive. The node exposes this as `POST /v0/equiv`.
 
+## Composition metadata
+
+`nl-validator compose <f1> <f2> …` derives the metadata of a sequential pipeline (each stage applied to
+the previous stage's result) from the stages' own signatures — the operable answer to *composition
+opacity*: a pipeline of well-described leaves is otherwise itself undescribed. It checks **type
+composability** (stage `i`'s result type must fit stage `i+1`'s parameter type, structurally, with
+type variables as wildcards) and propagates: **effects** = the union of every stage's effects;
+**capabilities** = the union; **termination** = `always` only if every stage is `always`, else
+`unknown`; **complexity** = a coarse upper bound (the maximum stage class — sequential composition's
+dominant term — or `unknown` if any is unrecognized). The composite runs from `f1`'s input type to
+`fn`'s result type. Worked: `reverse ; length` → `List a → nat`, effects `[]`, terminates `always`;
+`length ; reverse` is **not composable** (a `nat` result can't feed a `List` parameter). Scope (v0.1):
+each stage is a unary function; complexity is a bound, not an exact cost model.
+
 ## Effect enforcement
 
 A function record *declares* its effects (`signature.effects`, the closed ten-effect vocabulary:

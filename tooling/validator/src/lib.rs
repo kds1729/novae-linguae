@@ -43,6 +43,9 @@ pub use induct::{
 pub mod equiv;
 pub use equiv::{prove_equivalent, EquivVerdict};
 
+pub mod compose;
+pub use compose::{compose, CompositionMetadata};
+
 pub mod effects;
 pub use effects::{check_effects, infer_effects};
 

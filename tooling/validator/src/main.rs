@@ -256,6 +256,15 @@ enum Commands {
         #[arg(long, default_value = "z3")]
         solver: String,
     },
+    /// Derive a sequential pipeline's **composite metadata** from its stages' signatures (the
+    /// "composition opacity" problem): type composability stage-to-stage, the *union* of effects and
+    /// capabilities, `always` termination only if every stage is, and a coarse max complexity. Each
+    /// stage is a unary function applied to the previous stage's result. Exit 1 if not composable.
+    Compose {
+        /// Function-record files, in pipeline order (`f1 f2 …`; each applied to the previous result).
+        #[arg(required = true)]
+        records: Vec<PathBuf>,
+    },
     /// Nova Locutio agent loop: consume a signed message and emit a signed reply (spec/agent-loop.md).
     /// Handles `request`/`apply` (run the target on the value-expression args → an `assert` whose
     /// `predicate` claim is `eq(target(args…), result)`, self-verifiable by re-running),
@@ -503,6 +512,7 @@ fn main() -> ExitCode {
             (cmd_prove(&record, body.as_ref(), smt_out.as_ref(), &solver), false)
         }
         Commands::Equiv { body_f, body_g, solver } => (cmd_equiv(&body_f, &body_g, &solver), false),
+        Commands::Compose { records } => (cmd_compose(&records), false),
         Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
             (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
@@ -841,6 +851,23 @@ fn cmd_equiv(body_f: &PathBuf, body_g: &PathBuf, solver: &str) -> Result<()> {
             Ok(())
         }
         EquivVerdict::NoSolver => Err(anyhow::anyhow!("NO-SOLVER    `{solver}` not found")),
+    }
+}
+
+fn cmd_compose(records: &[PathBuf]) -> Result<()> {
+    let recs = records.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
+    let m = nl_validator::compose(&recs);
+    let ty = |t: &Option<serde_json::Value>| t.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "?".into());
+    if m.composable {
+        println!("COMPOSABLE   {}", m.reason);
+        println!("  type        {} -> {}", ty(&m.input_type), ty(&m.output_type));
+        println!("  effects     {:?}", m.effects);
+        println!("  capabilities {:?}", m.capabilities);
+        println!("  terminates  {}", m.terminates);
+        println!("  complexity  {}", m.complexity);
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("NOT-COMPOSABLE  {}", m.reason))
     }
 }
 
