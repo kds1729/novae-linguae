@@ -144,12 +144,32 @@ case substitution is applied, the IH is asserted (step only), and the negated go
 or a single uninterpreted symbol — so `forall f xs. length(map(f, xs)) = length(xs)` is proved with `f`
 *uninterpreted* (i.e. for every f). The base and step scripts together are the re-checkable certificate.
 
+### Lemma discovery
+
 Where one unfold of the definitions plus the IH does not close the step — a law that needs an auxiliary
-lemma, classically `reverse(reverse(xs)) = xs` — the solver (run under a wall-clock timeout, so an
-undecidable query can never hang) returns UNKNOWN. That is reported honestly, never as a false PROVED.
-Proved live: `map(id, xs) = xs`, `length(map(f, xs)) = length(xs)`, `length(append(xs, ys)) =
-length(xs) + length(ys)` — each by induction; `reverse∘reverse = id` → UNKNOWN. Lemma discovery,
-`foldl`/`foldr`, and induction over user-defined recursive bodies (`self`) remain future work.
+lemma, classically `reverse(reverse(xs)) = xs` — the prover does not give up. It selects relevant lemmas
+from a **curated catalog** of standard list-algebra laws (`lemmas.rs`: `append_nil`, `append_assoc`,
+`reverse_append`, `length_append`, `map_append`), **proves each one by induction first** — recursively,
+since lemmas depend on one another: `reverse_append` rests on `append_assoc` + `append_nil` — and then
+re-runs the stalled obligation with the proved lemmas asserted as universally-quantified axioms.
+`reverse(reverse(xs)) = xs` is now **PROVED**, discovering `reverse_append` (and transitively
+`append_nil`, `append_assoc`).
+
+This is sound by construction: a lemma is assumed only after it is itself discharged, so assuming only
+*true* facts can never close a *false* goal — `reverse(xs) = xs` stays NOT-PROVED, and a true law whose
+lemma the catalog lacks (e.g. `map(f, reverse(xs)) = reverse(map(f, xs))`) stays UNKNOWN, never a false
+PROVED. Lemma relevance is gated by the goal's *prelude closure* (the recursive functions it already
+defines — and a `reverse` goal pulls in `append`), so an unrelated lemma's recursive definition can't
+derail the solver into a timeout. The certificate is the whole proof tree — the goal's base + step
+(assuming the lemmas) plus **each lemma's own base + step** — every obligation `unsat` on its own, so a
+receiver re-checks the entire tree rather than trusting it (principles 3, 5). The solver still runs
+under a wall-clock timeout, so an undecidable query reports UNKNOWN rather than hanging.
+
+Proved live by induction: `map(id, xs) = xs`, `length(map(f, xs)) = length(xs)`, `length(append(xs, ys))
+= length(xs) + length(ys)`; **`reverse(reverse(xs)) = xs`** via lemma discovery. The generalizable
+follow-on (theory exploration — conjecturing lemmas by enumerating terms over the goal's operations and
+testing them before proof) plugs in at the catalog seam. `foldl`/`foldr` and induction over
+user-defined recursive bodies (`self`) remain future work.
 
 ## Effect enforcement
 

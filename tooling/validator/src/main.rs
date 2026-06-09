@@ -712,21 +712,39 @@ fn cmd_prove(
         if let Some(cert) = &cert {
             write_cert("", &cert.smt)?;
         }
-        // First-order SMT can't reach list/recursion laws — fall back to structural induction.
+        // First-order SMT can't reach list/recursion laws — fall back to structural induction
+        // (with auxiliary-lemma discovery for laws a single unfold + IH can't close).
         let label = if matches!(outcome, ProofOutcome::Unsupported(_)) {
             use nl_validator::InductionOutcome;
-            let (iout, icert) = nl_validator::prove_by_induction(expr, body_ast.as_ref(), solver);
+            let (iout, icert) = nl_validator::prove_by_induction_with_lemmas(
+                expr,
+                body_ast.as_ref(),
+                solver,
+                nl_validator::DEFAULT_LEMMA_DEPTH,
+            );
             if let Some(c) = &icert {
                 write_cert(".base", &c.base)?;
                 write_cert(".step", &c.step)?;
+                // Each discovered lemma's own discharge, so the proof tree re-checks end to end.
+                for lem in &c.lemmas {
+                    write_cert(&format!(".lemma-{}.base", lem.name), &lem.base)?;
+                    write_cert(&format!(".lemma-{}.step", lem.name), &lem.step)?;
+                }
             }
             match iout {
                 InductionOutcome::Proved => {
                     let v = icert.as_ref().map(|c| c.var.as_str()).unwrap_or("?");
                     format!("PROVED       by structural induction on `{v}` (base + step both unsat)")
                 }
+                InductionOutcome::ProvedWithLemmas(lemmas) => {
+                    let v = icert.as_ref().map(|c| c.var.as_str()).unwrap_or("?");
+                    format!(
+                        "PROVED       by structural induction on `{v}` using lemmas: {}",
+                        lemmas.join(", ")
+                    )
+                }
                 InductionOutcome::Failed(why) => format!("NOT-PROVED   induction did not close: {why}"),
-                InductionOutcome::Unknown => "UNKNOWN      induction step needs a lemma (solver undecided)".to_string(),
+                InductionOutcome::Unknown => "UNKNOWN      induction step needs a lemma we lack (solver undecided)".to_string(),
                 InductionOutcome::NoSolver => {
                     no_solver = true;
                     format!("NO-SOLVER    `{solver}` not found; obligations emitted, re-check elsewhere")

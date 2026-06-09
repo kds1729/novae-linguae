@@ -14,12 +14,24 @@
 //! `reverse`, `map`, `filter`, …) are emitted as z3 `define-fun-rec` definitions over the `Lst`
 //! datatype, the case's substitution is applied, and we assert the *negation* of the goal (plus the IH,
 //! for the step). `unsat` on both ⇒ **PROVED-BY-INDUCTION**; the solver closes each case by unfolding
-//! the recursive definitions one level and using the IH. Where one unfold + IH is not enough (a law
-//! that needs an auxiliary lemma, classically `reverse(reverse(xs)) = xs`), the solver returns
-//! `unknown` and we report **UNKNOWN** — honest, not a false proof.
+//! the recursive definitions one level and using the IH.
 //!
-//! The two emitted scripts (base, step) together **are the proof certificate**: any SMT solver
-//! re-checks them, so the induction is re-checkable, not trusted (principles 3, 5).
+//! **Lemma discovery (Layer A).** Where one unfold + IH is not enough — a law that needs an auxiliary
+//! lemma, classically `reverse(reverse(xs)) = xs`, whose step needs `reverse(append(as, bs)) =
+//! append(reverse(bs), reverse(as))` — [`prove_by_induction_with_lemmas`] selects relevant lemmas from
+//! a curated catalog ([`crate::lemmas`]), **proves each one by induction first** (recursively: the
+//! lemmas may depend on one another — `reverse_append` rests on `append_assoc` + `append_nil`), and
+//! re-runs the stalled obligation with the proved lemmas added as universally-quantified axioms. A
+//! lemma is assumed only after it is itself discharged, so a false goal can never be closed: this is
+//! exactly as honest as the bare engine, just able to reach further. When no catalog lemma helps, the
+//! verdict is still **UNKNOWN** — never a false proof. (Relevance is gated by the goal's *prelude
+//! closure* so an unrelated lemma's recursive definition can't derail the solver into a timeout.)
+//!
+//! The emitted scripts together **are the proof certificate**: the goal's base + step (assuming the
+//! lemmas as axioms) plus each lemma's own base + step. Any SMT solver re-checks the whole tree —
+//! every obligation `unsat` on its own — so the induction is re-checkable, not trusted (principles 3,
+//! 5). The generalizable follow-on (Layer B) is *theory exploration*: conjecturing lemmas by
+//! enumerating terms over the goal's operations and testing them before proof. The catalog is the seam.
 //!
 //! Honest scope (v0.1). Element sort is `Int`; the list is `Lst`. Supported operations: `length`,
 //! `append`, `reverse`, `map`, `filter`, `cons`, `head`, `tail`, `null`, plus the `Int`/`Bool`
@@ -36,9 +48,12 @@ use std::collections::{BTreeMap, BTreeSet};
 pub enum InductionOutcome {
     /// Both the base and step obligations were discharged (`unsat`): the law holds by induction.
     Proved,
+    /// Discharged, but only after assuming one or more auxiliary lemmas (each itself proved by
+    /// induction first). Carries the names of the lemmas used, in dependency order.
+    ProvedWithLemmas(Vec<String>),
     /// A case was satisfiable — the law does not hold (or the chosen induction does not close it).
     Failed(String),
-    /// The solver could not decide a case (typically the step needs an auxiliary lemma).
+    /// The solver could not decide a case (typically the step needs an auxiliary lemma we lack).
     Unknown,
     /// The goal is outside the supported recursive fragment — not attempted.
     Unsupported(String),
@@ -46,8 +61,22 @@ pub enum InductionOutcome {
     NoSolver,
 }
 
-/// The base and step SMT-LIB obligations — together, the re-checkable induction certificate.
+/// The base and step SMT-LIB obligations — together, the re-checkable induction certificate. When the
+/// proof needed auxiliary lemmas, `base`/`step` are the *augmented* obligations (the lemmas asserted as
+/// quantified axioms) and `lemmas` holds each lemma's own discharge, in dependency order — so the whole
+/// proof tree re-checks: each lemma's base/step is unsat on its own, then the goal's base/step is unsat
+/// given the lemmas as axioms.
 pub struct InductionCertificate {
+    pub var: String,
+    pub base: String,
+    pub step: String,
+    pub lemmas: Vec<LemmaCertificate>,
+}
+
+/// A proved auxiliary lemma's obligations, recorded so the certificate stays self-contained.
+#[derive(Clone)]
+pub struct LemmaCertificate {
+    pub name: String,
     pub var: String,
     pub base: String,
     pub step: String,
@@ -382,6 +411,17 @@ fn lower_app(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
 
 // --- prelude (datatype + recursive definitions) ---------------------------------------------------
 
+/// The set of list operations the prelude will *define* given a goal that directly uses `used`. Mirrors
+/// the dependency in [`build_prelude`]: `reverse` is defined via `append`, so a goal using `reverse`
+/// has `append` available too. A candidate lemma is admissible iff its operations are a subset of this.
+fn prelude_closure(used: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut c = used.clone();
+    if c.contains("reverse") {
+        c.insert("append".to_string());
+    }
+    c
+}
+
 fn build_prelude(used: &BTreeSet<String>, map_fn: &FnModel, filter_pred: &FnModel) -> String {
     let mut s = String::new();
     s.push_str("(set-logic ALL)\n");
@@ -438,6 +478,14 @@ fn declare_free(var_sorts: &BTreeMap<String, Sort3>, induction_var: &str) -> Str
 /// Build the base + step induction obligations for a `forall <list> …` law. Err if the goal is outside
 /// the supported recursive fragment (the caller maps that to UNSUPPORTED).
 pub fn build_induction(prop_expr: &J, body: Option<&J>) -> Result<InductionCertificate> {
+    build_obligations(prop_expr, body, &[])
+}
+
+/// Like [`build_induction`], but each entry of `lemmas` (a proved `forall` law) is emitted as a
+/// universally-quantified SMT axiom in both the base and step obligations. The recursive defs cover the
+/// union of operations used by the goal and the lemmas, so a lemma may mention an operation the goal
+/// does not. `lemmas` must already be proved — see [`prove_by_induction_with_lemmas`].
+fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<InductionCertificate> {
     let _ = body; // self-defined recursive functions are future work (see module docs).
     if prop_expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
         bail!("not a `forall` — no induction to perform");
@@ -463,20 +511,31 @@ pub fn build_induction(prop_expr: &J, body: Option<&J>) -> Result<InductionCerti
         .cloned()
         .ok_or_else(|| anyhow!("no list-typed quantified variable to induct on (use the first-order prover)"))?;
 
+    // The map/filter function model is taken from the *goal*. A lemma proved with an uninterpreted
+    // function entails its specialisation to the goal's concrete function, so lowering a lemma's `map`
+    // against the goal's global `mapfn` is sound regardless of which the goal uses.
     let map_fn = model_of(pred, "map", &vars)?;
     let filter_pred = model_of(pred, "filter", &vars)?;
+    // Prelude covers the union of operations used by the goal and every assumed lemma.
     let mut used = BTreeSet::new();
     collect_ops(pred, &mut used);
+    for lem in lemmas {
+        if let Some(lb) = lem.get("body") {
+            collect_ops(lb, &mut used);
+        }
+    }
 
     let prelude = build_prelude(&used, &map_fn, &filter_pred);
     let free = declare_free(&var_sorts, &induction_var);
+    // The proved lemmas, each as a quantified axiom asserted before the goal's negation.
+    let axioms = lemmas.iter().map(|l| lemma_axiom(l)).collect::<Result<Vec<_>>>()?.join("");
 
     // Base: xs := nil.
     let base = {
         let mut env = BTreeMap::new();
         env.insert(induction_var.clone(), "nil".to_string());
         let goal = lower(pred, &env)?;
-        format!("{prelude}{free}; base case: {induction_var} = nil\n(assert (not {goal}))\n(check-sat)\n")
+        format!("{prelude}{free}{axioms}; base case: {induction_var} = nil\n(assert (not {goal}))\n(check-sat)\n")
     };
 
     // Step: xs := (cons h t); assume the IH for t.
@@ -489,39 +548,187 @@ pub fn build_induction(prop_expr: &J, body: Option<&J>) -> Result<InductionCerti
         env.insert(induction_var.clone(), format!("(cons {hv} {tv})"));
         let goal = lower(pred, &env)?;
         format!(
-            "{prelude}{free}(declare-const {hv} Int)\n(declare-const {tv} Lst)\n; step case: assume IH for {tv}, prove for (cons {hv} {tv})\n(assert {ih})\n(assert (not {goal}))\n(check-sat)\n"
+            "{prelude}{free}{axioms}(declare-const {hv} Int)\n(declare-const {tv} Lst)\n; step case: assume IH for {tv}, prove for (cons {hv} {tv})\n(assert {ih})\n(assert (not {goal}))\n(check-sat)\n"
         )
     };
 
-    Ok(InductionCertificate { var: induction_var, base, step })
+    Ok(InductionCertificate { var: induction_var, base, step, lemmas: Vec::new() })
 }
 
-/// Attempt to prove a law by structural induction. Out-of-fragment goals yield `Unsupported`. The
-/// solver runs under a wall-clock timeout (see [`crate::prove::run_smt`]), so a step that needs an
-/// auxiliary lemma reports UNKNOWN rather than hanging.
-pub fn prove_by_induction(prop_expr: &J, body: Option<&J>, solver: &str) -> (InductionOutcome, Option<InductionCertificate>) {
+/// Lower a proved `forall` lemma to a universally-quantified SMT `(assert (forall …))`. Function- and
+/// predicate-sorted binders are dropped (they are modelled by the global `mapfn`/`filterpred` symbols),
+/// matching [`declare_free`]; a lemma with no remaining binders becomes a plain `(assert …)`.
+fn lemma_axiom(lemma: &J) -> Result<String> {
+    let vars: Vec<String> = lemma
+        .get("vars")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let pred = lemma.get("body").ok_or_else(|| anyhow!("lemma has no body"))?;
+    let sorts = infer_sorts(pred, &vars)?;
+    let body = lower(pred, &BTreeMap::new())?;
+    let binders: Vec<String> = vars
+        .iter()
+        .filter_map(|v| match sorts.get(v) {
+            Some(Sort3::Int) => Some(format!("({v} Int)")),
+            Some(Sort3::Bool) => Some(format!("({v} Bool)")),
+            Some(Sort3::Lst) => Some(format!("({v} Lst)")),
+            _ => None, // Func / Pred: modelled globally, not bound here.
+        })
+        .collect();
+    Ok(if binders.is_empty() {
+        format!("(assert {body})\n")
+    } else {
+        format!("(assert (forall ({}) {body}))\n", binders.join(" "))
+    })
+}
+
+/// Run a single induction certificate's base then step through the solver. `Unsat`+`Unsat` ⇒ `Proved`.
+fn discharge(cert: &InductionCertificate, solver: &str) -> InductionOutcome {
     use crate::prove::{run_smt, SatAnswer};
-    let cert = match build_induction(prop_expr, body) {
-        Err(e) => return (InductionOutcome::Unsupported(format!("{e:#}")), None),
-        Ok(c) => c,
-    };
-    // Discharge the base case first.
     match run_smt(&cert.base, solver) {
-        Err(e) => return (InductionOutcome::Unsupported(format!("solver error (base): {e:#}")), Some(cert)),
-        Ok(SatAnswer::NoSolver) => return (InductionOutcome::NoSolver, Some(cert)),
-        Ok(SatAnswer::Sat(_)) => return (InductionOutcome::Failed("base case is satisfiable (law fails at nil)".into()), Some(cert)),
-        Ok(SatAnswer::Unknown) => return (InductionOutcome::Unknown, Some(cert)),
+        Err(e) => return InductionOutcome::Unsupported(format!("solver error (base): {e:#}")),
+        Ok(SatAnswer::NoSolver) => return InductionOutcome::NoSolver,
+        Ok(SatAnswer::Sat(_)) => return InductionOutcome::Failed("base case is satisfiable (law fails at nil)".into()),
+        Ok(SatAnswer::Unknown) => return InductionOutcome::Unknown,
         Ok(SatAnswer::Unsat) => {}
     }
-    // Then the step case (IH assumed).
-    let outcome = match run_smt(&cert.step, solver) {
-        Err(e) => return (InductionOutcome::Unsupported(format!("solver error (step): {e:#}")), Some(cert)),
+    match run_smt(&cert.step, solver) {
+        Err(e) => InductionOutcome::Unsupported(format!("solver error (step): {e:#}")),
         Ok(SatAnswer::Unsat) => InductionOutcome::Proved,
         Ok(SatAnswer::Sat(_)) => InductionOutcome::Failed("step case is satisfiable (induction does not close)".into()),
         Ok(SatAnswer::Unknown) => InductionOutcome::Unknown,
         Ok(SatAnswer::NoSolver) => InductionOutcome::NoSolver,
+    }
+}
+
+/// Attempt to prove a law by structural induction with a *single* unfold + IH (no lemma discovery).
+/// Out-of-fragment goals yield `Unsupported`. A step that needs an auxiliary lemma reports `Unknown`.
+pub fn prove_by_induction(prop_expr: &J, body: Option<&J>, solver: &str) -> (InductionOutcome, Option<InductionCertificate>) {
+    let cert = match build_induction(prop_expr, body) {
+        Err(e) => return (InductionOutcome::Unsupported(format!("{e:#}")), None),
+        Ok(c) => c,
     };
-    (outcome, Some(cert))
+    (discharge(&cert, solver), Some(cert))
+}
+
+/// The default recursion depth for lemma discovery: deep enough for the standard list laws
+/// (`reverse∘reverse` → `reverse_append` → {`append_assoc`, `append_nil`} is two levels) with margin.
+pub const DEFAULT_LEMMA_DEPTH: usize = 3;
+
+/// Attempt to prove a law by structural induction, discovering and discharging auxiliary lemmas from
+/// the catalog ([`crate::lemmas`]) when a single unfold + IH stalls. Soundness is preserved: a lemma is
+/// assumed only after it is itself proved (to `max_depth` of nested discovery), so this never returns a
+/// false `Proved`/`ProvedWithLemmas`. Falls back to the bare engine's verdict when no lemma helps.
+pub fn prove_by_induction_with_lemmas(
+    prop_expr: &J,
+    body: Option<&J>,
+    solver: &str,
+    max_depth: usize,
+) -> (InductionOutcome, Option<InductionCertificate>) {
+    let mut in_progress = Vec::new();
+    prove_rec(prop_expr, body, solver, max_depth, &mut in_progress)
+}
+
+/// Recursive core of lemma discovery. `in_progress` carries the goals currently being proved up the
+/// stack, so a candidate identical to one already in flight is skipped (cycle guard).
+fn prove_rec(
+    prop_expr: &J,
+    body: Option<&J>,
+    solver: &str,
+    depth: usize,
+    in_progress: &mut Vec<J>,
+) -> (InductionOutcome, Option<InductionCertificate>) {
+    let bare = match build_induction(prop_expr, body) {
+        Err(e) => return (InductionOutcome::Unsupported(format!("{e:#}")), None),
+        Ok(c) => c,
+    };
+    match discharge(&bare, solver) {
+        // A clean proof, a genuine failure, a missing solver, or an error: nothing a lemma can fix.
+        InductionOutcome::Proved => return (InductionOutcome::Proved, Some(bare)),
+        out @ (InductionOutcome::Failed(_)
+        | InductionOutcome::NoSolver
+        | InductionOutcome::Unsupported(_)) => return (out, Some(bare)),
+        // Undecided: try to discover lemmas (if we have depth budget left).
+        InductionOutcome::Unknown | InductionOutcome::ProvedWithLemmas(_) => {}
+    }
+    if depth == 0 {
+        return (InductionOutcome::Unknown, Some(bare));
+    }
+
+    // Select relevant catalog lemmas: those whose operations all fit within the goal's *prelude
+    // closure* (the recursive functions the goal already defines — and a `reverse` goal pulls in
+    // `append`, since reverse is defined via append), excluding the goal itself and any goal already
+    // being proved up the stack. The closure test is what keeps the search clean: a lemma over an
+    // operation the goal never touches (e.g. `length_append` for a pure `reverse` law) would only add
+    // an unused recursive definition and its quantifier, which derails z3 into a timeout.
+    let mut goal_ops = BTreeSet::new();
+    if let Some(b) = prop_expr.get("body") {
+        collect_ops(b, &mut goal_ops);
+    }
+    let closure = prelude_closure(&goal_ops);
+    in_progress.push(prop_expr.clone());
+    let mut assumed: Vec<J> = Vec::new(); // directly-assumed lemma statements
+    let mut proved_certs: Vec<LemmaCertificate> = Vec::new(); // full proof tree, dependency order
+    for lemma in crate::lemmas::catalog() {
+        let lops = {
+            let mut s = BTreeSet::new();
+            if let Some(b) = lemma.stmt.get("body") {
+                collect_ops(b, &mut s);
+            }
+            s
+        };
+        if !lops.is_subset(&closure) || in_progress.iter().any(|g| g == &lemma.stmt) {
+            continue;
+        }
+        let (out, cert) = prove_rec(&lemma.stmt, None, solver, depth - 1, in_progress);
+        let proved = matches!(out, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_));
+        if proved {
+            if let Some(c) = cert {
+                // Record this lemma's sub-lemmas first (dependency order), then the lemma itself.
+                for sub in &c.lemmas {
+                    if !proved_certs.iter().any(|p| p.name == sub.name) {
+                        proved_certs.push(sub.clone());
+                    }
+                }
+                if !proved_certs.iter().any(|p| p.name == lemma.name) {
+                    proved_certs.push(LemmaCertificate {
+                        name: lemma.name.to_string(),
+                        var: c.var,
+                        base: c.base,
+                        step: c.step,
+                    });
+                }
+            }
+            assumed.push(lemma.stmt.clone());
+        }
+    }
+    in_progress.pop();
+
+    if assumed.is_empty() {
+        return (InductionOutcome::Unknown, Some(bare));
+    }
+
+    // Re-build the obligations with the proved lemmas as axioms, and retry.
+    let refs: Vec<&J> = assumed.iter().collect();
+    let aug = match build_obligations(prop_expr, body, &refs) {
+        Err(e) => return (InductionOutcome::Unsupported(format!("{e:#}")), Some(bare)),
+        Ok(mut c) => {
+            c.lemmas = proved_certs;
+            c
+        }
+    };
+    // `discharge` only ever returns Proved / Failed / Unknown / Unsupported / NoSolver.
+    match discharge(&aug, solver) {
+        InductionOutcome::Proved => {
+            let names = aug.lemmas.iter().map(|l| l.name.clone()).collect();
+            (InductionOutcome::ProvedWithLemmas(names), Some(aug))
+        }
+        // The lemmas did not close it (or the solver still stalled): honest UNKNOWN.
+        InductionOutcome::Failed(_) | InductionOutcome::Unknown => (InductionOutcome::Unknown, Some(aug)),
+        out @ (InductionOutcome::NoSolver | InductionOutcome::Unsupported(_)) => (out, Some(aug)),
+        InductionOutcome::ProvedWithLemmas(_) => unreachable!("discharge never returns ProvedWithLemmas"),
+    }
 }
 
 #[cfg(test)]
@@ -635,5 +842,89 @@ mod tests {
         let (o, _) = prove_by_induction(&prop, None, solver);
         assert!(matches!(o, InductionOutcome::Unknown | InductionOutcome::Failed(_)),
             "reverse involution needs a lemma — expected UNKNOWN/uncloseable, got {o:?}");
+    }
+
+    // ---- lemma discovery (Layer A) ----
+
+    #[test]
+    fn proves_reverse_involution_with_lemmas() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall xs. eq(reverse(reverse(xs)), xs) — closed by discovering `reverse_append` (which
+        // itself rests on `append_nil` + `append_assoc`). The headline target for lemma discovery.
+        let prop = forall(&["xs"], app("eq", vec![app("reverse", vec![app("reverse", vec![var("xs")])]), var("xs")]));
+        let (o, cert) = prove_by_induction_with_lemmas(&prop, None, solver, DEFAULT_LEMMA_DEPTH);
+        match o {
+            InductionOutcome::ProvedWithLemmas(lemmas) => {
+                assert!(lemmas.contains(&"reverse_append".to_string()), "expected reverse_append, got {lemmas:?}");
+                // The full dependency tree is recorded for re-checking.
+                assert!(lemmas.contains(&"append_nil".to_string()));
+                assert!(lemmas.contains(&"append_assoc".to_string()));
+            }
+            other => panic!("expected ProvedWithLemmas, got {other:?}"),
+        }
+        // The certificate carries every sub-lemma's own base + step obligations.
+        let cert = cert.expect("certificate present");
+        assert_eq!(cert.lemmas.len(), 3, "append_nil, append_assoc, reverse_append");
+        assert!(cert.step.contains("(forall"), "the goal's step assumes the lemmas as quantified axioms");
+    }
+
+    #[test]
+    fn proves_reverse_append_with_lemmas() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall xs ys. eq(reverse(append(xs, ys)), append(reverse(ys), reverse(xs)))
+        let prop = forall(&["xs", "ys"], app("eq", vec![
+            app("reverse", vec![app("append", vec![var("xs"), var("ys")])]),
+            app("append", vec![app("reverse", vec![var("ys")]), app("reverse", vec![var("xs")])]),
+        ]));
+        let (o, _) = prove_by_induction_with_lemmas(&prop, None, solver, DEFAULT_LEMMA_DEPTH);
+        assert!(matches!(o, InductionOutcome::ProvedWithLemmas(_)), "expected ProvedWithLemmas, got {o:?}");
+    }
+
+    #[test]
+    fn lemma_discovery_keeps_a_plain_proof_plain() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // A law the bare engine already closes must NOT get spuriously decorated with lemmas.
+        let prop = forall(&["xs", "ys"], app("eq", vec![
+            app("length", vec![app("append", vec![var("xs"), var("ys")])]),
+            app("add", vec![app("length", vec![var("xs")]), app("length", vec![var("ys")])]),
+        ]));
+        let (o, _) = prove_by_induction_with_lemmas(&prop, None, solver, DEFAULT_LEMMA_DEPTH);
+        assert_eq!(o, InductionOutcome::Proved, "length-append closes bare; no lemmas should be used");
+    }
+
+    #[test]
+    fn lemma_discovery_never_proves_a_false_law() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall xs. eq(reverse(xs), xs) — false for lists of length ≥ 2. Assuming only *proved*
+        // lemmas can never make a false goal provable; expect a non-PROVED verdict.
+        let prop = forall(&["xs"], app("eq", vec![app("reverse", vec![var("xs")]), var("xs")]));
+        let (o, _) = prove_by_induction_with_lemmas(&prop, None, solver, DEFAULT_LEMMA_DEPTH);
+        assert!(
+            matches!(o, InductionOutcome::Failed(_) | InductionOutcome::Unknown),
+            "a false law must never be PROVED, got {o:?}"
+        );
+    }
+
+    #[test]
+    fn unreachable_law_stays_unknown() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall f xs. eq(map(f, reverse(xs)), reverse(map(f, xs))) — true, but needs a map/reverse
+        // distribution lemma the catalog lacks. Honest UNKNOWN, not a false PROVED.
+        let prop = forall(&["f", "xs"], app("eq", vec![
+            app("map", vec![var("f"), app("reverse", vec![var("xs")])]),
+            app("reverse", vec![app("map", vec![var("f"), var("xs")])]),
+        ]));
+        let (o, _) = prove_by_induction_with_lemmas(&prop, None, solver, DEFAULT_LEMMA_DEPTH);
+        assert_eq!(o, InductionOutcome::Unknown, "no applicable lemma — expected UNKNOWN, got {o:?}");
     }
 }

@@ -30,8 +30,13 @@ pub mod proptest;
 pub mod prove;
 pub use prove::{build_certificate, prove_property, Certificate, ProofOutcome, Sort};
 
+pub mod lemmas;
+
 pub mod induct;
-pub use induct::{build_induction, prove_by_induction, InductionCertificate, InductionOutcome};
+pub use induct::{
+    build_induction, prove_by_induction, prove_by_induction_with_lemmas, InductionCertificate,
+    InductionOutcome, LemmaCertificate, DEFAULT_LEMMA_DEPTH,
+};
 
 pub mod effects;
 pub use effects::{check_effects, infer_effects};
