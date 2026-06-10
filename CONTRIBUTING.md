@@ -2,15 +2,15 @@
 
 *Novae Linguae* is an open-source project that explicitly treats **AI agents as first-class contributors**. This document describes how to contribute — as a human, as an AI agent operating with a human partner, or eventually as an AI agent operating autonomously once the infrastructure exists.
 
-If you find anything here unclear, opening an issue (once the public repo exists) or contacting the maintainer is itself a contribution.
+If you find anything here unclear, opening an issue or contacting the maintainer is itself a contribution.
 
 ---
 
 ## Project status
 
-The public GitHub repository does not yet exist; day-to-day work happens in a private working copy. The project is well past the design phase, though: alongside the schemas, specifications, and manifesto there is a working reference implementation — the `nl-validator` toolchain (canonical form, signing, encryption, a tree-walking evaluator + Hindley-Milner type checker, an SMT + structural-induction prover with lemma discovery, equivalence proving and clustering, effect enforcement, the trust model, and the Nova Locutio agent loop), four ingestion adapters, and a reference commons node deployed live as **Arca**. See the README's Status section for the full inventory.
+The project is public and well past the design phase: alongside the schemas, specifications, and manifesto there is a working reference implementation — the `nl-validator` toolchain (canonical form, signing, encryption, a tree-walking evaluator + Hindley-Milner type checker, an SMT + structural-induction prover with lemma discovery, equivalence proving and clustering, effect enforcement, the trust model, and the Nova Locutio agent loop), four ingestion adapters, and a reference commons node deployed live as **Arca** (https://nl.1105software.com). See the README's Status section for the full inventory.
 
-This document describes the protocol that will apply when the public repo opens. During the design phase, contributions are coordinated directly with the maintainer (see *Communication* below).
+Contributions go through the standard GitHub flow (see *How to propose a change* below).
 
 The most useful contributions right now are:
 
@@ -91,16 +91,6 @@ When direct AI contribution lands, it will live alongside human contribution, no
 
 ## How to propose a change
 
-### During the design phase (now)
-
-The public repo does not exist. Reach the maintainer directly (see *Communication*) to:
-
-- Propose a substantive design change.
-- Resolve a deferred item from `spec/README.md`.
-- Contribute an ingestion adapter, reference validator, or other tooling.
-
-### After the public repo opens
-
 The standard GitHub flow, with project-specific norms:
 
 1. **For substantive changes, open an issue first** — discuss the design before writing the implementation. Avoids the worst kind of wasted work (a polished PR that we cannot merge because it contradicts the spec).
@@ -146,22 +136,20 @@ Review **does not** require:
 
 ## Communication
 
-The project does not yet have public communication channels. During the design phase, contact the maintainer directly. Once the public repo opens, expected channels:
-
 - **GitHub issues** for design discussion and bug reports.
 - **GitHub pull requests** for code and spec changes.
 - A real-time channel (Matrix, Zulip, or Discord — TBD) for in-flight discussion.
+
+**Security issues are different — do not open a public issue.** Report vulnerabilities privately per [`SECURITY.md`](SECURITY.md) (GitHub private advisories or info@1105software.com). Note that the cryptography here is reference-grade and unaudited.
 
 ---
 
 ## Code of conduct
 
-Two non-negotiable norms while a full document is drafted:
+The project adopts the [Contributor Covenant 2.1](CODE_OF_CONDUCT.md); enforcement contact is info@1105software.com. Two project-specific norms it's worth stating explicitly:
 
 1. **Be kind.** Disagreement about design is fine; condescension is not.
 2. **Be honest about AI involvement.** See *Disclosure conventions* above. Honesty is foundational to a project whose entire thesis is AI agents as first-class participants.
-
-A full Code of Conduct (likely the Contributor Covenant 2.1 or similar) will be added before the public repo opens.
 
 ---
 
