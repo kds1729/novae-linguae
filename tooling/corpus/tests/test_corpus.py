@@ -38,6 +38,10 @@ class CommittedCorpusTests(unittest.TestCase):
             if ex["polarity"] == "negative":
                 self.assertTrue(v["rejected"], f"{ex['id']} (negative) was not rejected by {v['check']}")
                 continue
+            # A positive COMPOSITION example: the pipeline composes (checked by `nl-validator compose`).
+            if ex["category"] == "composition":
+                self.assertTrue(v["composable"], f"{ex['id']} composition is not composable")
+                continue
             if ex["modality"] == "nova_lingua":
                 self.assertTrue(v["schema_valid"], f"{ex['id']} not schema-valid")
                 self.assertTrue(v["well_typed"], f"{ex['id']} not well-typed")
@@ -54,9 +58,13 @@ class CommittedCorpusTests(unittest.TestCase):
 
     def test_every_example_has_all_views(self):
         for ex in _load(_CORPUS):
-            for key in ("intent", "summary", "tags", "modality", "polarity"):
+            for key in ("intent", "summary", "tags", "modality", "polarity", "category"):
                 self.assertTrue(ex.get(key), f"{ex['id']} missing {key}")
             views = ex["views"]
+            if ex["category"] == "composition":
+                for k in ("pipeline", "stages", "composite"):
+                    self.assertIn(k, views, f"{ex['id']} missing view {k}")
+                continue
             if ex["polarity"] == "negative":
                 # Negatives carry the offending artifact: a record+body (lingua) or a message (locutio).
                 if ex["modality"] == "nova_lingua":

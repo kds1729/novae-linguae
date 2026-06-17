@@ -114,16 +114,21 @@ to be rejected*, for the stated reason. Today's five:
 
 ## Scope and where it grows
 
-37 examples today (32 positive, 5 negative):
+40 examples today (34 positive, 6 negative), in three `category`s:
 
-- **Nova Lingua** (26) — seven families (unary integer, binary integer, boolean/predicate, list,
-  list-transform: `map`/`filter`/`append`, composition: `foldl`-product / `length`∘`filter`, and float:
-  `square_f` / `double_f`), 13 with properties proved over the unbounded domain, plus 3 negatives.
-- **Nova Locutio** (11) — nine signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
+- **function** (26) — Nova Lingua function records across seven families (unary integer, binary integer,
+  boolean/predicate, list, list-transform: `map`/`filter`/`append`, composition: `foldl`-product /
+  `length`∘`filter`, and float: `square_f` / `double_f`), 13 with properties proved over the unbounded
+  domain, plus 3 negatives.
+- **exchange** (11) — Nova Locutio signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
   `verify-claim` CONFIRMED, `request`/`validate` → `assert`, `request`/`store` → `ack`, `propose` →
   `commit`, `commit` → `assert` (CONFIRMED), `delegate` → `ack`, `retract` → `ack`, `query` → `ack`),
-  plus 2 negatives (a signed-but-false claim, and a capability-denied apply).
+  plus 2 negatives (a signed-but-false claim, a capability-denied apply).
+- **composition** (3) — assembled pipelines with the composite metadata `nl-validator compose` derives
+  from the stages' signatures (`reverse;length` → `nat`, `negate_all;reverse` → `List int`), plus 1
+  negative (`length;reverse` — a `nat` can't feed a `List` parameter, so the pipeline does not compose).
+  The category for "assemble, don't write" (principle 4).
 
 This is the seam, not the ceiling, all behind the same "generate → verify → emit" pipeline: more Nova
-Lingua families (string / `Maybe` / `Result` functions); multi-stage `compose` pipelines; full multi-turn
-orchestrated transcripts via `orchestrate`; and more negative cases.
+Lingua families; longer/branching `compose` pipelines; full multi-turn orchestrated transcripts via
+`orchestrate`; and more negative cases.

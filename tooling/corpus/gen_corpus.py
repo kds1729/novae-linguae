@@ -362,6 +362,7 @@ def build_and_verify(spec, workdir):
     example = {
         "id": spec["name"],
         "modality": "nova_lingua",
+        "category": "function",
         "polarity": "positive",
         "intent": spec["intent"],
         "summary": spec["summary"],
@@ -457,7 +458,7 @@ def nova_locutio_examples(commons_dir, by_name):
 
     def emit(ident, intent, summary, tags, act, request, reply, outcome, ok):
         out.append({
-            "id": "locutio_" + ident, "modality": "nova_locutio", "polarity": "positive",
+            "id": "locutio_" + ident, "modality": "nova_locutio", "category": "exchange", "polarity": "positive",
             "intent": intent, "summary": summary, "tags": tags,
             "views": {"speech_act": act, "request": request, "reply": reply, "reply_act": reply.get("kind") if reply else None},
             "verification": {
@@ -610,6 +611,7 @@ def negative_examples(workdir, commons_dir, by_name):
     def emit(ident, modality, intent, summary, tags, views, check, verdict, reason, rejected):
         out.append({
             "id": "neg_" + ident, "modality": modality, "polarity": "negative",
+            "category": "function" if modality == "nova_lingua" else "exchange",
             "intent": intent, "summary": summary, "tags": tags, "views": views,
             "verification": {"expected": "rejected", "check": check, "verdict": verdict,
                              "rejected": rejected, "reason": (reason or "").strip()[:300]},
@@ -703,6 +705,69 @@ def negative_examples(workdir, commons_dir, by_name):
     return out
 
 
+# --- composition examples: assembled pipelines with derived composite metadata --------------------
+#
+# A distinct example category (principle 4, "assemble, don't write"): a pipeline of function records and
+# the composite metadata `nl-validator compose` derives from their signatures (composability stage-to-
+# stage, the union of effects/capabilities, conjunction of termination, a coarse max complexity). A
+# composable pipeline is a positive example; a pipeline whose stage types don't line up is a negative one
+# (the composer correctly reports NOT-COMPOSABLE).
+
+def compose_examples(commons_dir, by_name):
+    def parse_compose(text):
+        meta = {"composable": text.strip().startswith("COMPOSABLE")}
+        for line in text.splitlines():
+            s = line.strip()
+            for key in ("effects", "capabilities", "terminates", "complexity"):
+                if s.startswith(key):
+                    meta[key] = s[len(key):].strip()
+            if s.startswith("type "):
+                rest = s[len("type"):].strip()
+                if " -> " in rest:
+                    inp, outp = rest.split(" -> ", 1)
+                    try:
+                        meta["input_type"], meta["output_type"] = json.loads(inp), json.loads(outp)
+                    except Exception:
+                        pass
+            if s.startswith("NOT-COMPOSABLE"):
+                meta["reason"] = s[len("NOT-COMPOSABLE"):].strip()
+        return meta
+
+    out = []
+    pipelines = [
+        ("reverse_then_length", "Compose: reverse a list, then take its length.",
+         "A two-stage pipeline reverse;length over List a, yielding nat.", ["reverse", "length"], True),
+        ("negate_then_reverse", "Compose: negate every element, then reverse the list.",
+         "A two-stage pipeline negate_all;reverse over a list of ints.", ["negate_all", "reverse"], True),
+        ("length_then_reverse", "Compose: take a list's length, then reverse it.",
+         "length yields a nat, which cannot feed reverse's List parameter — the pipeline does NOT compose.",
+         ["length", "reverse"], False),
+    ]
+    for ident, intent, summary, names, expect in pipelines:
+        recs = [by_name[n] for n in names]
+        paths = [os.path.join(commons_dir, r["hash"] + ".json") for r in recs]
+        p = cli(["compose"] + paths)  # NOT-COMPOSABLE is reported on stderr (non-zero exit)
+        meta = parse_compose(p.stdout + "\n" + p.stderr)
+        composable = meta.get("composable", False)
+        views = {"pipeline": [r["hash"] for r in recs], "stages": recs, "composite": meta}
+        if expect:
+            out.append({
+                "id": "compose_" + ident, "modality": "nova_lingua", "category": "composition", "polarity": "positive",
+                "intent": intent, "summary": summary, "tags": ["composition", "pipeline", "assemble"],
+                "views": views, "verification": {"composable": composable, "checked_by": "compose"},
+                "_ok": composable is True,
+            })
+        else:
+            out.append({
+                "id": "neg_compose_" + ident, "modality": "nova_lingua", "category": "composition", "polarity": "negative",
+                "intent": intent, "summary": summary, "tags": ["negative", "composition", "type-error"],
+                "views": views, "verification": {"expected": "rejected", "check": "compose", "verdict": "NOT-COMPOSABLE",
+                                                 "rejected": not composable, "reason": meta.get("reason", "")},
+                "_ok": composable is False,
+            })
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="Generate a verified Nova Lingua training corpus (JSONL).")
     ap.add_argument("--out", default=str(_HERE.parent / "corpus.jsonl"), help="output JSONL path")
@@ -738,20 +803,28 @@ def main():
                 examples.append(ex)
             if not ok:
                 dropped.append((ex["id"], ex["verification"]))
+        # Composition examples — assembled pipelines and their derived composite metadata (principle 4).
+        for ex in compose_examples(commons_dir, by_name):
+            ok = ex.pop("_ok")
+            if ok or args.keep_unverified:
+                examples.append(ex)
+            if not ok:
+                dropped.append((ex["id"], ex["verification"]))
 
     with open(args.out, "w", encoding="utf-8") as fh:
         for ex in examples:
             fh.write(json.dumps(ex, ensure_ascii=False) + "\n")
 
-    by_modality, by_polarity = {}, {}
+    by_modality, by_polarity, by_category = {}, {}, {}
     for ex in examples:
         by_modality[ex["modality"]] = by_modality.get(ex["modality"], 0) + 1
         by_polarity[ex["polarity"]] = by_polarity.get(ex["polarity"], 0) + 1
+        by_category[ex["category"]] = by_category.get(ex["category"], 0) + 1
     families = {"unary_arith": len(unary_arith()), "binary_arith": len(binary_arith()),
                 "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs()),
                 "list_transform_funcs": len(list_transform_funcs()),
                 "composition_funcs": len(composition_funcs()), "float_funcs": len(float_funcs())}
-    proved = sum(1 for ex in examples if ex["modality"] == "nova_lingua" and ex["polarity"] == "positive"
+    proved = sum(1 for ex in examples if ex["category"] == "function" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"
                     and ex["verification"]["outcome"] == "CONFIRMED")
@@ -761,6 +834,7 @@ def main():
         "examples": len(examples),
         "by_modality": by_modality,
         "by_polarity": by_polarity,
+        "by_category": by_category,
         "nova_lingua_families": families,
         "verified_all": len(dropped) == 0,
         "proved_properties": proved,
