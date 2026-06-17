@@ -113,17 +113,16 @@ to be rejected*, for the stated reason. Today's four:
 
 ## Scope and where it grows
 
-30 examples today (26 positive, 4 negative):
+31 examples today (27 positive, 4 negative):
 
 - **Nova Lingua** (22) — five families (unary integer, binary integer, boolean/predicate, list, and
   list-transform: `map`/`filter`/`append`), 13 with properties proved over the unbounded domain, plus 3
   negatives.
-- **Nova Locutio** (8) — seven signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
-  `verify-claim` CONFIRMED, `request`/`validate` → `assert`, `propose` → `commit`, `commit` → `assert`
-  (CONFIRMED), `delegate` → `ack`, `query` → `ack`), plus 1 negative.
+- **Nova Locutio** (9) — eight signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
+  `verify-claim` CONFIRMED, `request`/`validate` → `assert`, `request`/`store` → `ack`, `propose` →
+  `commit`, `commit` → `assert` (CONFIRMED), `delegate` → `ack`, `query` → `ack`), plus 1 negative.
 
 This is the seam, not the ceiling, all behind the same "generate → verify → emit" pipeline: more Nova
 Lingua families (string / `Maybe` / `Result` functions, multi-stage `compose` pipelines); more Nova
-Locutio speech acts (`retract`, full multi-turn orchestrated transcripts via `orchestrate`, and `store`
-once the validator's `function-record-v0.2` payload `$ref` resolves to the v0.2 schema); and more negative
-cases.
+Locutio speech acts (`retract`, full multi-turn orchestrated transcripts via `orchestrate`); and more
+negative cases.

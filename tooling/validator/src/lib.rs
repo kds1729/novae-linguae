@@ -154,10 +154,14 @@ const SCHEMA_ID_BASE: &str = "https://novae-linguae.org/spec/";
 /// Resolves cross-file schema `$ref`s from a local `spec/` directory.
 ///
 /// A reference resolves to a URI like
-/// `https://novae-linguae.org/spec/v0.1/function-record.schema.json`; this
-/// retriever maps it to `<spec_dir>/function-record.schema.json`. The version
-/// path segment (`v0.1`, `v0.2`) is logical only — all schema files live flat
-/// in `spec/`, and the schema's own `$id` carries the version it speaks for.
+/// `https://novae-linguae.org/spec/v0.2/function-record.schema.json`. Schema
+/// files live flat in `spec/`, but a schema that was revised in a later version
+/// carries that version as a filename infix (`function-record.v0.2.schema.json`,
+/// `message.v0.2.schema.json`) while unchanged schemas stay flat
+/// (`type-expression.schema.json`). So this retriever maps a `vX.Y/<name>.schema.json`
+/// URI to `<spec_dir>/<name>.vX.Y.schema.json` when that file exists, and falls
+/// back to the flat `<spec_dir>/<name>.schema.json` otherwise — so a `v0.2`
+/// reference reaches the v0.2 schema, not the v0.1 one.
 struct LocalSchemaRetriever {
     spec_dir: PathBuf,
 }
@@ -173,10 +177,24 @@ impl Retrieve for LocalSchemaRetriever {
                 "cannot resolve external $ref `{s}`: only Novae Linguae schema URIs under `{SCHEMA_ID_BASE}` resolve locally"
             )
         })?;
-        let file = rest.rsplit('/').next().filter(|f| !f.is_empty()).ok_or_else(|| {
-            format!("cannot resolve external $ref `{s}`: no schema filename in the URI")
+        // Split into the version segment (`v0.2`) and the bare filename, then prefer the version-infixed
+        // schema file (`<name>.v0.2.schema.json`) over the flat one — falling back to flat for schemas
+        // that were not revised in that version.
+        let (version, file) = match rest.rsplit_once('/') {
+            Some((dir, f)) => (dir.rsplit('/').next().filter(|v| v.starts_with('v')), f),
+            None => (None, rest),
+        };
+        if file.is_empty() {
+            return Err(format!("cannot resolve external $ref `{s}`: no schema filename in the URI").into());
+        }
+        let mut candidates: Vec<String> = Vec::new();
+        if let (Some(v), Some(stem)) = (version, file.strip_suffix(".schema.json")) {
+            candidates.push(format!("{stem}.{v}.schema.json"));
+        }
+        candidates.push(file.to_string());
+        let path = candidates.iter().map(|c| self.spec_dir.join(c)).find(|p| p.exists()).ok_or_else(|| {
+            format!("resolving $ref `{s}`: none of {candidates:?} found under {}", self.spec_dir.display())
         })?;
-        let path = self.spec_dir.join(file);
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("resolving $ref `{s}` -> {}: {e}", path.display()))?;
         let value = serde_json::from_str(&text)

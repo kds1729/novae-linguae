@@ -489,9 +489,18 @@ def nova_locutio_examples(commons_dir, by_name):
          ["agent-loop", "delegate", "capability"], "delegate", dsigned, dreply,
          "ACKED" if d_ok else (dreply.get("kind", "NO-REPLY").upper() if dreply else "NO-REPLY"), d_ok)
 
-    # (request/store is omitted: the message v0.2 schema's $ref for a `function-record-v0.2` store payload
-    # currently mis-resolves to the v0.1 record schema in the validator, so an embedded v0.2 record can't
-    # schema-validate — a validator ref-resolution gap, not a corpus one.)
+    # request/store → ack: offer a record; the responder verifies its content-address and acknowledges.
+    sreq = {"schema_version": "0.2.0", "kind": "request", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+            "constraints": {"budget_tokens": 1000, "capabilities": [], "deadline_ms": 5000},
+            "body": {"action": "store", "payload": by_name["double"], "payload_kind": "function-record-v0.2"}}
+    ssigned = sign_message(sreq, SENDER_SEED)
+    sreply = respond_to(ssigned, commons_dir)
+    s_ok = (msg_schema_valid(ssigned) and bool(sreply) and msg_schema_valid(sreply)
+            and sreply.get("kind") == "ack" and sreply.get("in_reply_to") == ssigned.get("hash"))
+    emit("store_double", "Offer to store the `double` function record.",
+         "request/store the double record → the responder verifies its content-address and acks.",
+         ["agent-loop", "request", "store"], "request", ssigned, sreply,
+         "ACKED" if s_ok else (sreply.get("kind", "NO-REPLY").upper() if sreply else "NO-REPLY"), s_ok)
 
     # commit → assert: a received commitment to apply is fulfilled and asserted (claim re-runs true).
     creq = {"schema_version": "0.2.0", "kind": "commit", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,

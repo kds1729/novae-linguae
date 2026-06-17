@@ -64,6 +64,31 @@ fn all_examples_validate_against_their_schemas() {
 }
 
 #[test]
+fn store_payload_resolves_the_versioned_record_schema() {
+    // A `request`/`store` carries an embedded function record whose schema is selected by `payload_kind`
+    // via a versioned `$ref`. `function-record-v0.2` must resolve to function-record.v0.2.schema.json (which
+    // accepts a structured v0.2 record), NOT the flat v0.1 schema. The v0.1 `function-record` kind must in
+    // turn reject that same structured record — confirming the version segment actually selects the schema.
+    let v2_record = example("double.v0.2.json");
+    let store = |kind: &str| {
+        json!({
+            "schema_version": "0.2.0", "kind": "request", "in_reply_to": null,
+            "timestamp": "2026-06-17T00:00:00Z",
+            "from": "did:nova:0000000000000000000000000000000000000000000000000000000000000000",
+            "to": "did:nova:0000000000000000000000000000000000000000000000000000000000000000",
+            "hash": "msg_0000000000000000000000000000000000000000000000000000000000000000",
+            "signature": "ed25519:AAAA",
+            "constraints": {"budget_tokens": 1000, "capabilities": [], "deadline_ms": 5000},
+            "body": {"action": "store", "payload": v2_record.clone(), "payload_kind": kind}
+        })
+    };
+    assert!(check("message.v0.2.schema.json", &store("function-record-v0.2")).is_ok(),
+            "a v0.2 store payload must validate via the v0.2 record schema");
+    assert!(check("message.v0.2.schema.json", &store("function-record")).is_err(),
+            "a structured v0.2 record under the v0.1 payload_kind must be rejected");
+}
+
+#[test]
 fn unknown_field_is_rejected() {
     // `additionalProperties: false` everywhere — an unexpected key must fail.
     let mut v = example("map.json");
