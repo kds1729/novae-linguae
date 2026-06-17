@@ -98,6 +98,7 @@ def case_null(xs_name, nil_body, cons_body):
 
 INT = {"kind": "builtin", "name": "int"}
 NAT = {"kind": "builtin", "name": "nat"}
+BOOL = {"kind": "builtin", "name": "bool"}
 
 
 def fn(params, result):
@@ -178,6 +179,32 @@ def binary_arith():
     return out
 
 
+def boolean_funcs():
+    n, a, b = var("n"), var("a"), var("b")
+    out = [
+        {"name": "is_positive", "intent": "Test whether a number is positive.", "summary": "Returns true iff n > 0.",
+         "tags": ["predicate", "comparison"], "type_ast": fn([INT], BOOL), "body_ast": lam(["n"], bapp("gt", n, int_lit(0))),
+         "examples": [{"args": [3], "result": True}, {"args": [0], "result": False}, {"args": [-2], "result": False}],
+         "properties": [], "prove": False},
+        {"name": "is_nonnegative", "intent": "Test whether a number is non-negative.", "summary": "Returns true iff n >= 0.",
+         "tags": ["predicate", "comparison"], "type_ast": fn([INT], BOOL), "body_ast": lam(["n"], bapp("ge", n, int_lit(0))),
+         "examples": [{"args": [3], "result": True}, {"args": [0], "result": True}, {"args": [-1], "result": False}],
+         "properties": [], "prove": False},
+        # logical_not: involutive — not(not(b)) = b, proved over the boolean fragment.
+        {"name": "logical_not", "intent": "Negate a boolean.", "summary": "Returns the logical negation of b.",
+         "tags": ["boolean", "involutive"], "type_ast": fn([BOOL], BOOL), "body_ast": lam(["b"], bapp("not", b)),
+         "examples": [{"args": [True], "result": False}, {"args": [False], "result": True}],
+         # Over the builtin `not` (the prover's `self` defaults to Int params, which clashes with a bool function).
+         "properties": [{"name": "involutive", "expr": forall(["b"], op("eq", op("not", op("not", b)), b))}], "prove": True},
+        # logical_and: commutative.
+        {"name": "logical_and", "intent": "Logical AND of two booleans.", "summary": "Returns true iff both a and b are true.",
+         "tags": ["boolean", "commutative"], "type_ast": fn([BOOL, BOOL], BOOL), "body_ast": lam(["a", "b"], bapp("and", a, b)),
+         "examples": [{"args": [True, True], "result": True}, {"args": [True, False], "result": False}, {"args": [False, False], "result": False}],
+         "properties": [{"name": "commutative", "expr": forall(["a", "b"], op("eq", op("and", a, b), op("and", b, a)))}], "prove": True},
+    ]
+    return out
+
+
 def list_funcs():
     xs = var("xs")
     out = []
@@ -212,7 +239,7 @@ def list_funcs():
 
 
 def all_specs():
-    return unary_arith() + binary_arith() + list_funcs()
+    return unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -268,6 +295,7 @@ def build_and_verify(spec, workdir):
     example = {
         "id": spec["name"],
         "modality": "nova_lingua",
+        "polarity": "positive",
         "intent": spec["intent"],
         "summary": spec["summary"],
         "tags": spec["tags"],
@@ -362,7 +390,8 @@ def nova_locutio_examples(commons_dir, by_name):
 
     def emit(ident, intent, summary, tags, act, request, reply, outcome, ok):
         out.append({
-            "id": "locutio_" + ident, "modality": "nova_locutio", "intent": intent, "summary": summary, "tags": tags,
+            "id": "locutio_" + ident, "modality": "nova_locutio", "polarity": "positive",
+            "intent": intent, "summary": summary, "tags": tags,
             "views": {"speech_act": act, "request": request, "reply": reply, "reply_act": reply.get("kind") if reply else None},
             "verification": {
                 "request_schema_valid": msg_schema_valid(request),
@@ -406,6 +435,31 @@ def nova_locutio_examples(commons_dir, by_name):
             emit(ident, intent, summary, tags, kind, signed, reply, (reply.get("kind").upper() if reply else "NO-REPLY"),
                  schema_ok and threaded and committed)
 
+    # request/validate → assert (verified) or reject: validation-as-a-service.
+    vreq = {"schema_version": "0.2.0", "kind": "request", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+            "constraints": {"budget_tokens": 1000, "capabilities": [], "deadline_ms": 5000},
+            "body": {"action": "validate", "target": by_name["double"]["hash"]}}
+    vsigned = sign_message(vreq, SENDER_SEED)
+    vreply = respond_to(vsigned, commons_dir)
+    v_ok = (msg_schema_valid(vsigned) and bool(vreply) and msg_schema_valid(vreply)
+            and vreply.get("kind") == "assert" and vreply.get("in_reply_to") == vsigned.get("hash"))
+    emit("validate_double", "Ask an agent to validate the `double` function.",
+         "request/validate double → the responder type-checks and runs it, then asserts it is verified.",
+         ["agent-loop", "request", "validate"], "request", vsigned, vreply,
+         "VERIFIED" if v_ok else (vreply.get("kind", "NO-REPLY").upper() if vreply else "NO-REPLY"), v_ok)
+
+    # delegate → ack: granting a capability is acknowledged by the loop.
+    dreq = {"schema_version": "0.2.0", "kind": "delegate", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+            "constraints": None, "body": {"capability": "cap:apply", "conditions": [], "expires_at": None}}
+    dsigned = sign_message(dreq, SENDER_SEED)
+    dreply = respond_to(dsigned, commons_dir)
+    d_ok = (msg_schema_valid(dsigned) and bool(dreply) and msg_schema_valid(dreply)
+            and dreply.get("kind") == "ack" and dreply.get("in_reply_to") == dsigned.get("hash"))
+    emit("delegate_apply", "Delegate the capability to apply functions.",
+         "delegate cap:apply → the responder acknowledges receipt.",
+         ["agent-loop", "delegate", "capability"], "delegate", dsigned, dreply,
+         "ACKED" if d_ok else (dreply.get("kind", "NO-REPLY").upper() if dreply else "NO-REPLY"), d_ok)
+
     # query → ack (discovery by intent tag).
     qreq = {"schema_version": "0.2.0", "kind": "query", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
             "constraints": None, "body": {"limit": 50, "pattern": {"intent_tags": ["list"]}}}
@@ -418,6 +472,98 @@ def nova_locutio_examples(commons_dir, by_name):
     emit("query_list", "Find functions that operate on lists.",
          "query for functions tagged `list` → the responder acks with the matching content-addresses.",
          ["agent-loop", "query", "discovery"], "query", qsigned, qreply, f"ACK {len(matches)} match(es)", qok)
+    return out
+
+
+# --- negative examples: artifacts paired with the verifier's REJECTION ----------------------------
+#
+# The "is this wrong?" signal. Each is a deliberately-wrong artifact, and the example is valid only if
+# the reference verifier actually REJECTS it (the generator drops it otherwise — a negative that the
+# verifier accepts would be a verifier bug or a mislabeled example, not training signal). So a negative is
+# "verified" in the dual sense: verified to be rejected, for the stated reason.
+
+def negative_examples(workdir, commons_dir, by_name):
+    out = []
+    n = var("n")
+
+    def write_rec(name, rec, body):
+        addr = expr_address(body)
+        d = os.path.join(workdir, "neg_" + name)
+        write_runnable_dir(d, [rec], {addr: body})
+        return d, os.path.join(d, rec["hash"] + ".json"), os.path.join(d, addr + ".json")
+
+    def emit(ident, modality, intent, summary, tags, views, check, verdict, reason, rejected):
+        out.append({
+            "id": "neg_" + ident, "modality": modality, "polarity": "negative",
+            "intent": intent, "summary": summary, "tags": tags, "views": views,
+            "verification": {"expected": "rejected", "check": check, "verdict": verdict,
+                             "rejected": rejected, "reason": (reason or "").strip()[:300]},
+            "_ok": rejected,
+        })
+
+    # 1. Wrong return type — declares int -> bool but the body returns an int. Schema-valid and its example
+    #    even runs, but the TYPE CHECKER rejects it.
+    body1 = lam(["n"], bapp("add", n, n))
+    rec1 = build_v2_record("mislabeled", fn([INT], BOOL), [{"args": [to_value_ast(3)], "result": to_value_ast(6)}],
+                           body1, terminates="always")
+    _, r1, b1 = write_rec("mislabeled", rec1, body1)
+    tc = cli(["typecheck", r1, "--body", b1])
+    emit("wrong_return_type", "nova_lingua",
+         "A function declared to return a bool, but whose body returns an int.",
+         "Schema-valid and its example even runs, but the type checker rejects it: the body has type int, not bool.",
+         ["negative", "type-error"], {"record": rec1, "body": body1},
+         "typecheck", "ILL-TYPED", (tc.stdout + tc.stderr), tc.returncode != 0)
+
+    # 2. Refuted property — a correct body (add(n,n)) carrying a FALSE law (self(n) = n + 1). The prover
+    #    refutes it with a counterexample.
+    body2 = lam(["n"], bapp("add", n, n))
+    prop2 = [{"name": "false_doubling", "expr": forall(["n"], op("eq", self_app(n), op("add", n, int_lit(1))))}]
+    rec2 = build_v2_record("double", fn([INT], INT), [{"args": [to_value_ast(3)], "result": to_value_ast(6)}],
+                           body2, properties=prop2, terminates="always")
+    _, r2, b2 = write_rec("falselaw", rec2, body2)
+    pv = cli(["prove", r2, "--body", b2])
+    refuted = "REFUTED" in pv.stdout
+    emit("refuted_property", "nova_lingua",
+         "A doubling function that wrongly claims double(n) = n + 1.",
+         "The body and examples are correct, but the property is false; the prover refutes it with a counterexample.",
+         ["negative", "false-property"], {"record": rec2, "body": body2, "properties": prop2},
+         "prove", "REFUTED", pv.stdout, refuted)
+
+    # 3. Wrong example — claims double(3) = 7. Type-checks, but FAILS when the example is executed.
+    body3 = lam(["n"], bapp("add", n, n))
+    rec3 = build_v2_record("double", fn([INT], INT), [{"args": [to_value_ast(3)], "result": to_value_ast(7)}],
+                           body3, terminates="always")
+    d3, r3, b3 = write_rec("wrongexample", rec3, body3)
+    rn = cli(["run", "--records", d3, r3])
+    emit("wrong_example", "nova_lingua",
+         "A doubling function whose worked example claims double(3) = 7.",
+         "Well-typed, but executing the body against the example fails: double(3) is 6, not 7.",
+         ["negative", "wrong-example"], {"record": rec3, "body": body3},
+         "run", "EXAMPLE-FAILED", (rn.stdout + rn.stderr), rn.returncode != 0)
+
+    # 4. Nova Locutio — a validly-SIGNED assert with a FALSE claim (double(21) = 43). verify-claim re-runs
+    #    the claim and refutes it: a real signature is no guarantee of a true claim (principle 3).
+    resp_did = responder_did(RESPONDER_SEED)
+    req = {"schema_version": "0.2.0", "kind": "request", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+           "constraints": {"budget_tokens": 1000, "capabilities": [], "deadline_ms": 5000},
+           "body": {"action": "apply", "target": by_name["double"]["hash"], "args": [to_value_ast(21)]}}
+    reply = respond_to(sign_message(req, SENDER_SEED), commons_dir)
+    if reply and reply.get("kind") == "assert":
+        # Tamper the asserted result (42 -> 43) and re-sign, so the signature is valid but the claim is false.
+        try:
+            reply["body"]["claim"]["expr"]["args"][1]["value"]["value"] = 43
+        except (KeyError, IndexError, TypeError):
+            reply = None
+    if reply:
+        tampered = sign_message(reply, RESPONDER_SEED)
+        vp = _write_tmp(tampered)
+        vc = cli(["verify-claim", "--records", commons_dir, vp])
+        os.unlink(vp)
+        emit("false_claim", "nova_locutio",
+             "A signed assertion claiming double(21) = 43.",
+             "The signature is valid, but re-running the claim against the commons refutes it: double(21) is 42.",
+             ["negative", "false-claim", "agent-loop"], {"speech_act": "assert", "message": tampered},
+             "verify-claim", "REFUTED", (vc.stdout + vc.stderr), vc.returncode != 0)
     return out
 
 
@@ -449,32 +595,46 @@ def main():
                 examples.append(ex)
             if not ok:
                 dropped.append((ex["id"], ex["verification"]))
+        # Negative examples — artifacts the verifier correctly REJECTS (the "is this wrong?" signal).
+        for ex in negative_examples(wd, commons_dir, by_name):
+            ok = ex.pop("_ok")
+            if ok or args.keep_unverified:
+                examples.append(ex)
+            if not ok:
+                dropped.append((ex["id"], ex["verification"]))
 
     with open(args.out, "w", encoding="utf-8") as fh:
         for ex in examples:
             fh.write(json.dumps(ex, ensure_ascii=False) + "\n")
 
-    by_modality = {}
+    by_modality, by_polarity = {}, {}
     for ex in examples:
         by_modality[ex["modality"]] = by_modality.get(ex["modality"], 0) + 1
-    families = {"unary_arith": len(unary_arith()), "binary_arith": len(binary_arith()), "list_funcs": len(list_funcs())}
-    proved = sum(1 for ex in examples if ex["modality"] == "nova_lingua"
+        by_polarity[ex["polarity"]] = by_polarity.get(ex["polarity"], 0) + 1
+    families = {"unary_arith": len(unary_arith()), "binary_arith": len(binary_arith()),
+                "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs())}
+    proved = sum(1 for ex in examples if ex["modality"] == "nova_lingua" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
-    confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio"
+    confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"
                     and ex["verification"]["outcome"] == "CONFIRMED")
+    rejected = sum(1 for ex in examples if ex["polarity"] == "negative")
     manifest = {
         "corpus": os.path.basename(args.out),
         "examples": len(examples),
         "by_modality": by_modality,
+        "by_polarity": by_polarity,
         "nova_lingua_families": families,
         "verified_all": len(dropped) == 0,
         "proved_properties": proved,
         "confirmed_agent_loop_claims": confirmed,
         "schema": "function-record.v0.2.schema.json + message.v0.2.schema.json (v0.2.0)",
-        "note": "Every Nova Lingua example is schema-valid, well-typed, executes its examples, and (where "
-                "stated) proves its properties over the unbounded domain. Every Nova Locutio example is a "
-                "signed agent-loop exchange whose reply schema-validates and (for request/apply) re-runs "
-                "true via verify-claim. All checked by nl-validator.",
+        "note": "POSITIVE examples are correct-by-construction and checked: a Nova Lingua record is "
+                "schema-valid, well-typed, executes its examples, and (where stated) proves its properties "
+                "over the unbounded domain; a Nova Locutio example is a signed agent-loop exchange whose "
+                "reply schema-validates, is threaded, and (for request/apply) re-runs true via "
+                "verify-claim. NEGATIVE examples (polarity 'negative') are deliberately-wrong artifacts "
+                "confirmed to be REJECTED by the verifier — an ill-typed body, a refuted property, a "
+                "failed example, a signed-but-false claim. All checked by nl-validator.",
     }
     with open(args.out + ".manifest.json", "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)

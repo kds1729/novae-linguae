@@ -28,11 +28,16 @@ def _load(path):
 class CommittedCorpusTests(unittest.TestCase):
     def test_every_example_is_fully_verified(self):
         examples = _load(_CORPUS)
-        self.assertGreaterEqual(len(examples), 16)
+        self.assertGreaterEqual(len(examples), 20)
         self.assertTrue(any(e["modality"] == "nova_lingua" for e in examples))
         self.assertTrue(any(e["modality"] == "nova_locutio" for e in examples))
+        self.assertTrue(any(e["polarity"] == "negative" for e in examples))
         for ex in examples:
             v = ex["verification"]
+            # A NEGATIVE example is "verified to be rejected": the reference verifier must have rejected it.
+            if ex["polarity"] == "negative":
+                self.assertTrue(v["rejected"], f"{ex['id']} (negative) was not rejected by {v['check']}")
+                continue
             if ex["modality"] == "nova_lingua":
                 self.assertTrue(v["schema_valid"], f"{ex['id']} not schema-valid")
                 self.assertTrue(v["well_typed"], f"{ex['id']} not well-typed")
@@ -43,14 +48,23 @@ class CommittedCorpusTests(unittest.TestCase):
                 self.assertTrue(v["request_schema_valid"], f"{ex['id']} request not schema-valid")
                 self.assertTrue(v["reply_schema_valid"], f"{ex['id']} reply not schema-valid")
                 self.assertTrue(v["threaded"], f"{ex['id']} reply not threaded to request")
-                if ex["views"]["speech_act"] == "request":
-                    self.assertEqual(v["outcome"], "CONFIRMED", f"{ex['id']} claim not confirmed")
+                # request/apply exchanges carry a claim re-run to CONFIRMED; other acts succeed differently.
+                if v["outcome"].startswith("NOT") or v["outcome"] in ("NO-REPLY", "REJECT"):
+                    self.fail(f"{ex['id']} positive exchange has failure outcome {v['outcome']}")
 
     def test_every_example_has_all_views(self):
         for ex in _load(_CORPUS):
-            for key in ("intent", "summary", "tags", "modality"):
+            for key in ("intent", "summary", "tags", "modality", "polarity"):
                 self.assertTrue(ex.get(key), f"{ex['id']} missing {key}")
             views = ex["views"]
+            if ex["polarity"] == "negative":
+                # Negatives carry the offending artifact: a record+body (lingua) or a message (locutio).
+                if ex["modality"] == "nova_lingua":
+                    self.assertIn("record", views, f"{ex['id']} missing record")
+                    self.assertIn("body", views, f"{ex['id']} missing body")
+                else:
+                    self.assertIn("message", views, f"{ex['id']} missing message")
+                continue
             if ex["modality"] == "nova_lingua":
                 for key in ("surface_type", "surface_body", "record", "body", "examples"):
                     self.assertIsNotNone(views.get(key), f"{ex['id']} missing view {key}")

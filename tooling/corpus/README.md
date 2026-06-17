@@ -96,18 +96,32 @@ The generator **drops any example that fails a verification step and exits non-z
 clean run is itself the guarantee that every committed example is fully verified. It is deterministic (the
 families enumerate a fixed set, no RNG — principle 5), so the corpus is byte-reproducible.
 
-## Scope (v0.1) and where it grows
+## Negative examples
 
-16 examples today:
+Every example carries a `polarity`. A **negative** example is a deliberately-wrong artifact paired with
+the verifier's **rejection** — the "is this wrong?" signal — and it is valid only if the reference
+verifier actually rejects it (the generator drops a negative the verifier accepts, since that would be a
+verifier bug or a mislabel, not training signal). So a negative is verified in the dual sense: *verified
+to be rejected*, for the stated reason. Today's four:
 
-- **Nova Lingua** (12) — three families (unary integer, binary integer, and list functions:
-  `foldl`-sum / `reverse` / `length`), 10 with properties proved over the unbounded domain.
-- **Nova Locutio** (4) — signed agent-loop exchanges: `request`/`apply` → `assert` (×2, both
-  `verify-claim` CONFIRMED), `propose` → `commit`, and `query` → `ack`.
+| id | wrong because | caught by | verdict |
+|----|---------------|-----------|---------|
+| `neg_wrong_return_type` | declares `int -> bool`, body returns `int` | `typecheck` | ILL-TYPED |
+| `neg_refuted_property` | claims `double(n) = n + 1` | `prove` | REFUTED (counterexample) |
+| `neg_wrong_example` | claims `double(3) = 7` | `run` | EXAMPLE-FAILED |
+| `neg_false_claim` | a signed `assert` claiming `double(21) = 43` | `verify-claim` | REFUTED on re-execution |
+
+## Scope and where it grows
+
+26 examples today (22 positive, 4 negative):
+
+- **Nova Lingua** (19) — four families (unary integer, binary integer, boolean/predicate, and list
+  functions), 12 with properties proved over the unbounded domain, plus 3 negatives.
+- **Nova Locutio** (7) — six signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
+  `verify-claim` CONFIRMED, `request`/`validate` → `assert`, `propose` → `commit`, `delegate` → `ack`,
+  `query` → `ack`), plus 1 negative.
 
 This is the seam, not the ceiling, all behind the same "generate → verify → emit" pipeline: more Nova
 Lingua families (string / `Maybe` / `Result` functions, multi-stage `compose` pipelines, higher-order
-`map`/`filter` laws now that they discharge); more Nova Locutio speech acts (`delegate`/`retract`,
-`store`, and full multi-turn orchestrated transcripts via `orchestrate`); and **negative examples** — an
-artifact paired with the verification verdict that *rejects* it (an ill-typed body, a refuted property, a
-claim that fails to re-run), an equally valuable training signal.
+`map`/`filter` laws now that they discharge); more Nova Locutio speech acts (`retract`, `store`, and full
+multi-turn orchestrated transcripts via `orchestrate`); and more negative cases.
