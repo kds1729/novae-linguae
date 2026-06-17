@@ -114,17 +114,16 @@ to be rejected*, for the stated reason. Today's five:
 
 ## Scope and where it grows
 
-35 examples today (30 positive, 5 negative):
+37 examples today (32 positive, 5 negative):
 
-- **Nova Lingua** (24) — six families (unary integer, binary integer, boolean/predicate, list,
-  list-transform: `map`/`filter`/`append`, and composition: `foldl`-product / `length`∘`filter`), 13 with
-  properties proved over the unbounded domain, plus 3 negatives.
+- **Nova Lingua** (26) — seven families (unary integer, binary integer, boolean/predicate, list,
+  list-transform: `map`/`filter`/`append`, composition: `foldl`-product / `length`∘`filter`, and float:
+  `square_f` / `double_f`), 13 with properties proved over the unbounded domain, plus 3 negatives.
 - **Nova Locutio** (11) — nine signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
   `verify-claim` CONFIRMED, `request`/`validate` → `assert`, `request`/`store` → `ack`, `propose` →
   `commit`, `commit` → `assert` (CONFIRMED), `delegate` → `ack`, `retract` → `ack`, `query` → `ack`),
   plus 2 negatives (a signed-but-false claim, and a capability-denied apply).
 
 This is the seam, not the ceiling, all behind the same "generate → verify → emit" pipeline: more Nova
-Lingua families (string / `Maybe` / `Result` functions — and `float`, once the type checker makes
-arithmetic numeric-polymorphic; a float body already *runs*, it just doesn't type-check yet); multi-stage
-`compose` pipelines; full multi-turn orchestrated transcripts via `orchestrate`; and more negative cases.
+Lingua families (string / `Maybe` / `Result` functions); multi-stage `compose` pipelines; full multi-turn
+orchestrated transcripts via `orchestrate`; and more negative cases.

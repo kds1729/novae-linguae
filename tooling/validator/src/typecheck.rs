@@ -17,7 +17,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value as J;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// An inference type. `Con` covers scalars (`int`/`bool`/…), `List` (one arg), skolems (`$a`), and
 /// opaque sums/refs; `Fun` is an uncurried arrow matching the `fn` type AST.
@@ -37,16 +37,28 @@ fn con(name: &str) -> Ty {
 struct Infer {
     subst: HashMap<u32, Ty>,
     next: u32,
+    /// Variables constrained to be *numeric* — they may unify only with `int`/`float` (or another
+    /// variable, which then also becomes numeric). Backs the arithmetic operators (int OR float).
+    numeric: HashSet<u32>,
 }
 
 impl Infer {
     fn new() -> Self {
-        Infer { subst: HashMap::new(), next: 0 }
+        Infer { subst: HashMap::new(), next: 0, numeric: HashSet::new() }
     }
 
     fn fresh(&mut self) -> Ty {
         let v = self.next;
         self.next += 1;
+        Ty::Var(v)
+    }
+
+    /// A fresh *numeric* variable: it may unify only with `int`, `float`, or another (then-also-numeric)
+    /// variable — so an arithmetic operator works over either numeric type but not over a non-number.
+    fn fresh_numeric(&mut self) -> Ty {
+        let v = self.next;
+        self.next += 1;
+        self.numeric.insert(v);
         Ty::Var(v)
     }
 
@@ -90,6 +102,20 @@ impl Infer {
         }
         if self.occurs(v, t) {
             bail!("infinite type: variable occurs in {}", show(&self.zonk(t)));
+        }
+        // A numeric variable accepts only `int`/`float`; binding it to another variable propagates the
+        // constraint, and binding it to anything else (bool, a list, a function, …) is a type error.
+        if self.numeric.contains(&v) {
+            match t {
+                Ty::Var(u) => {
+                    self.numeric.insert(*u);
+                }
+                Ty::Con(n, args) if args.is_empty() && (n == "int" || n == "float") => {}
+                _ => bail!(
+                    "type mismatch: an arithmetic operator needs a numeric type (int or float), got {}",
+                    show(&self.zonk(t))
+                ),
+            }
         }
         self.subst.insert(v, t.clone());
         Ok(())
@@ -240,8 +266,17 @@ fn lit_ty(v: &J, inf: &mut Infer) -> Result<Ty> {
 fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
     let list = |t: Ty| Ty::Con("List".into(), vec![t]);
     Some(match name {
-        "add" | "sub" | "mul" | "div" | "mod" | "min" | "max" => Ty::Fun(vec![con("int"), con("int")], Box::new(con("int"))),
-        "neg" | "abs" => Ty::Fun(vec![con("int")], Box::new(con("int"))),
+        // Numeric over int OR float (a fresh numeric variable threads input and output).
+        "add" | "sub" | "mul" | "min" | "max" => {
+            let a = inf.fresh_numeric();
+            Ty::Fun(vec![a.clone(), a.clone()], Box::new(a))
+        }
+        "neg" | "abs" => {
+            let a = inf.fresh_numeric();
+            Ty::Fun(vec![a.clone()], Box::new(a))
+        }
+        // Integer-only: division and modulo keep `int` semantics.
+        "div" | "mod" => Ty::Fun(vec![con("int"), con("int")], Box::new(con("int"))),
         // Effectful builtins (effects tracked at eval, not in this checker): `print : forall a. a ->
         // unit`, `rand : int -> int`.
         "print" => {
@@ -267,7 +302,10 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
             let a = inf.fresh();
             Ty::Fun(vec![con("int"), a.clone()], Box::new(list(a)))
         }
-        "lt" | "le" | "gt" | "ge" => Ty::Fun(vec![con("int"), con("int")], Box::new(con("bool"))),
+        "lt" | "le" | "gt" | "ge" => {
+            let a = inf.fresh_numeric();
+            Ty::Fun(vec![a.clone(), a], Box::new(con("bool")))
+        }
         "and" | "or" | "xor" => Ty::Fun(vec![con("bool"), con("bool")], Box::new(con("bool"))),
         "not" => Ty::Fun(vec![con("bool")], Box::new(con("bool"))),
         "eq" | "neq" => {
@@ -527,11 +565,41 @@ mod tests {
             "body": { "kind": "fn", "params": [{ "kind": "var", "name": "a" }], "result": { "kind": "var", "name": "a" } } });
         assert!(typecheck(&poly, &idbody).is_ok());
 
-        // \x -> add(x, x)  against  forall a. a -> a  must FAIL (body forces a = int, skolem stays rigid).
+        // \x -> add(x, x)  against  forall a. a -> a  must FAIL (the skolem `a` is not numeric).
         let dbl = json!({ "kind": "lambda", "params": [{ "name": "x" }],
             "body": { "kind": "app", "fn": { "kind": "var", "name": "add" },
                       "args": [{ "kind": "var", "name": "x" }, { "kind": "var", "name": "x" }] } });
         assert!(typecheck(&poly, &dbl).is_err());
+    }
+
+    #[test]
+    fn arithmetic_is_numeric_over_int_and_float() {
+        // \x -> mul(x, x) checks at BOTH float -> float and int -> int (numeric operators, not int-only).
+        let body = json!({ "kind": "lambda", "params": [{ "name": "x" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "mul" },
+                      "args": [{ "kind": "var", "name": "x" }, { "kind": "var", "name": "x" }] } });
+        let ty = |n: &str| json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": n }],
+                                   "result": { "kind": "builtin", "name": n } });
+        assert!(typecheck(&ty("float"), &body).is_ok(), "mul over float : float -> float");
+        assert!(typecheck(&ty("int"), &body).is_ok(), "mul over int : int -> int");
+        // Comparisons take numeric args too: \x -> gt(x, x) at float -> bool.
+        let cmp = json!({ "kind": "lambda", "params": [{ "name": "x" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "gt" },
+                      "args": [{ "kind": "var", "name": "x" }, { "kind": "var", "name": "x" }] } });
+        let cmp_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "float" }],
+                             "result": { "kind": "builtin", "name": "bool" } });
+        assert!(typecheck(&cmp_ty, &cmp).is_ok(), "gt over float : float -> bool");
+    }
+
+    #[test]
+    fn arithmetic_operator_rejects_non_number() {
+        // \b -> add(b, b)  against  bool -> bool — `add` needs int or float, so this is ill-typed.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "b" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                      "args": [{ "kind": "var", "name": "b" }, { "kind": "var", "name": "b" }] } });
+        let bool_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "bool" }],
+                              "result": { "kind": "builtin", "name": "bool" } });
+        assert!(typecheck(&bool_ty, &body).is_err(), "add over bool must be rejected");
     }
 
     #[test]

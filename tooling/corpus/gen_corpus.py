@@ -290,14 +290,23 @@ def composition_funcs():
     ]
 
 
-# A float family is intentionally omitted for now: the evaluator promotes floats (a float body RUNS), but
-# the HM type checker types `add`/`mul` as int-only, so a `float -> float` record is rejected as ill-typed.
-# The `float` value-AST support above is the seam; the family drops in once arithmetic builtins are made
-# numeric-polymorphic in typecheck.rs.
+def float_funcs():
+    x = var("x")
+    return [
+        {"name": "square_f", "intent": "Square a floating-point number.", "summary": "Returns x * x.",
+         "tags": ["arithmetic", "float"], "type_ast": fn([FLOAT], FLOAT), "body_ast": lam(["x"], bapp("mul", x, x)),
+         "examples": [{"args": [2.5], "result": 6.25}, {"args": [-1.5], "result": 2.25}],
+         "properties": [], "prove": False},
+        {"name": "double_f", "intent": "Double a floating-point number.", "summary": "Returns x + x.",
+         "tags": ["arithmetic", "float", "linear"], "type_ast": fn([FLOAT], FLOAT), "body_ast": lam(["x"], bapp("add", x, x)),
+         "examples": [{"args": [1.5], "result": 3.0}, {"args": [-2.25], "result": -4.5}],
+         "properties": [], "prove": False},
+    ]
+
 
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
-            + list_transform_funcs() + composition_funcs())
+            + list_transform_funcs() + composition_funcs() + float_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -741,7 +750,7 @@ def main():
     families = {"unary_arith": len(unary_arith()), "binary_arith": len(binary_arith()),
                 "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs()),
                 "list_transform_funcs": len(list_transform_funcs()),
-                "composition_funcs": len(composition_funcs())}
+                "composition_funcs": len(composition_funcs()), "float_funcs": len(float_funcs())}
     proved = sum(1 for ex in examples if ex["modality"] == "nova_lingua" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"
