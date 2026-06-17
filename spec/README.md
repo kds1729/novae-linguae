@@ -7,7 +7,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | Path | Status | What it defines |
 |------|--------|------|
 | `function-record.schema.json` | v0.1 draft | The function-record schema, v0.1 (string surface form for type / predicate / value fields) |
-| `function-record.v0.2.schema.json` | v0.2 draft | The function-record schema, v0.2 — same shape as v0.1 but with structured type / predicate / value ASTs (sub-schemas inlined under `$defs` for self-containment) |
+| `function-record.v0.2.schema.json` | v0.2 draft | The function-record schema, v0.2 — same shape as v0.1 but with structured type / predicate / value ASTs (sub-schemas inlined under `$defs` for self-containment). Carries an optional v0.3 `signature.cost` (`time` / `measure` / `output_size`) enabling **precise** complexity composition through pipelines |
 | `message.schema.json` | v0.1 draft | The structured speech-act envelope for *Nova Locutio* messages |
 | `message.v0.2.schema.json` | v0.2 draft | *Nova Locutio* message envelope v0.2 — only breaking change: `assert_body.claim` and `commit_body.commitment` are now required structured ASTs (`claim-expression.schema.json` / `commitment-expression.schema.json`) instead of free-form strings |
 | `type-expression.schema.json` | v0.1 draft | Structured AST for *Nova Lingua* type expressions (used inline by `function-record.v0.2.schema.json`) |

@@ -281,18 +281,26 @@ opacity*: a pipeline of well-described leaves is otherwise itself undescribed. I
 composability** (stage `i`'s result type must fit stage `i+1`'s parameter type, structurally, with
 type variables as wildcards) and propagates: **effects** = the union of every stage's effects;
 **capabilities** = the union; **termination** = `always` only if every stage is `always`, else
-`unknown`; **complexity** = a coarse upper bound (the maximum stage class — sequential composition's
-dominant term — or `unknown` if any is unrecognized). Composability is decided structurally/coarsely, but
-the composite's input/output **types** are computed **precisely** by threading type variables through the
-pipeline (fresh-instantiate each stage, unify each result with the next parameter), so
-`wrap : a → List a ; head : List b → b` composes to the exact `a → a`, not the imprecise `a → b`. Worked:
-`reverse ; length` → `List a → nat`, effects `[]`, terminates `always`; `length ; reverse` is **not
-composable** (a `nat` result can't feed a `List` parameter). Scope: each stage is a unary function. The
-complexity stays a coarse upper bound on purpose — an *exact* composition needs each stage's **output-size
-relation** (how its result size depends on its input size) to re-express one stage's cost in the pipeline's
-input size, metadata the record schema does not carry yet (a v0.3 item); the tempting shortcut "a
-scalar-producing stage makes everything downstream `O(1)`" is *unsound*, because a downstream cost can
-depend on the scalar's value, not its size (`length ; factorial`).
+`unknown`; **complexity** = **precise** when every stage carries the v0.3 `cost` metadata, else a coarse
+upper bound (the maximum stage class, or `unknown` if any is unrecognized). Composability is decided
+structurally/coarsely, but the composite's input/output **types** are computed **precisely** by threading
+type variables through the pipeline (fresh-instantiate each stage, unify each result with the next
+parameter), so `wrap : a → List a ; head : List b → b` composes to the exact `a → a`, not the imprecise
+`a → b`. Worked: `reverse ; length` → `List a → nat`, effects `[]`, terminates `always`; `length ; reverse`
+is **not composable** (a `nat` result can't feed a `List` parameter). Scope: each stage is a unary function.
+
+**Precise complexity (`cost` metadata).** A stage's `signature.cost` declares its `time` class, the
+`measure` it counts (`size` or `value`), and its `output_size` relation to the input (`constant`,
+`preserving`, `bounded`, `quadratic`, `cubic`). The composer threads the value's size through the pipeline
+as a polynomial degree `d` in the input `n`: a stage costing `O(m^t · (log m)^l)` on a size-`Θ(n^d)` input
+costs `O(n^{t·d} · (log n)^l)`, and its `output_size` updates `d` (constant → 0, preserving/bounded → `d`,
+quadratic → `2d`, cubic → `3d`); the composite is the max term. This is **sound under expansion**, which
+the coarse max is not — an `n`-to-`n²` stage feeding `O(m²)` work is `O(n⁴)`, which `max(O(n²), O(n²))`
+misses — and it *tightens* collapse pipelines (after a constant-size output, `d = 0`, so a size-measured
+downstream cost is `O(1)`). The size-collapse shortcut is kept sound by `measure`: a **value**-measured
+stage (cost tracks a number's magnitude, not a structural size, e.g. `length ; factorial`) can't substitute,
+so the whole composite falls back to the coarse bound rather than wrongly claiming `O(1)`. The
+`cost-basis` line of `compose`'s output records which path was taken.
 
 ## Effect enforcement
 

@@ -258,8 +258,10 @@ enum Commands {
     },
     /// Derive a sequential pipeline's **composite metadata** from its stages' signatures (the
     /// "composition opacity" problem): type composability stage-to-stage, the *union* of effects and
-    /// capabilities, `always` termination only if every stage is, and a coarse max complexity. Each
-    /// stage is a unary function applied to the previous stage's result. Exit 1 if not composable.
+    /// capabilities, `always` termination only if every stage is, and the composite complexity —
+    /// **precise** (sound under expansion) when every stage carries `cost` metadata, else a coarse max
+    /// bound (the `cost-basis` line says which). Each stage is a unary function applied to the previous
+    /// stage's result. Exit 1 if not composable.
     Compose {
         /// Function-record files, in pipeline order (`f1 f2 …`; each applied to the previous result).
         #[arg(required = true)]
@@ -908,6 +910,7 @@ fn cmd_compose(records: &[PathBuf]) -> Result<()> {
         println!("  capabilities {:?}", m.capabilities);
         println!("  terminates  {}", m.terminates);
         println!("  complexity  {}", m.complexity);
+        println!("  cost-basis  {}", m.complexity_basis);
         Ok(())
     } else {
         Err(anyhow::anyhow!("NOT-COMPOSABLE  {}", m.reason))

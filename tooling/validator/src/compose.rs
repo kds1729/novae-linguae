@@ -13,15 +13,18 @@
 //! - **effects** — the *union* of every stage's declared effects (a pipeline performs all of them).
 //! - **capabilities** — the union, likewise.
 //! - **termination** — `always` only if every stage is `always`, else `unknown` (conservative).
-//! - **complexity** — a coarse upper bound: the maximum stage complexity (sequential composition's
-//!   dominant term), or `unknown` if any stage's is unrecognized. This stays coarse on purpose: an
-//!   *exact* composition needs each stage's **output-size relation** (how its result size depends on its
-//!   input size) so a cost in terms of one stage's input can be re-expressed in terms of the pipeline's
-//!   input — metadata the record schema doesn't carry yet (a v0.3 item). The tempting shortcut (a stage
-//!   that returns a scalar makes everything downstream `O(1)`) is *unsound*: a downstream cost can depend
-//!   on the scalar's value, not just its size (`length ; factorial`), so it would under-report. The
-//!   max-bound is a safe over-approximation for non-expanding pipelines; we keep it rather than tighten
-//!   it unsoundly.
+//! - **complexity** — **precise** when every stage carries the v0.3 `cost` metadata (a `time` class and
+//!   an `output_size` relation), else a coarse upper bound. The precise path threads the value's size
+//!   through the pipeline as a polynomial degree in the input `n` and substitutes each stage's cost at
+//!   its actual input size (`precise_complexity`): a stage costing `O(m^t)` on a size-`Θ(n^d)` input
+//!   costs `O(n^{t·d})`, and its `output_size` updates `d`. This is **sound under expansion**, which the
+//!   coarse max is not — a stage that turns `n` elements into `n²` followed by `O(m²)`-on-its-input work
+//!   is `O(n⁴)`, which `max(O(n²), O(n²))` misses. It also *tightens* collapse pipelines (after a
+//!   constant-size output, downstream size-measured costs are `O(1)`). The size-collapse shortcut is kept
+//!   sound by the `measure` field: a **value**-measured stage (cost tracks a number's magnitude, not a
+//!   structural size — `length ; factorial`) can't substitute, so the whole composite falls back to the
+//!   coarse max. Without `cost`, the coarse maximum stage complexity (a safe bound for non-expanding
+//!   pipelines) is reported, with `complexity_basis` recording which path was taken.
 //!
 //! So an assembled pipeline becomes as described as a leaf — the precondition for principle 4
 //! ("assemble, don't write") to yield artifacts that are themselves verifiable. Scope (v0.1): each stage
@@ -42,6 +45,9 @@ pub struct CompositionMetadata {
     pub capabilities: Vec<String>,
     pub terminates: String,
     pub complexity: String,
+    /// How `complexity` was derived: `"precise (output-size substitution)"` when every stage carries
+    /// size-measured `cost` metadata, else `"coarse upper bound"` (the max-rank fallback).
+    pub complexity_basis: String,
 }
 
 /// A coarse type for structural composability checks (polymorphic variables become `Any`).
@@ -278,6 +284,103 @@ fn complexity_of(stages: &[String]) -> String {
     best.map(|r| COMPLEXITY_RANK[r].to_string()).unwrap_or_else(|| "O(1)".to_string())
 }
 
+// --- precise complexity via output-size substitution ----------------------------------------------
+//
+// The coarse `complexity_of` above is the maximum stage class — a sound upper bound only when no stage
+// *expands* its input. For an expanding pipeline it UNDER-reports: a stage that turns an `n`-element list
+// into `n²` elements, followed by an `O(m²)`-on-its-input stage, is `O(n⁴)`, which `max(O(n²), O(n²))`
+// misses entirely. The fix is to know each stage's **output-size relation** (the v0.3 `cost` field) and
+// thread the size through the pipeline: track the current value's size as a polynomial degree in the
+// pipeline input `n`; a stage costing `O(m^t · (log m)^l)` on an input of size `Θ(n^d)` costs
+// `O(n^{t·d} · (log n)^l)`, and its `output_size` updates `d`. The composite is the max term. This is
+// exact for the supported classes and, unlike the coarse max, sound under expansion. It also *tightens*
+// collapse pipelines (after a stage whose output is constant-size, `d = 0`, so a size-measured downstream
+// cost is `O(1)`). Only **size-measured** costs substitute soundly — a value-measured stage (its cost
+// tracks a number's magnitude, not its size) makes the whole pipeline fall back to the coarse bound.
+
+/// A complexity class as `O(n^deg · (log n)^logs)`. Covers the schema's `time` classes: O(1)=(0,0),
+/// O(log n)=(0,1), O(n)=(1,0), O(n log n)=(1,1), O(n^2)=(2,0), O(n^2 log n)=(2,1), O(n^3)=(3,0).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Cost {
+    deg: u32,
+    logs: u32,
+}
+
+fn parse_time_class(s: &str) -> Option<Cost> {
+    Some(match s {
+        "O(1)" => Cost { deg: 0, logs: 0 },
+        "O(log n)" => Cost { deg: 0, logs: 1 },
+        "O(n)" => Cost { deg: 1, logs: 0 },
+        "O(n log n)" => Cost { deg: 1, logs: 1 },
+        "O(n^2)" => Cost { deg: 2, logs: 0 },
+        "O(n^2 log n)" => Cost { deg: 2, logs: 1 },
+        "O(n^3)" => Cost { deg: 3, logs: 0 },
+        _ => return None,
+    })
+}
+
+/// Asymptotic order on `Cost`: by polynomial degree, then by log-factor count.
+fn cost_max(a: Cost, b: Cost) -> Cost {
+    if (a.deg, a.logs) >= (b.deg, b.logs) {
+        a
+    } else {
+        b
+    }
+}
+
+fn cost_to_string(c: Cost) -> String {
+    let np = match c.deg {
+        0 => String::new(),
+        1 => "n".to_string(),
+        d => format!("n^{d}"),
+    };
+    let lp = match c.logs {
+        0 => String::new(),
+        1 => "log n".to_string(),
+        l => format!("(log n)^{l}"),
+    };
+    match (np.is_empty(), lp.is_empty()) {
+        (true, true) => "O(1)".to_string(),
+        (false, true) => format!("O({np})"),
+        (true, false) => format!("O({lp})"),
+        (false, false) => format!("O({np} {lp})"),
+    }
+}
+
+/// Precise composite complexity by substituting each stage's input size through the pipeline. Returns
+/// `None` when any stage lacks usable `cost` metadata (unknown `time`/`output_size`, or a value-measured
+/// cost) — the caller then reports the coarse bound. Never returns a *smaller-than-true* class: a stage's
+/// input-size degree only grows from real expansion, so the contributed cost is an exact substitution.
+fn precise_complexity(records: &[J]) -> Option<String> {
+    let mut cur_deg: u32 = 1; // the pipeline input has size Θ(n) = degree 1
+    let mut worst = Cost { deg: 0, logs: 0 };
+    for r in records {
+        let cost = r.pointer("/signature/cost")?;
+        // Value-measured costs track a number's magnitude, not a structural size, so size substitution
+        // through the pipeline doesn't apply — bail to the coarse bound for the whole composite.
+        if cost.get("measure").and_then(|m| m.as_str()).unwrap_or("size") != "size" {
+            return None;
+        }
+        let time = parse_time_class(cost.get("time")?.as_str()?)?;
+        // Cost on an input of size Θ(n^cur_deg): a constant-size input (cur_deg 0) makes any size-measured
+        // cost O(1); otherwise the poly degree multiplies and the log-factor count carries through.
+        let contributed = if cur_deg == 0 {
+            Cost { deg: 0, logs: 0 }
+        } else {
+            Cost { deg: time.deg.saturating_mul(cur_deg), logs: time.logs }
+        };
+        worst = cost_max(worst, contributed);
+        cur_deg = match cost.get("output_size")?.as_str()? {
+            "constant" => 0,
+            "preserving" | "bounded" => cur_deg, // bounded ≤ preserving; keep cur_deg as the size upper bound
+            "quadratic" => cur_deg.saturating_mul(2),
+            "cubic" => cur_deg.saturating_mul(3),
+            _ => return None, // "unknown" (or anything unrecognized) — can't substitute soundly
+        };
+    }
+    Some(cost_to_string(worst))
+}
+
 /// Derive the metadata of the sequential pipeline `records[0]; records[1]; …` (each stage applied to the
 /// previous stage's single result). Never errors — composability and the reason are in the returned value.
 pub fn compose(records: &[J]) -> CompositionMetadata {
@@ -290,6 +393,7 @@ pub fn compose(records: &[J]) -> CompositionMetadata {
         capabilities: vec![],
         terminates: "unknown".to_string(),
         complexity: "unknown".to_string(),
+        complexity_basis: "coarse upper bound".to_string(),
     };
     if records.is_empty() {
         return unknown("empty pipeline".to_string());
@@ -340,6 +444,13 @@ pub fn compose(records: &[J]) -> CompositionMetadata {
         ),
     };
 
+    // Precise complexity when every stage carries size-measured `cost` metadata; otherwise the coarse
+    // max bound. The precise path is exact and sound under expansion, where the coarse max under-reports.
+    let (complexity, complexity_basis) = match precise_complexity(records) {
+        Some(c) => (c, "precise (output-size substitution)".to_string()),
+        None => (complexity_of(&complexities), "coarse upper bound".to_string()),
+    };
+
     CompositionMetadata {
         composable: true,
         reason: format!("a {}-stage pipeline composes end to end", records.len()),
@@ -348,7 +459,8 @@ pub fn compose(records: &[J]) -> CompositionMetadata {
         effects: effects.into_iter().collect(),
         capabilities: capabilities.into_iter().collect(),
         terminates: if terms_all_always { "always" } else { "unknown" }.to_string(),
-        complexity: complexity_of(&complexities),
+        complexity,
+        complexity_basis,
     }
 }
 
@@ -409,6 +521,66 @@ mod tests {
     fn non_unary_stage_is_not_composable() {
         let m = compose(&[load("add.json"), load("length.json")]);
         assert!(!m.composable, "add is binary — not a pipeline stage");
+    }
+
+    // A synthetic costed stage `param -> result` carrying both the coarse `complexity` and the v0.3 `cost`.
+    fn costed(param: J, result: J, complexity: &str, time: &str, output_size: &str, measure: &str) -> J {
+        json!({ "signature": {
+            "type": { "kind": "fn", "params": [param], "result": result },
+            "effects": [], "capabilities": [], "terminates": "always",
+            "complexity": complexity,
+            "cost": { "time": time, "output_size": output_size, "measure": measure } } })
+    }
+    fn list_int() -> J {
+        json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "builtin", "name": "int" }] })
+    }
+    fn int_t() -> J {
+        json!({ "kind": "builtin", "name": "int" })
+    }
+
+    #[test]
+    fn precise_complexity_is_sound_under_expansion() {
+        // An EXPANDING stage (n elements -> n² elements, O(n²) to build) feeding an O(m²)-on-its-input
+        // stage is O(n⁴). The coarse max — max(O(n²), O(n²)) = O(n²) — under-reports; the precise path
+        // substitutes the n²-size input and reports O(n^4).
+        let expand = costed(list_int(), list_int(), "O(n^2)", "O(n^2)", "quadratic", "size");
+        let square = costed(list_int(), list_int(), "O(n^2)", "O(n^2)", "preserving", "size");
+        let m = compose(&[expand, square]);
+        assert!(m.composable);
+        assert_eq!(m.complexity, "O(n^4)", "expanding pipeline is O(n^4), not the coarse max O(n^2)");
+        assert_eq!(m.complexity_basis, "precise (output-size substitution)");
+    }
+
+    #[test]
+    fn precise_complexity_tightens_after_a_size_collapse() {
+        // A size-collapsing stage (List -> scalar) makes a downstream size-measured cost O(1), so the
+        // composite is O(n), tighter than the coarse max(O(n), O(n^2)) = O(n^2).
+        let collapse = costed(list_int(), int_t(), "O(n)", "O(n)", "constant", "size");
+        let downstream = costed(int_t(), int_t(), "O(n^2)", "O(n^2)", "preserving", "size");
+        let m = compose(&[collapse, downstream]);
+        assert!(m.composable);
+        assert_eq!(m.complexity, "O(n)", "after a constant-size output, a size-measured cost is O(1)");
+        assert_eq!(m.complexity_basis, "precise (output-size substitution)");
+    }
+
+    #[test]
+    fn value_measured_stage_falls_back_to_coarse() {
+        // The collapsed scalar's VALUE (not its size) drives the downstream cost — size substitution is
+        // unsound, so the whole composite falls back to the coarse max bound (O(n^2)), not a false O(n).
+        let collapse = costed(list_int(), int_t(), "O(n)", "O(n)", "constant", "size");
+        let value_cost = costed(int_t(), int_t(), "O(n^2)", "O(n^2)", "preserving", "value");
+        let m = compose(&[collapse, value_cost]);
+        assert!(m.composable);
+        assert_eq!(m.complexity, "O(n^2)", "a value-measured stage forces the coarse bound");
+        assert_eq!(m.complexity_basis, "coarse upper bound");
+    }
+
+    #[test]
+    fn missing_cost_metadata_uses_the_coarse_bound() {
+        // reverse/length carry no `cost` field, so the composite is the coarse max bound (the basis says so).
+        let m = compose(&[load("reverse.json"), load("length.json")]);
+        assert!(m.composable);
+        assert_eq!(m.complexity_basis, "coarse upper bound");
     }
 
     #[test]

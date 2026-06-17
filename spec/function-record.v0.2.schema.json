@@ -125,9 +125,34 @@
           "type": "string",
           "pattern": "^O\\([^)]+\\)$"
         },
+        "cost": { "$ref": "#/$defs/cost" },
         "terminates": {
           "type": "string",
           "enum": ["always", "conditional", "never", "unknown"]
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "description": "Structured cost metadata enabling PRECISE complexity composition through pipelines (v0.3). `time` is the function's running-time class in terms of its input `measure`; `output_size` is how its result size relates to its input size, so a downstream stage's cost can be re-expressed in the pipeline's input size. The flat `complexity` string above is the coarse, composition-unaware bound; `cost` is the richer, composable form.",
+      "required": ["time", "output_size"],
+      "additionalProperties": false,
+      "properties": {
+        "time": {
+          "type": "string",
+          "pattern": "^O\\([^)]+\\)$",
+          "description": "Running-time class as a function of the input measure: O(1), O(log n), O(n), O(n log n), O(n^2), O(n^2 log n), O(n^3)."
+        },
+        "measure": {
+          "type": "string",
+          "enum": ["size", "value"],
+          "default": "size",
+          "description": "What `n` counts in `time`: the input's structural SIZE (e.g. list length) or its numeric VALUE (e.g. a counter a loop runs to). Only size-measured costs substitute soundly through a pipeline; a value-measured stage makes the composite fall back to the coarse bound."
+        },
+        "output_size": {
+          "type": "string",
+          "enum": ["constant", "preserving", "bounded", "quadratic", "cubic", "unknown"],
+          "description": "Output size vs input size: constant (O(1), e.g. length/head), preserving (Theta(n), e.g. reverse/map), bounded (<= n, e.g. filter), quadratic (Theta(n^2), an expanding stage), cubic (Theta(n^3)), or unknown."
         }
       }
     },

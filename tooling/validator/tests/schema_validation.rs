@@ -89,6 +89,26 @@ fn store_payload_resolves_the_versioned_record_schema() {
 }
 
 #[test]
+fn cost_metadata_is_accepted_and_validated() {
+    // The additive v0.3 `signature.cost` field (precise-complexity composition) validates; a bad
+    // `output_size` enum is rejected. (Records without `cost` still validate — see VALID_PAIRS.)
+    let mut rec = example("double.v0.2.json");
+    rec["signature"].as_object_mut().unwrap().insert(
+        "cost".into(),
+        json!({ "time": "O(n)", "measure": "size", "output_size": "preserving" }),
+    );
+    assert!(
+        check("function-record.v0.2.schema.json", &rec).is_ok(),
+        "a record carrying valid cost metadata must validate"
+    );
+    rec["signature"]["cost"]["output_size"] = json!("exponential"); // not in the enum
+    assert!(
+        check("function-record.v0.2.schema.json", &rec).is_err(),
+        "an out-of-enum output_size must be rejected"
+    );
+}
+
+#[test]
 fn unknown_field_is_rejected() {
     // `additionalProperties: false` everywhere — an unexpected key must fail.
     let mut v = example("map.json");
