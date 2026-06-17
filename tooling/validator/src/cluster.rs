@@ -9,10 +9,11 @@
 //! and within a bucket a union-find runs `prove_equivalent` pairwise (skipping pairs already merged).
 //! The canonical representative is the lexicographically smallest content-address in a class.
 //!
-//! Scope follows [`crate::equiv`] (v0.1): unary functions, at least one side of a pair non-recursive —
-//! so two mutually-recursive same-shape functions stay separate classes (we can't yet prove them equal),
-//! and only functions whose body this node holds participate. Cost within a shape bucket of size k is up
-//! to O(k²) solver calls; the shape bucketing is what keeps that from being O(n²) over the whole set.
+//! Scope follows [`crate::equiv`]: functions of any arity ≥ 1, at least one side of a pair
+//! non-recursive — so two mutually-recursive same-shape functions stay separate classes (we can't yet
+//! prove them equal), and only functions whose body this node holds participate. Cost within a shape
+//! bucket of size k is up to O(k²) solver calls; the shape bucketing is what keeps that from being
+//! O(n²) over the whole set.
 
 use serde_json::Value as J;
 use std::collections::HashMap;
@@ -132,6 +133,9 @@ mod tests {
     fn lam(p: &str, body: J) -> J {
         json!({ "kind": "lambda", "params": [{ "name": p }], "body": body })
     }
+    fn lam2(p: &str, q: &str, body: J) -> J {
+        json!({ "kind": "lambda", "params": [{ "name": p }, { "name": q }], "body": body })
+    }
     fn bap(f: &str, args: J) -> J {
         json!({ "kind": "app", "fn": { "kind": "var", "name": f }, "args": args })
     }
@@ -143,6 +147,9 @@ mod tests {
     }
     fn num_to_num() -> J {
         json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }], "result": { "kind": "builtin", "name": "int" } })
+    }
+    fn num2_to_num() -> J {
+        json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "int" }], "result": { "kind": "builtin", "name": "int" } })
     }
     fn list_to_list() -> J {
         let la = json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "var", "name": "a" }] });
@@ -174,6 +181,22 @@ mod tests {
         // Canonical rep is the smallest address in the class.
         let ab = class_of(&h('a'));
         assert_eq!(ab.first().unwrap(), &h('a'));
+    }
+
+    #[test]
+    fn clusters_binary_functions_into_classes() {
+        let Some(s) = solver() else { return };
+        let h = |c: char| format!("fn_{}", c.to_string().repeat(64));
+        let items = [
+            item(&h('a'), num2_to_num(), lam2("a", "b", bap("add", json!([v("a"), v("b")])))), // a + b
+            item(&h('b'), num2_to_num(), lam2("x", "y", bap("add", json!([v("y"), v("x")])))), // y + x (commuted)
+            item(&h('c'), num2_to_num(), lam2("a", "b", bap("sub", json!([v("a"), v("b")])))), // a - b (distinct)
+        ];
+        let classes = cluster(&items, s);
+        let class_of = |x: &str| classes.iter().find(|c| c.contains(&x.to_string())).unwrap().clone();
+        assert_eq!(class_of(&h('a')), class_of(&h('b')), "addition is commutative — same class");
+        assert_ne!(class_of(&h('a')), class_of(&h('c')), "subtraction is a distinct class");
+        assert_eq!(classes.len(), 2, "{classes:?}");
     }
 
     #[test]
