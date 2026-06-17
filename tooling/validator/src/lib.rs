@@ -40,6 +40,9 @@ pub use induct::{
     DEFAULT_LEMMA_DEPTH,
 };
 
+pub mod normalize;
+pub use normalize::{normal_equivalent, normalize};
+
 pub mod equiv;
 pub use equiv::{prove_equivalent, EquivVerdict};
 

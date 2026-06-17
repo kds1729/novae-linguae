@@ -16,11 +16,12 @@
 //! inducts on one while treating the rest as free, so a multi-argument law (e.g. `\a b -> add(a, b)` ≡
 //! `\a b -> add(b, a)`) is proved with exactly the same machinery as a unary one.
 //!
-//! Before either path runs, an **α-equivalence** fast path checks whether the two bodies are the same
-//! term up to consistent renaming of bound variables — hash-different but identical. That needs no
-//! solver and, crucially, decides the case where *both* functions recurse (which the law-building path
-//! can only report UNSUPPORTED), so two renamed copies of the same recursive function are recognized as
-//! equivalent.
+//! Before either path runs, a **normalization** fast path ([`crate::normalize`]) checks whether the two
+//! bodies share a canonical normal form — equal up to α-renaming, AC ordering of commutative operators
+//! (`add(a,b)` ≡ `add(b,a)`), constant folding, and identity elimination, every rewrite meaning-
+//! preserving. That needs no solver and, crucially, decides the case where *both* functions recurse
+//! (which the law-building path can only report UNSUPPORTED), so two renamed (or commuted, or folded)
+//! copies of the same function are recognized as equivalent.
 //!
 //! Out of scope (reported UNSUPPORTED): nullary constants, mismatched arity, and two mutually-recursive
 //! functions that are *not* α-equivalent (v0.1 inlines one side); a multi-argument *recursive list*
@@ -39,11 +40,11 @@ use crate::{
 pub enum EquivVerdict {
     /// Proved `∀x. f(x) = g(x)`. Carries any auxiliary lemmas the proof needed (empty if first-order).
     Equivalent(Vec<String>),
-    /// The two functions are identical up to consistent renaming of bound variables (α-equivalence),
-    /// established structurally without the solver. They are hash-different but the *same term* — and
-    /// because this needs no induction, it also covers the both-recursive case the solver path can only
-    /// report UNSUPPORTED.
-    EquivalentByRenaming,
+    /// The two functions share a canonical normal form ([`crate::normalize`]) — equal up to α-renaming,
+    /// AC ordering of commutative operators, constant folding, and identity elimination, all
+    /// meaning-preserving. Established structurally without the solver, so it also covers the both-recursive
+    /// case the solver path can only report UNSUPPORTED.
+    EquivalentByNormalization,
     /// A solver counterexample shows the functions differ; carries the model.
     Distinct(String),
     /// Could not decide (solver gave up, or induction did not close).
@@ -153,7 +154,7 @@ fn apply_self_spine(args: &[J]) -> J {
 /// different canonical name, e.g. `\a b -> add(a,b)` vs `\a b -> add(b,a)` stay distinct, left to the
 /// solver). Object-key order doesn't matter: only ordered binder lists drive the counter, and the result
 /// is compared as JSON values (order-independent).
-fn alpha_canonical(node: &J) -> J {
+pub(crate) fn alpha_canonical(node: &J) -> J {
     fn go(node: &J, env: &BTreeMap<String, String>, ctr: &mut usize) -> J {
         match node {
             J::Object(m) => {
@@ -276,12 +277,6 @@ fn alpha_canonical(node: &J) -> J {
     go(node, &BTreeMap::new(), &mut ctr)
 }
 
-/// Whether two bodies are equal up to consistent renaming of bound variables. Sound for equivalence: an
-/// α-renaming preserves meaning exactly, so this never reports a false equivalence (and, needing no
-/// solver, it decides the case where *both* functions recurse).
-fn alpha_equivalent(body_f: &J, body_g: &J) -> bool {
-    alpha_canonical(body_f) == alpha_canonical(body_g)
-}
 
 /// Prove (or refute) that the two bodies are extensionally equal: `∀x. f(x) = g(x)`.
 pub fn prove_equivalent(body_f: &J, body_g: &J, solver: &str) -> EquivVerdict {
@@ -298,11 +293,13 @@ pub fn prove_equivalent(body_f: &J, body_g: &J, solver: &str) -> EquivVerdict {
         return EquivVerdict::Unsupported("lambda has no body".into());
     };
 
-    // Fast path: if the two bodies are the same term up to bound-variable renaming, they are equivalent
-    // structurally — no solver, and it works even when both sides recurse (the one case the law-building
-    // path below reports UNSUPPORTED).
-    if alpha_equivalent(body_f, body_g) {
-        return EquivVerdict::EquivalentByRenaming;
+    // Fast path: if the two bodies share a canonical normal form (α-renaming + AC ordering + constant
+    // folding + identity elimination — every rewrite meaning-preserving), they are equivalent, decided
+    // structurally with no solver. This subsumes plain renaming, reconciles commuted operands
+    // (`add(a,b)` ≡ `add(b,a)`) without a solver call, and decides the case where BOTH sides recurse (the
+    // one the law-building path below can only report UNSUPPORTED).
+    if crate::normalize::normal_equivalent(body_f, body_g) {
+        return EquivVerdict::EquivalentByNormalization;
     }
 
     // One fresh quantified variable per argument position, shared by both sides (so the two parameter
@@ -432,12 +429,10 @@ mod tests {
 
     #[test]
     fn equivalent_binary_commutativity() {
-        let Some(s) = solver() else { return };
-        // \a b -> add(a, b) ≡ \a b -> add(b, a) — proved over every (a, b) by the first-order backend,
-        // exercising the multi-argument forall the unary cap used to forbid.
+        // \a b -> add(a, b) ≡ \a b -> add(b, a) — reconciled by AC normalization (no solver needed).
         let f = binop("a", "b", "add", "a", "b");
         let g = binop("a", "b", "add", "b", "a");
-        assert_eq!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(vec![]));
+        assert_eq!(prove_equivalent(&f, &g, "z3"), EquivVerdict::EquivalentByNormalization);
     }
 
     #[test]
@@ -480,33 +475,25 @@ mod tests {
     #[test]
     fn alpha_renamed_recursive_is_equivalent() {
         // Two copies of the same recursive function differing only in the bound parameter name. The
-        // solver path would report UNSUPPORTED (both recursive); α-equivalence decides it — and needs no
+        // solver path would report UNSUPPORTED (both recursive); normalization decides it — and needs no
         // solver, so this runs everywhere.
-        assert_eq!(prove_equivalent(&rec_len("xs"), &rec_len("ys"), "z3"), EquivVerdict::EquivalentByRenaming);
+        assert_eq!(prove_equivalent(&rec_len("xs"), &rec_len("ys"), "z3"), EquivVerdict::EquivalentByNormalization);
     }
 
     #[test]
-    fn alpha_renamed_nonrecursive_short_circuits_solver() {
+    fn renamed_nonrecursive_short_circuits_solver() {
         // \a b -> add(a,b) and \x y -> add(x,y) are the same term renamed — caught structurally, no solver.
         let f = binop("a", "b", "add", "a", "b");
         let g = binop("x", "y", "add", "x", "y");
-        assert_eq!(prove_equivalent(&f, &g, "z3"), EquivVerdict::EquivalentByRenaming);
+        assert_eq!(prove_equivalent(&f, &g, "z3"), EquivVerdict::EquivalentByNormalization);
     }
 
     #[test]
-    fn commutation_is_not_alpha_equivalent() {
-        // Renaming is structural: `add(a,b)` and `add(b,a)` use their variables in different positions, so
-        // they are NOT α-equivalent (they are still *semantically* equal — left to the solver path).
-        let f = binop("a", "b", "add", "a", "b");
-        let g = binop("a", "b", "add", "b", "a");
-        assert!(!alpha_equivalent(&f, &g));
-    }
-
-    #[test]
-    fn alpha_canonical_handles_let_shadowing() {
-        // \a -> let a = a in a  vs  \z -> let z = z in z — alpha-equivalent despite shadowing.
-        let shadow = |p: &str| json!({ "kind": "lambda", "params": [{ "name": p }], "body": {
-            "kind": "let", "name": p, "value": { "kind": "var", "name": p }, "body": { "kind": "var", "name": p } } });
-        assert!(alpha_equivalent(&shadow("a"), &shadow("z")));
+    fn subtraction_is_not_commutativized() {
+        // `sub` does not commute, so normalization must NOT reorder it: \a b -> sub(a,b) and
+        // \a b -> sub(b,a) are not normal-equal (they are genuinely distinct — left to the solver).
+        let f = binop("a", "b", "sub", "a", "b");
+        let g = binop("a", "b", "sub", "b", "a");
+        assert!(!matches!(prove_equivalent(&f, &g, "z3"), EquivVerdict::EquivalentByNormalization));
     }
 }

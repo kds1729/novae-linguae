@@ -277,6 +277,19 @@ enum Commands {
         #[arg(long, default_value = "z3")]
         solver: String,
     },
+    /// Rewrite a body-expression AST to its **canonical normal form** via meaning-preserving rewrites
+    /// (α-renaming of bound variables, AC ordering of commutative operators, constant folding, identity
+    /// elimination). Two functions with equal normal form are equivalent — decided with no solver. Prints
+    /// the normal form (its `expr_` content-address with `--hash`). A canonical artifact per equivalence
+    /// class, the rung above picking a representative.
+    Normalize {
+        /// Body-expression AST (a `lambda` or a bare expression).
+        #[arg(long)]
+        body: PathBuf,
+        /// Print the normal form's `expr_` content-address instead of the JSON.
+        #[arg(long)]
+        hash: bool,
+    },
     /// Nova Locutio agent loop: consume a signed message and emit a signed reply (spec/agent-loop.md).
     /// Handles `request`/`apply` (run the target on the value-expression args → an `assert` whose
     /// `predicate` claim is `eq(target(args…), result)`, self-verifiable by re-running),
@@ -526,6 +539,7 @@ fn main() -> ExitCode {
         Commands::Equiv { body_f, body_g, solver } => (cmd_equiv(&body_f, &body_g, &solver), false),
         Commands::Compose { records } => (cmd_compose(&records), false),
         Commands::Cluster { records, solver } => (cmd_cluster(&records, &solver), false),
+        Commands::Normalize { body, hash } => (cmd_normalize(&body, hash), false),
         Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
             (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
@@ -852,8 +866,8 @@ fn cmd_equiv(body_f: &PathBuf, body_g: &PathBuf, solver: &str) -> Result<()> {
             }
             Ok(())
         }
-        EquivVerdict::EquivalentByRenaming => {
-            println!("EQUIVALENT   f ≡ g (identical up to variable renaming; no solver needed)");
+        EquivVerdict::EquivalentByNormalization => {
+            println!("EQUIVALENT   f ≡ g (identical canonical normal form; no solver needed)");
             Ok(())
         }
         EquivVerdict::Distinct(model) => {
@@ -869,6 +883,18 @@ fn cmd_equiv(body_f: &PathBuf, body_g: &PathBuf, solver: &str) -> Result<()> {
         }
         EquivVerdict::NoSolver => Err(anyhow::anyhow!("NO-SOLVER    `{solver}` not found")),
     }
+}
+
+fn cmd_normalize(body: &PathBuf, hash: bool) -> Result<()> {
+    let b = nl_validator::read_json(body)?;
+    let nf = nl_validator::normalize(&b);
+    if hash {
+        let h = nl_validator::hash_artifact_with_kind(&nf, nl_validator::ArtifactKind::BodyExpression)?;
+        println!("{h}");
+    } else {
+        println!("{}", serde_json::to_string_pretty(&nf)?);
+    }
+    Ok(())
 }
 
 fn cmd_compose(records: &[PathBuf]) -> Result<()> {

@@ -10,10 +10,11 @@
 //! The canonical representative is the lexicographically smallest content-address in a class.
 //!
 //! Scope follows [`crate::equiv`]: functions of any arity ≥ 1, at least one side of a pair
-//! non-recursive — so two mutually-recursive same-shape functions stay separate classes unless they are
-//! α-equivalent (renamed copies of the same recursive term, which `equiv` recognizes structurally), and
-//! only functions whose body this node holds participate. Cost within a shape bucket of size k is up to
-//! O(k²) solver calls; the shape bucketing is what keeps that from being O(n²) over the whole set.
+//! non-recursive — so two mutually-recursive same-shape functions stay separate classes unless they
+//! share a normal form (renamed/commuted/folded copies of the same recursive term, which `equiv`
+//! recognizes structurally via [`crate::normalize`]), and only functions whose body this node holds
+//! participate. Cost within a shape bucket of size k is up to O(k²) solver calls; the shape bucketing is
+//! what keeps that from being O(n²) over the whole set.
 
 use serde_json::Value as J;
 use std::collections::HashMap;
@@ -80,11 +81,11 @@ pub fn cluster(items: &[(String, J, Option<J>)], solver: &str) -> Vec<Vec<String
                     continue; // already merged transitively
                 }
                 if let (Some(bi), Some(bj)) = (&items[i].2, &items[j].2) {
-                    // Merge on a proved equivalence OR a structural α-equivalence (renamed duplicates,
-                    // including ones both sides recurse — which the solver path can't decide).
+                    // Merge on a proved equivalence OR a structural normalization match (renamed/commuted/
+                    // folded duplicates, including ones both sides recurse — which the solver can't decide).
                     if matches!(
                         prove_equivalent(bi, bj, solver),
-                        EquivVerdict::Equivalent(_) | EquivVerdict::EquivalentByRenaming
+                        EquivVerdict::Equivalent(_) | EquivVerdict::EquivalentByNormalization
                     ) {
                         let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
                         parent[ri] = rj;
