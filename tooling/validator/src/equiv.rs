@@ -19,21 +19,29 @@
 //! Before either path runs, a **normalization** fast path ([`crate::normalize`]) checks whether the two
 //! bodies share a canonical normal form — equal up to α-renaming, AC ordering of commutative operators
 //! (`add(a,b)` ≡ `add(b,a)`), constant folding, and identity elimination, every rewrite meaning-
-//! preserving. That needs no solver and, crucially, decides the case where *both* functions recurse
-//! (which the law-building path can only report UNSUPPORTED), so two renamed (or commuted, or folded)
-//! copies of the same function are recognized as equivalent.
+//! preserving. That needs no solver and decides many cases where *both* functions recurse — two renamed
+//! (or commuted, or folded) copies of the same function are recognized as equivalent.
+//!
+//! When normalization does not reconcile two **both-recursive** single-list-parameter functions, a
+//! **two-recursive structural induction** is attempted ([`crate::induct::prove_equiv_by_induction`]):
+//! both bodies are emitted as `define-fun-rec`s and `∀xs. f(xs) = g(xs)` is discharged by induction over
+//! `xs`. This decides genuinely-different recursions that align step-for-step and differ in their element
+//! arithmetic (e.g. a list-sum written two ways) — which normalization can't see. Recursions that don't
+//! align (needing a stronger induction or a cross-function lemma) leave the step satisfiable and are
+//! reported UNKNOWN, never a false verdict.
 //!
 //! Out of scope (reported UNSUPPORTED): nullary constants, mismatched arity, and two mutually-recursive
-//! functions that are *not* α-equivalent (v0.1 inlines one side); a multi-argument *recursive list*
-//! function also exceeds the inductive fragment (a single list parameter) and degrades to UNKNOWN, never
-//! a false verdict. A clean DISTINCT comes only from a solver counterexample (the first-order path); a
-//! non-closing induction is reported UNKNOWN, not DISTINCT, since it is not a refutation.
+//! functions of arity > 1; a multi-argument *recursive list* function also exceeds the inductive fragment
+//! (a single list parameter) and degrades to UNKNOWN. A clean DISTINCT comes only from a solver
+//! counterexample (the first-order path); a non-closing induction is reported UNKNOWN, not DISTINCT,
+//! since it is not a refutation.
 
 use serde_json::{json, Value as J};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    prove_by_induction_with_exploration, prove_property, InductionOutcome, ProofOutcome, DEFAULT_LEMMA_DEPTH,
+    prove_by_induction_with_exploration, prove_equiv_by_induction, prove_property, InductionOutcome,
+    ProofOutcome, DEFAULT_LEMMA_DEPTH,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,7 +334,20 @@ pub fn prove_equivalent(body_f: &J, body_g: &J, solver: &str) -> EquivVerdict {
     } else if !f_rec {
         (eq(apply_self, subst_many(if_, &f_map)), Some(body_g))
     } else {
-        return EquivVerdict::Unsupported("both functions are recursive (v0.1 inlines one side)".into());
+        // Both sides recurse and normalization (the fast path above) did not reconcile them. Attempt a
+        // two-recursive structural induction (single list parameter): it decides lockstep recursions that
+        // differ in their element arithmetic, and reports UNKNOWN (never a false verdict) when the
+        // recursions don't align. Multi-argument recursive pairs remain out of scope.
+        if pf.len() == 1 {
+            return match prove_equiv_by_induction(body_f, body_g, solver) {
+                InductionOutcome::Proved => EquivVerdict::Equivalent(vec![]),
+                InductionOutcome::ProvedWithLemmas(ls) => EquivVerdict::Equivalent(ls),
+                InductionOutcome::NoSolver => EquivVerdict::NoSolver,
+                InductionOutcome::Unknown | InductionOutcome::Failed(_) => EquivVerdict::Unknown,
+                InductionOutcome::Unsupported(why) => EquivVerdict::Unsupported(why),
+            };
+        }
+        return EquivVerdict::Unsupported("both functions are recursive with arity > 1 (out of scope)".into());
     };
 
     // First-order SMT first; fall back to induction + lemma discovery (mirrors `prove`).
@@ -495,5 +516,47 @@ mod tests {
         let f = binop("a", "b", "sub", "a", "b");
         let g = binop("a", "b", "sub", "b", "a");
         assert!(!matches!(prove_equivalent(&f, &g, "z3"), EquivVerdict::EquivalentByNormalization));
+    }
+
+    // \xs -> case null(xs) of true -> 0 | false -> <step>, where `step` is over head(xs) and self(tail xs).
+    fn rec_over_list(step: J) -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "op": "null", "args": [{ "kind": "var", "name": "xs" }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": step }] } })
+    }
+    fn head_xs() -> J {
+        json!({ "kind": "app", "op": "head", "args": [{ "kind": "var", "name": "xs" }] })
+    }
+    fn self_tail() -> J {
+        json!({ "kind": "app", "op": "apply", "args": [
+            { "kind": "var", "name": "self" },
+            { "kind": "app", "op": "tail", "args": [{ "kind": "var", "name": "xs" }] }] })
+    }
+
+    #[test]
+    fn both_recursive_lockstep_sums_are_equivalent() {
+        let Some(s) = solver() else { return };
+        // sum, two ways: add(head, self(tail))  vs  sub(self(tail), neg(head)). Both recurse, both equal
+        // the list sum, and normalization can't reconcile them (sub/neg vs add) — decided by the
+        // two-recursive structural induction.
+        let f = rec_over_list(json!({ "kind": "app", "op": "add", "args": [head_xs(), self_tail()] }));
+        let g = rec_over_list(json!({ "kind": "app", "op": "sub",
+            "args": [self_tail(), { "kind": "app", "op": "neg", "args": [head_xs()] }] }));
+        assert_eq!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(vec![]));
+    }
+
+    #[test]
+    fn both_recursive_unequal_is_unknown_not_false() {
+        let Some(s) = solver() else { return };
+        // sum vs length — both recursive, genuinely NOT equal. The induction step stays satisfiable, so
+        // the verdict is UNKNOWN, never a false EQUIVALENT.
+        let sum = rec_over_list(json!({ "kind": "app", "op": "add", "args": [head_xs(), self_tail()] }));
+        let len = rec_over_list(json!({ "kind": "app", "op": "add",
+            "args": [{ "kind": "lit", "value": { "kind": "int", "value": 1 } }, self_tail()] }));
+        assert_eq!(prove_equivalent(&sum, &len, s), EquivVerdict::Unknown);
     }
 }

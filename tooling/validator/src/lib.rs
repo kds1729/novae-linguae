@@ -36,8 +36,8 @@ pub mod explore;
 pub mod induct;
 pub use induct::{
     build_induction, prove_by_induction, prove_by_induction_with_exploration,
-    prove_by_induction_with_lemmas, InductionCertificate, InductionOutcome, LemmaCertificate,
-    DEFAULT_LEMMA_DEPTH,
+    prove_by_induction_with_lemmas, prove_equiv_by_induction, InductionCertificate, InductionOutcome,
+    LemmaCertificate, DEFAULT_LEMMA_DEPTH,
 };
 
 pub mod normalize;

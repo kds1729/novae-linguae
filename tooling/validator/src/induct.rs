@@ -486,19 +486,19 @@ fn lower_app(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
             let (a, b) = (l(0)?, l(1)?);
             format!("(ite (>= {a} {b}) {a} {b})")
         }
-        // The recursive function under test, as an SMT `define-fun-rec` named `self`.
+        // The recursive function under test, as an SMT `define-fun-rec` named `self`. `self__g` is the
+        // reserved name for a *second* recursive function (used only by the two-recursive equivalence
+        // path, [`prove_equiv_by_induction`]); the single-self prover never emits it.
         "self" => format!("(self {})", l(0)?),
+        "self__g" => format!("(self__g {})", l(0)?),
         // Curried application: `apply(self, x)` → recursive call; `apply(f, x)` for any other function
         // variable → the modelled global `mapfn`.
-        "apply" => {
-            if args.first().and_then(|a| var_name(a)) == Some("self") {
-                format!("(self {})", l(1)?)
-            } else if args.first().and_then(|a| var_name(a)).is_some() {
-                format!("(mapfn {})", l(1)?)
-            } else {
-                bail!("unsupported application form (out of fragment)")
-            }
-        }
+        "apply" => match args.first().and_then(|a| var_name(a)) {
+            Some("self") => format!("(self {})", l(1)?),
+            Some("self__g") => format!("(self__g {})", l(1)?),
+            Some(_) => format!("(mapfn {})", l(1)?),
+            None => bail!("unsupported application form (out of fragment)"),
+        },
         other => bail!("unsupported operator `{other}` (out of fragment)"),
     })
 }
@@ -537,8 +537,16 @@ fn infer_result_sort(node: &J) -> Sort3 {
 /// list selectors/builtins — all of which [`lower`] now handles. Errors if the body is outside this
 /// shape (the caller maps that to UNSUPPORTED).
 fn lower_self_def(body: &J) -> Result<String> {
+    lower_rec_def(body, "self")
+}
+
+/// Like [`lower_self_def`] but emits the `define-fun-rec` under `smt_name`. The body's recursive calls
+/// must already reference `smt_name` (`self` for the single-self prover; a caller wanting a second
+/// recursive function renames `self` → its reserved name with [`rename_self`] first). [`lower`] recognizes
+/// `self` and the reserved `self__g` as recursive heads.
+fn lower_rec_def(body: &J, smt_name: &str) -> Result<String> {
     if body.get("kind").and_then(|k| k.as_str()) != Some("lambda") {
-        bail!("`self` body is not a lambda");
+        bail!("recursive body is not a lambda");
     }
     let params = body.get("params").and_then(|p| p.as_array()).ok_or_else(|| anyhow!("lambda has no params"))?;
     if params.len() != 1 {
@@ -550,10 +558,67 @@ fn lower_self_def(body: &J) -> Result<String> {
         Sort3::Int => "Int",
         Sort3::Bool => "Bool",
         Sort3::Lst => "Lst",
-        Sort3::Func | Sort3::Pred => bail!("`self` returns a function/predicate sort (out of fragment)"),
+        Sort3::Func | Sort3::Pred => bail!("recursive function returns a function/predicate sort (out of fragment)"),
     };
     let lowered = lower(inner, &BTreeMap::new())?; // the param lowers to itself, scoped by the define-fun-rec
-    Ok(format!("(define-fun-rec self (({param} Lst)) {ret} {lowered})\n"))
+    Ok(format!("(define-fun-rec {smt_name} (({param} Lst)) {ret} {lowered})\n"))
+}
+
+/// Rename every `self` recursion marker (the `self` *var* and the `self` *op*) to `new_name` throughout
+/// the AST — so a second recursive function's body, which also writes its recursion as `self`, can be
+/// lowered to its own `define-fun-rec`.
+fn rename_self(node: &J, new_name: &str) -> J {
+    match node {
+        J::Object(m) => {
+            let mut out: serde_json::Map<String, J> =
+                m.iter().map(|(k, v)| (k.clone(), rename_self(v, new_name))).collect();
+            if out.get("kind").and_then(|k| k.as_str()) == Some("var")
+                && out.get("name").and_then(|n| n.as_str()) == Some("self")
+            {
+                out.insert("name".into(), J::String(new_name.to_string()));
+            }
+            if out.get("op").and_then(|o| o.as_str()) == Some("self") {
+                out.insert("op".into(), J::String(new_name.to_string()));
+            }
+            J::Object(out)
+        }
+        J::Array(items) => J::Array(items.iter().map(|v| rename_self(v, new_name)).collect()),
+        other => other.clone(),
+    }
+}
+
+/// Decide `∀xs. f(xs) = g(xs)` for **two recursive** single-list-parameter functions by structural
+/// induction over `xs`. Both bodies are emitted as `define-fun-rec`s (`self` and the reserved `self__g`),
+/// and the base (`xs = nil`) and step (assume `f(t) = g(t)`, prove `f(cons h t) = g(cons h t)`) are
+/// discharged like any other induction. This decides the case where both functions recurse *in lockstep*
+/// over the list and the per-step obligation closes by the element theory + the IH (e.g. two list-sums
+/// written with different but equal element arithmetic) — which normalization can't reconcile and the
+/// single-side inlining can't reach. A recursion that does not align (different step shapes, needing a
+/// stronger induction or a cross-function lemma the solver won't invent) leaves the step satisfiable and
+/// is reported `Unknown`, never a false verdict. No lemma discovery (that machinery is keyed to the
+/// single-self list laws); bare base + step only.
+pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> InductionOutcome {
+    let def_f = match lower_self_def(body_f) {
+        Ok(s) => s,
+        Err(e) => return InductionOutcome::Unsupported(format!("{e:#}")),
+    };
+    let def_g = match lower_rec_def(&rename_self(body_g, "self__g"), "self__g") {
+        Ok(s) => s,
+        Err(e) => return InductionOutcome::Unsupported(format!("{e:#}")),
+    };
+    // Prelude defines the list operations either body uses (element ops / `self` are not list ops, so
+    // `collect_ops` ignores them); map/filter, if present, are modelled by the shared global `mapfn`.
+    let mut used = BTreeSet::new();
+    collect_ops(body_f, &mut used);
+    collect_ops(body_g, &mut used);
+    let prelude = build_prelude(&used, &FnModel::None, &FnModel::None);
+    let base = format!(
+        "{prelude}{def_f}{def_g}; base case: xs = nil\n(assert (not (= (self nil) (self__g nil))))\n(check-sat)\n"
+    );
+    let step = format!(
+        "{prelude}{def_f}{def_g}(declare-const h Int)\n(declare-const t Lst)\n; step case: assume f(t)=g(t), prove for (cons h t)\n(assert (= (self t) (self__g t)))\n(assert (not (= (self (cons h t)) (self__g (cons h t)))))\n(check-sat)\n"
+    );
+    discharge(&InductionCertificate { var: "xs".into(), base, step, lemmas: Vec::new() }, solver)
 }
 
 // --- prelude (datatype + recursive definitions) ---------------------------------------------------
