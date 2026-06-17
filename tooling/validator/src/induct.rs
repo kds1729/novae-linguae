@@ -587,10 +587,90 @@ fn rename_self(node: &J, new_name: &str) -> J {
     }
 }
 
-/// Largest recursion stride the two-recursive search tries. `k`-step induction aligns recursions whose
-/// strides have a least-common-multiple ≤ this (1-vs-1, 1-vs-2, 1-vs-3, 2-vs-2, …); 2-vs-3 (lcm 6) and
-/// non-constant strides are beyond it and report UNKNOWN.
-const MAX_STRIDE: usize = 3;
+/// Largest induction stride the two-recursive prover will use. `k`-step induction aligns recursions whose
+/// strides have a least-common-multiple ≤ this: 1-vs-1, 1-vs-2, 1-vs-3, 2-vs-2 (≤ 3) **and** 2-vs-3
+/// (lcm 6). Pairs whose alignment period exceeds 6 (e.g. 3-vs-4, lcm 12) or that recurse at a
+/// non-constant stride are beyond it and report UNKNOWN — never a false verdict.
+const MAX_STRIDE: usize = 6;
+
+/// Greatest common divisor (Euclid).
+fn gcd(a: usize, b: usize) -> usize {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+/// Least common multiple; `0` if either side is `0`.
+fn lcm(a: usize, b: usize) -> usize {
+    if a == 0 || b == 0 {
+        0
+    } else {
+        a / gcd(a, b) * b
+    }
+}
+
+/// Recursion **stride** of a single-list-parameter body: how many list elements each `self`-step
+/// consumes — the number of nested `tail` applications wrapping the recursion variable in the self-call's
+/// argument (`self(tail xs)` → 1, `self(tail(tail xs))` → 2). `Some(d)` when every self-call descends by
+/// the same positive `d`; `None` when there is no self-call or the descents disagree (then the k-step
+/// search falls back to trying each stride). Knowing the stride lets the prover target the single
+/// realigning stride `lcm(stride_f, stride_g)` directly instead of searching.
+fn recursion_stride(body: &J, self_name: &str) -> Option<usize> {
+    let mut depths = BTreeSet::new();
+    collect_self_descents(body, self_name, &mut depths);
+    match depths.len() {
+        1 => depths.into_iter().next().filter(|&d| d >= 1),
+        _ => None,
+    }
+}
+
+fn collect_self_descents(node: &J, self_name: &str, out: &mut BTreeSet<usize>) {
+    match node {
+        J::Object(m) => {
+            if let Some(arg) = self_call_arg(m, self_name) {
+                out.insert(tail_depth(arg));
+            }
+            for v in m.values() {
+                collect_self_descents(v, self_name, out);
+            }
+        }
+        J::Array(items) => items.iter().for_each(|v| collect_self_descents(v, self_name, out)),
+        _ => {}
+    }
+}
+
+/// If `m` is a self-call, return its recursion argument. Handles both the curried `apply(self, arg)`
+/// op-spine (how a property/equiv body writes recursion) and a direct `fn:{var:self}` application.
+fn self_call_arg<'a>(m: &'a serde_json::Map<String, J>, self_name: &str) -> Option<&'a J> {
+    let args = m.get("args")?.as_array()?;
+    if m.get("op").and_then(|o| o.as_str()) == Some("apply") {
+        if args.first().and_then(|f| f.get("name")).and_then(|n| n.as_str()) == Some(self_name) {
+            return args.get(1);
+        }
+    }
+    if m.get("fn").and_then(|f| f.get("name")).and_then(|n| n.as_str()) == Some(self_name) {
+        return args.first();
+    }
+    None
+}
+
+/// Number of nested `tail`/`tl` applications wrapping `node` (`tail(tail x)` → 2, a bare var → 0).
+fn tail_depth(node: &J) -> usize {
+    if let J::Object(m) = node {
+        let head = m
+            .get("op")
+            .and_then(|o| o.as_str())
+            .or_else(|| m.get("fn").and_then(|f| f.get("name")).and_then(|n| n.as_str()));
+        if matches!(head, Some("tail") | Some("tl")) {
+            if let Some(a0) = m.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()) {
+                return 1 + tail_depth(a0);
+            }
+        }
+    }
+    0
+}
 
 /// Decide `∀xs. f(xs) = g(xs)` for **two recursive** single-list-parameter functions by structural
 /// induction over `xs`. Both bodies are emitted as `define-fun-rec`s (`self` and the reserved `self__g`).
@@ -656,8 +736,23 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
     }
 
     // Phase 2 — proof. All base cases up to `MAX_STRIDE` are unsat, so a stride `k` proves the law as soon
-    // as its step `P(t) ⟹ P(cons^k(t))` discharges. Try increasing strides; the first that closes wins.
-    for k in 1..=MAX_STRIDE {
+    // as its step `P(t) ⟹ P(cons^k(t))` discharges. When both recursion strides are readable off the AST,
+    // the minimal realigning stride is exactly `lcm(stride_f, stride_g)` (1 for lockstep, 2 for 1-vs-2,
+    // 6 for 2-vs-3 …) — target it directly. If that lcm exceeds `MAX_STRIDE`, no stride we can afford will
+    // close it, so report UNKNOWN without burning solver time. Bodies whose stride can't be read fall back
+    // to searching every stride. The first stride whose step discharges wins.
+    let strides: Vec<usize> = match (recursion_stride(body_f, "self"), recursion_stride(body_g, "self")) {
+        (Some(a), Some(b)) => {
+            let k = lcm(a, b);
+            if (1..=MAX_STRIDE).contains(&k) {
+                vec![k]
+            } else {
+                return InductionOutcome::Unknown;
+            }
+        }
+        _ => (1..=MAX_STRIDE).collect(),
+    };
+    for k in strides {
         let (decls, lst) = spine("h", k, "t");
         let script = format!(
             "{preamble}{decls}(declare-const t Lst)\n; step (stride {k}): assume f(t)=g(t), prove for cons^{k}(t)\n(assert (= (self t) (self__g t)))\n(assert (not (= (self {lst}) (self__g {lst}))))\n(check-sat)\n"

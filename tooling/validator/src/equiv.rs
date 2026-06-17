@@ -593,6 +593,50 @@ mod tests {
         assert_eq!(prove_equivalent(&len1, &len2, s), EquivVerdict::Equivalent(vec![]));
     }
 
+    // `tail` applied `n` times to `xs`.
+    fn tail_n(n: usize) -> J {
+        let mut node = json!({ "kind": "var", "name": "xs" });
+        for _ in 0..n {
+            node = json!({ "kind": "app", "op": "tail", "args": [node] });
+        }
+        node
+    }
+
+    // `length` counted `k` elements per recursive step: case-guards for the short tails (lengths 0..k-1)
+    // and an `add(k, self(tail^k xs))` recursive arm. `length_by(1)` is ordinary length; `length_by(2)`
+    // reproduces the misaligned-strides test's `len2`.
+    fn length_by(k: usize) -> J {
+        let mut body = json!({ "kind": "app", "op": "add", "args": [
+            { "kind": "lit", "value": { "kind": "int", "value": k } },
+            { "kind": "app", "op": "apply", "args": [{ "kind": "var", "name": "self" }, tail_n(k)] }] });
+        for i in (1..k).rev() {
+            body = json!({ "kind": "case",
+                "scrutinee": { "kind": "app", "op": "null", "args": [tail_n(i)] },
+                "arms": [
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                      "body": { "kind": "lit", "value": { "kind": "int", "value": i } } },
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": body }] });
+        }
+        json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "op": "null", "args": [{ "kind": "var", "name": "xs" }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": body }] } })
+    }
+
+    #[test]
+    fn lcm6_strides_proved_by_kstep() {
+        let Some(s) = solver() else { return };
+        // length peeling TWO elements per step vs length peeling THREE — both equal the list length, but
+        // their recursions only realign every lcm(2,3) = 6 elements. This is beyond the old stride-3
+        // ceiling; the prover detects the strides, targets k = 6, and proves it.
+        let len2 = length_by(2);
+        let len3 = length_by(3);
+        assert_eq!(prove_equivalent(&len2, &len3, s), EquivVerdict::Equivalent(vec![]));
+    }
+
     #[test]
     fn map_law_beyond_first_order_now_proves() {
         let Some(s) = solver() else { return };
