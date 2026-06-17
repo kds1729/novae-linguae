@@ -584,6 +584,17 @@ pub fn eval(expr: &J, env: &Env) -> Result<Val> {
                 other => bail!("field projection on a non-record: {}", encode_value(&other)),
             }
         }
+        "variant" => {
+            // Variant construction with a *computed* payload (`Just(a / b)`): the tag is fixed, the payload
+            // is an expression evaluated in the current environment. (The `lit` path constructs only
+            // constant variants; this is the body-expression form.)
+            let tag = expr["tag"].as_str().ok_or_else(|| anyhow!("variant tag"))?.to_string();
+            let payload = match expr.get("payload") {
+                Some(p) => Some(Box::new(eval(p, env)?)),
+                None => None,
+            };
+            Ok(Val::Variant(tag, payload))
+        }
         other => bail!("unknown expression kind: {other}"),
     }
 }
@@ -1101,6 +1112,29 @@ mod tests {
         let runs = run_examples(&record, &body).unwrap();
         assert!(!runs[0].passed);
         assert_eq!(runs[0].got, encode_value(&Val::Int(4)));
+    }
+
+    #[test]
+    fn variant_construction_with_computed_payload() {
+        // \a b -> case b == 0 of { true => None; false => Just(a / b) } — a safe-division returning Maybe.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "eq" },
+                "args": [{ "kind": "var", "name": "b" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "variant", "tag": "None" } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": { "kind": "variant", "tag": "Just",
+                    "payload": { "kind": "app", "fn": { "kind": "var", "name": "div" },
+                        "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] } } }] } });
+        // safe_div(6, 2) = Just(3) — the payload is computed, not a constant.
+        assert_eq!(
+            eval_body(&body, &[nat(6), nat(2)]).unwrap(),
+            json!({ "kind": "variant", "tag": "Just", "payload": { "kind": "int", "value": 3 } })
+        );
+        // safe_div(1, 0) = None.
+        assert_eq!(eval_body(&body, &[nat(1), nat(0)]).unwrap(), json!({ "kind": "variant", "tag": "None" }));
     }
 
     #[test]

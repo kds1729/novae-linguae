@@ -27,6 +27,9 @@ A call-by-value lambda calculus over the value-expression AST
   (exhaustiveness is the checker's job, not the evaluator's). `if` does not exist — it is `case` on a
   `bool` (principle 8).
 - **`field`** projects a record field.
+- **`variant`** constructs a sum value — a fixed `tag` with an optional `payload` *expression* evaluated
+  in the current environment (`Just(a / b)`, `None`). This is the body-expression form; the `lit` path
+  builds only constant variants. Sum values are destructured by `case` over `variant` patterns.
 
 **Builtins** (total, pure): arithmetic (`add` `sub` `mul` `div` `mod` `neg` `abs` `min` `max`),
 comparison (`eq` `neq` `lt` `le` `gt` `ge`), booleans (`and` `or` `xor` `not`), lists (`nil` `cons`
@@ -61,9 +64,10 @@ Hindley-Milner inference, unifying the body's inferred type with the declared `s
 - Verdict: **WELL-TYPED** (with the type) or **ILL-TYPED** (with the mismatch, exit 1).
 
 **Scope (v0.1, honest).** `nat` is normalized to `int` (no refinement-aware checking here);
-sum/`variant` and `ref` (named-type-by-address) types are opaque, so `case` arms over them are checked
-structurally with fresh payload types rather than resolved; refinements and effects are separate
-concerns, not checked here.
+sum/`variant` and `ref` (named-type-by-address) types are opaque (a single `Sum`), so a `variant`
+construction types as `Sum` (its payload expression is still inferred, so an error inside it is caught)
+and unifies with any declared sum result, and `case` arms over a sum are checked structurally with fresh
+payload types rather than resolved; refinements and effects are separate concerns, not checked here.
 
 ## Run-backed property verification
 

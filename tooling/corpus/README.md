@@ -114,12 +114,15 @@ to be rejected*, for the stated reason. Today's five:
 
 ## Scope and where it grows
 
-40 examples today (34 positive, 6 negative), in three `category`s:
+44 examples today (38 positive, 6 negative), in three `category`s:
 
-- **function** (26) — Nova Lingua function records across seven families (unary integer, binary integer,
+- **function** (30) — Nova Lingua function records across nine families (unary integer, binary integer,
   boolean/predicate, list, list-transform: `map`/`filter`/`append`, composition: `foldl`-product /
-  `length`∘`filter`, and float: `square_f` / `double_f`), 13 with properties proved over the unbounded
-  domain, plus 3 negatives.
+  `length`∘`filter`, float: `square_f` / `double_f`, Maybe: `safe_div` / `first`, and Result:
+  `checked_div` / `checked_sub`), 13 with properties proved over the unbounded domain, plus 3 negatives.
+  The sum-typed (Maybe/Result) functions construct their variant result with a computed payload
+  (`Just(a / b)`, `Err(b)`); sum types are opaque to the prover, so they verify by schema +
+  typecheck + run rather than proof.
 - **exchange** (11) — Nova Locutio signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
   `verify-claim` CONFIRMED, `request`/`validate` → `assert`, `request`/`store` → `ack`, `propose` →
   `commit`, `commit` → `assert` (CONFIRMED), `delegate` → `ack`, `retract` → `ack`, `query` → `ack`),

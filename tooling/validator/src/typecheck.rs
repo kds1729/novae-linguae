@@ -441,6 +441,15 @@ fn infer(expr: &J, env: &Env, inf: &mut Infer) -> Result<Ty> {
                 other => bail!("field projection on a non-record type: {}", show(&inf.zonk(&other))),
             }
         }
+        "variant" => {
+            // Variant construction. Sum types are opaque (`Sum`), matching how a literal variant value is
+            // typed and how the `case` arms / `variant` patterns treat them. The payload expression is still
+            // inferred so type errors inside it are caught, but it does not constrain the result.
+            if let Some(p) = expr.get("payload") {
+                infer(p, env, inf)?;
+            }
+            Ok(con("Sum"))
+        }
         other => bail!("unknown expression kind: {other}"),
     }
 }
@@ -570,6 +579,36 @@ mod tests {
             "body": { "kind": "app", "fn": { "kind": "var", "name": "add" },
                       "args": [{ "kind": "var", "name": "x" }, { "kind": "var", "name": "x" }] } });
         assert!(typecheck(&poly, &dbl).is_err());
+    }
+
+    #[test]
+    fn variant_construction_against_a_sum_type() {
+        // \a b -> case b == 0 of { true => None; false => Just(a / b) } : int -> int -> [Just(int) None].
+        // Sum types are opaque, so the constructed variant unifies with the declared sum result.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "eq" },
+                "args": [{ "kind": "var", "name": "b" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "variant", "tag": "None" } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": { "kind": "variant", "tag": "Just",
+                    "payload": { "kind": "app", "fn": { "kind": "var", "name": "div" },
+                        "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] } } }] } });
+        let sum = json!({ "kind": "sum", "variants": [
+            { "tag": "Just", "type": { "kind": "builtin", "name": "int" } }, { "tag": "None" }] });
+        let ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "int" }],
+                         "result": sum });
+        assert!(typecheck(&ty, &body).is_ok(), "safe-div : int -> int -> Maybe int");
+        // A type error *inside* the payload is still caught: `Just(not(a))` needs `a : bool`, clashing with int.
+        let bad = json!({ "kind": "lambda", "params": [{ "name": "a" }], "body": {
+            "kind": "variant", "tag": "Just",
+            "payload": { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                "args": [{ "kind": "var", "name": "a" },
+                    { "kind": "app", "fn": { "kind": "var", "name": "not" }, "args": [{ "kind": "var", "name": "a" }] }] } } });
+        let bad_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }], "result": sum });
+        assert!(typecheck(&bad_ty, &bad).is_err(), "a payload type error is not hidden by the opaque Sum");
     }
 
     #[test]

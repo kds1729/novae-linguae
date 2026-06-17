@@ -35,8 +35,9 @@
 //!   Compound value literals (lists, tuples, records, variants) inside a body
 //!   are deferred — the surface grammar's `value` delegation collides with `(…)`
 //!   grouping, and the committed example bodies don't need them.
-//! * Bare uppercase `Tag`s are not valid in expression position (only in case
-//!   patterns), per the §4 ambiguity note.
+//! * Uppercase `Tag`s in expression position construct variants: `None` (nullary)
+//!   and `Tag(expr)` with a computed payload (`Just(a / b)`). The parenthesised
+//!   payload binds to the tag, so it is not read as a juxtaposition argument.
 
 use serde_json::{json, Value};
 
@@ -412,6 +413,22 @@ impl Parser {
                     ))
                 }
             }
+            TokKind::Tag => {
+                // Variant construction in expression position: `None` (nullary) or `Some(expr)` (the
+                // payload is an expression — e.g. `Just(a / b)`). The parenthesised payload is bound to
+                // the tag here, so it is not mistaken for a juxtaposition argument.
+                let t = self.bump();
+                let mut variant = serde_json::Map::new();
+                variant.insert("kind".to_string(), Value::String("variant".to_string()));
+                variant.insert("tag".to_string(), Value::String(t.text));
+                if self.at(&TokKind::Lparen) {
+                    self.bump();
+                    let payload = self.parse_expr()?;
+                    self.expect(TokKind::Rparen, "`)` after variant payload")?;
+                    variant.insert("payload".to_string(), payload);
+                }
+                Ok(Value::Object(variant))
+            }
             TokKind::Lparen => {
                 self.bump();
                 if self.at(&TokKind::Rparen) {
@@ -515,6 +532,16 @@ fn render(node: &Value) -> Result<(String, u8), SurfaceError> {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| SurfaceError::msg("`field` missing `name`"))?;
             Ok((format!("{}.{name}", sub(record, FIELD_PREC)?), FIELD_PREC))
+        }
+        "variant" => {
+            let tag = node
+                .get("tag")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| SurfaceError::msg("`variant` missing `tag`"))?;
+            match node.get("payload") {
+                Some(payload) => Ok((format!("{tag}({})", render(payload)?.0), ATOM_PREC)),
+                None => Ok((tag.to_string(), ATOM_PREC)),
+            }
         }
         "app" => render_app(node),
         "let" => {
@@ -822,10 +849,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_variant_construction() {
+        // Bare and applied tags in expression position construct variants (`None`, `Just(a / b)`).
+        parses_to("None", json!({ "kind": "variant", "tag": "None" }));
+        parses_to(
+            "Just(a / b)",
+            json!({ "kind": "variant", "tag": "Just",
+                "payload": { "kind": "app", "fn": { "kind": "var", "name": "div" },
+                    "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] } }),
+        );
+    }
+
+    #[test]
     fn parse_errors() {
         assert!(parse_body("let x = 1").is_err()); // missing `in`
         assert!(parse_body("case n of { }").is_err()); // need >=1 arm
-        assert!(parse_body("Tag").is_err()); // bare tag not allowed in expr
+        assert!(parse_body("Just(").is_err()); // unterminated variant payload
         assert!(parse_body("\\(n) -> n").is_err()); // typed-param needs `: type`
     }
 
@@ -849,6 +888,9 @@ mod tests {
             "\\(f: a -> b) (x: a) -> f x",
             "case n of { 0 => true; _ => false }",
             "case opt of { Some(x) => x; None => 0 }",
+            "None",
+            "Just(a / b)",
+            "case b == 0 of { true => None; false => Just(a / b) }",
         ] {
             let ast = parse_body(s).unwrap();
             let printed = unparse_body(&ast).unwrap();

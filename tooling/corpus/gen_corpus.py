@@ -96,6 +96,36 @@ def case_null(xs_name, nil_body, cons_body):
     }
 
 
+def case_bool(scrutinee, true_body, false_body):
+    """`case <scrutinee> of true -> true_body | false -> false_body` — a boolean two-way branch."""
+    return {
+        "kind": "case",
+        "scrutinee": scrutinee,
+        "arms": [
+            {"pattern": {"kind": "lit", "value": {"kind": "bool", "value": True}}, "body": true_body},
+            {"pattern": {"kind": "lit", "value": {"kind": "bool", "value": False}}, "body": false_body},
+        ],
+    }
+
+
+def variant_expr(tag, payload=None):
+    """A variant-construction BODY expression: `None` (nullary) or `Just(<payload expr>)`."""
+    v = {"kind": "variant", "tag": tag}
+    if payload is not None:
+        v["payload"] = payload
+    return v
+
+
+def maybe_t(elem):
+    """The sum type `[Just(elem) None]`."""
+    return {"kind": "sum", "variants": [{"tag": "Just", "type": elem}, {"tag": "None"}]}
+
+
+def result_t(ok_t, err_t):
+    """The sum type `[Ok(ok_t) Err(err_t)]`."""
+    return {"kind": "sum", "variants": [{"tag": "Ok", "type": ok_t}, {"tag": "Err", "type": err_t}]}
+
+
 INT = {"kind": "builtin", "name": "int"}
 NAT = {"kind": "builtin", "name": "nat"}
 BOOL = {"kind": "builtin", "name": "bool"}
@@ -115,6 +145,17 @@ def poly_list_fn(result):
     return {"kind": "forall", "vars": ["a"], "body": fn([list_of(var("a"))], result)}
 
 
+_NO_PAYLOAD = object()  # sentinel distinguishing a nullary variant from one with a `0`/falsey payload
+
+
+class V:
+    """A variant value for worked examples: `V("Just", 3)` or the nullary `V("None")`."""
+
+    def __init__(self, tag, payload=_NO_PAYLOAD):
+        self.tag = tag
+        self.payload = payload
+
+
 def to_value_ast(pyval):
     if isinstance(pyval, bool):
         return {"kind": "bool", "value": pyval}
@@ -124,6 +165,11 @@ def to_value_ast(pyval):
         return {"kind": "float", "value": pyval}
     if isinstance(pyval, list):
         return {"kind": "list", "elems": [to_value_ast(x) for x in pyval]}
+    if isinstance(pyval, V):
+        out = {"kind": "variant", "tag": pyval.tag}
+        if pyval.payload is not _NO_PAYLOAD:
+            out["payload"] = to_value_ast(pyval.payload)
+        return out
     raise ValueError(f"unsupported example value {pyval!r}")
 
 
@@ -304,9 +350,58 @@ def float_funcs():
     ]
 
 
+def maybe_funcs():
+    # Sum-typed (Maybe) functions: total functions that RETURN an optional, constructing the variant with
+    # a computed payload (`Just(a / b)`). Sum types are opaque to the prover, so these verify by
+    # validate + typecheck + run (no proofs) — the new ground they cover is variant construction.
+    a, b, xs = var("a"), var("b"), var("xs")
+    return [
+        {"name": "safe_div", "intent": "Divide two integers, returning nothing on division by zero.",
+         "summary": "Just(a / b) when b is nonzero; None when b is zero.", "tags": ["arithmetic", "maybe", "partial"],
+         "type_ast": fn([INT, INT], maybe_t(INT)),
+         "body_ast": lam(["a", "b"], case_bool(bapp("eq", b, int_lit(0)),
+                                               variant_expr("None"), variant_expr("Just", bapp("div", a, b)))),
+         "examples": [{"args": [6, 2], "result": V("Just", 3)}, {"args": [7, 0], "result": V("None")},
+                      {"args": [9, 3], "result": V("Just", 3)}],
+         "properties": [], "prove": False},
+        {"name": "first", "intent": "The first element of a list, if it has one.",
+         "summary": "Just(head xs) for a non-empty list; None for the empty list.", "tags": ["list", "maybe", "safe"],
+         "type_ast": poly_list_fn(maybe_t(var("a"))),
+         "body_ast": lam(["xs"], case_bool(bapp("null", xs),
+                                           variant_expr("None"), variant_expr("Just", bapp("head", xs)))),
+         "examples": [{"args": [[]], "result": V("None")}, {"args": [[1, 2, 3]], "result": V("Just", 1)},
+                      {"args": [[9]], "result": V("Just", 9)}],
+         "properties": [], "prove": False},
+    ]
+
+
+def result_funcs():
+    # Sum-typed (Result) functions: success carries a value, failure carries an error payload.
+    a, b = var("a"), var("b")
+    return [
+        {"name": "checked_div", "intent": "Divide two integers, reporting the divisor as an error when it is zero.",
+         "summary": "Ok(a / b) when b is nonzero; Err(b) when b is zero.", "tags": ["arithmetic", "result", "partial"],
+         "type_ast": fn([INT, INT], result_t(INT, INT)),
+         "body_ast": lam(["a", "b"], case_bool(bapp("eq", b, int_lit(0)),
+                                               variant_expr("Err", b), variant_expr("Ok", bapp("div", a, b)))),
+         "examples": [{"args": [8, 2], "result": V("Ok", 4)}, {"args": [5, 0], "result": V("Err", 0)},
+                      {"args": [10, 5], "result": V("Ok", 2)}],
+         "properties": [], "prove": False},
+        {"name": "checked_sub", "intent": "Subtract, erroring when the result would go negative.",
+         "summary": "Ok(a - b) when a >= b; Err(b) otherwise.", "tags": ["arithmetic", "result"],
+         "type_ast": fn([INT, INT], result_t(INT, INT)),
+         "body_ast": lam(["a", "b"], case_bool(bapp("ge", a, b),
+                                               variant_expr("Ok", bapp("sub", a, b)), variant_expr("Err", b))),
+         "examples": [{"args": [5, 3], "result": V("Ok", 2)}, {"args": [2, 6], "result": V("Err", 6)},
+                      {"args": [4, 4], "result": V("Ok", 0)}],
+         "properties": [], "prove": False},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
-            + list_transform_funcs() + composition_funcs() + float_funcs())
+            + list_transform_funcs() + composition_funcs() + float_funcs()
+            + maybe_funcs() + result_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -823,7 +918,8 @@ def main():
     families = {"unary_arith": len(unary_arith()), "binary_arith": len(binary_arith()),
                 "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs()),
                 "list_transform_funcs": len(list_transform_funcs()),
-                "composition_funcs": len(composition_funcs()), "float_funcs": len(float_funcs())}
+                "composition_funcs": len(composition_funcs()), "float_funcs": len(float_funcs()),
+                "maybe_funcs": len(maybe_funcs()), "result_funcs": len(result_funcs())}
     proved = sum(1 for ex in examples if ex["category"] == "function" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"
