@@ -10,10 +10,10 @@
 //! The canonical representative is the lexicographically smallest content-address in a class.
 //!
 //! Scope follows [`crate::equiv`]: functions of any arity ≥ 1, at least one side of a pair
-//! non-recursive — so two mutually-recursive same-shape functions stay separate classes (we can't yet
-//! prove them equal), and only functions whose body this node holds participate. Cost within a shape
-//! bucket of size k is up to O(k²) solver calls; the shape bucketing is what keeps that from being
-//! O(n²) over the whole set.
+//! non-recursive — so two mutually-recursive same-shape functions stay separate classes unless they are
+//! α-equivalent (renamed copies of the same recursive term, which `equiv` recognizes structurally), and
+//! only functions whose body this node holds participate. Cost within a shape bucket of size k is up to
+//! O(k²) solver calls; the shape bucketing is what keeps that from being O(n²) over the whole set.
 
 use serde_json::Value as J;
 use std::collections::HashMap;
@@ -80,7 +80,12 @@ pub fn cluster(items: &[(String, J, Option<J>)], solver: &str) -> Vec<Vec<String
                     continue; // already merged transitively
                 }
                 if let (Some(bi), Some(bj)) = (&items[i].2, &items[j].2) {
-                    if matches!(prove_equivalent(bi, bj, solver), EquivVerdict::Equivalent(_)) {
+                    // Merge on a proved equivalence OR a structural α-equivalence (renamed duplicates,
+                    // including ones both sides recurse — which the solver path can't decide).
+                    if matches!(
+                        prove_equivalent(bi, bj, solver),
+                        EquivVerdict::Equivalent(_) | EquivVerdict::EquivalentByRenaming
+                    ) {
                         let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
                         parent[ri] = rj;
                     }
@@ -155,6 +160,10 @@ mod tests {
         let la = json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "var", "name": "a" }] });
         json!({ "kind": "forall", "vars": ["a"], "body": { "kind": "fn", "params": [la.clone()], "result": la } })
     }
+    fn list_to_num() -> J {
+        let la = json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "var", "name": "a" }] });
+        json!({ "kind": "forall", "vars": ["a"], "body": { "kind": "fn", "params": [la], "result": { "kind": "builtin", "name": "nat" } } })
+    }
     fn item(hash: &str, ty: J, body: J) -> (String, J, Option<J>) {
         (hash.to_string(), json!({ "hash": hash, "signature": { "type": ty } }), Some(body))
     }
@@ -197,6 +206,29 @@ mod tests {
         assert_eq!(class_of(&h('a')), class_of(&h('b')), "addition is commutative — same class");
         assert_ne!(class_of(&h('a')), class_of(&h('c')), "subtraction is a distinct class");
         assert_eq!(classes.len(), 2, "{classes:?}");
+    }
+
+    #[test]
+    fn alpha_renamed_recursive_duplicates_cluster_without_solver() {
+        // Two records that are the SAME recursive function up to the bound parameter name — hash-different
+        // and both recursive (a length over a list). The solver path can't decide a both-recursive pair,
+        // but α-equivalence merges them, and it needs no solver, so this runs even without z3.
+        let rec = |p: &str| json!({ "kind": "lambda", "params": [{ "name": p }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "op": "null", "args": [v(p)] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": int(0) },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": {
+                    "kind": "app", "op": "add", "args": [ int(1),
+                        { "kind": "app", "op": "apply", "args": [ v("self"),
+                            { "kind": "app", "op": "tail", "args": [v(p)] }] }] } }] } });
+        let h = |c: char| format!("fn_{}", c.to_string().repeat(64));
+        let items = [
+            item(&h('a'), list_to_num(), rec("xs")),
+            item(&h('b'), list_to_num(), rec("ys")),
+        ];
+        let classes = cluster(&items, "z3");
+        assert_eq!(classes.len(), 1, "renamed recursive duplicates collapse into one class: {classes:?}");
     }
 
     #[test]

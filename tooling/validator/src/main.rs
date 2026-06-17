@@ -852,6 +852,10 @@ fn cmd_equiv(body_f: &PathBuf, body_g: &PathBuf, solver: &str) -> Result<()> {
             }
             Ok(())
         }
+        EquivVerdict::EquivalentByRenaming => {
+            println!("EQUIVALENT   f ≡ g (identical up to variable renaming; no solver needed)");
+            Ok(())
+        }
         EquivVerdict::Distinct(model) => {
             Err(anyhow::anyhow!("DISTINCT     counterexample: {}", if model.is_empty() { "(model)".into() } else { model }))
         }
