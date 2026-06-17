@@ -238,8 +238,37 @@ def list_funcs():
     return out
 
 
+def list_transform_funcs():
+    xs, ys, x = var("xs"), var("ys"), var("x")
+    return [
+        # map with an inline lambda — runnable (the evaluator applies the closure).
+        {"name": "negate_all", "intent": "Negate every number in a list.", "summary": "Maps neg over the list.",
+         "tags": ["list", "map", "elementwise"], "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], bapp("map", lam(["x"], bapp("neg", x)), xs)),
+         "examples": [{"args": [[]], "result": []}, {"args": [[1, -2, 3]], "result": [-1, 2, -3]}],
+         "properties": [], "prove": False},
+        # filter with an inline predicate.
+        {"name": "keep_positives", "intent": "Keep only the positive numbers in a list.",
+         "summary": "Filters the list to its positive elements.", "tags": ["list", "filter"],
+         "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], bapp("filter", lam(["x"], bapp("gt", x, int_lit(0))), xs)),
+         "examples": [{"args": [[]], "result": []}, {"args": [[1, -2, 3, 0]], "result": [1, 3]}],
+         "properties": [], "prove": False},
+        # append — binary; length is additive (proved over the builtins via the length_append lemma).
+        {"name": "concat", "intent": "Concatenate two lists.", "summary": "Appends the second list onto the first.",
+         "tags": ["list", "lossless"],
+         "type_ast": {"kind": "forall", "vars": ["a"], "body": fn([list_of(var("a")), list_of(var("a"))], list_of(var("a")))},
+         "body_ast": lam(["xs", "ys"], bapp("append", xs, ys)),
+         "examples": [{"args": [[], [1]], "result": [1]}, {"args": [[1, 2], [3, 4]], "result": [1, 2, 3, 4]}],
+         "properties": [{"name": "length_additive",
+                         "expr": forall(["xs", "ys"], op("eq", op("length", op("append", xs, ys)),
+                                                       op("add", op("length", xs), op("length", ys))))}],
+         "prove": True},
+    ]
+
+
 def all_specs():
-    return unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
+    return unary_arith() + binary_arith() + boolean_funcs() + list_funcs() + list_transform_funcs()
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -460,6 +489,29 @@ def nova_locutio_examples(commons_dir, by_name):
          ["agent-loop", "delegate", "capability"], "delegate", dsigned, dreply,
          "ACKED" if d_ok else (dreply.get("kind", "NO-REPLY").upper() if dreply else "NO-REPLY"), d_ok)
 
+    # (request/store is omitted: the message v0.2 schema's $ref for a `function-record-v0.2` store payload
+    # currently mis-resolves to the v0.1 record schema in the validator, so an embedded v0.2 record can't
+    # schema-validate — a validator ref-resolution gap, not a corpus one.)
+
+    # commit → assert: a received commitment to apply is fulfilled and asserted (claim re-runs true).
+    creq = {"schema_version": "0.2.0", "kind": "commit", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+            "constraints": None,
+            "body": {"commitment": {"kind": "apply", "fn": by_name["double"]["hash"], "args": [to_value_ast(21)]},
+                     "conditions": [], "expires_at": None}}
+    csigned = sign_message(creq, SENDER_SEED)
+    creply = respond_to(csigned, commons_dir)
+    c_conf = False
+    if creply and creply.get("kind") == "assert":
+        vp = _write_tmp(creply)
+        c_conf = cli(["verify-claim", "--records", commons_dir, vp]).returncode == 0
+        os.unlink(vp)
+    c_ok = (msg_schema_valid(csigned) and bool(creply) and msg_schema_valid(creply)
+            and creply.get("kind") == "assert" and creply.get("in_reply_to") == csigned.get("hash") and c_conf)
+    emit("commit_double", "Commit to computing double of 21.",
+         "commit/apply double to 21 → the responder fulfils the commitment and asserts the result, which re-runs true.",
+         ["agent-loop", "commit"], "commit", csigned, creply,
+         "CONFIRMED" if c_ok else (creply.get("kind", "NO-REPLY").upper() if creply else "NO-REPLY"), c_ok)
+
     # query → ack (discovery by intent tag).
     qreq = {"schema_version": "0.2.0", "kind": "query", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
             "constraints": None, "body": {"limit": 50, "pattern": {"intent_tags": ["list"]}}}
@@ -612,7 +664,8 @@ def main():
         by_modality[ex["modality"]] = by_modality.get(ex["modality"], 0) + 1
         by_polarity[ex["polarity"]] = by_polarity.get(ex["polarity"], 0) + 1
     families = {"unary_arith": len(unary_arith()), "binary_arith": len(binary_arith()),
-                "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs())}
+                "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs()),
+                "list_transform_funcs": len(list_transform_funcs())}
     proved = sum(1 for ex in examples if ex["modality"] == "nova_lingua" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"
