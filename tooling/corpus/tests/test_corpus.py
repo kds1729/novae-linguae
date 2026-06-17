@@ -28,25 +28,42 @@ def _load(path):
 class CommittedCorpusTests(unittest.TestCase):
     def test_every_example_is_fully_verified(self):
         examples = _load(_CORPUS)
-        self.assertGreaterEqual(len(examples), 12)
+        self.assertGreaterEqual(len(examples), 16)
+        self.assertTrue(any(e["modality"] == "nova_lingua" for e in examples))
+        self.assertTrue(any(e["modality"] == "nova_locutio" for e in examples))
         for ex in examples:
             v = ex["verification"]
-            self.assertTrue(v["schema_valid"], f"{ex['id']} not schema-valid")
-            self.assertTrue(v["well_typed"], f"{ex['id']} not well-typed")
-            self.assertNotEqual(v["examples_passed"], "FAILED", f"{ex['id']} examples failed")
-            for p in v["proofs"]:
-                self.assertEqual(p["verdict"], "PROVED", f"{ex['id']} property {p['name']} not proved")
+            if ex["modality"] == "nova_lingua":
+                self.assertTrue(v["schema_valid"], f"{ex['id']} not schema-valid")
+                self.assertTrue(v["well_typed"], f"{ex['id']} not well-typed")
+                self.assertNotEqual(v["examples_passed"], "FAILED", f"{ex['id']} examples failed")
+                for p in v["proofs"]:
+                    self.assertEqual(p["verdict"], "PROVED", f"{ex['id']} property {p['name']} not proved")
+            else:  # nova_locutio — a signed agent-loop exchange
+                self.assertTrue(v["request_schema_valid"], f"{ex['id']} request not schema-valid")
+                self.assertTrue(v["reply_schema_valid"], f"{ex['id']} reply not schema-valid")
+                self.assertTrue(v["threaded"], f"{ex['id']} reply not threaded to request")
+                if ex["views"]["speech_act"] == "request":
+                    self.assertEqual(v["outcome"], "CONFIRMED", f"{ex['id']} claim not confirmed")
 
     def test_every_example_has_all_views(self):
         for ex in _load(_CORPUS):
-            for key in ("intent", "summary", "tags"):
+            for key in ("intent", "summary", "tags", "modality"):
                 self.assertTrue(ex.get(key), f"{ex['id']} missing {key}")
             views = ex["views"]
-            for key in ("surface_type", "surface_body", "record", "body", "examples"):
-                self.assertIsNotNone(views.get(key), f"{ex['id']} missing view {key}")
-            # The record's content-address is a real fn_ hash and its body a real expr_ address.
-            self.assertTrue(views["record"]["hash"].startswith("fn_"))
-            self.assertTrue(views["record"]["body_hash"].startswith("expr_"))
+            if ex["modality"] == "nova_lingua":
+                for key in ("surface_type", "surface_body", "record", "body", "examples"):
+                    self.assertIsNotNone(views.get(key), f"{ex['id']} missing view {key}")
+                self.assertTrue(views["record"]["hash"].startswith("fn_"))
+                self.assertTrue(views["record"]["body_hash"].startswith("expr_"))
+            else:  # nova_locutio
+                for key in ("speech_act", "request", "reply"):
+                    self.assertIsNotNone(views.get(key), f"{ex['id']} missing view {key}")
+                # Both messages are real signed Nova Locutio messages.
+                for m in (views["request"], views["reply"]):
+                    self.assertTrue(m["hash"].startswith("msg_"))
+                    self.assertTrue(m["signature"].startswith("ed25519:"))
+                    self.assertTrue(m["from"].startswith("did:nova:"))
 
 
 class RegenerationTests(unittest.TestCase):

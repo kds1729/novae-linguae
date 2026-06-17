@@ -35,6 +35,13 @@ from nl_core import build_v2_record, expr_address, write_runnable_dir  # noqa: E
 
 VALIDATOR = _REPO / "tooling" / "validator" / "target" / "release" / "nl-validator"
 SCHEMA = _REPO / "spec" / "function-record.v0.2.schema.json"
+MSG_SCHEMA = _REPO / "spec" / "message.v0.2.schema.json"
+
+# Deterministic identities + timestamp for the Nova Locutio exchanges (same seed = same key = same
+# signature, so the corpus stays byte-reproducible — principle 5).
+SENDER_SEED = "novae-linguae-corpus-sender"
+RESPONDER_SEED = "novae-linguae-corpus-responder"
+MSG_TS = "2026-06-17T00:00:00Z"
 
 # --- AST builders --------------------------------------------------------------------------------
 
@@ -260,6 +267,7 @@ def build_and_verify(spec, workdir):
 
     example = {
         "id": spec["name"],
+        "modality": "nova_lingua",
         "intent": spec["intent"],
         "summary": spec["summary"],
         "tags": spec["tags"],
@@ -283,6 +291,136 @@ def build_and_verify(spec, workdir):
     return example, ok
 
 
+# --- Nova Locutio: verified agent-loop exchanges -------------------------------------------------
+#
+# Each example is a real SIGNED exchange: a request / propose / query is constructed, signed as the
+# sender, and answered by `nl-validator respond` (the agent loop) under the responder's signing identity.
+# The verification is the agent loop's own — a request/apply reply is an `assert` whose claim *re-runs
+# true* (`verify-claim` CONFIRMED, principle 3); a propose is answered with a `commit` only after the
+# responder test-runs it; a query is answered with an `ack` of the matches — and both messages
+# schema-validate against message.v0.2 and the reply is correctly threaded back to the request.
+
+def _write_tmp(obj):
+    f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+    json.dump(obj, f)
+    f.close()
+    return f.name
+
+
+def sign_message(msg, seed):
+    p = _write_tmp(msg)
+    out = cli(["sign", "--seed", seed, p]).stdout
+    os.unlink(p)
+    return json.loads(out) if out.strip() else None
+
+
+def responder_did(seed):
+    """Derive a seed's did:nova identity by signing a throwaway message and reading its `from`."""
+    tmpl = {"schema_version": "0.2.0", "kind": "query", "in_reply_to": None, "timestamp": MSG_TS,
+            "to": "did:nova:" + "0" * 64, "constraints": None, "body": {"limit": 1, "pattern": {}}}
+    signed = sign_message(tmpl, seed)
+    return signed["from"] if signed else None
+
+
+def msg_schema_valid(msg):
+    p = _write_tmp(msg)
+    rc = cli(["validate", str(MSG_SCHEMA), p]).returncode
+    os.unlink(p)
+    return rc == 0
+
+
+def respond_to(signed_request, commons_dir):
+    p = _write_tmp(signed_request)
+    r = cli(["respond", "--records", commons_dir, "--seed", RESPONDER_SEED, p])
+    os.unlink(p)
+    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
+
+
+def build_commons(workdir, specs):
+    """A shared commons directory holding every runnable record (and its body), for the agent loop to
+    discover and run against. Returns the directory and a {name: record} map."""
+    records, bodies, by_name = [], {}, {}
+    for spec in specs:
+        ex = [{"args": [to_value_ast(a) for a in e["args"]], "result": to_value_ast(e["result"])} for e in spec["examples"]]
+        terminates = "always" if spec["name"] != "sum" else "unknown"
+        rec = build_v2_record(spec["name"], spec["type_ast"], ex, spec["body_ast"],
+                              properties=spec.get("properties") or None, intent_tags=spec["tags"], terminates=terminates)
+        addr = expr_address(spec["body_ast"])
+        records.append(rec)
+        bodies[addr] = spec["body_ast"]
+        by_name[spec["name"]] = rec
+    d = os.path.join(workdir, "_commons")
+    write_runnable_dir(d, records, bodies)
+    return d, by_name
+
+
+def nova_locutio_examples(commons_dir, by_name):
+    resp_did = responder_did(RESPONDER_SEED)
+    if not resp_did:
+        return []
+    out = []
+
+    def emit(ident, intent, summary, tags, act, request, reply, outcome, ok):
+        out.append({
+            "id": "locutio_" + ident, "modality": "nova_locutio", "intent": intent, "summary": summary, "tags": tags,
+            "views": {"speech_act": act, "request": request, "reply": reply, "reply_act": reply.get("kind") if reply else None},
+            "verification": {
+                "request_schema_valid": msg_schema_valid(request),
+                "reply_schema_valid": bool(reply) and msg_schema_valid(reply),
+                "threaded": bool(reply) and reply.get("in_reply_to") == request.get("hash"),
+                "outcome": outcome,
+            },
+            "_ok": ok,
+        })
+
+    # request/apply and propose exchanges.
+    apply_rows = [
+        ("apply_double", "Ask an agent to compute double of 21.",
+         "request/apply double to 21 → the responder runs it and asserts double(21) = 42, which re-runs true.",
+         "request", "double", [21], ["agent-loop", "request", "apply"]),
+        ("apply_add", "Ask an agent to add 3 and 4.",
+         "request/apply add to (3, 4) → the responder asserts add(3, 4) = 7, which re-runs true.",
+         "request", "add2", [3, 4], ["agent-loop", "request", "apply"]),
+        ("propose_double", "Propose that an agent compute double of 21.",
+         "propose/apply double to 21 → the responder test-runs it and commits.",
+         "propose", "double", [21], ["agent-loop", "propose"]),
+    ]
+    for ident, intent, summary, kind, tname, pyargs, tags in apply_rows:
+        body = {"action": "apply", "target": by_name[tname]["hash"], "args": [to_value_ast(a) for a in pyargs]}
+        req = {"schema_version": "0.2.0", "kind": kind, "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+               "constraints": {"budget_tokens": 1000, "capabilities": [], "deadline_ms": 5000}, "body": body}
+        signed = sign_message(req, SENDER_SEED)
+        reply = respond_to(signed, commons_dir)
+        schema_ok = msg_schema_valid(signed) and bool(reply) and msg_schema_valid(reply)
+        threaded = bool(reply) and reply.get("in_reply_to") == signed.get("hash") and reply.get("to") == signed.get("from")
+        if kind == "request":
+            confirmed = False
+            if reply and reply.get("kind") == "assert":
+                vp = _write_tmp(reply)
+                confirmed = cli(["verify-claim", "--records", commons_dir, vp]).returncode == 0
+                os.unlink(vp)
+            outcome = "CONFIRMED" if confirmed else "NOT-CONFIRMED"
+            emit(ident, intent, summary, tags, kind, signed, reply, outcome, schema_ok and threaded and confirmed)
+        else:  # propose
+            committed = bool(reply) and reply.get("kind") == "commit"
+            emit(ident, intent, summary, tags, kind, signed, reply, (reply.get("kind").upper() if reply else "NO-REPLY"),
+                 schema_ok and threaded and committed)
+
+    # query → ack (discovery by intent tag).
+    qreq = {"schema_version": "0.2.0", "kind": "query", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+            "constraints": None, "body": {"limit": 50, "pattern": {"intent_tags": ["list"]}}}
+    qsigned = sign_message(qreq, SENDER_SEED)
+    qreply = respond_to(qsigned, commons_dir)
+    matches = qreply.get("body", {}).get("result", {}).get("matches", []) if qreply else []
+    qok = (msg_schema_valid(qsigned) and bool(qreply) and msg_schema_valid(qreply)
+           and qreply.get("kind") == "ack" and len(matches) > 0
+           and qreply.get("in_reply_to") == qsigned.get("hash"))
+    emit("query_list", "Find functions that operate on lists.",
+         "query for functions tagged `list` → the responder acks with the matching content-addresses.",
+         ["agent-loop", "query", "discovery"], "query", qsigned, qreply, f"ACK {len(matches)} match(es)", qok)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="Generate a verified Nova Lingua training corpus (JSONL).")
     ap.add_argument("--out", default=str(_HERE.parent / "corpus.jsonl"), help="output JSONL path")
@@ -296,35 +434,54 @@ def main():
     specs = all_specs()
     examples, dropped = [], []
     with tempfile.TemporaryDirectory(prefix="nlcorpus-") as wd:
+        # Nova Lingua — verified function records.
         for spec in specs:
             ex, ok = build_and_verify(spec, wd)
             if ok or args.keep_unverified:
                 examples.append(ex)
             if not ok:
                 dropped.append((spec["name"], ex["verification"]))
+        # Nova Locutio — verified agent-loop exchanges over a shared commons of the same functions.
+        commons_dir, by_name = build_commons(wd, specs)
+        for ex in nova_locutio_examples(commons_dir, by_name):
+            ok = ex.pop("_ok")
+            if ok or args.keep_unverified:
+                examples.append(ex)
+            if not ok:
+                dropped.append((ex["id"], ex["verification"]))
 
     with open(args.out, "w", encoding="utf-8") as fh:
         for ex in examples:
             fh.write(json.dumps(ex, ensure_ascii=False) + "\n")
 
+    by_modality = {}
+    for ex in examples:
+        by_modality[ex["modality"]] = by_modality.get(ex["modality"], 0) + 1
     families = {"unary_arith": len(unary_arith()), "binary_arith": len(binary_arith()), "list_funcs": len(list_funcs())}
-    proved = sum(1 for ex in examples for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
+    proved = sum(1 for ex in examples if ex["modality"] == "nova_lingua"
+                 for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
+    confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio"
+                    and ex["verification"]["outcome"] == "CONFIRMED")
     manifest = {
         "corpus": os.path.basename(args.out),
         "examples": len(examples),
-        "families": families,
+        "by_modality": by_modality,
+        "nova_lingua_families": families,
         "verified_all": len(dropped) == 0,
         "proved_properties": proved,
-        "schema": "function-record.v0.2.schema.json (v0.2.0)",
-        "note": "Every example is schema-valid, well-typed, executes its examples, and (where stated) "
-                "proves its properties over the unbounded domain — checked by nl-validator.",
+        "confirmed_agent_loop_claims": confirmed,
+        "schema": "function-record.v0.2.schema.json + message.v0.2.schema.json (v0.2.0)",
+        "note": "Every Nova Lingua example is schema-valid, well-typed, executes its examples, and (where "
+                "stated) proves its properties over the unbounded domain. Every Nova Locutio example is a "
+                "signed agent-loop exchange whose reply schema-validates and (for request/apply) re-runs "
+                "true via verify-claim. All checked by nl-validator.",
     }
     with open(args.out + ".manifest.json", "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
         fh.write("\n")
 
     print(f"wrote {len(examples)} verified examples -> {args.out}")
-    print(f"  families: {families}; properties PROVED: {proved}")
+    print(f"  modality: {by_modality}; properties PROVED: {proved}; agent-loop claims CONFIRMED: {confirmed}")
     if dropped:
         print(f"  DROPPED {len(dropped)} unverified: {[n for n, _ in dropped]}", file=sys.stderr)
         for name, v in dropped:

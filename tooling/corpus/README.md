@@ -1,8 +1,9 @@
 # Synthetic training corpus
 
-A generator for a **verified** Nova Lingua training corpus, addressing the project's standing "training
-data" open problem: no model speaks Nova Lingua fluently on day one, and the corpus is part of the
-project rather than a follow-on.
+A generator for a **verified** training corpus spanning **both** languages — *Nova Lingua* (function
+records) and *Nova Locutio* (agent-loop message exchanges) — addressing the project's standing "training
+data" open problem: no model speaks them fluently on day one, and the corpus is part of the project
+rather than a follow-on. Each example carries a `modality` of `nova_lingua` or `nova_locutio`.
 
 The distinguishing constraint is the project's own thesis — *verified by default*. A training corpus full
 of plausible-but-wrong artifacts teaches a model to emit plausible-but-wrong artifacts. So every example
@@ -51,6 +52,37 @@ function, so a model can learn the bidirectional NL ↔ Nova Lingua mapping and 
 Properties are stated as a *different* expression than the body where possible (double's body is
 `add(n, n)` but its law says `self(n) = 2·n`), so the proof is non-trivial.
 
+A **Nova Locutio** example (`"modality": "nova_locutio"`) is a real **signed agent-loop exchange** — a
+natural-language intent paired with the message a sender would emit and the reply the responder
+(`nl-validator respond`) actually produces:
+
+```jsonc
+{
+  "id": "locutio_apply_double",
+  "modality": "nova_locutio",
+  "intent": "Ask an agent to compute double of 21.",
+  "views": {
+    "speech_act": "request",
+    "request":  { "kind": "request", "body": { "action": "apply", "target": "fn_…", "args": [ … 21 … ] },
+                  "from": "did:nova:…", "signature": "ed25519:…", "hash": "msg_…", ... },
+    "reply":    { "kind": "assert",  "body": { "claim": { … eq(double(21), 42) … } },
+                  "from": "did:nova:…", "signature": "ed25519:…", "in_reply_to": "msg_…", ... },
+    "reply_act": "assert"
+  },
+  "verification": {
+    "request_schema_valid": true,
+    "reply_schema_valid": true,
+    "threaded": true,                  // reply.in_reply_to == request.hash, addressed back to the sender
+    "outcome": "CONFIRMED"             // the assert's claim re-ran true via verify-claim (principle 3)
+  }
+}
+```
+
+The verification is the agent loop's own: a `request`/`apply` is answered with an `assert` whose claim
+**re-runs true** (`verify-claim`), a `propose` is answered with a `commit` only after the responder
+test-runs it, and a `query` is answered with an `ack` of the matching content-addresses. Identities are
+deterministic (fixed seeds), so the signed exchanges are byte-reproducible.
+
 ## Running it
 
 ```bash
@@ -66,10 +98,16 @@ families enumerate a fixed set, no RNG — principle 5), so the corpus is byte-r
 
 ## Scope (v0.1) and where it grows
 
-Three families today — unary integer functions, binary integer functions, and list functions
-(`foldl`-sum, `reverse`, `length`) — 12 examples, 10 with properties proved over the unbounded domain.
-This is the seam, not the ceiling: more families (string/Maybe/Result functions, multi-stage compositions
-via `compose`, higher-order `map`/`filter` laws now that they discharge), the *Nova Locutio* side (intent →
-`request`/`query`/`propose` message exemplars), and negative examples (an artifact paired with the
-verification verdict that *rejects* it — equally valuable training signal) all drop in behind the same
-"generate → verify → emit" pipeline.
+16 examples today:
+
+- **Nova Lingua** (12) — three families (unary integer, binary integer, and list functions:
+  `foldl`-sum / `reverse` / `length`), 10 with properties proved over the unbounded domain.
+- **Nova Locutio** (4) — signed agent-loop exchanges: `request`/`apply` → `assert` (×2, both
+  `verify-claim` CONFIRMED), `propose` → `commit`, and `query` → `ack`.
+
+This is the seam, not the ceiling, all behind the same "generate → verify → emit" pipeline: more Nova
+Lingua families (string / `Maybe` / `Result` functions, multi-stage `compose` pipelines, higher-order
+`map`/`filter` laws now that they discharge); more Nova Locutio speech acts (`delegate`/`retract`,
+`store`, and full multi-turn orchestrated transcripts via `orchestrate`); and **negative examples** — an
+artifact paired with the verification verdict that *rejects* it (an ill-typed body, a refuted property, a
+claim that fails to re-run), an equally valuable training signal.
