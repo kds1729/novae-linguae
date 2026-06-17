@@ -95,6 +95,24 @@ class PythonBodyTests(unittest.TestCase):
         inner = body["body"]["body"]  # lambda -> (let acc=0 in <let acc=foldl(...) in acc>)
         self.assertEqual(inner["value"]["fn"], {"kind": "var", "name": "foldl"})
 
+    def test_augmented_accumulator_loop_becomes_foldl(self):
+        # `acc += x` is the common idiom — equivalent to the explicit `acc = acc + x` form.
+        aug = py_body("def f(xs):\n    acc = 0\n    for x in xs:\n        acc += x\n    return acc")
+        plain = py_body("def f(xs):\n    acc = 0\n    for x in xs:\n        acc = acc + x\n    return acc")
+        self.assertEqual(aug, plain)
+        prod = py_body("def f(xs):\n    acc = 1\n    for x in xs:\n        acc *= x\n    return acc")
+        fold = prod["body"]["body"]["value"]
+        self.assertEqual(fold["fn"], {"kind": "var", "name": "foldl"})
+        # update lambda body is `mul(acc, x)`
+        self.assertEqual(fold["args"][0]["body"]["fn"], {"kind": "var", "name": "mul"})
+
+    def test_top_level_augmented_assignment_becomes_let(self):
+        # `n += 1` outside a loop re-binds n to add(n, 1).
+        body = py_body("def f(n):\n    n += 1\n    return n")
+        let = body["body"]  # lambda -> let n = add(n,1) in n
+        self.assertEqual(let["kind"], "let")
+        self.assertEqual(let["value"]["fn"], {"kind": "var", "name": "add"})
+
     def test_out_of_subset_returns_none(self):
         self.assertIsNone(py_body("def f(x):\n    if x:\n        return 1\n    return 0"))  # truthy non-bool test
         self.assertIsNone(py_body("def f(x):\n    return [i for r in x for i in r]"))  # multi-generator comp

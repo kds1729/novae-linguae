@@ -216,6 +216,16 @@ def _block_from_py(stmts):
         if not isinstance(head.target, ast.Name) or head.value is None:
             raise BodyError("annotated assignment must be `name: T = value`")
         return b_let(head.target.id, _expr_from_py(head.value), _block_from_py(tail))
+    if isinstance(head, ast.AugAssign):
+        # `acc += e` (or -=, *=, /=, %=) re-binds `acc` to `acc <op> e` — a `let` over the rest. `acc`
+        # must already be bound (a parameter or a preceding assignment).
+        if not isinstance(head.target, ast.Name):
+            raise BodyError("augmented assignment must target a single name")
+        if type(head.op) not in _PY_BIN:
+            raise BodyError("unsupported augmented-assignment operator")
+        name = head.target.id
+        update = _op_app(_PY_BIN[type(head.op)], [b_var(name), _expr_from_py(head.value)])
+        return b_let(name, update, _block_from_py(tail))
     if isinstance(head, ast.If):
         if not _is_boolish(head.test):
             raise BodyError("non-boolean `if` test (Python truthiness is not representable)")
@@ -229,14 +239,24 @@ def _block_from_py(stmts):
         #   acc = foldl(\acc x -> update, acc, src) ; <rest>
         if head.orelse or not isinstance(head.target, ast.Name):
             raise BodyError("only `for <name> in <src>:` accumulator loops are in subset")
-        if len(head.body) != 1 or not isinstance(head.body[0], ast.Assign):
+        if len(head.body) != 1 or not isinstance(head.body[0], (ast.Assign, ast.AugAssign)):
             raise BodyError("loop body must be a single accumulator assignment")
         asg = head.body[0]
-        if len(asg.targets) != 1 or not isinstance(asg.targets[0], ast.Name):
-            raise BodyError("accumulator assignment must target a single name")
-        acc, x = asg.targets[0].id, head.target.id
-        fold = b_app(b_var("foldl"),
-                     [b_lambda([acc, x], _expr_from_py(asg.value)), b_var(acc), _expr_from_py(head.iter)])
+        if isinstance(asg, ast.AugAssign):
+            # `for x in src: acc += f(x)` -> foldl(\acc x -> acc <op> f(x), acc, src) — the common
+            # sum/product/count idiom, equivalent to the explicit `acc = acc <op> f(x)` form below.
+            if not isinstance(asg.target, ast.Name):
+                raise BodyError("accumulator assignment must target a single name")
+            if type(asg.op) not in _PY_BIN:
+                raise BodyError("unsupported augmented-assignment operator")
+            acc, x = asg.target.id, head.target.id
+            update = _op_app(_PY_BIN[type(asg.op)], [b_var(acc), _expr_from_py(asg.value)])
+        else:
+            if len(asg.targets) != 1 or not isinstance(asg.targets[0], ast.Name):
+                raise BodyError("accumulator assignment must target a single name")
+            acc, x = asg.targets[0].id, head.target.id
+            update = _expr_from_py(asg.value)
+        fold = b_app(b_var("foldl"), [b_lambda([acc, x], update), b_var(acc), _expr_from_py(head.iter)])
         return b_let(acc, fold, _block_from_py(tail))
     raise BodyError(f"unsupported statement {type(head).__name__}")
 
