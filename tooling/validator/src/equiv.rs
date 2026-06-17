@@ -342,8 +342,10 @@ pub fn prove_equivalent(body_f: &J, body_g: &J, solver: &str) -> EquivVerdict {
             return match prove_equiv_by_induction(body_f, body_g, solver) {
                 InductionOutcome::Proved => EquivVerdict::Equivalent(vec![]),
                 InductionOutcome::ProvedWithLemmas(ls) => EquivVerdict::Equivalent(ls),
+                // A base case refuted: a concrete short list where the two differ — a real counterexample.
+                InductionOutcome::Failed(model) => EquivVerdict::Distinct(model),
                 InductionOutcome::NoSolver => EquivVerdict::NoSolver,
-                InductionOutcome::Unknown | InductionOutcome::Failed(_) => EquivVerdict::Unknown,
+                InductionOutcome::Unknown => EquivVerdict::Unknown,
                 InductionOutcome::Unsupported(why) => EquivVerdict::Unsupported(why),
             };
         }
@@ -550,13 +552,44 @@ mod tests {
     }
 
     #[test]
-    fn both_recursive_unequal_is_unknown_not_false() {
+    fn both_recursive_unequal_is_refuted() {
         let Some(s) = solver() else { return };
-        // sum vs length — both recursive, genuinely NOT equal. The induction step stays satisfiable, so
-        // the verdict is UNKNOWN, never a false EQUIVALENT.
+        // sum vs length — both recursive, genuinely NOT equal. A base case (the list [0]) refutes:
+        // sum([0]) = 0 ≠ 1 = length([0]). So the verdict is a clean DISTINCT, never a false EQUIVALENT.
         let sum = rec_over_list(json!({ "kind": "app", "op": "add", "args": [head_xs(), self_tail()] }));
         let len = rec_over_list(json!({ "kind": "app", "op": "add",
             "args": [{ "kind": "lit", "value": { "kind": "int", "value": 1 } }, self_tail()] }));
-        assert_eq!(prove_equivalent(&sum, &len, s), EquivVerdict::Unknown);
+        match prove_equivalent(&sum, &len, s) {
+            EquivVerdict::Distinct(_) => {}
+            other => panic!("expected DISTINCT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn misaligned_strides_proved_by_kstep() {
+        let Some(s) = solver() else { return };
+        // length peeling ONE element per step vs length peeling TWO — equal, but the recursions misalign,
+        // so ordinary (k=1) induction can't close it. The k-step search proves it at stride 2.
+        let len1 = rec_over_list(json!({ "kind": "app", "op": "add",
+            "args": [{ "kind": "lit", "value": { "kind": "int", "value": 1 } }, self_tail()] }));
+        // \xs -> case null(xs) of T -> 0 | F -> (case null(tail xs) of T -> 1 | F -> add(2, self(tail(tail xs))))
+        let len2 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "op": "null", "args": [{ "kind": "var", "name": "xs" }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": {
+                    "kind": "case",
+                    "scrutinee": { "kind": "app", "op": "null", "args": [{ "kind": "app", "op": "tail", "args": [{ "kind": "var", "name": "xs" }] }] },
+                    "arms": [
+                        { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                          "body": { "kind": "lit", "value": { "kind": "int", "value": 1 } } },
+                        { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": {
+                            "kind": "app", "op": "add", "args": [
+                                { "kind": "lit", "value": { "kind": "int", "value": 2 } },
+                                { "kind": "app", "op": "apply", "args": [{ "kind": "var", "name": "self" },
+                                    { "kind": "app", "op": "tail", "args": [{ "kind": "app", "op": "tail", "args": [{ "kind": "var", "name": "xs" }] }] }] }] } }] } }] } });
+        assert_eq!(prove_equivalent(&len1, &len2, s), EquivVerdict::Equivalent(vec![]));
     }
 }

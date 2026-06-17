@@ -587,17 +587,32 @@ fn rename_self(node: &J, new_name: &str) -> J {
     }
 }
 
+/// Largest recursion stride the two-recursive search tries. `k`-step induction aligns recursions whose
+/// strides have a least-common-multiple ≤ this (1-vs-1, 1-vs-2, 1-vs-3, 2-vs-2, …); 2-vs-3 (lcm 6) and
+/// non-constant strides are beyond it and report UNKNOWN.
+const MAX_STRIDE: usize = 3;
+
 /// Decide `∀xs. f(xs) = g(xs)` for **two recursive** single-list-parameter functions by structural
-/// induction over `xs`. Both bodies are emitted as `define-fun-rec`s (`self` and the reserved `self__g`),
-/// and the base (`xs = nil`) and step (assume `f(t) = g(t)`, prove `f(cons h t) = g(cons h t)`) are
-/// discharged like any other induction. This decides the case where both functions recurse *in lockstep*
-/// over the list and the per-step obligation closes by the element theory + the IH (e.g. two list-sums
-/// written with different but equal element arithmetic) — which normalization can't reconcile and the
-/// single-side inlining can't reach. A recursion that does not align (different step shapes, needing a
-/// stronger induction or a cross-function lemma the solver won't invent) leaves the step satisfiable and
-/// is reported `Unknown`, never a false verdict. No lemma discovery (that machinery is keyed to the
-/// single-self list laws); bare base + step only.
+/// induction over `xs`. Both bodies are emitted as `define-fun-rec`s (`self` and the reserved `self__g`).
+///
+/// It searches over the induction **stride** `k = 1..=MAX_STRIDE`. A `k`-step induction has base cases
+/// for every list length `0..k-1` and a step `P(t) ⟹ P(cons^k(t))` — a valid induction principle for any
+/// `k` (every list of length `qk + r` reduces by the step to its length-`r` base). `k = 1` is ordinary
+/// structural induction and decides recursions that align step-for-step but differ in their element
+/// arithmetic (e.g. two list-sums written differently). A larger `k` aligns *misaligned* recursions: a
+/// length-by-1 and a length-by-2 function close at `k = 2`. The first stride whose base **and** step all
+/// discharge ⇒ PROVED.
+///
+/// Refutation falls out of the same base cases: if any base case is **satisfiable**, that is a concrete
+/// short list on which the two functions differ — a genuine counterexample, so the verdict is a clean
+/// DISTINCT (carried as `Failed(model)`), not UNKNOWN. (A *step* that stays satisfiable only means this
+/// stride's induction doesn't close — not a refutation — so the search moves to the next stride.) When no
+/// stride closes and no base case refutes, the verdict is UNKNOWN (a recursion misaligned beyond
+/// `MAX_STRIDE`, or one needing a cross-function lemma the solver won't invent) — never a false verdict.
+/// No lemma discovery on this path (that machinery is keyed to the single-self list laws).
 pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> InductionOutcome {
+    use crate::prove::{run_smt, SatAnswer};
+
     let def_f = match lower_self_def(body_f) {
         Ok(s) => s,
         Err(e) => return InductionOutcome::Unsupported(format!("{e:#}")),
@@ -611,14 +626,50 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
     let mut used = BTreeSet::new();
     collect_ops(body_f, &mut used);
     collect_ops(body_g, &mut used);
-    let prelude = build_prelude(&used, &FnModel::None, &FnModel::None);
-    let base = format!(
-        "{prelude}{def_f}{def_g}; base case: xs = nil\n(assert (not (= (self nil) (self__g nil))))\n(check-sat)\n"
-    );
-    let step = format!(
-        "{prelude}{def_f}{def_g}(declare-const h Int)\n(declare-const t Lst)\n; step case: assume f(t)=g(t), prove for (cons h t)\n(assert (= (self t) (self__g t)))\n(assert (not (= (self (cons h t)) (self__g (cons h t)))))\n(check-sat)\n"
-    );
-    discharge(&InductionCertificate { var: "xs".into(), base, step, lemmas: Vec::new() }, solver)
+    let preamble = format!("{}{def_f}{def_g}", build_prelude(&used, &FnModel::None, &FnModel::None));
+
+    // The list `cons(p0, cons(p1, …, cons(p_{n-1}, tail)))` with the given declarations.
+    let spine = |prefix: &str, n: usize, tail: &str| -> (String, String) {
+        let decls: String = (0..n).map(|i| format!("(declare-const {prefix}{i} Int)\n")).collect();
+        let mut lst = tail.to_string();
+        for i in (0..n).rev() {
+            lst = format!("(cons {prefix}{i} {lst})");
+        }
+        (decls, lst)
+    };
+
+    // Phase 1 — refutation. Check base cases for every list length `0..MAX_STRIDE` (these are exactly the
+    // base obligations any stride `k ≤ MAX_STRIDE` needs). A satisfiable one is a concrete short list on
+    // which `f ≠ g` — a genuine counterexample, so a clean DISTINCT.
+    for j in 0..MAX_STRIDE {
+        let (decls, lst) = spine("a", j, "nil");
+        let script = format!(
+            "{preamble}{decls}; base case: list of length {j}\n(assert (not (= (self {lst}) (self__g {lst}))))\n(check-sat)\n(get-model)\n"
+        );
+        match run_smt(&script, solver) {
+            Ok(SatAnswer::Unsat) => {}
+            Ok(SatAnswer::Sat(model)) => return InductionOutcome::Failed(model),
+            Ok(SatAnswer::Unknown) => return InductionOutcome::Unknown,
+            Ok(SatAnswer::NoSolver) => return InductionOutcome::NoSolver,
+            Err(e) => return InductionOutcome::Unsupported(format!("solver error (base len {j}): {e:#}")),
+        }
+    }
+
+    // Phase 2 — proof. All base cases up to `MAX_STRIDE` are unsat, so a stride `k` proves the law as soon
+    // as its step `P(t) ⟹ P(cons^k(t))` discharges. Try increasing strides; the first that closes wins.
+    for k in 1..=MAX_STRIDE {
+        let (decls, lst) = spine("h", k, "t");
+        let script = format!(
+            "{preamble}{decls}(declare-const t Lst)\n; step (stride {k}): assume f(t)=g(t), prove for cons^{k}(t)\n(assert (= (self t) (self__g t)))\n(assert (not (= (self {lst}) (self__g {lst}))))\n(check-sat)\n"
+        );
+        match run_smt(&script, solver) {
+            Ok(SatAnswer::Unsat) => return InductionOutcome::Proved,
+            Ok(SatAnswer::Sat(_)) | Ok(SatAnswer::Unknown) => {} // this stride doesn't close — try a larger one
+            Ok(SatAnswer::NoSolver) => return InductionOutcome::NoSolver,
+            Err(e) => return InductionOutcome::Unsupported(format!("solver error (step k={k}): {e:#}")),
+        }
+    }
+    InductionOutcome::Unknown
 }
 
 // --- prelude (datatype + recursive definitions) ---------------------------------------------------
