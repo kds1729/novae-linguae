@@ -592,4 +592,37 @@ mod tests {
                                     { "kind": "app", "op": "tail", "args": [{ "kind": "app", "op": "tail", "args": [{ "kind": "var", "name": "xs" }] }] }] }] } }] } }] } });
         assert_eq!(prove_equivalent(&len1, &len2, s), EquivVerdict::Equivalent(vec![]));
     }
+
+    #[test]
+    fn map_law_beyond_first_order_now_proves() {
+        let Some(s) = solver() else { return };
+        // `\f xs -> map(f, reverse(xs))` ≡ `\f xs -> reverse(map(f, xs))`. This is a map law over an
+        // UNINTERPRETED function — beyond the first-order fragment. It is provable only because the
+        // function `f` is a quantified parameter (n-ary equiv), which lets the prover model map's function
+        // as the global uninterpreted symbol and select the `map_append` lemma. (With `f` free it was
+        // out of fragment.)
+        let f = json!({ "kind": "lambda", "params": [{ "name": "f" }, { "name": "xs" }], "body": {
+            "kind": "app", "op": "map", "args": [{ "kind": "var", "name": "f" },
+                { "kind": "app", "op": "reverse", "args": [{ "kind": "var", "name": "xs" }] }] } });
+        let g = json!({ "kind": "lambda", "params": [{ "name": "f" }, { "name": "xs" }], "body": {
+            "kind": "app", "op": "reverse", "args": [{ "kind": "app", "op": "map",
+                "args": [{ "kind": "var", "name": "f" }, { "kind": "var", "name": "xs" }] }] } });
+        assert!(matches!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(_)));
+    }
+
+    #[test]
+    fn filter_distributes_over_append() {
+        let Some(s) = solver() else { return };
+        // `\p xs ys -> filter(p, append(xs, ys))` ≡ `\p xs ys -> append(filter(p, xs), filter(p, ys))`.
+        // A filter law over an uninterpreted predicate, decided by direct induction (no helper lemma) —
+        // the filter fragment is reachable now that `p` is a quantified parameter.
+        let f = json!({ "kind": "lambda", "params": [{ "name": "p" }, { "name": "xs" }, { "name": "ys" }], "body": {
+            "kind": "app", "op": "filter", "args": [{ "kind": "var", "name": "p" },
+                { "kind": "app", "op": "append", "args": [{ "kind": "var", "name": "xs" }, { "kind": "var", "name": "ys" }] }] } });
+        let g = json!({ "kind": "lambda", "params": [{ "name": "p" }, { "name": "xs" }, { "name": "ys" }], "body": {
+            "kind": "app", "op": "append", "args": [
+                { "kind": "app", "op": "filter", "args": [{ "kind": "var", "name": "p" }, { "kind": "var", "name": "xs" }] },
+                { "kind": "app", "op": "filter", "args": [{ "kind": "var", "name": "p" }, { "kind": "var", "name": "ys" }] }] } });
+        assert!(matches!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(_)));
+    }
 }
