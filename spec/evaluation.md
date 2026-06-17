@@ -51,6 +51,10 @@ Hindley-Milner inference, unifying the body's inferred type with the declared `s
 - Fresh unification variables, union-find substitution with the occurs check.
 - Builtins are **polymorphic schemes** instantiated fresh per use (`map : (a→b) → List a → List b`,
   `eq : a → a → bool`, …).
+- **Arithmetic is numeric-polymorphic.** `add`/`sub`/`mul`/`min`/`max`/`neg`/`abs` and the comparisons
+  `lt`/`le`/`gt`/`ge` use a *numeric* type variable — one that unifies only with `int` or `float` (or with
+  another variable, which then itself becomes numeric). So they check over either numeric type but reject a
+  non-number (`\b -> add(b, b)` against `bool → bool` is ILL-TYPED). `div`/`mod` stay `int`-only.
 - `let` is monomorphic (a deliberate simplification).
 - A declared `forall` type's variables are **skolemized to rigid constants**, so the body must be
   genuinely polymorphic: `\x -> x` checks against `forall a. a → a`, but `\x -> add(x, x)` does not.
@@ -215,16 +219,29 @@ and rarely discharges such laws even when handed the lemma) remains future work.
 
 `nl-validator equiv` decides whether two functions compute the same thing — `∀x. f(x) = g(x)` over the
 unbounded domain — the operable form of *semantic equivalence vs hash equivalence* (two records can be
-hash-different yet behaviorally identical). It does not introduce a new two-function encoding: it reuses
-the property prover by **inlining**. When both sides are non-recursive it builds the law `eq(f(x), g(x))`
-with both bodies inlined (so all operations stay visible to lemma discovery); when one side recurses,
-that side becomes `self` (a `define-fun-rec`) and the other is inlined. The resulting law is discharged
-by the same first-order SMT → induction → lemma-discovery pipeline. **EQUIVALENT** (the law is proved),
-**DISTINCT** (a solver counterexample — only the first-order path yields one), **UNKNOWN** (a
-non-closing induction is *not* a refutation, so it is never reported as DISTINCT), or **UNSUPPORTED**.
-Proved live: `\xs. reverse(reverse(xs)) ≡ \xs. xs` (via lemma discovery), `double-via-add ≡
-double-via-mul`; `double ≢ \n. n + 1` is DISTINCT at `n = 1`. Scope (v0.1): unary functions, at least one
-side non-recursive. The node exposes this as `POST /v0/equiv`.
+hash-different yet behaviorally identical). Functions of **any arity ≥ 1** are supported (the prover quantifies over several variables, inducting on
+one and treating the rest as free).
+
+A **normalization fast path** ([Canonical normalization](#canonical-normalization)) runs first: if the two
+bodies share a canonical normal form — equal up to α-renaming, AC ordering of commutative operators
+(`add(a,b) ≡ add(b,a)`), constant folding, and identity elimination — they are equivalent, decided
+structurally with **no solver**. This also settles many cases where *both* sides recurse.
+
+Otherwise it reuses the property prover by **inlining**, introducing no new encoding for the common cases:
+with both sides non-recursive it builds `eq(f(x…), g(x…))` (operations stay visible to lemma discovery);
+when one side recurses it becomes `self` (a `define-fun-rec`) and the other is inlined; and when **both**
+recurse, both bodies are emitted as `define-fun-rec`s and `∀xs. f(xs) = g(xs)` is discharged by **structural
+induction over the list**, with the induction **stride searched** (`k = 1..3`) so recursions that misalign by
+a small constant stride (a length-by-1 vs a length-by-2) still close. The base cases double as refutation:
+a *satisfiable* base case is a concrete short list on which the two functions differ — a clean **DISTINCT**.
+
+Verdicts: **EQUIVALENT** (the law is proved, or the normal forms are equal), **DISTINCT** (a counterexample —
+from the first-order solver or a refuting base case), **UNKNOWN** (a non-closing induction is *not* a
+refutation, so it is never reported as DISTINCT), or **UNSUPPORTED** (nullary, mismatched arity, or two
+mutually-recursive functions that neither normalize alike nor align within the stride bound). Proved live:
+`\xs. reverse(reverse xs) ≡ \xs. xs` and `\a b. add(a,b) ≡ \a b. add(b,a)` (the latter without a solver), two
+list-sums written `add(head, self(tail))` vs `sub(self(tail), neg(head))`; `double ≢ \n. n+1` is DISTINCT,
+`sum ≢ length` is DISTINCT at `[2]`. The node exposes this as `POST /v0/equiv`.
 
 `nl-validator cluster <dir>` lifts this to a whole record set — behavioral-equivalence **classes** with a
 canonical representative. To stay tractable it buckets functions by a coarse **signature shape** (arity +
@@ -233,8 +250,24 @@ compared, then runs a union-find proving equivalence pairwise within each bucket
 merged). The canonical representative is the lexicographically smallest content-address. This is the
 deduplication-beyond-byte-identity that principle 2 calls for. Worked: a set with `\n. add(n,n)`,
 `\n. mul(2,n)`, `\n. mul(3,n)` clusters the first two together and leaves the tripling distinct. Scope
-follows equivalence (unary, at least one side of a pair non-recursive), and cost within a shape bucket of
-size *k* is up to O(*k*²) solver calls — the bucketing keeps that from being O(*n*²) over the whole set.
+follows equivalence (any arity ≥ 1, at least one side of a pair non-recursive), and cost within a shape
+bucket of size *k* is up to O(*k*²) solver calls — the bucketing keeps that from being O(*n*²) over the
+whole set.
+
+### Canonical normalization
+
+`nl-validator normalize <body>` rewrites a body-expression AST to a **canonical normal form** via
+meaning-preserving rewrites, so functions reconcilable by those rewrites share one canonical artifact (and
+one `expr_` content-address) — a step beyond merely *picking* a representative. The rewrites: **α-renaming**
+of bound variables to positional names; **AC ordering** of associative+commutative operators
+(`add`/`mul`/`and`/`or`/`xor`) — flatten across nesting, fold literals, drop the identity element, sort the
+operands — so `add(a,b)` and `add(b,a)` coincide; **commutative ordering** of `eq`/`neq`; **constant
+folding** of the total `Int`/`Bool` operators (`div`/`mod` are left alone, to avoid a divide-by-zero
+rewrite); **identity elimination** (`add(x,0) → x`, `mul(x,1) → x`, …) but **not** *absorbing* elements
+(`mul(x,0) → 0` is unsound under a non-terminating `x`); and **involution** (`neg∘neg`, `not∘not`),
+`id(x) → x`, literal `nat → int`. Each rewrite preserves meaning, so equal normal forms imply equivalence
+(it is a normalizer, not a decision procedure — *unequal* normal forms say nothing). This backs `equiv`'s
+solver-free fast path and is deterministic (principle 5), so a body has exactly one normal form.
 
 ## Composition metadata
 
@@ -245,10 +278,17 @@ composability** (stage `i`'s result type must fit stage `i+1`'s parameter type, 
 type variables as wildcards) and propagates: **effects** = the union of every stage's effects;
 **capabilities** = the union; **termination** = `always` only if every stage is `always`, else
 `unknown`; **complexity** = a coarse upper bound (the maximum stage class — sequential composition's
-dominant term — or `unknown` if any is unrecognized). The composite runs from `f1`'s input type to
-`fn`'s result type. Worked: `reverse ; length` → `List a → nat`, effects `[]`, terminates `always`;
-`length ; reverse` is **not composable** (a `nat` result can't feed a `List` parameter). Scope (v0.1):
-each stage is a unary function; complexity is a bound, not an exact cost model.
+dominant term — or `unknown` if any is unrecognized). Composability is decided structurally/coarsely, but
+the composite's input/output **types** are computed **precisely** by threading type variables through the
+pipeline (fresh-instantiate each stage, unify each result with the next parameter), so
+`wrap : a → List a ; head : List b → b` composes to the exact `a → a`, not the imprecise `a → b`. Worked:
+`reverse ; length` → `List a → nat`, effects `[]`, terminates `always`; `length ; reverse` is **not
+composable** (a `nat` result can't feed a `List` parameter). Scope: each stage is a unary function. The
+complexity stays a coarse upper bound on purpose — an *exact* composition needs each stage's **output-size
+relation** (how its result size depends on its input size) to re-express one stage's cost in the pipeline's
+input size, metadata the record schema does not carry yet (a v0.3 item); the tempting shortcut "a
+scalar-producing stage makes everything downstream `O(1)`" is *unsound*, because a downstream cost can
+depend on the scalar's value, not its size (`length ; factorial`).
 
 ## Effect enforcement
 
