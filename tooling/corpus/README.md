@@ -102,7 +102,7 @@ Every example carries a `polarity`. A **negative** example is a deliberately-wro
 the verifier's **rejection** — the "is this wrong?" signal — and it is valid only if the reference
 verifier actually rejects it (the generator drops a negative the verifier accepts, since that would be a
 verifier bug or a mislabel, not training signal). So a negative is verified in the dual sense: *verified
-to be rejected*, for the stated reason. Today's four:
+to be rejected*, for the stated reason. Today's five:
 
 | id | wrong because | caught by | verdict |
 |----|---------------|-----------|---------|
@@ -110,19 +110,21 @@ to be rejected*, for the stated reason. Today's four:
 | `neg_refuted_property` | claims `double(n) = n + 1` | `prove` | REFUTED (counterexample) |
 | `neg_wrong_example` | claims `double(3) = 7` | `run` | EXAMPLE-FAILED |
 | `neg_false_claim` | a signed `assert` claiming `double(21) = 43` | `verify-claim` | REFUTED on re-execution |
+| `neg_capability_denied` | applies a capability-gated function without the capability | the `respond` capability gate | REJECT `not_authorized` |
 
 ## Scope and where it grows
 
-31 examples today (27 positive, 4 negative):
+35 examples today (30 positive, 5 negative):
 
-- **Nova Lingua** (22) — five families (unary integer, binary integer, boolean/predicate, list, and
-  list-transform: `map`/`filter`/`append`), 13 with properties proved over the unbounded domain, plus 3
-  negatives.
-- **Nova Locutio** (9) — eight signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
+- **Nova Lingua** (24) — six families (unary integer, binary integer, boolean/predicate, list,
+  list-transform: `map`/`filter`/`append`, and composition: `foldl`-product / `length`∘`filter`), 13 with
+  properties proved over the unbounded domain, plus 3 negatives.
+- **Nova Locutio** (11) — nine signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
   `verify-claim` CONFIRMED, `request`/`validate` → `assert`, `request`/`store` → `ack`, `propose` →
-  `commit`, `commit` → `assert` (CONFIRMED), `delegate` → `ack`, `query` → `ack`), plus 1 negative.
+  `commit`, `commit` → `assert` (CONFIRMED), `delegate` → `ack`, `retract` → `ack`, `query` → `ack`),
+  plus 2 negatives (a signed-but-false claim, and a capability-denied apply).
 
 This is the seam, not the ceiling, all behind the same "generate → verify → emit" pipeline: more Nova
-Lingua families (string / `Maybe` / `Result` functions, multi-stage `compose` pipelines); more Nova
-Locutio speech acts (`retract`, full multi-turn orchestrated transcripts via `orchestrate`); and more
-negative cases.
+Lingua families (string / `Maybe` / `Result` functions — and `float`, once the type checker makes
+arithmetic numeric-polymorphic; a float body already *runs*, it just doesn't type-check yet); multi-stage
+`compose` pipelines; full multi-turn orchestrated transcripts via `orchestrate`; and more negative cases.

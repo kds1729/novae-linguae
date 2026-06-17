@@ -1,20 +1,21 @@
 {
   "corpus": "corpus.jsonl",
-  "examples": 31,
+  "examples": 35,
   "by_modality": {
-    "nova_lingua": 22,
-    "nova_locutio": 9
+    "nova_lingua": 24,
+    "nova_locutio": 11
   },
   "by_polarity": {
-    "positive": 27,
-    "negative": 4
+    "positive": 30,
+    "negative": 5
   },
   "nova_lingua_families": {
     "unary_arith": 5,
     "binary_arith": 4,
     "boolean_funcs": 4,
     "list_funcs": 3,
-    "list_transform_funcs": 3
+    "list_transform_funcs": 3,
+    "composition_funcs": 2
   },
   "verified_all": true,
   "proved_properties": 13,

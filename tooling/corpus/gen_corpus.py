@@ -31,7 +31,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve()
 _REPO = _HERE.parents[2]  # tooling/corpus -> tooling -> repo root
 sys.path.insert(0, str(_REPO / "tooling" / "ingest-common"))
-from nl_core import build_v2_record, expr_address, write_runnable_dir  # noqa: E402
+from nl_core import build_v2_record, content_hash, expr_address, write_runnable_dir  # noqa: E402
 
 VALIDATOR = _REPO / "tooling" / "validator" / "target" / "release" / "nl-validator"
 SCHEMA = _REPO / "spec" / "function-record.v0.2.schema.json"
@@ -99,6 +99,7 @@ def case_null(xs_name, nil_body, cons_body):
 INT = {"kind": "builtin", "name": "int"}
 NAT = {"kind": "builtin", "name": "nat"}
 BOOL = {"kind": "builtin", "name": "bool"}
+FLOAT = {"kind": "builtin", "name": "float"}
 
 
 def fn(params, result):
@@ -119,6 +120,8 @@ def to_value_ast(pyval):
         return {"kind": "bool", "value": pyval}
     if isinstance(pyval, int):
         return {"kind": "int", "value": pyval}
+    if isinstance(pyval, float):
+        return {"kind": "float", "value": pyval}
     if isinstance(pyval, list):
         return {"kind": "list", "elems": [to_value_ast(x) for x in pyval]}
     raise ValueError(f"unsupported example value {pyval!r}")
@@ -267,8 +270,34 @@ def list_transform_funcs():
     ]
 
 
+def composition_funcs():
+    xs, x = var("xs"), var("x")
+    return [
+        # product — a left fold with multiplication.
+        {"name": "product", "intent": "Multiply all the numbers in a list.",
+         "summary": "Folds mul over the list, 1 for the empty list.", "tags": ["list", "fold", "arithmetic"],
+         "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], bapp("foldl", lam(["acc", "x"], bapp("mul", var("acc"), x)), int_lit(1), xs)),
+         "examples": [{"args": [[]], "result": 1}, {"args": [[2, 3, 4]], "result": 24}, {"args": [[5, -2]], "result": -10}],
+         "properties": [], "prove": False},
+        # count_positives — length . filter, a composition of two list builtins.
+        {"name": "count_positives", "intent": "Count the positive numbers in a list.",
+         "summary": "The length of the list's positive elements.", "tags": ["list", "filter", "composition"],
+         "type_ast": fn([list_of(INT)], NAT),
+         "body_ast": lam(["xs"], bapp("length", bapp("filter", lam(["x"], bapp("gt", x, int_lit(0))), xs))),
+         "examples": [{"args": [[]], "result": 0}, {"args": [[1, -2, 3, 0, 4]], "result": 3}],
+         "properties": [], "prove": False},
+    ]
+
+
+# A float family is intentionally omitted for now: the evaluator promotes floats (a float body RUNS), but
+# the HM type checker types `add`/`mul` as int-only, so a `float -> float` record is rejected as ill-typed.
+# The `float` value-AST support above is the seam; the family drops in once arithmetic builtins are made
+# numeric-polymorphic in typecheck.rs.
+
 def all_specs():
-    return unary_arith() + binary_arith() + boolean_funcs() + list_funcs() + list_transform_funcs()
+    return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
+            + list_transform_funcs() + composition_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -443,11 +472,14 @@ def nova_locutio_examples(commons_dir, by_name):
          "propose/apply double to 21 → the responder test-runs it and commits.",
          "propose", "double", [21], ["agent-loop", "propose"]),
     ]
+    first_request_hash = None
     for ident, intent, summary, kind, tname, pyargs, tags in apply_rows:
         body = {"action": "apply", "target": by_name[tname]["hash"], "args": [to_value_ast(a) for a in pyargs]}
         req = {"schema_version": "0.2.0", "kind": kind, "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
                "constraints": {"budget_tokens": 1000, "capabilities": [], "deadline_ms": 5000}, "body": body}
         signed = sign_message(req, SENDER_SEED)
+        if first_request_hash is None:
+            first_request_hash = signed.get("hash")
         reply = respond_to(signed, commons_dir)
         schema_ok = msg_schema_valid(signed) and bool(reply) and msg_schema_valid(reply)
         threaded = bool(reply) and reply.get("in_reply_to") == signed.get("hash") and reply.get("to") == signed.get("from")
@@ -520,6 +552,19 @@ def nova_locutio_examples(commons_dir, by_name):
          "commit/apply double to 21 → the responder fulfils the commitment and asserts the result, which re-runs true.",
          ["agent-loop", "commit"], "commit", csigned, creply,
          "CONFIRMED" if c_ok else (creply.get("kind", "NO-REPLY").upper() if creply else "NO-REPLY"), c_ok)
+
+    # retract → ack: withdraw an earlier message; the loop acknowledges the retraction.
+    if first_request_hash:
+        rreq = {"schema_version": "0.2.0", "kind": "retract", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+                "constraints": None, "body": {"retracts": first_request_hash, "reason": "superseded by a corrected request"}}
+        rsigned = sign_message(rreq, SENDER_SEED)
+        rreply = respond_to(rsigned, commons_dir)
+        r_ok = (msg_schema_valid(rsigned) and bool(rreply) and msg_schema_valid(rreply)
+                and rreply.get("kind") == "ack" and rreply.get("in_reply_to") == rsigned.get("hash"))
+        emit("retract_request", "Withdraw an earlier request.",
+             "retract a prior message → the responder acknowledges the retraction.",
+             ["agent-loop", "retract"], "retract", rsigned, rreply,
+             "ACKED" if r_ok else (rreply.get("kind", "NO-REPLY").upper() if rreply else "NO-REPLY"), r_ok)
 
     # query → ack (discovery by intent tag).
     qreq = {"schema_version": "0.2.0", "kind": "query", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
@@ -625,6 +670,27 @@ def negative_examples(workdir, commons_dir, by_name):
              "The signature is valid, but re-running the claim against the commons refutes it: double(21) is 42.",
              ["negative", "false-claim", "agent-loop"], {"speech_act": "assert", "message": tampered},
              "verify-claim", "REFUTED", (vc.stdout + vc.stderr), vc.returncode != 0)
+
+    # 5. Nova Locutio — a capability-gated apply WITHOUT presenting the capability. The function declares
+    #    a required capability; the request lists none, so the responder rejects it as not_authorized.
+    body_cap = lam(["n"], bapp("add", n, n))
+    rec_cap = build_v2_record("guarded_double", fn([INT], INT), [{"args": [to_value_ast(3)], "result": to_value_ast(6)}],
+                              body_cap, terminates="always")
+    rec_cap["signature"]["capabilities"] = ["cap:apply/guarded"]
+    rec_cap["hash"] = content_hash(rec_cap, "fn", strip=("hash",))  # re-hash: capabilities changed the record
+    dcap, _, _ = write_rec("guarded", rec_cap, body_cap)
+    greq = {"schema_version": "0.2.0", "kind": "request", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+            "constraints": {"budget_tokens": 1000, "capabilities": [], "deadline_ms": 5000},  # presents NO capabilities
+            "body": {"action": "apply", "target": rec_cap["hash"], "args": [to_value_ast(3)]}}
+    gsigned = sign_message(greq, SENDER_SEED)
+    greply = respond_to(gsigned, dcap)
+    denied = (bool(greply) and greply.get("kind") == "reject"
+              and greply.get("body", {}).get("code") == "not_authorized")
+    emit("capability_denied", "nova_locutio",
+         "A request to apply a capability-gated function without presenting the capability.",
+         "The function requires cap:apply/guarded; the request lists none, so the responder rejects it as not_authorized.",
+         ["negative", "capability", "agent-loop"], {"speech_act": "request", "request": gsigned, "reply": greply},
+         "capability-gate", "NOT-AUTHORIZED", json.dumps(greply.get("body")) if greply else "", denied)
     return out
 
 
@@ -674,7 +740,8 @@ def main():
         by_polarity[ex["polarity"]] = by_polarity.get(ex["polarity"], 0) + 1
     families = {"unary_arith": len(unary_arith()), "binary_arith": len(binary_arith()),
                 "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs()),
-                "list_transform_funcs": len(list_transform_funcs())}
+                "list_transform_funcs": len(list_transform_funcs()),
+                "composition_funcs": len(composition_funcs())}
     proved = sum(1 for ex in examples if ex["modality"] == "nova_lingua" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"

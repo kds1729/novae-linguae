@@ -62,8 +62,8 @@ class CommittedCorpusTests(unittest.TestCase):
                 if ex["modality"] == "nova_lingua":
                     self.assertIn("record", views, f"{ex['id']} missing record")
                     self.assertIn("body", views, f"{ex['id']} missing body")
-                else:
-                    self.assertIn("message", views, f"{ex['id']} missing message")
+                else:  # nova_locutio negative: a single offending message, or a rejected exchange.
+                    self.assertTrue("message" in views or "request" in views, f"{ex['id']} missing message/request")
                 continue
             if ex["modality"] == "nova_lingua":
                 for key in ("surface_type", "surface_body", "record", "body", "examples"):
