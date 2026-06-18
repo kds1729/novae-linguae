@@ -193,6 +193,10 @@ def unary_arith():
          "strictly_increasing", forall(["n"], op("gt", self_app(n), n)), ["arithmetic"]),
         ("negate", "Negate a number.", "Returns -n.", bapp("neg", n), [0, 7, -4], lambda x: -x,
          "sums_to_zero", forall(["n"], op("eq", op("add", self_app(n), n), int_lit(0))), ["arithmetic"]),
+        ("quadruple", "Quadruple a number.", "Returns 4 * n.", bapp("mul", int_lit(4), n), [0, 3, -2], lambda x: 4 * x,
+         "two_doublings", forall(["n"], op("eq", self_app(n), op("mul", int_lit(2), op("mul", int_lit(2), n)))), ["arithmetic", "linear"]),
+        ("decrement", "Subtract one from a number.", "Returns n - 1.", bapp("sub", n, int_lit(1)), [0, 9, -5], lambda x: x - 1,
+         "strictly_decreasing", forall(["n"], op("lt", self_app(n), n)), ["arithmetic"]),
     ]
     out = []
     for name, intent, summary, body, ins, f, pname, pexpr, tags in rows:
@@ -216,6 +220,8 @@ def binary_arith():
          "anti_symmetric", forall(["a", "b"], op("eq", self_app(a, b), op("neg", op("sub", b, a)))), ["arithmetic"]),
         ("maximum", "The larger of two numbers.", "Returns max(a, b).", bapp("max", a, b), [(5, 3), (2, 9), (-2, -7)], max,
          "at_least_first", forall(["a", "b"], op("ge", self_app(a, b), a)), ["arithmetic", "order"]),
+        ("minimum", "The smaller of two numbers.", "Returns min(a, b).", bapp("min", a, b), [(5, 3), (2, 9), (-2, -7)], min,
+         "at_most_first", forall(["a", "b"], op("le", self_app(a, b), a)), ["arithmetic", "order"]),
     ]
     out = []
     for name, intent, summary, body, ins, f, pname, pexpr, tags in rows:
@@ -250,6 +256,16 @@ def boolean_funcs():
          "tags": ["boolean", "commutative"], "type_ast": fn([BOOL, BOOL], BOOL), "body_ast": lam(["a", "b"], bapp("and", a, b)),
          "examples": [{"args": [True, True], "result": True}, {"args": [True, False], "result": False}, {"args": [False, False], "result": False}],
          "properties": [{"name": "commutative", "expr": forall(["a", "b"], op("eq", op("and", a, b), op("and", b, a)))}], "prove": True},
+        # logical_or: commutative (over the boolean fragment).
+        {"name": "logical_or", "intent": "Logical OR of two booleans.", "summary": "Returns true iff a or b is true.",
+         "tags": ["boolean", "commutative"], "type_ast": fn([BOOL, BOOL], BOOL), "body_ast": lam(["a", "b"], bapp("or", a, b)),
+         "examples": [{"args": [False, False], "result": False}, {"args": [True, False], "result": True}, {"args": [True, True], "result": True}],
+         "properties": [{"name": "commutative", "expr": forall(["a", "b"], op("eq", op("or", a, b), op("or", b, a)))}], "prove": True},
+        # is_zero: a predicate; examples only.
+        {"name": "is_zero", "intent": "Test whether a number is zero.", "summary": "Returns true iff n == 0.",
+         "tags": ["predicate", "comparison"], "type_ast": fn([INT], BOOL), "body_ast": lam(["n"], bapp("eq", n, int_lit(0))),
+         "examples": [{"args": [0], "result": True}, {"args": [3], "result": False}, {"args": [-1], "result": False}],
+         "properties": [], "prove": False},
     ]
     return out
 
@@ -433,7 +449,9 @@ def verdict_tokens(text):
 def build_and_verify(spec, workdir):
     examples = [{"args": [to_value_ast(a) for a in ex["args"]], "result": to_value_ast(ex["result"])}
                 for ex in spec["examples"]]
-    terminates = "always" if spec["name"] != "sum" else "unknown"  # sum's termination isn't certified here
+    # A spec may declare its own termination class (e.g. an unbounded self-recursion that isn't certified
+    # `always` here); default to `always`, with `sum`'s fold left `unknown` for back-compat.
+    terminates = spec.get("terminates", "unknown" if spec["name"] == "sum" else "always")
     record = build_v2_record(spec["name"], spec["type_ast"], examples, spec["body_ast"],
                              properties=spec.get("properties") or None, intent_tags=spec["tags"],
                              terminates=terminates)
@@ -533,7 +551,7 @@ def build_commons(workdir, specs):
     records, bodies, by_name = [], {}, {}
     for spec in specs:
         ex = [{"args": [to_value_ast(a) for a in e["args"]], "result": to_value_ast(e["result"])} for e in spec["examples"]]
-        terminates = "always" if spec["name"] != "sum" else "unknown"
+        terminates = spec.get("terminates", "unknown" if spec["name"] == "sum" else "always")
         rec = build_v2_record(spec["name"], spec["type_ast"], ex, spec["body_ast"],
                               properties=spec.get("properties") or None, intent_tags=spec["tags"], terminates=terminates)
         addr = expr_address(spec["body_ast"])
