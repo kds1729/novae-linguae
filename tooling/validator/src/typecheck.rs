@@ -511,7 +511,12 @@ fn pattern_ty(pat: &J, scrut: &Ty, env: &mut Env, inf: &mut Infer) -> Result<()>
 pub fn typecheck(declared: &J, body: &J) -> Result<String> {
     let mut inf = Infer::new();
     let dt = ast_to_ty(declared)?;
-    let bt = infer(body, &Env::new(), &mut inf)?;
+    // Bind `self` to the declared (skolemized) function type so a self-recursive body type-checks:
+    // a recursive call shares the function's own rigid type. Monomorphic recursion only — `self` is a
+    // single monotype, not re-generalized — which is exactly what these records need.
+    let mut env = Env::new();
+    env.insert("self".to_string(), dt.clone());
+    let bt = infer(body, &env, &mut inf)?;
     match inf.unify(&bt, &dt) {
         Ok(()) => Ok(format!("WELL-TYPED  {}", show(&inf.zonk(&dt)))),
         Err(e) => Err(anyhow!(
@@ -547,6 +552,15 @@ mod tests {
         let record = load("double.v0.2.json");
         let body = load("body-double.json");
         assert!(typecheck_record(&record, &body).is_ok());
+    }
+
+    #[test]
+    fn self_recursive_record_is_well_typed() {
+        // `self` is bound to the declared signature, so a recursive body type-checks: the recursive
+        // `self(tail xs)` call shares the function's own type. (Previously failed: unbound variable self.)
+        let record = load("length.json");
+        let body = load("body-length.json");
+        assert!(typecheck_record(&record, &body).is_ok(), "recursive length should type-check");
     }
 
     #[test]

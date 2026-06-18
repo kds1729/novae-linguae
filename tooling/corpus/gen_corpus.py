@@ -273,8 +273,8 @@ def boolean_funcs():
 def list_funcs():
     xs = var("xs")
     out = []
-    # sum — a left fold over the list with an inline lambda (`self`-recursion isn't bound in the standalone
-    # evaluator, so the runnable form uses the `foldl` builtin). Examples executed.
+    # sum — a left fold over the list with an inline lambda. (The `recursive_funcs` family carries the
+    # raw `self`-recursive form, `sum_rec`; this one shows the fold idiom for the same intent.) Examples executed.
     out.append({
         "name": "sum", "intent": "Sum a list of numbers.", "summary": "Adds every element with foldl, 0 for the empty list.",
         "tags": ["list", "fold", "arithmetic"], "type_ast": fn([list_of(INT)], INT),
@@ -414,10 +414,46 @@ def result_funcs():
     ]
 
 
+def recursive_funcs():
+    # RAW self-recursion in the function under test — ground the rest of the corpus doesn't cover (the
+    # list families use builtins/folds, never recursion in the body being described). `self` is now bound
+    # in BOTH the typechecker and the evaluator (a record body type-checks against its own signature, and
+    # runs via a recursive closure), so these pass the full positive gate. The `length_rec` law is stated
+    # over `self`, so the proof encodes the supplied recursive body as its own `define-fun-rec` and inducts
+    # on it — the user-defined-recursion path, not a builtin.
+    n, xs, ys = var("n"), var("xs"), var("ys")
+    return [
+        {"name": "length_rec", "intent": "Count the elements of a list, by recursion.",
+         "summary": "0 for the empty list; otherwise 1 + the length of the tail.", "tags": ["list", "recursion", "measure"],
+         "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], case_null("xs", int_lit(0), bapp("add", int_lit(1), bself(bapp("tail", xs))))),
+         "examples": [{"args": [[]], "result": 0}, {"args": [[1, 2, 3]], "result": 3}, {"args": [[9]], "result": 1}],
+         # Distributes over append — proved by structural induction over the supplied recursive body.
+         "properties": [{"name": "length_append_self",
+                         "expr": forall(["xs", "ys"], op("eq", self_app(op("append", xs, ys)),
+                                                       op("add", self_app(xs), self_app(ys))))}],
+         "prove": True, "terminates": "always"},
+        {"name": "sum_rec", "intent": "Sum a list of numbers, by recursion.",
+         "summary": "0 for the empty list; otherwise the head plus the sum of the tail.", "tags": ["list", "recursion", "arithmetic"],
+         "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], case_null("xs", int_lit(0), bapp("add", bapp("head", xs), bself(bapp("tail", xs))))),
+         "examples": [{"args": [[]], "result": 0}, {"args": [[1, 2, 3]], "result": 6}, {"args": [[5, -2, 4]], "result": 7}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "factorial", "intent": "The factorial of a non-negative integer.",
+         "summary": "1 when n is 0; otherwise n * factorial(n - 1).", "tags": ["arithmetic", "recursion"],
+         "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], case_bool(bapp("eq", n, int_lit(0)), int_lit(1),
+                                          bapp("mul", n, bself(bapp("sub", n, int_lit(1)))))),
+         "examples": [{"args": [0], "result": 1}, {"args": [1], "result": 1}, {"args": [3], "result": 6}, {"args": [5], "result": 120}],
+         # Terminates only for n >= 0 (recurses forever on a negative), so it isn't certified `always`.
+         "properties": [], "prove": False, "terminates": "unknown"},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + float_funcs()
-            + maybe_funcs() + result_funcs())
+            + maybe_funcs() + result_funcs() + recursive_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -937,7 +973,8 @@ def main():
                 "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs()),
                 "list_transform_funcs": len(list_transform_funcs()),
                 "composition_funcs": len(composition_funcs()), "float_funcs": len(float_funcs()),
-                "maybe_funcs": len(maybe_funcs()), "result_funcs": len(result_funcs())}
+                "maybe_funcs": len(maybe_funcs()), "result_funcs": len(result_funcs()),
+                "recursive_funcs": len(recursive_funcs())}
     proved = sum(1 for ex in examples if ex["category"] == "function" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"

@@ -181,6 +181,11 @@ pub enum Val {
     Variant(String, Option<Box<Val>>),
     FnRef(String),
     Closure { params: Vec<String>, body: Rc<J>, env: Env },
+    /// A self-recursive function value: like `Closure`, but every application first re-binds
+    /// `self_name` to the *whole* function in the environment, so the body can call back into it.
+    /// Binding the full function (never a partially-applied remainder) keeps `self` correct even
+    /// when the recursive function is itself partially applied.
+    RecClosure { self_name: String, params: Vec<String>, body: Rc<J>, env: Env },
     Builtin { name: String, arity: usize, applied: Vec<Val> },
 }
 
@@ -269,7 +274,9 @@ pub fn encode_value(v: &Val) -> J {
             None => json!({ "kind": "variant", "tag": tag }),
         },
         Val::FnRef(t) => json!({ "kind": "fn_ref", "target": t }),
-        Val::Closure { params, .. } => json!({ "kind": "function", "params": params.len() }),
+        Val::Closure { params, .. } | Val::RecClosure { params, .. } => {
+            json!({ "kind": "function", "params": params.len() })
+        }
         Val::Builtin { name, arity, applied } => {
             json!({ "kind": "function", "builtin": name, "remaining": arity - applied.len() })
         }
@@ -656,6 +663,16 @@ pub fn apply(f: Val, mut args: Vec<Val>) -> Result<Val> {
                 apply(result, extra)
             }
         }
+        Val::RecClosure { self_name, params, body, env } => {
+            // Re-bind `self` to the whole function, then evaluate exactly as a closure would. The
+            // resulting closure's env carries `self`, so currying/partial application stay recursive.
+            let mut env0 = env.clone();
+            env0.insert(
+                self_name.clone(),
+                Val::RecClosure { self_name: self_name.clone(), params: params.clone(), body: body.clone(), env },
+            );
+            apply(Val::Closure { params, body, env: env0 }, args)
+        }
         Val::Builtin { name, arity, mut applied } => {
             applied.append(&mut args);
             if applied.len() < arity {
@@ -876,8 +893,20 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
 // ---------------------------------------------------------------------------
 
 /// Evaluate a body AST, then apply it to the given argument values. Returns the resulting value AST.
+/// Evaluate a (typically record) body to its function value, binding `self` to the function itself
+/// so a self-recursive body can call back into it. A lambda becomes a `RecClosure`; any other body
+/// is returned unchanged (nothing to recurse into).
+pub fn eval_recursive_body(body: &J) -> Result<Val> {
+    Ok(match eval(body, &Env::new())? {
+        Val::Closure { params, body, env } => {
+            Val::RecClosure { self_name: "self".to_string(), params, body, env }
+        }
+        other => other,
+    })
+}
+
 pub fn eval_body(body: &J, args: &[J]) -> Result<J> {
-    let f = eval(body, &Env::new())?;
+    let f = eval_recursive_body(body)?;
     let argv = args.iter().map(decode_value).collect::<Result<Vec<_>>>()?;
     Ok(encode_value(&apply(f, argv)?))
 }
@@ -894,7 +923,7 @@ pub struct ExampleRun {
 /// Run every `examples[]` of a function record through its `body`: bind the example's args, evaluate
 /// the body, and compare to the example's claimed `result`. This is what makes the examples executable.
 pub fn run_examples(record: &J, body: &J) -> Result<Vec<ExampleRun>> {
-    let f = eval(body, &Env::new())?;
+    let f = eval_recursive_body(body)?;
     let examples = record.get("examples").and_then(|e| e.as_array()).cloned().unwrap_or_default();
     let mut out = vec![];
     for (index, ex) in examples.iter().enumerate() {
@@ -1044,7 +1073,7 @@ pub fn runtime_verdict(expr: &J, examples: &[J], self_fn: &Option<Val>) -> Verdi
 
 /// Build the executable function-under-test from a body AST (for `self`), if it evaluates.
 pub fn self_fn_from_body(body: &J) -> Option<Val> {
-    eval(body, &Env::new()).ok()
+    eval_recursive_body(body).ok()
 }
 
 /// Evaluate a closed predicate-expression — a Nova Locutio `assert` claim — to a runtime value,
@@ -1094,6 +1123,46 @@ mod tests {
         assert!(runs.iter().all(|r| r.passed), "double should match all its worked examples");
         // double(5) == 10
         assert_eq!(eval_body(&body, &[nat(5)]).unwrap(), encode_value(&Val::Int(10)));
+    }
+
+    #[test]
+    fn self_recursive_body_runs() {
+        // `self` is bound to the function itself, so a self-recursive body evaluates and its examples pass.
+        let record = load("length.json");
+        let body = load("body-length.json");
+        let runs = run_examples(&record, &body).unwrap();
+        assert!(runs.iter().all(|r| r.passed), "recursive length should match all its worked examples");
+        // length([10,20,30,40]) == 4 — exercises four levels of `self` recursion.
+        assert_eq!(
+            eval_body(&body, &[json!({ "kind": "list", "elems": [nat(10), nat(20), nat(30), nat(40)] })]).unwrap(),
+            encode_value(&Val::Int(4))
+        );
+    }
+
+    #[test]
+    fn self_recursion_survives_partial_application() {
+        // A recursive function partially applied (curried) must still recurse: `self` always rebinds the
+        // WHOLE function, never the partially-applied remainder. `factorial` curries trivially (arity 1),
+        // so apply it in two steps via the RecClosure path and check the deep recursion still terminates.
+        let factorial = json!({
+            "kind": "lambda", "params": [{ "name": "n" }],
+            "body": { "kind": "case",
+                "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "eq" },
+                    "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+                "arms": [
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                      "body": { "kind": "lit", "value": { "kind": "int", "value": 1 } } },
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                      "body": { "kind": "app", "fn": { "kind": "var", "name": "mul" }, "args": [
+                          { "kind": "var", "name": "n" },
+                          { "kind": "app", "fn": { "kind": "var", "name": "self" }, "args": [
+                              { "kind": "app", "fn": { "kind": "var", "name": "sub" },
+                                "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 1 } }] }] }] } },
+                ] }
+        });
+        let f = eval_recursive_body(&factorial).unwrap();
+        assert!(matches!(f, Val::RecClosure { .. }));
+        assert!(val_eq(&apply(f, vec![Val::Int(5)]).unwrap(), &Val::Int(120)));
     }
 
     #[test]

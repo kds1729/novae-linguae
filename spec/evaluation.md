@@ -20,6 +20,10 @@ A call-by-value lambda calculus over the value-expression AST
 - **`lit`** is its value-expression decoded.
 - **`lambda`** is a closure capturing the environment; application supports **currying** (too few args
   → a partial application) and over-application (extra args applied to the result).
+- **`self`** — a record's body runs as a *recursive* closure: each application re-binds `self` to the
+  whole function before evaluating the body, so a self-recursive body (`length_rec`, `factorial`) calls
+  back into itself. Binding the full function (never a partially-applied remainder) keeps recursion
+  correct even when the function is itself partially applied.
 - **`app`** evaluates the function and arguments and applies.
 - **`let`** binds monomorphically.
 - **`case`** evaluates the scrutinee and tries arms in order over the four pattern kinds
@@ -59,6 +63,10 @@ Hindley-Milner inference, unifying the body's inferred type with the declared `s
   another variable, which then itself becomes numeric). So they check over either numeric type but reject a
   non-number (`\b -> add(b, b)` against `bool → bool` is ILL-TYPED). `div`/`mod` stay `int`-only.
 - `let` is monomorphic (a deliberate simplification).
+- **`self` is bound to the declared signature**, so a self-recursive body type-checks: the recursive call
+  shares the function's own (skolemized) type. Monomorphic recursion only — `self` is a single monotype,
+  not re-generalized — which is what the recursive records need (`length_rec : List a → int` checks with
+  `self(tail xs)` typed by the same signature).
 - A declared `forall` type's variables are **skolemized to rigid constants**, so the body must be
   genuinely polymorphic: `\x -> x` checks against `forall a. a → a`, but `\x -> add(x, x)` does not.
 - Verdict: **WELL-TYPED** (with the type) or **ILL-TYPED** (with the mismatch, exit 1).
