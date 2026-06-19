@@ -46,6 +46,10 @@
 //! a boolean `case` on `null(xs)` and recurses via `self`/`apply(self, …)`, since the language has no
 //! native `cons`/`nil` patterns). The induction then discharges it exactly as it does the built-in
 //! recursive list ops. So e.g. a user-defined recursive `length` is proved to distribute over `append`.
+//! `self` may **return a list** (the SMT return sort is read off its base arm — a `nil`/cons arm ⇒ `Lst`),
+//! so a cons-recursive map is proved length-preserving; and it may take a **second list parameter** carried
+//! through the recursion (induction on the first), so a user-defined recursive `append` is proved
+//! length-additive.
 //!
 //! **Folds.** `foldr(f, z, xs)` and `foldl(f, z, xs)` are emitted as their own `define-fun-rec`s over a
 //! single global uninterpreted binary `foldfn` (so a law holds for *every* `f`). `foldr` discharges with
@@ -58,8 +62,9 @@
 //! `append`, `reverse`, `map`, `filter`, `cons`, `head`, `tail`, `null`, `foldr`, `foldl`, plus the
 //! `Int`/`Bool` element algebra. `map`/`filter`/`fold` take at most one function/predicate, modelled as
 //! `id` or a single uninterpreted symbol (so `forall f xs. length(map(f, xs)) = length(xs)` is provable
-//! with `f` uninterpreted). `self` must be a single-list-parameter recursive function. Lists-of-lists
-//! and multiple distinct function arguments are out of scope and reported UNSUPPORTED.
+//! with `f` uninterpreted). `self` recurses on its first list parameter, with at most one additional
+//! spectator parameter; three-plus parameters, lists-of-lists, and multiple distinct function arguments
+//! are out of scope and reported UNSUPPORTED.
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value as J;
@@ -151,6 +156,24 @@ fn var_name(node: &J) -> Option<&str> {
     } else {
         None
     }
+}
+
+/// Unwind a curried application of `self`/`self__g` to its arguments in order, if `node` is one.
+/// `apply(self, x)` → `("self", [x])`; `apply(apply(self, x), y)` → `("self", [x, y])`. Returns `None`
+/// for any application not headed by a recursion marker (e.g. `apply(f, x)` for a modelled `f`).
+fn unwind_self_apply(node: &J) -> Option<(&str, Vec<&J>)> {
+    if head_op(node).as_deref() != Some("apply") {
+        return None;
+    }
+    let args = args_of(node);
+    let f = *args.first()?;
+    let x = *args.get(1)?;
+    if let Some(name) = var_name(f).filter(|n| *n == "self" || *n == "self__g") {
+        return Some((name, vec![x]));
+    }
+    let (name, mut inner) = unwind_self_apply(f)?;
+    inner.push(x);
+    Some((name, inner))
 }
 
 fn references_self(node: &J) -> bool {
@@ -486,19 +509,27 @@ fn lower_app(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
             let (a, b) = (l(0)?, l(1)?);
             format!("(ite (>= {a} {b}) {a} {b})")
         }
-        // The recursive function under test, as an SMT `define-fun-rec` named `self`. `self__g` is the
-        // reserved name for a *second* recursive function (used only by the two-recursive equivalence
-        // path, [`prove_equiv_by_induction`]); the single-self prover never emits it.
-        "self" => format!("(self {})", l(0)?),
-        "self__g" => format!("(self__g {})", l(0)?),
-        // Curried application: `apply(self, x)` → recursive call; `apply(f, x)` for any other function
-        // variable → the modelled global `mapfn`.
-        "apply" => match args.first().and_then(|a| var_name(a)) {
-            Some("self") => format!("(self {})", l(1)?),
-            Some("self__g") => format!("(self__g {})", l(1)?),
-            Some(_) => format!("(mapfn {})", l(1)?),
-            None => bail!("unsupported application form (out of fragment)"),
-        },
+        // The recursive function under test, as an SMT `define-fun-rec` named `self` (`self__g` is the
+        // reserved name for a *second* recursive function in the equivalence path). Applied directly in
+        // the `op`/`fn`-var form to one or two arguments (`self(xs)`, `self(tail xs, ys)`).
+        "self" | "self__g" => {
+            let lowered = (0..args.len()).map(l).collect::<Result<Vec<_>>>()?.join(" ");
+            format!("({op} {lowered})")
+        }
+        // Curried application: an `apply` spine bottoming out in `self`/`self__g` is a recursive call
+        // (one or two args — `apply(apply(self, xs), ys)` → `(self xs ys)`); `apply(f, x)` for any other
+        // function variable → the modelled global `mapfn`.
+        "apply" => {
+            if let Some((name, sargs)) = unwind_self_apply(node) {
+                let lowered = sargs.iter().map(|a| lower(a, env)).collect::<Result<Vec<_>>>()?.join(" ");
+                format!("({name} {lowered})")
+            } else {
+                match args.first().and_then(|a| var_name(a)) {
+                    Some(_) => format!("(mapfn {})", l(1)?),
+                    None => bail!("unsupported application form (out of fragment)"),
+                }
+            }
+        }
         other => bail!("unsupported operator `{other}` (out of fragment)"),
     })
 }
@@ -517,14 +548,22 @@ fn infer_result_sort(node: &J) -> Sort3 {
         // recursive function returns a list — e.g. a cons-recursive `map`/`append` whose base case is nil.
         Some("var") if node.get("name").and_then(|n| n.as_str()) == Some("nil") => Sort3::Lst,
         Some("case") => {
-            // Infer from a *non-recursive* (base) arm, which has a concrete sort; fall back to the first.
+            // Infer from the arms, preferring a concrete list/bool sort over the Int default: an arm that
+            // conses (or is `nil`) makes the function list-returning even when another arm is a bare
+            // variable that reads as Int (e.g. `append`'s base arm `ys`). A genuinely Int-returning
+            // function has every arm Int, so this stays correct; a body with truly mixed-sort arms is
+            // ill-typed and the resulting SMT def fails to sort-check (⇒ UNSUPPORTED, never a false PROVED).
             let arms = node.get("arms").and_then(|a| a.as_array());
-            let base = arms.and_then(|arms| {
-                arms.iter()
-                    .find(|a| a.get("body").map(|b| !references_self(b)).unwrap_or(false))
-                    .or_else(|| arms.first())
-            });
-            base.and_then(|a| a.get("body")).map(infer_result_sort).unwrap_or(Sort3::Int)
+            let sorts: Vec<Sort3> = arms
+                .map(|arms| arms.iter().filter_map(|a| a.get("body")).map(infer_result_sort).collect())
+                .unwrap_or_default();
+            if sorts.contains(&Sort3::Lst) {
+                Sort3::Lst
+            } else if sorts.contains(&Sort3::Bool) {
+                Sort3::Bool
+            } else {
+                Sort3::Int
+            }
         }
         Some("app") => match head_op(node).as_deref().unwrap_or_default() {
             "append" | "reverse" | "cons" | "tail" | "map" | "filter" => Sort3::Lst,
@@ -547,24 +586,44 @@ fn lower_self_def(body: &J) -> Result<String> {
 /// must already reference `smt_name` (`self` for the single-self prover; a caller wanting a second
 /// recursive function renames `self` → its reserved name with [`rename_self`] first). [`lower`] recognizes
 /// `self` and the reserved `self__g` as recursive heads.
+fn sort_kw(s: Sort3) -> Result<&'static str> {
+    Ok(match s {
+        Sort3::Int => "Int",
+        Sort3::Bool => "Bool",
+        Sort3::Lst => "Lst",
+        Sort3::Func | Sort3::Pred => bail!("recursive function uses a function/predicate sort (out of fragment)"),
+    })
+}
+
 fn lower_rec_def(body: &J, smt_name: &str) -> Result<String> {
     if body.get("kind").and_then(|k| k.as_str()) != Some("lambda") {
         bail!("recursive body is not a lambda");
     }
     let params = body.get("params").and_then(|p| p.as_array()).ok_or_else(|| anyhow!("lambda has no params"))?;
-    if params.len() != 1 {
-        bail!("self-induction supports a single-parameter recursive function (got {} params)", params.len());
+    // The recursion is on the FIRST list parameter; one extra "spectator" parameter (carried through the
+    // recursion, e.g. the second list of `append`) is supported. More than two is out of fragment.
+    if params.is_empty() || params.len() > 2 {
+        bail!("self-induction supports a one- or two-parameter recursive function (got {} params)", params.len());
     }
-    let param = params[0].get("name").and_then(|n| n.as_str()).ok_or_else(|| anyhow!("param has no name"))?;
+    let pnames: Vec<String> = params
+        .iter()
+        .map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from).ok_or_else(|| anyhow!("param has no name")))
+        .collect::<Result<_>>()?;
     let inner = body.get("body").ok_or_else(|| anyhow!("lambda has no body"))?;
-    let ret = match infer_result_sort(inner) {
-        Sort3::Int => "Int",
-        Sort3::Bool => "Bool",
-        Sort3::Lst => "Lst",
-        Sort3::Func | Sort3::Pred => bail!("recursive function returns a function/predicate sort (out of fragment)"),
-    };
-    let lowered = lower(inner, &BTreeMap::new())?; // the param lowers to itself, scoped by the define-fun-rec
-    Ok(format!("(define-fun-rec {smt_name} (({param} Lst)) {ret} {lowered})\n"))
+    let ret_sort = infer_result_sort(inner);
+    let ret = sort_kw(ret_sort)?;
+    // Parameter sorts: the recursion parameter (first) is a list; any other is inferred from the body,
+    // defaulting to the return sort when unconstrained (the list-combining shape, e.g. append's `ys`). A
+    // wrong guess can't yield a false proof — the SMT def would fail to sort-check and report UNSUPPORTED.
+    let mut psorts: BTreeMap<String, Option<Sort3>> = pnames.iter().map(|p| (p.clone(), None)).collect();
+    walk_sorts(inner, &pnames, &mut psorts)?;
+    let mut decls = String::new();
+    for (i, p) in pnames.iter().enumerate() {
+        let s = if i == 0 { Sort3::Lst } else { psorts.get(p).copied().flatten().unwrap_or(ret_sort) };
+        decls.push_str(&format!("({p} {})", sort_kw(s)?));
+    }
+    let lowered = lower(inner, &BTreeMap::new())?; // params lower to themselves, scoped by the define-fun-rec
+    Ok(format!("(define-fun-rec {smt_name} ({decls}) {ret} {lowered})\n"))
 }
 
 /// Rename every `self` recursion marker (the `self` *var* and the `self` *op*) to `new_name` throughout
@@ -1569,6 +1628,63 @@ mod tests {
         ]));
         let (o, _) = prove_by_induction(&prop, Some(&recursive_double_all_body()), solver);
         assert_eq!(o, InductionOutcome::Proved, "list-returning self should preserve length, got {o:?}");
+    }
+
+    /// `self = \xs ys -> case null(xs) of true -> ys | false -> cons(head xs, self(tail xs, ys))` —
+    /// a TWO-list-parameter recursive append, recursing on the first list with the second a spectator.
+    fn recursive_append_body() -> J {
+        json!({
+            "kind": "lambda",
+            "params": [{ "name": "xs" }, { "name": "ys" }],
+            "body": {
+                "kind": "case",
+                "scrutinee": app("null", vec![var("xs")]),
+                "arms": [
+                    { "pattern": lit_bool(true),  "body": var("ys") },
+                    { "pattern": lit_bool(false), "body": app("cons", vec![
+                        app("head", vec![var("xs")]),
+                        json!({ "kind": "app", "op": "self", "args": [app("tail", vec![var("xs")]), var("ys")] })]) },
+                ]
+            }
+        })
+    }
+    /// `self(xs, ys)` written as the curried apply spine `apply(apply(self, xs), ys)`.
+    fn call_self2(x: J, y: J) -> J {
+        app("apply", vec![app("apply", vec![var("self"), x]), y])
+    }
+
+    #[test]
+    fn proves_two_param_self_append_is_length_additive() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall xs ys. length(self(xs, ys)) = length(xs) + length(ys) — induction on the first list,
+        // ys carried as a spectator. Exercises the two-parameter `define-fun-rec` and curried self-call.
+        let prop = forall(&["xs", "ys"], app("eq", vec![
+            app("length", vec![call_self2(var("xs"), var("ys"))]),
+            app("add", vec![app("length", vec![var("xs")]), app("length", vec![var("ys")])]),
+        ]));
+        let (o, _) = prove_by_induction(&prop, Some(&recursive_append_body()), solver);
+        assert_eq!(o, InductionOutcome::Proved, "append length-additivity should be proved, got {o:?}");
+    }
+
+    #[test]
+    fn false_two_param_self_law_is_not_proved() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall xs ys. length(self(xs, ys)) = (length(xs) + length(ys)) + 1 — off by one, so false. The
+        // `length(ys)` term pins ys to a list (so the goal sort-checks), and the base case xs=nil refutes
+        // it: length(ys) = length(ys) + 1 is unsatisfiable as an equation, so its negation is a model.
+        let prop = forall(&["xs", "ys"], app("eq", vec![
+            app("length", vec![call_self2(var("xs"), var("ys"))]),
+            app("add", vec![
+                app("add", vec![app("length", vec![var("xs")]), app("length", vec![var("ys")])]),
+                lit_int(1)]),
+        ]));
+        let (o, _) = prove_by_induction(&prop, Some(&recursive_append_body()), solver);
+        assert!(matches!(o, InductionOutcome::Failed(_) | InductionOutcome::Unknown),
+            "a false two-param self-law must not be PROVED, got {o:?}");
     }
 
     #[test]

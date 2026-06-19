@@ -452,12 +452,12 @@ def recursive_funcs():
 
 def recursive_list_funcs():
     # Self-recursive functions that BUILD a list (cons-recursion). `nil` is the empty-list constant (var
-    # `nil`); each step conses onto the recursive call on the tail. These validate, type-check, and run.
-    # Their natural laws are length-preserving / length-additive (`length(self xs) = length xs`), but the
-    # prover returns UNSUPPORTED for them: the inductive fragment proves laws where `self` returns an Int
-    # (e.g. `length_rec`'s `length_append`), not ones where the user-defined recursive function returns a
-    # LIST composed under a builtin like `length`. So they ship as runnable-only recursion examples; the
-    # list-returning-self law is a documented prover-frontier item (README "Remaining frontier").
+    # `nil`); each step conses onto the recursive call on the tail. These validate, type-check, run, AND
+    # prove their length laws by induction over the supplied recursive body: the inductive prover now
+    # handles a `self` that returns a LIST composed under a builtin like `length` (`double_all_rec` /
+    # `increment_all_rec` are length-preserving), and a two-list-parameter `self` recursing on the first
+    # with the second a spectator (`append_rec` is length-additive). `countdown_rec` (int -> list) runs
+    # without a stated law.
     xs, ys, n = var("xs"), var("ys"), var("n")
     nil = var("nil")
     return [
@@ -487,7 +487,12 @@ def recursive_list_funcs():
          "body_ast": lam(["xs", "ys"], case_null("xs", ys,
                                                  bapp("cons", bapp("head", xs), bself(bapp("tail", xs), ys)))),
          "examples": [{"args": [[], [1]], "result": [1]}, {"args": [[1, 2], [3, 4]], "result": [1, 2, 3, 4]}],
-         "properties": [], "prove": False, "terminates": "always"},
+         # Length is additive over the two arguments — proved by induction on the first list (the second
+         # is a spectator carried through the recursion).
+         "properties": [{"name": "length_additive",
+                         "expr": forall(["xs", "ys"], op("eq", op("length", self_app(xs, ys)),
+                                                       op("add", op("length", xs), op("length", ys))))}],
+         "prove": True, "terminates": "always"},
         {"name": "countdown_rec", "intent": "Build the list n, n-1, …, 1 for a non-negative integer.",
          "summary": "nil when n is 0; otherwise n consed onto the countdown from n-1.",
          "tags": ["list", "recursion", "generative"], "type_ast": fn([INT], list_of(INT)),

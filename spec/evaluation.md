@@ -215,9 +215,11 @@ self` — the body branches with a boolean `case` on `null(xs)` and recurses via
 `self(xs) = 0`) is correctly NOT-PROVED. The recursive function may **return a list**, not just a
 scalar: `self`'s SMT return sort is inferred from its base arm (a base case of `nil` ⇒ `Lst`), so a
 cons-recursive map (`self = \xs -> case null(xs) of true -> nil | false -> cons(2*head xs, self(tail
-xs))`) is **proved length-preserving** (`length(self xs) = length xs`). Scope: `self` is a
-single-list-parameter recursive function — a recursion on **two** list parameters (a user-defined
-`append`) is still out of fragment and reported UNSUPPORTED.
+xs))`) is **proved length-preserving** (`length(self xs) = length xs`). A **two-list-parameter** `self`
+is also handled — induction is on the first list, the second carried as a spectator — so a user-defined
+recursive `append` is **proved length-additive** (`length(self xs ys) = length xs + length ys`). Scope:
+the recursion is on the first list parameter, with at most one additional spectator parameter; three or
+more parameters are out of fragment and reported UNSUPPORTED.
 
 ### Folds
 
