@@ -513,6 +513,9 @@ fn infer_result_sort(node: &J) -> Sort3 {
             Some("list") => Sort3::Lst,
             _ => Sort3::Int,
         },
+        // `nil` is the empty-list constant (written as a `var`), so a base arm of `nil` means the
+        // recursive function returns a list — e.g. a cons-recursive `map`/`append` whose base case is nil.
+        Some("var") if node.get("name").and_then(|n| n.as_str()) == Some("nil") => Sort3::Lst,
         Some("case") => {
             // Infer from a *non-recursive* (base) arm, which has a concrete sort; fall back to the first.
             let arms = node.get("arms").and_then(|a| a.as_array());
@@ -1531,6 +1534,41 @@ mod tests {
         ]));
         let (o, _) = prove_by_induction(&prop, Some(&recursive_length_body()), solver);
         assert_eq!(o, InductionOutcome::Proved, "self distributes over append should be proved, got {o:?}");
+    }
+
+    /// `self = \xs -> case null(xs) of true -> nil | false -> cons(mul(2, head xs), self(tail xs))` —
+    /// a cons-recursive map (doubling). The recursive function returns a LIST, unlike `recursive_length`.
+    fn recursive_double_all_body() -> J {
+        json!({
+            "kind": "lambda",
+            "params": [{ "name": "xs" }],
+            "body": {
+                "kind": "case",
+                "scrutinee": app("null", vec![var("xs")]),
+                "arms": [
+                    { "pattern": lit_bool(true),  "body": var("nil") },
+                    { "pattern": lit_bool(false), "body": app("cons", vec![
+                        app("mul", vec![lit_int(2), app("head", vec![var("xs")])]),
+                        call_self(app("tail", vec![var("xs")]))]) },
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn proves_list_returning_self_preserves_length() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall xs. length(self(xs)) = length(xs) — a law where the user-defined recursive `self`
+        // returns a LIST, composed under the builtin `length`. Regression: the base arm `nil` must be
+        // recognized as a list so `self`'s SMT return sort is `Lst`, not the default `Int`.
+        let prop = forall(&["xs"], app("eq", vec![
+            app("length", vec![call_self(var("xs"))]),
+            app("length", vec![var("xs")]),
+        ]));
+        let (o, _) = prove_by_induction(&prop, Some(&recursive_double_all_body()), solver);
+        assert_eq!(o, InductionOutcome::Proved, "list-returning self should preserve length, got {o:?}");
     }
 
     #[test]

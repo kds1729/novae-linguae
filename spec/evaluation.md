@@ -212,7 +212,12 @@ self` — the body branches with a boolean `case` on `null(xs)` and recurses via
 (the language has no native `cons`/`nil` patterns) — and the induction discharges it exactly as it does
 `reverse`/`append`. Demonstrated live: a user-defined recursive `length` is **proved to distribute over
 `append`** (`self(append(xs, ys)) = self(xs) + self(ys)`); a false law over the same `self` (e.g.
-`self(xs) = 0`) is correctly NOT-PROVED. Scope: `self` is a single-list-parameter recursive function.
+`self(xs) = 0`) is correctly NOT-PROVED. The recursive function may **return a list**, not just a
+scalar: `self`'s SMT return sort is inferred from its base arm (a base case of `nil` ⇒ `Lst`), so a
+cons-recursive map (`self = \xs -> case null(xs) of true -> nil | false -> cons(2*head xs, self(tail
+xs))`) is **proved length-preserving** (`length(self xs) = length xs`). Scope: `self` is a
+single-list-parameter recursive function — a recursion on **two** list parameters (a user-defined
+`append`) is still out of fragment and reported UNSUPPORTED.
 
 ### Folds
 

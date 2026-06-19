@@ -450,10 +450,59 @@ def recursive_funcs():
     ]
 
 
+def recursive_list_funcs():
+    # Self-recursive functions that BUILD a list (cons-recursion). `nil` is the empty-list constant (var
+    # `nil`); each step conses onto the recursive call on the tail. These validate, type-check, and run.
+    # Their natural laws are length-preserving / length-additive (`length(self xs) = length xs`), but the
+    # prover returns UNSUPPORTED for them: the inductive fragment proves laws where `self` returns an Int
+    # (e.g. `length_rec`'s `length_append`), not ones where the user-defined recursive function returns a
+    # LIST composed under a builtin like `length`. So they ship as runnable-only recursion examples; the
+    # list-returning-self law is a documented prover-frontier item (README "Remaining frontier").
+    xs, ys, n = var("xs"), var("ys"), var("n")
+    nil = var("nil")
+    return [
+        {"name": "double_all_rec", "intent": "Double every number in a list, by recursion.",
+         "summary": "nil for the empty list; otherwise (2*head) consed onto doubling the tail.",
+         "tags": ["list", "recursion", "map", "elementwise"], "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], case_null("xs", nil,
+                                           bapp("cons", bapp("mul", int_lit(2), bapp("head", xs)), bself(bapp("tail", xs))))),
+         "examples": [{"args": [[]], "result": []}, {"args": [[1, -2, 3]], "result": [2, -4, 6]}],
+         # Preserves length — proved by induction over the list-returning recursive body.
+         "properties": [{"name": "length_preserving",
+                         "expr": forall(["xs"], op("eq", op("length", self_app(xs)), op("length", xs)))}],
+         "prove": True, "terminates": "always"},
+        {"name": "increment_all_rec", "intent": "Add one to every number in a list, by recursion.",
+         "summary": "nil for the empty list; otherwise (head+1) consed onto incrementing the tail.",
+         "tags": ["list", "recursion", "map", "elementwise"], "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], case_null("xs", nil,
+                                           bapp("cons", bapp("add", bapp("head", xs), int_lit(1)), bself(bapp("tail", xs))))),
+         "examples": [{"args": [[]], "result": []}, {"args": [[0, 9, -5]], "result": [1, 10, -4]}],
+         "properties": [{"name": "length_preserving",
+                         "expr": forall(["xs"], op("eq", op("length", self_app(xs)), op("length", xs)))}],
+         "prove": True, "terminates": "always"},
+        {"name": "append_rec", "intent": "Concatenate two lists, by recursion on the first.",
+         "summary": "the second list when the first is empty; otherwise head consed onto appending the tail.",
+         "tags": ["list", "recursion", "lossless"],
+         "type_ast": {"kind": "forall", "vars": ["a"], "body": fn([list_of(var("a")), list_of(var("a"))], list_of(var("a")))},
+         "body_ast": lam(["xs", "ys"], case_null("xs", ys,
+                                                 bapp("cons", bapp("head", xs), bself(bapp("tail", xs), ys)))),
+         "examples": [{"args": [[], [1]], "result": [1]}, {"args": [[1, 2], [3, 4]], "result": [1, 2, 3, 4]}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "countdown_rec", "intent": "Build the list n, n-1, …, 1 for a non-negative integer.",
+         "summary": "nil when n is 0; otherwise n consed onto the countdown from n-1.",
+         "tags": ["list", "recursion", "generative"], "type_ast": fn([INT], list_of(INT)),
+         "body_ast": lam(["n"], case_bool(bapp("eq", n, int_lit(0)), nil,
+                                          bapp("cons", n, bself(bapp("sub", n, int_lit(1)))))),
+         "examples": [{"args": [0], "result": []}, {"args": [3], "result": [3, 2, 1]}, {"args": [1], "result": [1]}],
+         # Terminates only for n >= 0 (recurses forever on a negative).
+         "properties": [], "prove": False, "terminates": "unknown"},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + float_funcs()
-            + maybe_funcs() + result_funcs() + recursive_funcs())
+            + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -974,7 +1023,8 @@ def main():
                 "list_transform_funcs": len(list_transform_funcs()),
                 "composition_funcs": len(composition_funcs()), "float_funcs": len(float_funcs()),
                 "maybe_funcs": len(maybe_funcs()), "result_funcs": len(result_funcs()),
-                "recursive_funcs": len(recursive_funcs())}
+                "recursive_funcs": len(recursive_funcs()),
+                "recursive_list_funcs": len(recursive_list_funcs())}
     proved = sum(1 for ex in examples if ex["category"] == "function" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"

@@ -114,19 +114,25 @@ to be rejected*, for the stated reason. Today's five:
 
 ## Scope and where it grows
 
-52 examples today (46 positive, 6 negative), in three `category`s:
+56 examples today (50 positive, 6 negative), in three `category`s:
 
-- **function** (38) — Nova Lingua function records across ten families (unary integer incl. `double` /
+- **function** (42) — Nova Lingua function records across eleven families (unary integer incl. `double` /
   `quadruple` / `decrement`, binary integer incl. `maximum` / `minimum`, boolean/predicate incl.
   `logical_and` / `logical_or` / `is_zero`, list, list-transform: `map`/`filter`/`append`, composition:
   `foldl`-product / `length`∘`filter`, float: `square_f` / `double_f`, Maybe: `safe_div` / `first`,
-  Result: `checked_div` / `checked_sub`, and **recursion** — raw `self`-recursive `length_rec` /
-  `sum_rec` / `factorial`), 18 with properties proved over the unbounded domain, plus 3 negatives.
+  Result: `checked_div` / `checked_sub`, **recursion** — scalar/measure `self`-recursive `length_rec` /
+  `sum_rec` / `factorial`, and **list-building recursion** — cons-recursive `double_all_rec` /
+  `increment_all_rec` / `append_rec` / `countdown_rec`), 20 with properties proved over the unbounded
+  domain, plus 3 negatives.
   The sum-typed (Maybe/Result) functions construct their variant result with a computed payload
   (`Just(a / b)`, `Err(b)`); sum types are opaque to the prover, so they verify by schema +
-  typecheck + run rather than proof. The recursion family calls itself via `self` — now bound in the
-  typechecker and evaluator, so a recursive body type-checks against its own signature and runs; its
-  law (`length_rec` distributes over `append`) is proved by induction over the supplied recursive body.
+  typecheck + run rather than proof. The recursion families call themselves via `self` — now bound in the
+  typechecker and evaluator, so a recursive body type-checks against its own signature and runs.
+  Their laws are proved by induction over the supplied recursive body: `length_rec` distributes over
+  `append`, and the list-building `double_all_rec` / `increment_all_rec` are proved length-preserving
+  (`length(self xs) = length xs`) — a law where the recursive function returns a *list*. (`append_rec`,
+  recursive on two list parameters, runs but is outside the single-parameter inductive fragment, so it
+  ships without a proved property.)
 - **exchange** (11) — Nova Locutio signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
   `verify-claim` CONFIRMED, `request`/`validate` → `assert`, `request`/`store` → `ack`, `propose` →
   `commit`, `commit` → `assert` (CONFIRMED), `delegate` → `ack`, `retract` → `ack`, `query` → `ack`),
