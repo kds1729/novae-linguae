@@ -482,6 +482,41 @@ def list_fold_funcs():
     ]
 
 
+def refined_funcs():
+    # Functions carrying REFINEMENT predicates — constraints a type alone can't express (principle 1), the
+    # corpus's first records to populate `signature.refinements`. A `pre` refinement is a precondition the
+    # caller must establish (a nonzero divisor, a non-empty list); a `post` refinement constrains the
+    # result (referenced as `output`). The refinement is a predicate-expression AST over the parameters;
+    # the worked examples all satisfy the precondition, so the record still type-checks and runs.
+    a, b, n, xs = var("a"), var("b"), var("n"), var("xs")
+    return [
+        {"name": "divide", "intent": "Integer division, with a nonzero-divisor precondition.",
+         "summary": "Returns a / b; requires b != 0.", "tags": ["arithmetic", "partial", "refinement"],
+         "type_ast": fn([INT, INT], INT), "body_ast": lam(["a", "b"], bapp("div", a, b)),
+         "examples": [{"args": [6, 2], "result": 3}, {"args": [9, 3], "result": 3}, {"args": [7, 1], "result": 7}],
+         "refinements": [{"kind": "pre", "expr": op("neq", b, int_lit(0))}],
+         "properties": [], "prove": False},
+        {"name": "modulo", "intent": "Integer modulo, with a nonzero-divisor precondition.",
+         "summary": "Returns a mod b; requires b != 0.", "tags": ["arithmetic", "partial", "refinement"],
+         "type_ast": fn([INT, INT], INT), "body_ast": lam(["a", "b"], bapp("mod", a, b)),
+         "examples": [{"args": [7, 3], "result": 1}, {"args": [8, 4], "result": 0}, {"args": [9, 5], "result": 4}],
+         "refinements": [{"kind": "pre", "expr": op("neq", b, int_lit(0))}],
+         "properties": [], "prove": False},
+        {"name": "head_of", "intent": "The first element of a list, with a non-empty precondition.",
+         "summary": "Returns head(xs); requires xs to be non-empty.", "tags": ["list", "partial", "refinement"],
+         "type_ast": poly_list_fn(var("a")), "body_ast": lam(["xs"], bapp("head", xs)),
+         "examples": [{"args": [[1, 2, 3]], "result": 1}, {"args": [[9]], "result": 9}],
+         "refinements": [{"kind": "pre", "expr": op("not", op("null", xs))}],
+         "properties": [], "prove": False},
+        {"name": "abs_pos", "intent": "Absolute value, with a non-negative postcondition.",
+         "summary": "Returns |n|; guarantees the result is >= 0.", "tags": ["arithmetic", "refinement"],
+         "type_ast": fn([INT], INT), "body_ast": lam(["n"], bapp("abs", n)),
+         "examples": [{"args": [0], "result": 0}, {"args": [6], "result": 6}, {"args": [-4], "result": 4}],
+         "refinements": [{"kind": "post", "expr": op("ge", var("output"), int_lit(0))}],
+         "properties": [], "prove": False},
+    ]
+
+
 def float_funcs():
     x = var("x")
     return [
@@ -867,7 +902,7 @@ def order_laws():
 
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
-            + list_transform_funcs() + composition_funcs() + list_fold_funcs() + float_funcs()
+            + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + float_funcs()
             + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs()
             + arith_laws() + bool_laws() + order_laws())
 
@@ -906,7 +941,7 @@ def build_and_verify(spec, workdir):
     terminates = spec.get("terminates", "unknown" if spec["name"] == "sum" else "always")
     record = build_v2_record(spec["name"], spec["type_ast"], examples, spec["body_ast"],
                              properties=spec.get("properties") or None, intent_tags=spec["tags"],
-                             terminates=terminates)
+                             terminates=terminates, refinements=spec.get("refinements"))
     body = spec["body_ast"]
     addr = expr_address(body)
     d = os.path.join(workdir, spec["name"])
@@ -1005,7 +1040,8 @@ def build_commons(workdir, specs):
         ex = [{"args": [to_value_ast(a) for a in e["args"]], "result": to_value_ast(e["result"])} for e in spec["examples"]]
         terminates = spec.get("terminates", "unknown" if spec["name"] == "sum" else "always")
         rec = build_v2_record(spec["name"], spec["type_ast"], ex, spec["body_ast"],
-                              properties=spec.get("properties") or None, intent_tags=spec["tags"], terminates=terminates)
+                              properties=spec.get("properties") or None, intent_tags=spec["tags"],
+                              terminates=terminates, refinements=spec.get("refinements"))
         addr = expr_address(spec["body_ast"])
         records.append(rec)
         bodies[addr] = spec["body_ast"]
@@ -1482,7 +1518,7 @@ def main():
                 "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs()),
                 "list_transform_funcs": len(list_transform_funcs()),
                 "composition_funcs": len(composition_funcs()), "list_fold_funcs": len(list_fold_funcs()),
-                "float_funcs": len(float_funcs()),
+                "refined_funcs": len(refined_funcs()), "float_funcs": len(float_funcs()),
                 "maybe_funcs": len(maybe_funcs()), "result_funcs": len(result_funcs()),
                 "recursive_funcs": len(recursive_funcs()),
                 "recursive_list_funcs": len(recursive_list_funcs()),
