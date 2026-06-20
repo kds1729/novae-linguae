@@ -1405,6 +1405,32 @@ def negative_examples(workdir, commons_dir, by_name):
          "reports it UNDER-DECLARED before any execution.",
          ["negative", "effects"], {"record": rec7, "body": body7},
          "check-effects", "UNDER-DECLARED", (ce.stdout + ce.stderr), "UNDER-DECLARED" in (ce.stdout + ce.stderr))
+
+    # 8. List op on a scalar — the body reverses an int. Declared int -> List int, but `reverse` needs a
+    #    list, so the type checker rejects the body (a different ill-typing than a wrong declared return).
+    body8 = lam(["n"], bapp("reverse", n))
+    rec8 = build_v2_record("misapply", fn([INT], list_of(INT)),
+                           [{"args": [to_value_ast(3)], "result": to_value_ast([3])}], body8, terminates="always")
+    _, r8, b8 = write_rec("listonscalar", rec8, body8)
+    tc8 = cli(["typecheck", r8, "--body", b8])
+    emit("list_op_on_scalar", "nova_lingua",
+         "A function whose body reverses an integer.",
+         "reverse expects a list, but its argument is an int; the type checker rejects the body as ill-typed.",
+         ["negative", "type-error"], {"record": rec8, "body": body8},
+         "typecheck", "ILL-TYPED", (tc8.stdout + tc8.stderr), tc8.returncode != 0)
+
+    # 9. Arity mismatch — the body applies `add` (a two-argument function) to a single argument, so it has
+    #    a function type, not int; the type checker rejects it.
+    body9 = lam(["n"], bapp("add", n))
+    rec9 = build_v2_record("halfadd", fn([INT], INT),
+                           [{"args": [to_value_ast(3)], "result": to_value_ast(3)}], body9, terminates="always")
+    _, r9, b9 = write_rec("aritymismatch", rec9, body9)
+    tc9 = cli(["typecheck", r9, "--body", b9])
+    emit("arity_mismatch", "nova_lingua",
+         "A function whose body applies add to a single argument.",
+         "add takes two arguments; applied to one it yields a function, not an int, so the type checker rejects the body.",
+         ["negative", "type-error"], {"record": rec9, "body": body9},
+         "typecheck", "ILL-TYPED", (tc9.stdout + tc9.stderr), tc9.returncode != 0)
     return out
 
 
