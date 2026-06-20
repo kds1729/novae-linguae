@@ -114,9 +114,9 @@ to be rejected*, for the stated reason. Today's five:
 
 ## Scope and where it grows
 
-76 examples today (70 positive, 6 negative), in three `category`s:
+78 examples today (70 positive, 8 negative), in three `category`s:
 
-- **function** (57) — Nova Lingua function records across eleven families (unary integer incl. `double` /
+- **function** (59) — Nova Lingua function records across eleven families (unary integer incl. `double` /
   `quadruple` / `decrement` / `abs_val`, binary integer incl. `maximum` / `minimum` / `abs_diff`,
   boolean/predicate incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` / `is_even`, list,
   list-transform: `map`/`filter`/`append` (`negate_all` / `square_all` / `keep_positives` / `keep_evens`),
@@ -127,7 +127,8 @@ to be rejected*, for the stated reason. Today's five:
   / `square_all_rec` / `append_rec` / `countdown_rec`), 30 with properties proved over the unbounded domain
   — including the `filter`/`reverse` commutation (`filter(p, reverse xs) = reverse(filter p xs)`,
   auxiliary-lemma) and `filter` idempotence (`filter(p, filter p xs) = filter p xs`, direct induction) —
-  plus 3 negatives.
+  plus 5 negatives (an ill-typed body, a refuted doubling law, a refuted commutativity claim, a wrong
+  scalar example, and a wrong list example).
   The sum-typed (Maybe/Result) functions construct their variant result with a computed payload
   (`Just(a / b)`, `Err(b)`); sum types are opaque to the prover, so they verify by schema +
   typecheck + run rather than proof. The recursion families call themselves via `self` — now bound in the

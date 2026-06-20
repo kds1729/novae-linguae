@@ -981,6 +981,36 @@ def negative_examples(workdir, commons_dir, by_name):
          ["negative", "wrong-example"], {"record": rec3, "body": body3},
          "run", "EXAMPLE-FAILED", (rn.stdout + rn.stderr), rn.returncode != 0)
 
+    # 3b. Refuted property — a correct subtraction body carrying a FALSE law (claims it is commutative,
+    #     self(a,b) = self(b,a)). The prover refutes it with a concrete counterexample.
+    a, b = var("a"), var("b")
+    body3b = lam(["a", "b"], bapp("sub", a, b))
+    prop3b = [{"name": "false_commutative", "expr": forall(["a", "b"], op("eq", self_app(a, b), self_app(b, a)))}]
+    rec3b = build_v2_record("subtract", fn([INT, INT], INT),
+                            [{"args": [to_value_ast(5), to_value_ast(3)], "result": to_value_ast(2)}],
+                            body3b, properties=prop3b, terminates="always")
+    _, r3b, b3b = write_rec("falsecommute", rec3b, body3b)
+    pv3b = cli(["prove", r3b, "--body", b3b])
+    emit("refuted_commutativity", "nova_lingua",
+         "A subtraction function that wrongly claims to be commutative.",
+         "The body and example are correct, but a - b = b - a is false; the prover refutes it with a counterexample.",
+         ["negative", "false-property"], {"record": rec3b, "body": body3b, "properties": prop3b},
+         "prove", "REFUTED", pv3b.stdout, "REFUTED" in pv3b.stdout)
+
+    # 3c. Wrong example for a LIST function — claims reverse([1,2,3]) = [1,2,3]. Type-checks, but FAILS on
+    #     execution (reverse([1,2,3]) is [3,2,1]).
+    body3c = lam(["xs"], bapp("reverse", var("xs")))
+    rec3c = build_v2_record("reverse", poly_list_fn(list_of(var("a"))),
+                            [{"args": [to_value_ast([1, 2, 3])], "result": to_value_ast([1, 2, 3])}],
+                            body3c, terminates="always")
+    d3c, r3c, _ = write_rec("wronglistexample", rec3c, body3c)
+    rn3c = cli(["run", "--records", d3c, r3c])
+    emit("wrong_list_example", "nova_lingua",
+         "A reverse function whose worked example claims reverse([1,2,3]) = [1,2,3].",
+         "Well-typed, but executing it fails: reverse([1,2,3]) is [3,2,1], not [1,2,3].",
+         ["negative", "wrong-example", "list"], {"record": rec3c, "body": body3c},
+         "run", "EXAMPLE-FAILED", (rn3c.stdout + rn3c.stderr), rn3c.returncode != 0)
+
     # 4. Nova Locutio — a validly-SIGNED assert with a FALSE claim (double(21) = 43). verify-claim re-runs
     #    the claim and refutes it: a real signature is no guarantee of a true claim (principle 3).
     resp_did = responder_did(RESPONDER_SEED)
