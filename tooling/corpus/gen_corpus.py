@@ -993,6 +993,14 @@ def nova_locutio_examples(commons_dir, by_name):
         ("apply_multiply", "Ask an agent to multiply 6 and 7.",
          "request/apply mul to (6, 7) → the responder asserts mul(6, 7) = 42, which re-runs true.",
          "request", "mul2", [6, 7], ["agent-loop", "request", "apply"]),
+        ("apply_sum_foldr", "Ask an agent to sum the list [1, 2, 3] with a right fold.",
+         "request/apply sum_foldr to [1, 2, 3] → the responder runs it over the list argument and asserts "
+         "sum_foldr([1, 2, 3]) = 6, which re-runs true.",
+         "request", "sum_foldr", [[1, 2, 3]], ["agent-loop", "request", "apply", "list"]),
+        ("apply_all_positive", "Ask an agent whether every element of [2, 4, 6] is positive.",
+         "request/apply all_positive to [2, 4, 6] → the responder asserts all_positive([2, 4, 6]) = true, "
+         "which re-runs true (an apply whose result is a boolean).",
+         "request", "all_positive", [[2, 4, 6]], ["agent-loop", "request", "apply", "list", "predicate"]),
         ("propose_double", "Propose that an agent compute double of 21.",
          "propose/apply double to 21 → the responder test-runs it and commits.",
          "propose", "double", [21], ["agent-loop", "propose"]),
