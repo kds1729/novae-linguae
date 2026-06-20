@@ -197,6 +197,8 @@ def unary_arith():
          "two_doublings", forall(["n"], op("eq", self_app(n), op("mul", int_lit(2), op("mul", int_lit(2), n)))), ["arithmetic", "linear"]),
         ("decrement", "Subtract one from a number.", "Returns n - 1.", bapp("sub", n, int_lit(1)), [0, 9, -5], lambda x: x - 1,
          "strictly_decreasing", forall(["n"], op("lt", self_app(n), n)), ["arithmetic"]),
+        ("abs_val", "Absolute value of a number.", "Returns |n|.", bapp("abs", n), [0, 6, -4], abs,
+         "nonnegative", forall(["n"], op("ge", self_app(n), int_lit(0))), ["arithmetic"]),
     ]
     out = []
     for name, intent, summary, body, ins, f, pname, pexpr, tags in rows:
@@ -222,6 +224,9 @@ def binary_arith():
          "at_least_first", forall(["a", "b"], op("ge", self_app(a, b), a)), ["arithmetic", "order"]),
         ("minimum", "The smaller of two numbers.", "Returns min(a, b).", bapp("min", a, b), [(5, 3), (2, 9), (-2, -7)], min,
          "at_most_first", forall(["a", "b"], op("le", self_app(a, b), a)), ["arithmetic", "order"]),
+        ("abs_diff", "The absolute difference of two numbers.", "Returns |a - b|.", bapp("abs", bapp("sub", a, b)),
+         [(5, 3), (3, 5), (-2, 4)], lambda x, y: abs(x - y),
+         "symmetric", forall(["a", "b"], op("eq", self_app(a, b), self_app(b, a))), ["arithmetic"]),
     ]
     out = []
     for name, intent, summary, body, ins, f, pname, pexpr, tags in rows:
@@ -265,6 +270,17 @@ def boolean_funcs():
         {"name": "is_zero", "intent": "Test whether a number is zero.", "summary": "Returns true iff n == 0.",
          "tags": ["predicate", "comparison"], "type_ast": fn([INT], BOOL), "body_ast": lam(["n"], bapp("eq", n, int_lit(0))),
          "examples": [{"args": [0], "result": True}, {"args": [3], "result": False}, {"args": [-1], "result": False}],
+         "properties": [], "prove": False},
+        # logical_xor: commutative (over the boolean fragment).
+        {"name": "logical_xor", "intent": "Exclusive OR of two booleans.", "summary": "Returns true iff exactly one of a, b is true.",
+         "tags": ["boolean", "commutative"], "type_ast": fn([BOOL, BOOL], BOOL), "body_ast": lam(["a", "b"], bapp("xor", a, b)),
+         "examples": [{"args": [False, False], "result": False}, {"args": [True, False], "result": True}, {"args": [True, True], "result": False}],
+         "properties": [{"name": "commutative", "expr": forall(["a", "b"], op("eq", op("xor", a, b), op("xor", b, a)))}], "prove": True},
+        # is_even: a predicate over n mod 2; examples only.
+        {"name": "is_even", "intent": "Test whether a number is even.", "summary": "Returns true iff n mod 2 == 0.",
+         "tags": ["predicate", "arithmetic"], "type_ast": fn([INT], BOOL),
+         "body_ast": lam(["n"], bapp("eq", bapp("mod", n, int_lit(2)), int_lit(0))),
+         "examples": [{"args": [0], "result": True}, {"args": [4], "result": True}, {"args": [3], "result": False}],
          "properties": [], "prove": False},
     ]
     return out
