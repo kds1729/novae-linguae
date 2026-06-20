@@ -114,18 +114,19 @@ to be rejected*, for the stated reason. Today's five:
 
 ## Scope and where it grows
 
-81 examples today (73 positive, 8 negative), in three `category`s:
+84 examples today (76 positive, 8 negative), in three `category`s:
 
-- **function** (62) — Nova Lingua function records across twelve families (unary integer incl. `double` /
+- **function** (65) — Nova Lingua function records across thirteen families (unary integer incl. `double` /
   `quadruple` / `decrement` / `abs_val`, binary integer incl. `maximum` / `minimum` / `abs_diff`,
-  ternary algebraic laws (`sum3` associative, `mul_sum` distributive, `add_zero` right-identity),
+  ternary integer algebraic laws (`sum3` associative, `mul_sum` distributive, `add_zero` right-identity),
+  boolean algebraic laws (`and3` / `or3` associative, `nand` De Morgan),
   boolean/predicate incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` / `is_even`, list,
   list-transform: `map`/`filter`/`append` (`negate_all` / `square_all` / `keep_positives` / `keep_evens`),
   composition: `foldl`-product / `length`∘`filter` / `sum_of_squares`, float: `square_f` / `double_f` /
   `negate_f` / `cube_f`, Maybe: `safe_div` / `safe_mod` / `first`, Result: `checked_div` / `checked_sub`,
   **recursion** — scalar/measure `self`-recursive `length_rec` / `sum_rec` / `product_rec` / `factorial`,
   and **list-building recursion** — cons-recursive `double_all_rec` / `increment_all_rec` / `negate_all_rec`
-  / `square_all_rec` / `append_rec` / `countdown_rec`), 33 with properties proved over the unbounded domain
+  / `square_all_rec` / `append_rec` / `countdown_rec`), 36 with properties proved over the unbounded domain
   — including the `filter`/`reverse` commutation (`filter(p, reverse xs) = reverse(filter p xs)`,
   auxiliary-lemma) and `filter` idempotence (`filter(p, filter p xs) = filter p xs`, direct induction) —
   plus 5 negatives (an ill-typed body, a refuted doubling law, a refuted commutativity claim, a wrong

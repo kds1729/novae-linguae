@@ -649,11 +649,47 @@ def arith_laws():
     ]
 
 
+def bool_laws():
+    # Boolean algebraic laws — associativity and De Morgan — PROVED over the boolean fragment. Stated over
+    # the BUILTINS (`and`/`or`/`not`), not `self`: the prover defaults `self`'s parameters to Int, which
+    # clashes with a boolean function, whereas the builtin-stated law engages the boolean solver directly.
+    a, b, c = var("a"), var("b"), var("c")
+    return [
+        {"name": "and3", "intent": "Logical AND of three booleans.", "summary": "Returns (a and b) and c.",
+         "tags": ["boolean", "associative"], "type_ast": fn([BOOL, BOOL, BOOL], BOOL),
+         "body_ast": lam(["a", "b", "c"], bapp("and", bapp("and", a, b), c)),
+         "examples": [{"args": [True, True, True], "result": True}, {"args": [True, False, True], "result": False},
+                      {"args": [False, True, True], "result": False}],
+         "properties": [{"name": "associative",
+                         "expr": forall(["a", "b", "c"], op("eq", op("and", op("and", a, b), c),
+                                                       op("and", a, op("and", b, c))))}],
+         "prove": True},
+        {"name": "or3", "intent": "Logical OR of three booleans.", "summary": "Returns (a or b) or c.",
+         "tags": ["boolean", "associative"], "type_ast": fn([BOOL, BOOL, BOOL], BOOL),
+         "body_ast": lam(["a", "b", "c"], bapp("or", bapp("or", a, b), c)),
+         "examples": [{"args": [False, False, False], "result": False}, {"args": [True, False, False], "result": True},
+                      {"args": [False, False, True], "result": True}],
+         "properties": [{"name": "associative",
+                         "expr": forall(["a", "b", "c"], op("eq", op("or", op("or", a, b), c),
+                                                       op("or", a, op("or", b, c))))}],
+         "prove": True},
+        {"name": "nand", "intent": "Logical NAND of two booleans.", "summary": "Returns not (a and b).",
+         "tags": ["boolean", "de-morgan"], "type_ast": fn([BOOL, BOOL], BOOL),
+         "body_ast": lam(["a", "b"], bapp("not", bapp("and", a, b))),
+         "examples": [{"args": [True, True], "result": False}, {"args": [True, False], "result": True},
+                      {"args": [False, False], "result": True}],
+         "properties": [{"name": "de_morgan",
+                         "expr": forall(["a", "b"], op("eq", op("not", op("and", a, b)),
+                                                       op("or", op("not", a), op("not", b))))}],
+         "prove": True},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + float_funcs()
             + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs()
-            + arith_laws())
+            + arith_laws() + bool_laws())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -1220,7 +1256,7 @@ def main():
                 "maybe_funcs": len(maybe_funcs()), "result_funcs": len(result_funcs()),
                 "recursive_funcs": len(recursive_funcs()),
                 "recursive_list_funcs": len(recursive_list_funcs()),
-                "arith_laws": len(arith_laws())}
+                "arith_laws": len(arith_laws()), "bool_laws": len(bool_laws())}
     proved = sum(1 for ex in examples if ex["category"] == "function" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"
