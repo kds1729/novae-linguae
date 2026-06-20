@@ -95,10 +95,22 @@ class Task:
     grade_ctx: dict = field(default_factory=dict)  # inputs the grader needs
 
 
+def _has_fn_ref(e):
+    """True if any worked example takes a function-valued (fn_ref) argument. Such examples need the
+    referenced helper record in the run directory to execute, which the standalone write/read graders
+    don't supply — so they're excluded from the task pool (they remain valid corpus training data)."""
+    for ex in e.get("views", {}).get("examples", []):
+        for a in ex.get("args", []):
+            if isinstance(a, dict) and a.get("kind") == "fn_ref":
+                return True
+    return False
+
+
 def _function_examples(corpus):
     return [e for e in corpus
             if e.get("modality") == "nova_lingua" and e.get("category") == "function"
-            and e.get("polarity") == "positive" and e.get("views", {}).get("surface_body")]
+            and e.get("polarity") == "positive" and e.get("views", {}).get("surface_body")
+            and not _has_fn_ref(e)]
 
 
 WRITE_SYSTEM = (

@@ -160,6 +160,14 @@ class V:
         self.payload = payload
 
 
+class FnRef:
+    """A function-valued example argument, referenced by the name of a helper in the spec's `fn_deps`.
+    Resolved to an `{"kind": "fn_ref", "target": <helper hash>}` value once the helper record is built."""
+
+    def __init__(self, name):
+        self.name = name
+
+
 def to_value_ast(pyval):
     if isinstance(pyval, bool):
         return {"kind": "bool", "value": pyval}
@@ -900,6 +908,60 @@ def order_laws():
     ]
 
 
+def higher_order_funcs():
+    # Functions whose TYPE is higher-order — they take a function as an argument: the corpus's first such
+    # records with EXECUTABLE examples. Each example supplies the function argument as an `fn_ref` to a
+    # helper declared in `fn_deps`, which the generator builds into the run directory so the worked example
+    # runs end to end — a record assembled from another commons function (principle 4). Kept out of
+    # `all_specs` (so the shared-commons / agent-loop builders are unaffected) and run only as function
+    # examples. Bodies wrap the higher-order builtins map/filter/foldl/foldr; examples only (laws over an
+    # uninterpreted function are already carried as properties on first-order records like negate_all).
+    DOUBLE = {"name": "double_dep", "type_ast": fn([INT], INT),
+              "body_ast": lam(["n"], bapp("add", var("n"), var("n"))), "examples": [{"args": [3], "result": 6}]}
+    IS_POS = {"name": "is_pos_dep", "type_ast": fn([INT], BOOL),
+              "body_ast": lam(["n"], bapp("gt", var("n"), int_lit(0))),
+              "examples": [{"args": [3], "result": True}, {"args": [-1], "result": False}]}
+    ADD2 = {"name": "add2_dep", "type_ast": fn([INT, INT], INT),
+            "body_ast": lam(["a", "b"], bapp("add", var("a"), var("b"))), "examples": [{"args": [1, 2], "result": 3}]}
+    list_a, list_b = list_of(var("a")), list_of(var("b"))
+    return [
+        {"name": "map_with", "intent": "Apply a function to every element of a list.",
+         "summary": "map(f, xs) — the elementwise transform, taking the function as an argument.",
+         "tags": ["list", "higher-order", "map"],
+         "type_ast": {"kind": "forall", "vars": ["a", "b"], "body": fn([fn([var("a")], var("b")), list_a], list_b)},
+         "body_ast": lam(["f", "xs"], bapp("map", var("f"), var("xs"))),
+         "examples": [{"args": [FnRef("double_dep"), [1, 2, 3]], "result": [2, 4, 6]},
+                      {"args": [FnRef("double_dep"), []], "result": []}],
+         "fn_deps": [DOUBLE], "properties": [], "prove": False},
+        {"name": "filter_with", "intent": "Keep the elements of a list that satisfy a predicate.",
+         "summary": "filter(p, xs) — taking the predicate as an argument.",
+         "tags": ["list", "higher-order", "filter"],
+         "type_ast": {"kind": "forall", "vars": ["a"], "body": fn([fn([var("a")], BOOL), list_a], list_a)},
+         "body_ast": lam(["p", "xs"], bapp("filter", var("p"), var("xs"))),
+         "examples": [{"args": [FnRef("is_pos_dep"), [1, -2, 3, 0]], "result": [1, 3]},
+                      {"args": [FnRef("is_pos_dep"), []], "result": []}],
+         "fn_deps": [IS_POS], "properties": [], "prove": False},
+        {"name": "foldl_with", "intent": "Left-fold a list with a binary function and an initial value.",
+         "summary": "foldl(f, z, xs) — the accumulating fold, taking the combining function as an argument.",
+         "tags": ["list", "higher-order", "fold"],
+         "type_ast": {"kind": "forall", "vars": ["a", "b"],
+                      "body": fn([fn([var("b"), var("a")], var("b")), var("b"), list_a], var("b"))},
+         "body_ast": lam(["f", "z", "xs"], bapp("foldl", var("f"), var("z"), var("xs"))),
+         "examples": [{"args": [FnRef("add2_dep"), 0, [1, 2, 3]], "result": 6},
+                      {"args": [FnRef("add2_dep"), 10, []], "result": 10}],
+         "fn_deps": [ADD2], "properties": [], "prove": False},
+        {"name": "foldr_with", "intent": "Right-fold a list with a binary function and an initial value.",
+         "summary": "foldr(f, z, xs) — taking the combining function as an argument.",
+         "tags": ["list", "higher-order", "fold"],
+         "type_ast": {"kind": "forall", "vars": ["a", "b"],
+                      "body": fn([fn([var("a"), var("b")], var("b")), var("b"), list_a], var("b"))},
+         "body_ast": lam(["f", "z", "xs"], bapp("foldr", var("f"), var("z"), var("xs"))),
+         "examples": [{"args": [FnRef("add2_dep"), 0, [1, 2, 3]], "result": 6},
+                      {"args": [FnRef("add2_dep"), 5, []], "result": 5}],
+         "fn_deps": [ADD2], "properties": [], "prove": False},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + float_funcs()
@@ -934,7 +996,22 @@ def verdict_tokens(text):
 
 
 def build_and_verify(spec, workdir):
-    examples = [{"args": [to_value_ast(a) for a in ex["args"]], "result": to_value_ast(ex["result"])}
+    # A higher-order spec references helper functions by `fn_deps`; build those records first so their
+    # content-addresses are known, then resolve any FnRef example argument to an `fn_ref` value pointing at
+    # the helper's hash. The helpers are written into the run directory so `run` resolves the fn_ref.
+    dep_records, dep_bodies, dep_hashes = [], {}, {}
+    for dep in spec.get("fn_deps", []):
+        dep_ex = [{"args": [to_value_ast(a) for a in e["args"]], "result": to_value_ast(e["result"])}
+                  for e in dep["examples"]]
+        dep_rec = build_v2_record(dep["name"], dep["type_ast"], dep_ex, dep["body_ast"], terminates="always")
+        dep_records.append(dep_rec)
+        dep_bodies[expr_address(dep["body_ast"])] = dep["body_ast"]
+        dep_hashes[dep["name"]] = dep_rec["hash"]
+
+    def resolve_arg(a):
+        return {"kind": "fn_ref", "target": dep_hashes[a.name]} if isinstance(a, FnRef) else to_value_ast(a)
+
+    examples = [{"args": [resolve_arg(a) for a in ex["args"]], "result": to_value_ast(ex["result"])}
                 for ex in spec["examples"]]
     # A spec may declare its own termination class (e.g. an unbounded self-recursion that isn't certified
     # `always` here); default to `always`, with `sum`'s fold left `unknown` for back-compat.
@@ -945,7 +1022,7 @@ def build_and_verify(spec, workdir):
     body = spec["body_ast"]
     addr = expr_address(body)
     d = os.path.join(workdir, spec["name"])
-    write_runnable_dir(d, [record], {addr: body})
+    write_runnable_dir(d, [record] + dep_records, {addr: body, **dep_bodies})
     rec_path = os.path.join(d, f"{record['hash']}.json")
     body_path = os.path.join(d, f"{addr}.json")
 
@@ -1530,8 +1607,9 @@ def main():
     specs = all_specs()
     examples, dropped = [], []
     with tempfile.TemporaryDirectory(prefix="nlcorpus-") as wd:
-        # Nova Lingua — verified function records.
-        for spec in specs:
+        # Nova Lingua — verified function records (first-order specs, then the higher-order ones whose
+        # examples reference helper functions by fn_ref).
+        for spec in specs + higher_order_funcs():
             ex, ok = build_and_verify(spec, wd)
             if ok or args.keep_unverified:
                 examples.append(ex)
@@ -1578,7 +1656,7 @@ def main():
                 "recursive_funcs": len(recursive_funcs()),
                 "recursive_list_funcs": len(recursive_list_funcs()),
                 "arith_laws": len(arith_laws()), "bool_laws": len(bool_laws()),
-                "order_laws": len(order_laws())}
+                "order_laws": len(order_laws()), "higher_order_funcs": len(higher_order_funcs())}
     proved = sum(1 for ex in examples if ex["category"] == "function" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"
