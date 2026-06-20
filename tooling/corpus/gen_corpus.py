@@ -691,11 +691,39 @@ def bool_laws():
     ]
 
 
+def order_laws():
+    # Algebraic laws of the order operators `max`/`min` — idempotence, commutativity, associativity —
+    # PROVED over the unbounded Int domain (max/min lower to `ite` comparisons, which z3 decides).
+    a, b, c = var("a"), var("b"), var("c")
+    return [
+        {"name": "max_self", "intent": "The maximum of a number with itself.", "summary": "Returns max(a, a).",
+         "tags": ["arithmetic", "order", "idempotent"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["a"], bapp("max", a, a)),
+         "examples": [{"args": [5], "result": 5}, {"args": [-3], "result": -3}, {"args": [0], "result": 0}],
+         "properties": [{"name": "idempotent", "expr": forall(["a"], op("eq", self_app(a), a))}],
+         "prove": True},
+        {"name": "max3", "intent": "The maximum of three numbers.", "summary": "Returns max(max(a, b), c).",
+         "tags": ["arithmetic", "order", "associative"], "type_ast": fn([INT, INT, INT], INT),
+         "body_ast": lam(["a", "b", "c"], bapp("max", bapp("max", a, b), c)),
+         "examples": [{"args": [1, 2, 3], "result": 3}, {"args": [3, 1, 2], "result": 3}, {"args": [-1, -5, -2], "result": -1}],
+         "properties": [{"name": "associative",
+                         "expr": forall(["a", "b", "c"], op("eq", self_app(a, b, c), op("max", a, op("max", b, c))))}],
+         "prove": True},
+        {"name": "min3", "intent": "The minimum of three numbers.", "summary": "Returns min(min(a, b), c).",
+         "tags": ["arithmetic", "order", "associative"], "type_ast": fn([INT, INT, INT], INT),
+         "body_ast": lam(["a", "b", "c"], bapp("min", bapp("min", a, b), c)),
+         "examples": [{"args": [1, 2, 3], "result": 1}, {"args": [3, 1, 2], "result": 1}, {"args": [-1, -5, -2], "result": -5}],
+         "properties": [{"name": "associative",
+                         "expr": forall(["a", "b", "c"], op("eq", self_app(a, b, c), op("min", a, op("min", b, c))))}],
+         "prove": True},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + float_funcs()
             + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs()
-            + arith_laws() + bool_laws())
+            + arith_laws() + bool_laws() + order_laws())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -1262,7 +1290,8 @@ def main():
                 "maybe_funcs": len(maybe_funcs()), "result_funcs": len(result_funcs()),
                 "recursive_funcs": len(recursive_funcs()),
                 "recursive_list_funcs": len(recursive_list_funcs()),
-                "arith_laws": len(arith_laws()), "bool_laws": len(bool_laws())}
+                "arith_laws": len(arith_laws()), "bool_laws": len(bool_laws()),
+                "order_laws": len(order_laws())}
     proved = sum(1 for ex in examples if ex["category"] == "function" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"
