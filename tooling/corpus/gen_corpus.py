@@ -315,6 +315,8 @@ def list_funcs():
             {"name": "commutes_with_filter",
              "expr": forall(["p", "xs"], op("eq", op("filter", var("p"), op("reverse", xs)),
                                             op("reverse", op("filter", var("p"), xs))))},
+            # Length-preserving — proved by induction, discovering the `length_append` lemma.
+            {"name": "length_preserving", "expr": forall(["xs"], op("eq", op("length", op("reverse", xs)), op("length", xs)))},
         ],
         "prove": True,
     })
@@ -336,7 +338,11 @@ def list_transform_funcs():
          "tags": ["list", "map", "elementwise"], "type_ast": fn([list_of(INT)], list_of(INT)),
          "body_ast": lam(["xs"], bapp("map", lam(["x"], bapp("neg", x)), xs)),
          "examples": [{"args": [[]], "result": []}, {"args": [[1, -2, 3]], "result": [-1, 2, -3]}],
-         "properties": [], "prove": False},
+         # Mapping preserves length, for EVERY function — proved with `f` modelled uninterpreted. Stated
+         # generically over `f`, independent of this record's concrete `neg`.
+         "properties": [{"name": "map_length",
+                         "expr": forall(["f", "xs"], op("eq", op("length", op("map", var("f"), xs)), op("length", xs)))}],
+         "prove": True},
         # filter with an inline predicate.
         {"name": "keep_positives", "intent": "Keep only the positive numbers in a list.",
          "summary": "Filters the list to its positive elements.", "tags": ["list", "filter"],

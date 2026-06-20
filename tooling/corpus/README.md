@@ -126,7 +126,7 @@ to be rejected*, for the stated reason. Today's five:
   `negate_f` / `cube_f`, Maybe: `safe_div` / `safe_mod` / `first`, Result: `checked_div` / `checked_sub`,
   **recursion** — scalar/measure `self`-recursive `length_rec` / `sum_rec` / `product_rec` / `factorial`,
   and **list-building recursion** — cons-recursive `double_all_rec` / `increment_all_rec` / `negate_all_rec`
-  / `square_all_rec` / `append_rec` / `countdown_rec`), 36 with properties proved over the unbounded domain
+  / `square_all_rec` / `append_rec` / `countdown_rec`), 38 with properties proved over the unbounded domain
   — including the `filter`/`reverse` commutation (`filter(p, reverse xs) = reverse(filter p xs)`,
   auxiliary-lemma) and `filter` idempotence (`filter(p, filter p xs) = filter p xs`, direct induction) —
   plus 5 negatives (an ill-typed body, a refuted doubling law, a refuted commutativity claim, a wrong
