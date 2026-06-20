@@ -13,7 +13,10 @@ the compute.
 ## Task shapes
 
 All tasks are drawn from the verified corpus (`../corpus/corpus.jsonl`), so the ground truth is itself
-machine-checked.
+machine-checked. The write/read pool is restricted to **self-contained** examples — a higher-order record
+whose worked example takes a function-valued (`fn_ref`) argument needs its helper record in the run
+directory to execute, which the standalone graders don't supply, so those examples are excluded from
+tasks (they remain valid corpus training data).
 
 - **write** — given an intent, a type signature, and worked examples, the model emits a function *body*
   in the surface syntax. Graded by `parse-body` → `typecheck` (does it have the declared type?) → `run`
