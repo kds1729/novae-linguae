@@ -114,7 +114,7 @@ to be rejected*, for the stated reason. Today's five:
 
 ## Scope and where it grows
 
-71 examples today (65 positive, 6 negative), in three `category`s:
+76 examples today (70 positive, 6 negative), in three `category`s:
 
 - **function** (57) — Nova Lingua function records across eleven families (unary integer incl. `double` /
   `quadruple` / `decrement` / `abs_val`, binary integer incl. `maximum` / `minimum` / `abs_diff`,
@@ -138,14 +138,15 @@ to be rejected*, for the stated reason. Today's five:
   (`length(self xs) = length xs`) — a law where the recursive function returns a *list*; and `append_rec`,
   recursive on **two** list parameters (the first inducted on, the second a spectator), is proved
   length-additive (`length(self xs ys) = length xs + length ys`).
-- **exchange** (11) — Nova Locutio signed agent-loop exchanges (`request`/`apply` → `assert` ×2 both
+- **exchange** (13) — Nova Locutio signed agent-loop exchanges (`request`/`apply` → `assert` ×4 all
   `verify-claim` CONFIRMED, `request`/`validate` → `assert`, `request`/`store` → `ack`, `propose` →
   `commit`, `commit` → `assert` (CONFIRMED), `delegate` → `ack`, `retract` → `ack`, `query` → `ack`),
   plus 2 negatives (a signed-but-false claim, a capability-denied apply).
-- **composition** (3) — assembled pipelines with the composite metadata `nl-validator compose` derives
-  from the stages' signatures (`reverse;length` → `nat`, `negate_all;reverse` → `List int`), plus 1
-  negative (`length;reverse` — a `nat` can't feed a `List` parameter, so the pipeline does not compose).
-  The category for "assemble, don't write" (principle 4).
+- **composition** (6) — assembled pipelines with the composite metadata `nl-validator compose` derives
+  from the stages' signatures (`reverse;length` → `nat`, `negate_all;reverse` → `List int`,
+  `keep_positives;length` → `nat`, `square_all;sum` → `int`, and a three-stage
+  `keep_positives;square_all;sum` → `int`), plus 1 negative (`length;reverse` — a `nat` can't feed a
+  `List` parameter, so the pipeline does not compose). The category for "assemble, don't write" (principle 4).
 
 This is the seam, not the ceiling, all behind the same "generate → verify → emit" pipeline: more Nova
 Lingua families; longer/branching `compose` pipelines; full multi-turn orchestrated transcripts via
