@@ -122,8 +122,9 @@ to be rejected*, for the stated reason. Today's five:
   `foldl`-product / `length`∘`filter`, float: `square_f` / `double_f`, Maybe: `safe_div` / `first`,
   Result: `checked_div` / `checked_sub`, **recursion** — scalar/measure `self`-recursive `length_rec` /
   `sum_rec` / `product_rec` / `factorial`, and **list-building recursion** — cons-recursive
-  `double_all_rec` / `increment_all_rec` / `append_rec` / `countdown_rec`), 23 with properties proved
-  over the unbounded domain, plus 3 negatives.
+  `double_all_rec` / `increment_all_rec` / `append_rec` / `countdown_rec`), 24 with properties proved
+  over the unbounded domain — including the `filter`/`reverse` commutation (`filter(p, reverse xs) =
+  reverse(filter p xs)`), discharged via an auxiliary lemma — plus 3 negatives.
   The sum-typed (Maybe/Result) functions construct their variant result with a computed payload
   (`Just(a / b)`, `Err(b)`); sum types are opaque to the prover, so they verify by schema +
   typecheck + run rather than proof. The recursion families call themselves via `self` — now bound in the

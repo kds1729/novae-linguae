@@ -548,13 +548,20 @@ const SOLVER_TIMEOUT_SECS: u64 = 5;
 /// timeout so an undecidable query becomes `Unknown` instead of hanging. z3's own `-t:` soft limit is
 /// passed too (it returns `unknown` cleanly); the process kill is the backstop for any solver.
 pub fn run_smt(script: &str, solver: &str) -> Result<SatAnswer> {
+    run_smt_secs(script, solver, SOLVER_TIMEOUT_SECS)
+}
+
+/// Like [`run_smt`], but with an explicit per-check timeout in seconds. Exploratory search (trying many
+/// candidate lemma subsets) uses a short budget — a successful list-law proof closes in well under a
+/// second, so a failing subset needn't burn the full default timeout.
+pub fn run_smt_secs(script: &str, solver: &str, secs: u64) -> Result<SatAnswer> {
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
     let mut cmd = Command::new(solver);
     if solver == "z3" || solver.ends_with("/z3") {
-        cmd.arg(format!("-t:{}", SOLVER_TIMEOUT_SECS * 1000)); // per-check soft timeout (ms)
+        cmd.arg(format!("-t:{}", secs * 1000)); // per-check soft timeout (ms)
     }
     let mut child = match cmd
         .arg("-in")
@@ -575,7 +582,7 @@ pub fn run_smt(script: &str, solver: &str) -> Result<SatAnswer> {
         .map_err(|e| anyhow!("writing to solver: {e}"))?; // dropping the handle closes stdin (EOF)
 
     // Poll for completion, killing the process if it overruns the timeout backstop.
-    let deadline = Instant::now() + Duration::from_secs(SOLVER_TIMEOUT_SECS + 5);
+    let deadline = Instant::now() + Duration::from_secs(secs + 5);
     loop {
         match child.try_wait().map_err(|e| anyhow!("waiting on solver: {e}"))? {
             Some(_) => break,

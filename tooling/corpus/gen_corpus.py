@@ -290,7 +290,16 @@ def list_funcs():
         "examples": [{"args": [[]], "result": []}, {"args": [[1, 2, 3]], "result": [3, 2, 1]}],
         # Stated over the builtin `reverse` (not `self`), matching the spec/examples list-law records: this
         # is what lets lemma discovery engage and PROVE it (a `self`-wrapper hides the ops from selection).
-        "properties": [{"name": "involutive", "expr": forall(["xs"], op("eq", op("reverse", op("reverse", xs)), xs))}],
+        # The second law — reverse commutes with filtering — is the headline of the auxiliary-lemma
+        # frontier: its induction needs `filter_append` (and `append_nil`), which the prover now isolates
+        # from the rest of the catalog (an explicit e-matching trigger + minimal-subset search) so z3's
+        # quantifier instantiation doesn't stall. `p` is a quantified predicate, modelled uninterpreted.
+        "properties": [
+            {"name": "involutive", "expr": forall(["xs"], op("eq", op("reverse", op("reverse", xs)), xs))},
+            {"name": "commutes_with_filter",
+             "expr": forall(["p", "xs"], op("eq", op("filter", var("p"), op("reverse", xs)),
+                                            op("reverse", op("filter", var("p"), xs))))},
+        ],
         "prove": True,
     })
     # length — builtin; examples executed.

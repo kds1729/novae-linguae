@@ -165,24 +165,38 @@ or a single uninterpreted symbol — so `forall f xs. length(map(f, xs)) = lengt
 Where one unfold of the definitions plus the IH does not close the step — a law that needs an auxiliary
 lemma, classically `reverse(reverse(xs)) = xs` — the prover does not give up. It selects relevant lemmas
 from a **curated catalog** of standard list-algebra laws (`lemmas.rs`: `append_nil`, `append_assoc`,
-`reverse_append`, `length_append`, `map_append`), **proves each one by induction first** — recursively,
-since lemmas depend on one another: `reverse_append` rests on `append_assoc` + `append_nil` — and then
-re-runs the stalled obligation with the proved lemmas asserted as universally-quantified axioms.
+`reverse_append`, `length_append`, `map_append`, `filter_append`), **proves each one by induction first**
+— recursively, since lemmas depend on one another: `reverse_append` rests on `append_assoc` + `append_nil`
+— and then re-runs the stalled obligation with the proved lemmas asserted as universally-quantified axioms.
 `reverse(reverse(xs)) = xs` is now **PROVED**, discovering `reverse_append` (and transitively
 `append_nil`, `append_assoc`).
 
+**Order-independent instantiation + minimal subsets.** Two e-matching hazards make naïve axiom assertion
+fragile, and the higher-order list laws expose both. First, z3's choice of *which* quantified lemma to
+instantiate depends on **assertion order** — the same lemma set closes a goal in one order and returns
+UNKNOWN in another. Each lemma axiom therefore carries an explicit **trigger** (`:pattern`) on its
+left-hand side (the rewrite-from term), pinning instantiation regardless of order. Second, asserting
+*every* admissible lemma at once overwhelms instantiation (associativity + reverse/append distribution are
+classic trigger loops): so when the full catalog set stalls, the prover retries with **minimal subsets**,
+smallest first, and closes with the least set that works — `filter(p, reverse xs) = reverse(filter p xs)`
+needs exactly `filter_append` + `append_nil`, and the extra `reverse_append`/`append_assoc` axioms break
+it. The exploratory subset attempts run under a short solver budget (a real list-law proof closes in well
+under a second), so the search doesn't dominate wall-clock. With both, `map(f, reverse xs) = reverse(map f
+xs)` and `filter(p, reverse xs) = reverse(filter p xs)` are **PROVED**.
+
 This is sound by construction: a lemma is assumed only after it is itself discharged, so assuming only
 *true* facts can never close a *false* goal — `reverse(xs) = xs` stays NOT-PROVED, and a true law whose
-lemma the catalog lacks (e.g. `map(f, reverse(xs)) = reverse(map(f, xs))`) stays UNKNOWN, never a false
-PROVED. Lemma relevance is gated by the goal's *prelude closure* (the recursive functions it already
-defines — and a `reverse` goal pulls in `append`), so an unrelated lemma's recursive definition can't
-derail the solver into a timeout. The certificate is the whole proof tree — the goal's base + step
+lemma the catalog lacks (one needing a *non-catalog* lemma, e.g. `reverse(append(reverse xs, ys)) =
+append(reverse ys, xs)` under the catalog alone) stays UNKNOWN, never a false PROVED. Lemma relevance is
+gated by the goal's *prelude closure* (the recursive functions it already defines — and a `reverse` goal
+pulls in `append`), so an unrelated lemma's recursive definition can't derail the solver into a timeout. The certificate is the whole proof tree — the goal's base + step
 (assuming the lemmas) plus **each lemma's own base + step** — every obligation `unsat` on its own, so a
 receiver re-checks the entire tree rather than trusting it (principles 3, 5). The solver still runs
 under a wall-clock timeout, so an undecidable query reports UNKNOWN rather than hanging.
 
 Proved live by induction: `map(id, xs) = xs`, `length(map(f, xs)) = length(xs)`, `length(append(xs, ys))
-= length(xs) + length(ys)`; **`reverse(reverse(xs)) = xs`** via lemma discovery.
+= length(xs) + length(ys)`; **`reverse(reverse(xs)) = xs`**, **`map(f, reverse xs) = reverse(map f xs)`**,
+and **`filter(p, reverse xs) = reverse(filter p xs)`** via lemma discovery.
 
 ### Theory exploration
 

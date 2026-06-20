@@ -98,5 +98,24 @@ pub fn catalog() -> Vec<Lemma> {
                 ),
             ),
         },
+        // filter(p, append(xs, ys)) = append(filter(p, xs), filter(p, ys))  — filter distributes over
+        // append. The analogue of `map_append` for the conditional combinator; the auxiliary lemma a
+        // `filter`/`reverse` commutation needs.
+        Lemma {
+            name: "filter_append",
+            stmt: forall(
+                &["p", "xs", "ys"],
+                eq(
+                    app("filter", vec![var("p"), app("append", vec![var("xs"), var("ys")])]),
+                    app(
+                        "append",
+                        vec![
+                            app("filter", vec![var("p"), var("xs")]),
+                            app("filter", vec![var("p"), var("ys")]),
+                        ],
+                    ),
+                ),
+            ),
+        },
     ]
 }

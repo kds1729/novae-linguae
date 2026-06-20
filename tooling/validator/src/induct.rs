@@ -1024,6 +1024,11 @@ fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<I
 /// Lower a proved `forall` lemma to a universally-quantified SMT `(assert (forall …))`. Function- and
 /// predicate-sorted binders are dropped (they are modelled by the global `mapfn`/`filterpred` symbols),
 /// matching [`declare_free`]; a lemma with no remaining binders becomes a plain `(assert …)`.
+/// Whether `var` occurs as a whole SMT token in `smt` (not as a substring of a longer identifier).
+fn token_present(smt: &str, var: &str) -> bool {
+    smt.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|tok| tok == var)
+}
+
 fn lemma_axiom(lemma: &J) -> Result<String> {
     let vars: Vec<String> = lemma
         .get("vars")
@@ -1033,33 +1038,67 @@ fn lemma_axiom(lemma: &J) -> Result<String> {
     let pred = lemma.get("body").ok_or_else(|| anyhow!("lemma has no body"))?;
     let sorts = infer_sorts(pred, &vars)?;
     let body = lower(pred, &BTreeMap::new())?;
+    let mut binder_names: Vec<String> = Vec::new();
     let binders: Vec<String> = vars
         .iter()
-        .filter_map(|v| match sorts.get(v) {
-            Some(Sort3::Int) => Some(format!("({v} Int)")),
-            Some(Sort3::Bool) => Some(format!("({v} Bool)")),
-            Some(Sort3::Lst) => Some(format!("({v} Lst)")),
-            _ => None, // Func / Pred: modelled globally, not bound here.
+        .filter_map(|v| {
+            let kw = match sorts.get(v) {
+                Some(Sort3::Int) => "Int",
+                Some(Sort3::Bool) => "Bool",
+                Some(Sort3::Lst) => "Lst",
+                _ => return None, // Func / Pred: modelled globally, not bound here.
+            };
+            binder_names.push(v.clone());
+            Some(format!("({v} {kw})"))
         })
         .collect();
-    Ok(if binders.is_empty() {
-        format!("(assert {body})\n")
+    if binders.is_empty() {
+        return Ok(format!("(assert {body})\n"));
+    }
+    // Pin the quantifier with an explicit e-matching trigger: the lemma's left-hand side (its
+    // "rewrite-from" term) when it mentions every bound variable. Without this z3 picks a trigger
+    // heuristically and instantiation becomes sensitive to *assertion order* — the same minimal lemma set
+    // closes a goal in one order and returns UNKNOWN in another. An LHS trigger makes it order-independent.
+    // Falls back to z3's auto-trigger when the LHS is unsuitable (not an equation, or misses a variable).
+    let trigger = if head_op(pred).as_deref() == Some("eq") {
+        match args_of(pred).first() {
+            Some(lhs) => {
+                let t = lower(lhs, &BTreeMap::new())?;
+                if binder_names.iter().all(|v| token_present(&t, v)) {
+                    Some(t)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        }
     } else {
-        format!("(assert (forall ({}) {body}))\n", binders.join(" "))
+        None
+    };
+    Ok(match trigger {
+        Some(t) => format!("(assert (forall ({}) (! {body} :pattern ({t}))))\n", binders.join(" ")),
+        None => format!("(assert (forall ({}) {body}))\n", binders.join(" ")),
     })
 }
 
+/// The default per-check solver timeout (seconds) for discharging an obligation.
+const DISCHARGE_SECS: u64 = 5;
+/// A short timeout for exploratory lemma-subset search: a real list-law proof closes in well under a
+/// second, so a non-closing subset needn't burn the full default budget (it would otherwise make the
+/// subset search dominate wall-clock).
+const SEARCH_SECS: u64 = 2;
+
 /// Run a single induction certificate's base then step through the solver. `Unsat`+`Unsat` ⇒ `Proved`.
-fn discharge(cert: &InductionCertificate, solver: &str) -> InductionOutcome {
-    use crate::prove::{run_smt, SatAnswer};
-    match run_smt(&cert.base, solver) {
+fn discharge(cert: &InductionCertificate, solver: &str, secs: u64) -> InductionOutcome {
+    use crate::prove::{run_smt_secs, SatAnswer};
+    match run_smt_secs(&cert.base, solver, secs) {
         Err(e) => return InductionOutcome::Unsupported(format!("solver error (base): {e:#}")),
         Ok(SatAnswer::NoSolver) => return InductionOutcome::NoSolver,
         Ok(SatAnswer::Sat(_)) => return InductionOutcome::Failed("base case is satisfiable (law fails at nil)".into()),
         Ok(SatAnswer::Unknown) => return InductionOutcome::Unknown,
         Ok(SatAnswer::Unsat) => {}
     }
-    match run_smt(&cert.step, solver) {
+    match run_smt_secs(&cert.step, solver, secs) {
         Err(e) => InductionOutcome::Unsupported(format!("solver error (step): {e:#}")),
         Ok(SatAnswer::Unsat) => InductionOutcome::Proved,
         Ok(SatAnswer::Sat(_)) => InductionOutcome::Failed("step case is satisfiable (induction does not close)".into()),
@@ -1075,7 +1114,7 @@ pub fn prove_by_induction(prop_expr: &J, body: Option<&J>, solver: &str) -> (Ind
         Err(e) => return (InductionOutcome::Unsupported(format!("{e:#}")), None),
         Ok(c) => c,
     };
-    (discharge(&cert, solver), Some(cert))
+    (discharge(&cert, solver, DISCHARGE_SECS), Some(cert))
 }
 
 /// The default recursion depth for lemma discovery: deep enough for the standard list laws
@@ -1173,6 +1212,7 @@ fn close_with(
     solver: &str,
     assumed: &[J],
     certs: Vec<LemmaCertificate>,
+    secs: u64,
 ) -> (InductionOutcome, Option<InductionCertificate>) {
     let refs: Vec<&J> = assumed.iter().collect();
     let aug = match build_obligations(prop_expr, body, &refs) {
@@ -1182,7 +1222,7 @@ fn close_with(
             c
         }
     };
-    match discharge(&aug, solver) {
+    match discharge(&aug, solver, secs) {
         InductionOutcome::Proved => {
             let names = aug.lemmas.iter().map(|l| l.name.clone()).collect();
             (InductionOutcome::ProvedWithLemmas(names), Some(aug))
@@ -1192,6 +1232,38 @@ fn close_with(
         out @ (InductionOutcome::NoSolver | InductionOutcome::Unsupported(_)) => (out, Some(aug)),
         InductionOutcome::ProvedWithLemmas(_) => unreachable!("discharge never returns ProvedWithLemmas"),
     }
+}
+
+/// Try to close the goal with *subsets* of the already-proved catalog lemmas, smallest first, returning
+/// the first subset that discharges it. The full set is assumed already tried by the caller, so this
+/// searches proper subsets only. Capped at [`MAX_SUBSET_ATTEMPTS`] close attempts to bound the search on
+/// genuinely-unknown goals. Soundness is unchanged: every lemma in any subset was proved before use.
+fn close_with_minimal_subset(
+    prop_expr: &J,
+    body: Option<&J>,
+    solver: &str,
+    proved: &[ProvedLemma],
+) -> Option<(InductionOutcome, Option<InductionCertificate>)> {
+    const MAX_SUBSET_ATTEMPTS: usize = 16;
+    let n = proved.len();
+    // No proper non-empty subset to try when there are fewer than two lemmas (the lone lemma == full set).
+    if n < 2 || n > 16 {
+        return None;
+    }
+    // Proper non-empty subsets as bitmasks, ordered by ascending size (minimal sets first).
+    let mut masks: Vec<u32> = (1u32..(1 << n)).filter(|m| m.count_ones() < n as u32).collect();
+    masks.sort_by_key(|m| m.count_ones());
+    for mask in masks.into_iter().take(MAX_SUBSET_ATTEMPTS) {
+        let subset: Vec<&ProvedLemma> = (0..n).filter(|i| mask & (1 << i) != 0).map(|i| &proved[i]).collect();
+        let assumed: Vec<J> = subset.iter().map(|p| p.stmt.clone()).collect();
+        let certs = subset.iter().fold(Vec::new(), |acc, p| merge_certs(&acc, &p.certs));
+        if let (out @ InductionOutcome::ProvedWithLemmas(_), cert) =
+            close_with(prop_expr, body, solver, &assumed, certs, SEARCH_SECS)
+        {
+            return Some((out, cert));
+        }
+    }
+    None
 }
 
 /// Memoizing wrapper over [`prove_rec_inner`]: a goal proved once is cached (by canonical statement) and
@@ -1234,7 +1306,7 @@ fn prove_rec_inner(
         Err(e) => return (InductionOutcome::Unsupported(format!("{e:#}")), None),
         Ok(c) => c,
     };
-    match discharge(&bare, solver) {
+    match discharge(&bare, solver, DISCHARGE_SECS) {
         // A clean proof, a genuine failure, a missing solver, or an error: nothing a lemma can fix.
         InductionOutcome::Proved => return (InductionOutcome::Proved, Some(bare)),
         out @ (InductionOutcome::Failed(_)
@@ -1259,19 +1331,30 @@ fn prove_rec_inner(
 
     in_progress.push(prop_expr.clone());
 
-    // Phase A — curated catalog (fast path). Prove every admissible catalog lemma, then try to close
-    // the goal with the lot. (Catalog lemmas are few and mutually consistent, so bloat isn't a concern.)
-    let mut base_assumed: Vec<J> = Vec::new();
-    let mut base_certs: Vec<LemmaCertificate> = Vec::new();
+    // Phase A — curated catalog (fast path). Prove every admissible catalog lemma, then try to close the
+    // goal with the lot. If the full set stalls, retry with minimal subsets: piling *every* admissible
+    // lemma into one query can overwhelm z3's quantifier instantiation (associativity + reverse/append
+    // distribution are classic trigger-loop culprits), so a goal that needs only a small subset closes
+    // with that subset even when the full set yields UNKNOWN (e.g. filter/reverse commutation needs just
+    // `filter_append` + `append_nil`, and the extra `reverse_append`/`append_assoc` axioms break it).
+    let mut proved: Vec<ProvedLemma> = Vec::new();
     for lemma in crate::lemmas::catalog() {
         if let Some(p) = prove_one(lemma.name, &lemma.stmt, solver, depth, &closure, in_progress, memo) {
-            base_assumed.push(p.stmt);
-            base_certs = merge_certs(&base_certs, &p.certs);
+            proved.push(p);
         }
     }
+    let base_assumed: Vec<J> = proved.iter().map(|p| p.stmt.clone()).collect();
+    let base_certs: Vec<LemmaCertificate> =
+        proved.iter().fold(Vec::new(), |acc, p| merge_certs(&acc, &p.certs));
     if !base_assumed.is_empty() {
-        match close_with(prop_expr, body, solver, &base_assumed, base_certs.clone()) {
-            (InductionOutcome::Unknown, _) => {} // catalog didn't close it — fall through to Phase B
+        match close_with(prop_expr, body, solver, &base_assumed, base_certs.clone(), DISCHARGE_SECS) {
+            (InductionOutcome::Unknown, _) => {
+                // Full set didn't close it — try minimal subsets before falling through to Phase B.
+                if let Some(res) = close_with_minimal_subset(prop_expr, body, solver, &proved) {
+                    in_progress.pop();
+                    return res;
+                }
+            }
             (out, cert) => {
                 in_progress.pop();
                 return (out, cert);
@@ -1298,7 +1381,7 @@ fn prove_rec_inner(
             assumed.push(p.stmt.clone());
             let certs = merge_certs(&base_certs, &p.certs);
             if let (out @ InductionOutcome::ProvedWithLemmas(_), cert) =
-                close_with(prop_expr, body, solver, &assumed, certs)
+                close_with(prop_expr, body, solver, &assumed, certs, DISCHARGE_SECS)
             {
                 in_progress.pop();
                 return (out, cert);
@@ -1315,7 +1398,7 @@ fn prove_rec_inner(
                 certs = merge_certs(&certs, &p.certs);
             }
             if let (out @ InductionOutcome::ProvedWithLemmas(_), cert) =
-                close_with(prop_expr, body, solver, &assumed, certs)
+                close_with(prop_expr, body, solver, &assumed, certs, DISCHARGE_SECS)
             {
                 in_progress.pop();
                 return (out, cert);
@@ -1467,6 +1550,21 @@ mod tests {
     }
 
     #[test]
+    fn proves_filter_reverse_commutation_with_lemmas() {
+        let Some(solver) = solver() else {
+            return;
+        };
+        // forall p xs. eq(filter(p, reverse(xs)), reverse(filter(p, xs))) — filter commutes with reverse.
+        // The step needs the auxiliary `filter_append`; `p` is modelled by the global `filterpred`.
+        let prop = forall(&["p", "xs"], app("eq", vec![
+            app("filter", vec![var("p"), app("reverse", vec![var("xs")])]),
+            app("reverse", vec![app("filter", vec![var("p"), var("xs")])]),
+        ]));
+        let (o, _) = prove_by_induction_with_lemmas(&prop, None, solver, DEFAULT_LEMMA_DEPTH);
+        assert!(matches!(o, InductionOutcome::ProvedWithLemmas(_)), "expected ProvedWithLemmas, got {o:?}");
+    }
+
+    #[test]
     fn proves_reverse_append_with_lemmas() {
         let Some(solver) = solver() else {
             return;
@@ -1510,18 +1608,20 @@ mod tests {
     }
 
     #[test]
-    fn unreachable_law_stays_unknown() {
+    fn map_reverse_commutation_proves_via_catalog() {
         let Some(solver) = solver() else {
             return;
         };
-        // forall f xs. eq(map(f, reverse(xs)), reverse(map(f, xs))) — true, but needs a map/reverse
-        // distribution lemma the catalog lacks. Honest UNKNOWN, not a false PROVED.
+        // forall f xs. eq(map(f, reverse(xs)), reverse(map(f, xs))) — closes with the catalog's
+        // `map_append` lemma. (The trigger + minimal-subset machinery isolates `map_append` from the rest
+        // of the catalog, which together would otherwise stall z3's instantiation.) The honest-UNKNOWN
+        // guard for a law needing a *non-catalog* lemma lives in `exploration_proves_a_law_the_catalog_cannot`.
         let prop = forall(&["f", "xs"], app("eq", vec![
             app("map", vec![var("f"), app("reverse", vec![var("xs")])]),
             app("reverse", vec![app("map", vec![var("f"), var("xs")])]),
         ]));
         let (o, _) = prove_by_induction_with_lemmas(&prop, None, solver, DEFAULT_LEMMA_DEPTH);
-        assert_eq!(o, InductionOutcome::Unknown, "no applicable lemma — expected UNKNOWN, got {o:?}");
+        assert!(matches!(o, InductionOutcome::ProvedWithLemmas(_)), "expected ProvedWithLemmas, got {o:?}");
     }
 
     // ---- theory exploration (Layer B) ----
