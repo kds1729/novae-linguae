@@ -1096,6 +1096,9 @@ def nova_locutio_examples(commons_dir, by_name):
         ("propose_double", "Propose that an agent compute double of 21.",
          "propose/apply double to 21 → the responder test-runs it and commits.",
          "propose", "double", [21], ["agent-loop", "propose"]),
+        ("propose_negate", "Propose that an agent negate every element of [1, -2, 3].",
+         "propose/apply negate_all to [1, -2, 3] → the responder test-runs it over the list and commits.",
+         "propose", "negate_all", [[1, -2, 3]], ["agent-loop", "propose", "list"]),
     ]
     first_request_hash = None
     for ident, intent, summary, kind, tname, pyargs, tags in apply_rows:
@@ -1203,6 +1206,32 @@ def nova_locutio_examples(commons_dir, by_name):
     emit("query_list", "Find functions that operate on lists.",
          "query for functions tagged `list` → the responder acks with the matching content-addresses.",
          ["agent-loop", "query", "discovery"], "query", qsigned, qreply, f"ACK {len(matches)} match(es)", qok)
+
+    # query → ack (discovery by a different intent tag — the refinement-carrying functions).
+    qreq2 = {"schema_version": "0.2.0", "kind": "query", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+             "constraints": None, "body": {"limit": 50, "pattern": {"intent_tags": ["refinement"]}}}
+    qsigned2 = sign_message(qreq2, SENDER_SEED)
+    qreply2 = respond_to(qsigned2, commons_dir)
+    matches2 = qreply2.get("body", {}).get("result", {}).get("matches", []) if qreply2 else []
+    qok2 = (msg_schema_valid(qsigned2) and bool(qreply2) and msg_schema_valid(qreply2)
+            and qreply2.get("kind") == "ack" and len(matches2) > 0
+            and qreply2.get("in_reply_to") == qsigned2.get("hash"))
+    emit("query_refinement", "Find functions that carry refinement predicates.",
+         "query for functions tagged `refinement` → the responder acks with the matching content-addresses.",
+         ["agent-loop", "query", "discovery"], "query", qsigned2, qreply2, f"ACK {len(matches2)} match(es)", qok2)
+
+    # request/validate → assert: validate a LIST function (reverse), not just a scalar one.
+    vreq2 = {"schema_version": "0.2.0", "kind": "request", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+             "constraints": {"budget_tokens": 1000, "capabilities": [], "deadline_ms": 5000},
+             "body": {"action": "validate", "target": by_name["reverse"]["hash"]}}
+    vsigned2 = sign_message(vreq2, SENDER_SEED)
+    vreply2 = respond_to(vsigned2, commons_dir)
+    v_ok2 = (msg_schema_valid(vsigned2) and bool(vreply2) and msg_schema_valid(vreply2)
+             and vreply2.get("kind") == "assert" and vreply2.get("in_reply_to") == vsigned2.get("hash"))
+    emit("validate_reverse", "Ask an agent to validate the `reverse` function.",
+         "request/validate reverse → the responder type-checks and runs it, then asserts it is verified.",
+         ["agent-loop", "request", "validate", "list"], "request", vsigned2, vreply2,
+         "VERIFIED" if v_ok2 else (vreply2.get("kind", "NO-REPLY").upper() if vreply2 else "NO-REPLY"), v_ok2)
     return out
 
 
