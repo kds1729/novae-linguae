@@ -53,6 +53,10 @@ def int_lit(n):
     return {"kind": "lit", "value": {"kind": "int", "value": n}}
 
 
+def bool_lit(b):
+    return {"kind": "lit", "value": {"kind": "bool", "value": b}}
+
+
 def op(name, *args):
     # The `op` form — used in PROPERTY/predicate expressions (the prover's head_op reads it).
     return {"kind": "app", "op": name, "args": list(args)}
@@ -415,6 +419,56 @@ def composition_funcs():
     ]
 
 
+def list_fold_funcs():
+    # Right-fold aggregations over a list — the `foldr` idiom (a complement to the `foldl` examples in
+    # `list_funcs`/`composition_funcs`) and the corpus's first `List -> bool` functions (every other
+    # boolean function takes a scalar). A predicate folds a per-element test with the boolean accumulator;
+    # the empty list returns the fold's identity (`true` for "all", `false` for "any"/"contains"). Runnable;
+    # examples only — these widen the vocabulary a model must read and write, not the proof surface.
+    xs, x, acc = var("xs"), var("x"), var("acc")
+
+    def foldr_body(step, init):
+        return lam(["xs"], bapp("foldr", lam(["x", "acc"], step), init, xs))
+
+    return [
+        {"name": "all_positive", "intent": "Test whether every number in a list is positive.",
+         "summary": "true for the empty list; otherwise (head > 0) and the rest are all positive.",
+         "tags": ["list", "fold", "predicate"], "type_ast": fn([list_of(INT)], BOOL),
+         "body_ast": foldr_body(bapp("and", bapp("gt", x, int_lit(0)), acc), bool_lit(True)),
+         "examples": [{"args": [[]], "result": True}, {"args": [[1, 2, 3]], "result": True},
+                      {"args": [[1, -2, 3]], "result": False}],
+         "properties": [], "prove": False},
+        {"name": "any_negative", "intent": "Test whether a list contains a negative number.",
+         "summary": "false for the empty list; otherwise (head < 0) or the rest contains a negative.",
+         "tags": ["list", "fold", "predicate"], "type_ast": fn([list_of(INT)], BOOL),
+         "body_ast": foldr_body(bapp("or", bapp("lt", x, int_lit(0)), acc), bool_lit(False)),
+         "examples": [{"args": [[]], "result": False}, {"args": [[1, 2, 3]], "result": False},
+                      {"args": [[1, -2, 3]], "result": True}],
+         "properties": [], "prove": False},
+        {"name": "contains_zero", "intent": "Test whether a list contains a zero.",
+         "summary": "false for the empty list; otherwise (head == 0) or the rest contains a zero.",
+         "tags": ["list", "fold", "predicate"], "type_ast": fn([list_of(INT)], BOOL),
+         "body_ast": foldr_body(bapp("or", bapp("eq", x, int_lit(0)), acc), bool_lit(False)),
+         "examples": [{"args": [[]], "result": False}, {"args": [[1, 0, 2]], "result": True},
+                      {"args": [[1, 2, 3]], "result": False}],
+         "properties": [], "prove": False},
+        {"name": "all_even", "intent": "Test whether every number in a list is even.",
+         "summary": "true for the empty list; otherwise (head even) and the rest are all even.",
+         "tags": ["list", "fold", "predicate", "arithmetic"], "type_ast": fn([list_of(INT)], BOOL),
+         "body_ast": foldr_body(bapp("and", bapp("eq", bapp("mod", x, int_lit(2)), int_lit(0)), acc), bool_lit(True)),
+         "examples": [{"args": [[]], "result": True}, {"args": [[2, 4, 6]], "result": True},
+                      {"args": [[1, 2, 3]], "result": False}],
+         "properties": [], "prove": False},
+        {"name": "sum_foldr", "intent": "Sum a list of numbers with a right fold.",
+         "summary": "0 for the empty list; otherwise head + the sum of the rest.",
+         "tags": ["list", "fold", "arithmetic"], "type_ast": fn([list_of(INT)], INT),
+         "body_ast": foldr_body(bapp("add", x, acc), int_lit(0)),
+         "examples": [{"args": [[]], "result": 0}, {"args": [[1, 2, 3]], "result": 6},
+                      {"args": [[5, -2, 4]], "result": 7}],
+         "properties": [], "prove": False},
+    ]
+
+
 def float_funcs():
     x = var("x")
     return [
@@ -721,7 +775,7 @@ def order_laws():
 
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
-            + list_transform_funcs() + composition_funcs() + float_funcs()
+            + list_transform_funcs() + composition_funcs() + list_fold_funcs() + float_funcs()
             + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs()
             + arith_laws() + bool_laws() + order_laws())
 
@@ -1286,7 +1340,8 @@ def main():
     families = {"unary_arith": len(unary_arith()), "binary_arith": len(binary_arith()),
                 "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs()),
                 "list_transform_funcs": len(list_transform_funcs()),
-                "composition_funcs": len(composition_funcs()), "float_funcs": len(float_funcs()),
+                "composition_funcs": len(composition_funcs()), "list_fold_funcs": len(list_fold_funcs()),
+                "float_funcs": len(float_funcs()),
                 "maybe_funcs": len(maybe_funcs()), "result_funcs": len(result_funcs()),
                 "recursive_funcs": len(recursive_funcs()),
                 "recursive_list_funcs": len(recursive_list_funcs()),
