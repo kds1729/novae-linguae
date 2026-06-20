@@ -382,6 +382,19 @@ def list_transform_funcs():
          "body_ast": lam(["xs"], bapp("filter", lam(["x"], bapp("eq", bapp("mod", x, int_lit(2)), int_lit(0))), xs)),
          "examples": [{"args": [[]], "result": []}, {"args": [[1, 2, 3, 4]], "result": [2, 4]}],
          "properties": [], "prove": False},
+        # reverse distributes over append with the operands swapped — reverse(xs ++ ys) = reverse ys ++
+        # reverse xs. Proved by structural induction, discovering the `reverse_append` lemma (and its own
+        # sub-lemmas append_assoc/append_nil) — the headline of the lemma-discovery prover, stated as a law.
+        {"name": "reverse_concat", "intent": "Reverse the concatenation of two lists.",
+         "summary": "Returns reverse(xs ++ ys), which equals reverse(ys) ++ reverse(xs).",
+         "tags": ["list", "lossless"],
+         "type_ast": {"kind": "forall", "vars": ["a"], "body": fn([list_of(var("a")), list_of(var("a"))], list_of(var("a")))},
+         "body_ast": lam(["xs", "ys"], bapp("reverse", bapp("append", xs, ys))),
+         "examples": [{"args": [[], [1]], "result": [1]}, {"args": [[1, 2], [3, 4]], "result": [4, 3, 2, 1]}],
+         "properties": [{"name": "antihomomorphism",
+                         "expr": forall(["xs", "ys"], op("eq", self_app(xs, ys),
+                                                       op("append", op("reverse", ys), op("reverse", xs))))}],
+         "prove": True},
     ]
 
 
@@ -721,6 +734,18 @@ def arith_laws():
          "examples": [{"args": [0], "result": 0}, {"args": [7], "result": 0}, {"args": [-4], "result": 0}],
          "properties": [{"name": "annihilates", "expr": forall(["n"], op("eq", self_app(n), int_lit(0)))}],
          "prove": True},
+        {"name": "neg_neg", "intent": "Negate a number twice.", "summary": "Returns -(-n).",
+         "tags": ["arithmetic", "involutive"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], bapp("neg", bapp("neg", n))),
+         "examples": [{"args": [0], "result": 0}, {"args": [7], "result": 7}, {"args": [-4], "result": -4}],
+         "properties": [{"name": "involutive", "expr": forall(["n"], op("eq", self_app(n), n))}],
+         "prove": True},
+        {"name": "abs_abs", "intent": "Take the absolute value twice.", "summary": "Returns ||n||.",
+         "tags": ["arithmetic", "idempotent"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], bapp("abs", bapp("abs", n))),
+         "examples": [{"args": [0], "result": 0}, {"args": [6], "result": 6}, {"args": [-4], "result": 4}],
+         "properties": [{"name": "idempotent", "expr": forall(["n"], op("eq", self_app(n), op("abs", n)))}],
+         "prove": True},
     ]
 
 
@@ -766,6 +791,25 @@ def bool_laws():
                          "expr": forall(["a", "b"], op("eq", op("not", op("or", a, b)),
                                                        op("and", op("not", a), op("not", b))))}],
          "prove": True},
+        {"name": "and_idem", "intent": "Logical AND of a boolean with itself.", "summary": "Returns a and a.",
+         "tags": ["boolean", "idempotent"], "type_ast": fn([BOOL], BOOL),
+         "body_ast": lam(["a"], bapp("and", a, a)),
+         "examples": [{"args": [True], "result": True}, {"args": [False], "result": False}],
+         "properties": [{"name": "idempotent", "expr": forall(["a"], op("eq", op("and", a, a), a))}],
+         "prove": True},
+        {"name": "or_idem", "intent": "Logical OR of a boolean with itself.", "summary": "Returns a or a.",
+         "tags": ["boolean", "idempotent"], "type_ast": fn([BOOL], BOOL),
+         "body_ast": lam(["a"], bapp("or", a, a)),
+         "examples": [{"args": [True], "result": True}, {"args": [False], "result": False}],
+         "properties": [{"name": "idempotent", "expr": forall(["a"], op("eq", op("or", a, a), a))}],
+         "prove": True},
+        {"name": "and_absorb", "intent": "Absorption of OR into AND.", "summary": "Returns a and (a or b).",
+         "tags": ["boolean", "absorption"], "type_ast": fn([BOOL, BOOL], BOOL),
+         "body_ast": lam(["a", "b"], bapp("and", a, bapp("or", a, b))),
+         "examples": [{"args": [True, False], "result": True}, {"args": [False, True], "result": False},
+                      {"args": [True, True], "result": True}],
+         "properties": [{"name": "absorbs", "expr": forall(["a", "b"], op("eq", op("and", a, op("or", a, b)), a))}],
+         "prove": True},
     ]
 
 
@@ -805,6 +849,18 @@ def order_laws():
          "body_ast": lam(["a", "b"], bapp("min", a, b)),
          "examples": [{"args": [5, 3], "result": 3}, {"args": [2, 9], "result": 2}, {"args": [-2, -7], "result": -7}],
          "properties": [{"name": "commutative", "expr": forall(["a", "b"], op("eq", self_app(a, b), op("min", b, a)))}],
+         "prove": True},
+        {"name": "max_min_absorb", "intent": "Absorption of min into max.", "summary": "Returns max(a, min(a, b)).",
+         "tags": ["arithmetic", "order", "absorption"], "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], bapp("max", a, bapp("min", a, b))),
+         "examples": [{"args": [5, 3], "result": 5}, {"args": [2, 9], "result": 2}, {"args": [-2, -7], "result": -2}],
+         "properties": [{"name": "absorbs", "expr": forall(["a", "b"], op("eq", self_app(a, b), a))}],
+         "prove": True},
+        {"name": "min_max_absorb", "intent": "Absorption of max into min.", "summary": "Returns min(a, max(a, b)).",
+         "tags": ["arithmetic", "order", "absorption"], "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], bapp("min", a, bapp("max", a, b))),
+         "examples": [{"args": [5, 3], "result": 5}, {"args": [2, 9], "result": 2}, {"args": [-2, -7], "result": -2}],
+         "properties": [{"name": "absorbs", "expr": forall(["a", "b"], op("eq", self_app(a, b), a))}],
          "prove": True},
     ]
 
