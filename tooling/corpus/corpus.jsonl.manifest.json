@@ -1,16 +1,16 @@
 {
   "corpus": "corpus.jsonl",
-  "examples": 126,
+  "examples": 128,
   "by_modality": {
-    "nova_lingua": 108,
+    "nova_lingua": 110,
     "nova_locutio": 18
   },
   "by_polarity": {
-    "positive": 113,
+    "positive": 115,
     "negative": 13
   },
   "by_category": {
-    "function": 98,
+    "function": 100,
     "exchange": 18,
     "composition": 10
   },
@@ -31,7 +31,8 @@
     "arith_laws": 7,
     "bool_laws": 7,
     "order_laws": 7,
-    "higher_order_funcs": 4
+    "higher_order_funcs": 4,
+    "provenance_funcs": 2
   },
   "verified_all": true,
   "proved_properties": 54,

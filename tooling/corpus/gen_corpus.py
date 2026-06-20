@@ -962,6 +962,30 @@ def higher_order_funcs():
     ]
 
 
+def provenance_funcs():
+    # Records carrying DERIVATION HISTORY (principle 1): `derived_from` / `supersedes` point at the
+    # content-address of a prior function — the corpus's first non-null provenance. The parent is declared
+    # as an fn_dep so its hash is known and stamped into the field (then the record is re-hashed). The
+    # record otherwise validates, type-checks, and runs normally; the link is pure metadata.
+    n = var("n")
+    DOUBLE = {"name": "double_parent", "type_ast": fn([INT], INT),
+              "body_ast": lam(["n"], bapp("add", var("n"), var("n"))), "examples": [{"args": [3], "result": 6}]}
+    NEGATE_OLD = {"name": "negate_via_sub", "type_ast": fn([INT], INT),
+                  "body_ast": lam(["n"], bapp("sub", int_lit(0), var("n"))), "examples": [{"args": [3], "result": -3}]}
+    return [
+        {"name": "quadruple_derived", "intent": "Quadruple a number, derived from doubling.",
+         "summary": "Returns 4 * n; derived_from the doubling function.", "tags": ["arithmetic", "linear", "provenance"],
+         "type_ast": fn([INT], INT), "body_ast": lam(["n"], bapp("mul", int_lit(4), n)),
+         "examples": [{"args": [0], "result": 0}, {"args": [3], "result": 12}, {"args": [-2], "result": -8}],
+         "derived_from": "double_parent", "fn_deps": [DOUBLE], "properties": [], "prove": False},
+        {"name": "negate_v2", "intent": "Negate a number, superseding an earlier implementation.",
+         "summary": "Returns -n with the neg builtin; supersedes a prior 0 - n implementation.",
+         "tags": ["arithmetic", "provenance"], "type_ast": fn([INT], INT), "body_ast": lam(["n"], bapp("neg", n)),
+         "examples": [{"args": [0], "result": 0}, {"args": [7], "result": -7}, {"args": [-4], "result": 4}],
+         "supersedes": "negate_via_sub", "fn_deps": [NEGATE_OLD], "properties": [], "prove": False},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + float_funcs()
@@ -1019,6 +1043,17 @@ def build_and_verify(spec, workdir):
     record = build_v2_record(spec["name"], spec["type_ast"], examples, spec["body_ast"],
                              properties=spec.get("properties") or None, intent_tags=spec["tags"],
                              terminates=terminates, refinements=spec.get("refinements"))
+    # Derivation history (principle 1): stamp derived_from / supersedes with a parent's content-address
+    # (the parent is declared as an fn_dep so its hash is known), then re-hash since the content changed.
+    # `derived_from` is a LIST of addresses (a function may derive from several); `supersedes` is a single.
+    prov = {}
+    if spec.get("derived_from"):
+        prov["derived_from"] = [dep_hashes[spec["derived_from"]]]
+    if spec.get("supersedes"):
+        prov["supersedes"] = dep_hashes[spec["supersedes"]]
+    if prov:
+        record.update(prov)
+        record["hash"] = content_hash(record, "fn", strip=("hash",))
     body = spec["body_ast"]
     addr = expr_address(body)
     d = os.path.join(workdir, spec["name"])
@@ -1609,7 +1644,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="nlcorpus-") as wd:
         # Nova Lingua — verified function records (first-order specs, then the higher-order ones whose
         # examples reference helper functions by fn_ref).
-        for spec in specs + higher_order_funcs():
+        for spec in specs + higher_order_funcs() + provenance_funcs():
             ex, ok = build_and_verify(spec, wd)
             if ok or args.keep_unverified:
                 examples.append(ex)
@@ -1656,7 +1691,8 @@ def main():
                 "recursive_funcs": len(recursive_funcs()),
                 "recursive_list_funcs": len(recursive_list_funcs()),
                 "arith_laws": len(arith_laws()), "bool_laws": len(bool_laws()),
-                "order_laws": len(order_laws()), "higher_order_funcs": len(higher_order_funcs())}
+                "order_laws": len(order_laws()), "higher_order_funcs": len(higher_order_funcs()),
+                "provenance_funcs": len(provenance_funcs())}
     proved = sum(1 for ex in examples if ex["category"] == "function" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"
