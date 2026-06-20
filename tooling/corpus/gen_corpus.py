@@ -1247,6 +1247,35 @@ def negative_examples(workdir, commons_dir, by_name):
          "The function requires cap:apply/guarded; the request lists none, so the responder rejects it as not_authorized.",
          ["negative", "capability", "agent-loop"], {"speech_act": "request", "request": gsigned, "reply": greply},
          "capability-gate", "NOT-AUTHORIZED", json.dumps(greply.get("body")) if greply else "", denied)
+
+    # 6. Schema-invalid record — a structurally malformed record (its required `body_hash` field removed).
+    #    The first gate, `validate`, rejects it against the schema before any semantic check can run.
+    body6 = lam(["n"], bapp("add", n, n))
+    rec6 = build_v2_record("double", fn([INT], INT), [{"args": [to_value_ast(3)], "result": to_value_ast(6)}],
+                           body6, terminates="always")
+    bad6 = {k: v for k, v in rec6.items() if k != "body_hash"}  # drop a required field
+    p6 = _write_tmp(bad6)
+    vv = cli(["validate", str(SCHEMA), p6])
+    os.unlink(p6)
+    emit("schema_invalid", "nova_lingua",
+         "A function record with its required body_hash field removed.",
+         "Structurally malformed: the schema validator rejects it before any semantic check, since body_hash is required.",
+         ["negative", "schema"], {"record": bad6, "body": body6},
+         "validate", "SCHEMA-INVALID", (vv.stdout + vv.stderr), vv.returncode != 0)
+
+    # 7. Under-declared effects — a body that prints (an io.console effect) while the record declares none.
+    #    `check-effects` proves statically that the body's effects are not a subset of the declared set and
+    #    rejects it, without ever running it (an empty effect list is not a purity certificate).
+    body7 = lam(["msg"], bapp("print", var("msg")))
+    rec7 = build_v2_record("noisy", fn([INT], {"kind": "builtin", "name": "unit"}), [], body7, terminates="always")
+    _, r7, b7 = write_rec("undereffect", rec7, body7)
+    ce = cli(["check-effects", r7, "--body", b7])
+    emit("under_declared_effects", "nova_lingua",
+         "A function that prints but declares no effects.",
+         "The body performs io.console (print) while the record's effect signature is empty; check-effects "
+         "reports it UNDER-DECLARED before any execution.",
+         ["negative", "effects"], {"record": rec7, "body": body7},
+         "check-effects", "UNDER-DECLARED", (ce.stdout + ce.stderr), "UNDER-DECLARED" in (ce.stdout + ce.stderr))
     return out
 
 
