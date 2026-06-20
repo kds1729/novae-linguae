@@ -354,6 +354,19 @@ def list_transform_funcs():
                          "expr": forall(["xs", "ys"], op("eq", op("length", op("append", xs, ys)),
                                                        op("add", op("length", xs), op("length", ys))))}],
          "prove": True},
+        # map with a squaring lambda.
+        {"name": "square_all", "intent": "Square every number in a list.", "summary": "Maps n*n over the list.",
+         "tags": ["list", "map", "elementwise"], "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], bapp("map", lam(["x"], bapp("mul", x, x)), xs)),
+         "examples": [{"args": [[]], "result": []}, {"args": [[1, -2, 3]], "result": [1, 4, 9]}],
+         "properties": [], "prove": False},
+        # filter with an evenness predicate.
+        {"name": "keep_evens", "intent": "Keep only the even numbers in a list.",
+         "summary": "Filters the list to its even elements.", "tags": ["list", "filter"],
+         "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], bapp("filter", lam(["x"], bapp("eq", bapp("mod", x, int_lit(2)), int_lit(0))), xs)),
+         "examples": [{"args": [[]], "result": []}, {"args": [[1, 2, 3, 4]], "result": [2, 4]}],
+         "properties": [], "prove": False},
     ]
 
 
@@ -374,6 +387,20 @@ def composition_funcs():
          "body_ast": lam(["xs"], bapp("length", bapp("filter", lam(["x"], bapp("gt", x, int_lit(0))), xs))),
          "examples": [{"args": [[]], "result": 0}, {"args": [[1, -2, 3, 0, 4]], "result": 3}],
          "properties": [], "prove": False},
+        # count_evens — length . filter(even).
+        {"name": "count_evens", "intent": "Count the even numbers in a list.",
+         "summary": "The length of the list's even elements.", "tags": ["list", "filter", "composition"],
+         "type_ast": fn([list_of(INT)], NAT),
+         "body_ast": lam(["xs"], bapp("length", bapp("filter", lam(["x"], bapp("eq", bapp("mod", x, int_lit(2)), int_lit(0))), xs))),
+         "examples": [{"args": [[]], "result": 0}, {"args": [[1, 2, 3, 4]], "result": 2}],
+         "properties": [], "prove": False},
+        # sum_of_squares — foldl-add over the squares (a map fused into the fold).
+        {"name": "sum_of_squares", "intent": "Sum the squares of a list of numbers.",
+         "summary": "Folds add over each element squared, 0 for the empty list.", "tags": ["list", "map", "fold", "composition"],
+         "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], bapp("foldl", lam(["acc", "x"], bapp("add", var("acc"), bapp("mul", x, x))), int_lit(0), xs)),
+         "examples": [{"args": [[]], "result": 0}, {"args": [[1, 2, 3]], "result": 14}, {"args": [[2, -3]], "result": 13}],
+         "properties": [], "prove": False},
     ]
 
 
@@ -387,6 +414,15 @@ def float_funcs():
         {"name": "double_f", "intent": "Double a floating-point number.", "summary": "Returns x + x.",
          "tags": ["arithmetic", "float", "linear"], "type_ast": fn([FLOAT], FLOAT), "body_ast": lam(["x"], bapp("add", x, x)),
          "examples": [{"args": [1.5], "result": 3.0}, {"args": [-2.25], "result": -4.5}],
+         "properties": [], "prove": False},
+        {"name": "negate_f", "intent": "Negate a floating-point number.", "summary": "Returns -x.",
+         "tags": ["arithmetic", "float"], "type_ast": fn([FLOAT], FLOAT), "body_ast": lam(["x"], bapp("neg", x)),
+         "examples": [{"args": [2.5], "result": -2.5}, {"args": [-1.5], "result": 1.5}],
+         "properties": [], "prove": False},
+        {"name": "cube_f", "intent": "Cube a floating-point number.", "summary": "Returns x * x * x.",
+         "tags": ["arithmetic", "float"], "type_ast": fn([FLOAT], FLOAT),
+         "body_ast": lam(["x"], bapp("mul", x, bapp("mul", x, x))),
+         "examples": [{"args": [2.0], "result": 8.0}, {"args": [-1.5], "result": -3.375}],
          "properties": [], "prove": False},
     ]
 
@@ -404,6 +440,14 @@ def maybe_funcs():
                                                variant_expr("None"), variant_expr("Just", bapp("div", a, b)))),
          "examples": [{"args": [6, 2], "result": V("Just", 3)}, {"args": [7, 0], "result": V("None")},
                       {"args": [9, 3], "result": V("Just", 3)}],
+         "properties": [], "prove": False},
+        {"name": "safe_mod", "intent": "Modulo of two integers, returning nothing on a zero divisor.",
+         "summary": "Just(a mod b) when b is nonzero; None when b is zero.", "tags": ["arithmetic", "maybe", "partial"],
+         "type_ast": fn([INT, INT], maybe_t(INT)),
+         "body_ast": lam(["a", "b"], case_bool(bapp("eq", b, int_lit(0)),
+                                               variant_expr("None"), variant_expr("Just", bapp("mod", a, b)))),
+         "examples": [{"args": [7, 3], "result": V("Just", 1)}, {"args": [5, 0], "result": V("None")},
+                      {"args": [8, 4], "result": V("Just", 0)}],
          "properties": [], "prove": False},
         {"name": "first", "intent": "The first element of a list, if it has one.",
          "summary": "Just(head xs) for a non-empty list; None for the empty list.", "tags": ["list", "maybe", "safe"],
