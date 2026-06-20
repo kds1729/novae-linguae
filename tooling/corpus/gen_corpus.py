@@ -706,6 +706,21 @@ def arith_laws():
          "examples": [{"args": [0], "result": 0}, {"args": [7], "result": 7}, {"args": [-4], "result": -4}],
          "properties": [{"name": "right_identity", "expr": forall(["n"], op("eq", self_app(n), n))}],
          "prove": True},
+        {"name": "mul_sub", "intent": "Multiply a number by the difference of two others.",
+         "summary": "Returns a * (b - c).", "tags": ["arithmetic", "distributive"],
+         "type_ast": fn([INT, INT, INT], INT),
+         "body_ast": lam(["a", "b", "c"], bapp("mul", a, bapp("sub", b, c))),
+         "examples": [{"args": [2, 5, 3], "result": 4}, {"args": [0, 7, 1], "result": 0}, {"args": [-2, 1, 4], "result": 6}],
+         "properties": [{"name": "distributes_over_sub",
+                         "expr": forall(["a", "b", "c"], op("eq", self_app(a, b, c),
+                                                       op("sub", op("mul", a, b), op("mul", a, c))))}],
+         "prove": True},
+        {"name": "sub_self", "intent": "Subtract a number from itself.", "summary": "Returns n - n.",
+         "tags": ["arithmetic", "identity"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], bapp("sub", n, n)),
+         "examples": [{"args": [0], "result": 0}, {"args": [7], "result": 0}, {"args": [-4], "result": 0}],
+         "properties": [{"name": "annihilates", "expr": forall(["n"], op("eq", self_app(n), int_lit(0)))}],
+         "prove": True},
     ]
 
 
@@ -742,6 +757,15 @@ def bool_laws():
                          "expr": forall(["a", "b"], op("eq", op("not", op("and", a, b)),
                                                        op("or", op("not", a), op("not", b))))}],
          "prove": True},
+        {"name": "nor", "intent": "Logical NOR of two booleans.", "summary": "Returns not (a or b).",
+         "tags": ["boolean", "de-morgan"], "type_ast": fn([BOOL, BOOL], BOOL),
+         "body_ast": lam(["a", "b"], bapp("not", bapp("or", a, b))),
+         "examples": [{"args": [True, True], "result": False}, {"args": [True, False], "result": False},
+                      {"args": [False, False], "result": True}],
+         "properties": [{"name": "de_morgan",
+                         "expr": forall(["a", "b"], op("eq", op("not", op("or", a, b)),
+                                                       op("and", op("not", a), op("not", b))))}],
+         "prove": True},
     ]
 
 
@@ -769,6 +793,18 @@ def order_laws():
          "examples": [{"args": [1, 2, 3], "result": 1}, {"args": [3, 1, 2], "result": 1}, {"args": [-1, -5, -2], "result": -5}],
          "properties": [{"name": "associative",
                          "expr": forall(["a", "b", "c"], op("eq", self_app(a, b, c), op("min", a, op("min", b, c))))}],
+         "prove": True},
+        {"name": "max_comm", "intent": "The maximum of two numbers, in either order.", "summary": "Returns max(a, b).",
+         "tags": ["arithmetic", "order", "commutative"], "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], bapp("max", a, b)),
+         "examples": [{"args": [5, 3], "result": 5}, {"args": [2, 9], "result": 9}, {"args": [-2, -7], "result": -2}],
+         "properties": [{"name": "commutative", "expr": forall(["a", "b"], op("eq", self_app(a, b), op("max", b, a)))}],
+         "prove": True},
+        {"name": "min_comm", "intent": "The minimum of two numbers, in either order.", "summary": "Returns min(a, b).",
+         "tags": ["arithmetic", "order", "commutative"], "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], bapp("min", a, b)),
+         "examples": [{"args": [5, 3], "result": 3}, {"args": [2, 9], "result": 2}, {"args": [-2, -7], "result": -7}],
+         "properties": [{"name": "commutative", "expr": forall(["a", "b"], op("eq", self_app(a, b), op("min", b, a)))}],
          "prove": True},
     ]
 
