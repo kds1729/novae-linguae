@@ -1292,9 +1292,21 @@ def compose_examples(commons_dir, by_name):
         ("filter_square_sum", "Compose: keep the positives, square them, then sum.",
          "A three-stage pipeline keep_positives;square_all;sum — the sum of the squares of the positive elements.",
          ["keep_positives", "square_all", "sum"], True),
+        ("negate_reverse_length", "Compose: negate every element, reverse, then count.",
+         "A three-stage pipeline negate_all;reverse;length over a list of ints, yielding nat.",
+         ["negate_all", "reverse", "length"], True),
+        ("square_reverse_sumfoldr", "Compose: square every element, reverse, then right-fold-sum.",
+         "A three-stage pipeline square_all;reverse;sum_foldr over a list of ints, yielding int.",
+         ["square_all", "reverse", "sum_foldr"], True),
+        ("filter_square_reverse_sum", "Compose: keep positives, square, reverse, then sum.",
+         "A four-stage pipeline keep_positives;square_all;reverse;sum — the corpus's longest assembled pipeline.",
+         ["keep_positives", "square_all", "reverse", "sum"], True),
         ("length_then_reverse", "Compose: take a list's length, then reverse it.",
          "length yields a nat, which cannot feed reverse's List parameter — the pipeline does NOT compose.",
          ["length", "reverse"], False),
+        ("allpositive_then_reverse", "Compose: test all-positive, then reverse.",
+         "all_positive yields a bool, which cannot feed reverse's List parameter — the pipeline does NOT compose.",
+         ["all_positive", "reverse"], False),
     ]
     for ident, intent, summary, names, expect in pipelines:
         recs = [by_name[n] for n in names]
