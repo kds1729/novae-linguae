@@ -1,17 +1,18 @@
 {
   "corpus": "corpus.jsonl",
-  "examples": 128,
+  "examples": 130,
   "by_modality": {
     "nova_lingua": 110,
-    "nova_locutio": 18
+    "nova_locutio": 20
   },
   "by_polarity": {
-    "positive": 115,
+    "positive": 117,
     "negative": 13
   },
   "by_category": {
     "function": 100,
     "exchange": 18,
+    "transcript": 2,
     "composition": 10
   },
   "nova_lingua_families": {
@@ -36,7 +37,7 @@
   },
   "verified_all": true,
   "proved_properties": 54,
-  "confirmed_agent_loop_claims": 7,
+  "confirmed_agent_loop_claims": 8,
   "schema": "function-record.v0.2.schema.json + message.v0.2.schema.json (v0.2.0)",
   "note": "POSITIVE examples are correct-by-construction and checked: a Nova Lingua record is schema-valid, well-typed, executes its examples, and (where stated) proves its properties over the unbounded domain; a Nova Locutio example is a signed agent-loop exchange whose reply schema-validates, is threaded, and (for request/apply) re-runs true via verify-claim. NEGATIVE examples (polarity 'negative') are deliberately-wrong artifacts confirmed to be REJECTED by the verifier \u2014 an ill-typed body, a refuted property, a failed example, a signed-but-false claim. All checked by nl-validator."
 }

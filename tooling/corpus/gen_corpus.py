@@ -1347,6 +1347,84 @@ def nova_locutio_examples(commons_dir, by_name):
     return out
 
 
+def multiturn_examples(commons_dir, by_name):
+    """Multi-turn signed transcripts (category `transcript`): the agent DISCOVERS a function by intent
+    (query -> ack), then USES the discovered content-address in a follow-up turn (apply -> assert, or
+    validate -> assert). Each turn is a real signed message answered by `nl-validator respond`, and the
+    whole chain is threaded by in_reply_to. Verified end to end — the ack must actually list the target the
+    follow-up uses, and the final assert re-runs/validates true — so it is principle 4 made multi-turn."""
+    resp_did = responder_did(RESPONDER_SEED)
+    if not resp_did:
+        return []
+    out = []
+
+    def query_turn(tag):
+        q = {"schema_version": "0.2.0", "kind": "query", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
+             "constraints": None, "body": {"limit": 50, "pattern": {"intent_tags": [tag]}}}
+        sq = sign_message(q, SENDER_SEED)
+        ack = respond_to(sq, commons_dir)
+        matches = ack.get("body", {}).get("result", {}).get("matches", []) if ack else []
+        return sq, ack, matches
+
+    def follow_up(action, target, ack, args=None):
+        body = {"action": action, "target": target}
+        if args is not None:
+            body["args"] = args
+        req = {"schema_version": "0.2.0", "kind": "request", "in_reply_to": ack.get("hash") if ack else None,
+               "timestamp": MSG_TS, "to": resp_did,
+               "constraints": {"budget_tokens": 1000, "capabilities": [], "deadline_ms": 5000}, "body": body}
+        sreq = sign_message(req, SENDER_SEED)
+        return sreq, respond_to(sreq, commons_dir)
+
+    def emit(ident, intent, summary, tags, transcript, extra_ok, outcome):
+        threaded = all(transcript[i].get("in_reply_to") == transcript[i - 1].get("hash")
+                       for i in range(1, len(transcript)))
+        schema_ok = all(msg_schema_valid(m) for m in transcript)
+        ok = bool(transcript) and schema_ok and threaded and extra_ok
+        out.append({
+            "id": "transcript_" + ident, "modality": "nova_locutio", "category": "transcript", "polarity": "positive",
+            "intent": intent, "summary": summary, "tags": tags,
+            "views": {"transcript": transcript, "turns": len(transcript) // 2, "outcome": outcome},
+            "verification": {"all_schema_valid": schema_ok, "threaded": threaded, "outcome": outcome},
+            "_ok": ok,
+        })
+
+    # T1: discover an arithmetic function (the ack lists double), then apply the discovered address.
+    q1, ack1, m1 = query_turn("arithmetic")
+    tgt1 = by_name["double"]["hash"]
+    sapply, assert1 = follow_up("apply", tgt1, ack1, args=[to_value_ast(21)])
+    confirmed = False
+    if assert1 and assert1.get("kind") == "assert":
+        vp = _write_tmp(assert1)
+        confirmed = cli(["verify-claim", "--records", commons_dir, vp]).returncode == 0
+        os.unlink(vp)
+    transcript1 = [x for x in [q1, ack1, sapply, assert1] if x]
+    ok1 = (bool(ack1) and ack1.get("kind") == "ack" and tgt1 in m1
+           and bool(assert1) and assert1.get("kind") == "assert" and confirmed)
+    emit("discover_then_apply",
+         "Discover an arithmetic function, then apply the one you found.",
+         "Two turns: query for `arithmetic` functions -> ack lists double's content-address; then request/apply "
+         "that address to 21 -> assert double(21) = 42, which re-runs true. The apply targets a hash the query "
+         "surfaced — discover-then-use, threaded end to end.",
+         ["agent-loop", "multi-turn", "query", "apply", "discovery"], transcript1, ok1,
+         "CONFIRMED" if ok1 else "NOT-CONFIRMED")
+
+    # T2: discover a list function (the ack lists reverse), then validate the discovered address.
+    q2, ack2, m2 = query_turn("list")
+    tgt2 = by_name["reverse"]["hash"]
+    sval, assert2 = follow_up("validate", tgt2, ack2)
+    transcript2 = [x for x in [q2, ack2, sval, assert2] if x]
+    ok2 = (bool(ack2) and ack2.get("kind") == "ack" and tgt2 in m2
+           and bool(assert2) and assert2.get("kind") == "assert")
+    emit("discover_then_validate",
+         "Discover a list function, then validate the one you found.",
+         "Two turns: query for `list` functions -> ack lists reverse's content-address; then request/validate "
+         "that address -> assert it is verified. The validate targets a hash the query surfaced.",
+         ["agent-loop", "multi-turn", "query", "validate", "discovery"], transcript2, ok2,
+         "VERIFIED" if ok2 else "NOT-VERIFIED")
+    return out
+
+
 # --- negative examples: artifacts paired with the verifier's REJECTION ----------------------------
 #
 # The "is this wrong?" signal. Each is a deliberately-wrong artifact, and the example is valid only if
@@ -1653,6 +1731,13 @@ def main():
         # Nova Locutio — verified agent-loop exchanges over a shared commons of the same functions.
         commons_dir, by_name = build_commons(wd, specs)
         for ex in nova_locutio_examples(commons_dir, by_name):
+            ok = ex.pop("_ok")
+            if ok or args.keep_unverified:
+                examples.append(ex)
+            if not ok:
+                dropped.append((ex["id"], ex["verification"]))
+        # Multi-turn transcripts — discover a function, then use the discovered address in a later turn.
+        for ex in multiturn_examples(commons_dir, by_name):
             ok = ex.pop("_ok")
             if ok or args.keep_unverified:
                 examples.append(ex)

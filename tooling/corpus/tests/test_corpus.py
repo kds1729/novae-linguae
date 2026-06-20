@@ -42,6 +42,12 @@ class CommittedCorpusTests(unittest.TestCase):
             if ex["category"] == "composition":
                 self.assertTrue(v["composable"], f"{ex['id']} composition is not composable")
                 continue
+            # A positive multi-turn TRANSCRIPT: all messages schema-valid, threaded, non-failure outcome.
+            if ex["category"] == "transcript":
+                self.assertTrue(v["all_schema_valid"], f"{ex['id']} transcript not all schema-valid")
+                self.assertTrue(v["threaded"], f"{ex['id']} transcript not threaded")
+                self.assertFalse(v["outcome"].startswith("NOT"), f"{ex['id']} transcript outcome {v['outcome']}")
+                continue
             if ex["modality"] == "nova_lingua":
                 self.assertTrue(v["schema_valid"], f"{ex['id']} not schema-valid")
                 self.assertTrue(v["well_typed"], f"{ex['id']} not well-typed")
@@ -64,6 +70,19 @@ class CommittedCorpusTests(unittest.TestCase):
             if ex["category"] == "composition":
                 for k in ("pipeline", "stages", "composite"):
                     self.assertIn(k, views, f"{ex['id']} missing view {k}")
+                continue
+            if ex["category"] == "transcript":
+                # A multi-turn transcript: a chain of >= 3 real signed messages, threaded by in_reply_to.
+                self.assertIn("transcript", views, f"{ex['id']} missing transcript")
+                msgs = views["transcript"]
+                self.assertGreaterEqual(len(msgs), 3, f"{ex['id']} transcript too short")
+                for m in msgs:
+                    self.assertTrue(m["hash"].startswith("msg_"))
+                    self.assertTrue(m["signature"].startswith("ed25519:"))
+                    self.assertTrue(m["from"].startswith("did:nova:"))
+                for i in range(1, len(msgs)):
+                    self.assertEqual(msgs[i].get("in_reply_to"), msgs[i - 1]["hash"],
+                                     f"{ex['id']} turn {i} not threaded to the previous message")
                 continue
             if ex["polarity"] == "negative":
                 # Negatives carry the offending artifact: a record+body (lingua) or a message (locutio).
