@@ -240,8 +240,9 @@ fn nat_from_text(digits: &str) -> Value {
     }
 }
 
-/// Build an `int` value from a (possibly signed) integer lexeme.
-fn int_from_text(s: &str) -> Value {
+/// Build an `int` value from a (possibly signed) integer lexeme. `pub(crate)` so the body parser can
+/// reuse it for the `int(N)` typed-literal form (mirroring this module's value-syntax handling).
+pub(crate) fn int_from_text(s: &str) -> Value {
     let (neg, ds) = match s.strip_prefix('-') {
         Some(r) => (true, r),
         None => (false, s),

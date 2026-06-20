@@ -386,6 +386,16 @@ impl Parser {
                     "false" => {
                         Ok(json!({ "kind": "lit", "value": { "kind": "bool", "value": false } }))
                     }
+                    // `int(N)` is a typed integer literal (a non-negative `int`, distinct from the bare
+                    // `nat`), mirroring the value-syntax `int(...)` form — NOT an application of a function
+                    // named `int`. The pretty-printer emits non-negative `int` literals this way, so this
+                    // makes the body surface round-trip.
+                    "int" if self.at(&TokKind::Lparen) => {
+                        self.bump(); // `(`
+                        let n = self.expect(TokKind::Int, "an integer literal inside `int(...)`")?;
+                        self.expect(TokKind::Rparen, "`)` to close `int(...)`")?;
+                        Ok(json!({ "kind": "lit", "value": { "kind": "int", "value": values::int_from_text(&n.text) } }))
+                    }
                     other if is_keyword(other) => Err(SurfaceError::at(
                         t.offset,
                         format!("unexpected keyword `{other}` in expression position"),
@@ -726,6 +736,16 @@ mod tests {
             json!({"kind": "lit", "value": {"kind": "bool", "value": true}}),
         );
         parses_to("()", json!({"kind": "lit", "value": {"kind": "unit"}}));
+        // `int(N)` is a typed integer literal, not an application of a function named `int` — this is
+        // what makes the body surface round-trip (the pretty-printer emits non-negative ints as `int(N)`).
+        parses_to("int(1)", json!({"kind": "lit", "value": {"kind": "int", "value": 1}}));
+        parses_to(
+            "n + int(1)",
+            json!({"kind": "app", "fn": {"kind": "var", "name": "add"}, "args": [
+                {"kind": "var", "name": "n"},
+                {"kind": "lit", "value": {"kind": "int", "value": 1}},
+            ]}),
+        );
     }
 
     #[test]
