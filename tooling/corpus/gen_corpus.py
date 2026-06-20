@@ -343,7 +343,12 @@ def list_transform_funcs():
          "type_ast": fn([list_of(INT)], list_of(INT)),
          "body_ast": lam(["xs"], bapp("filter", lam(["x"], bapp("gt", x, int_lit(0))), xs)),
          "examples": [{"args": [[]], "result": []}, {"args": [[1, -2, 3, 0]], "result": [1, 3]}],
-         "properties": [], "prove": False},
+         # Filtering is idempotent — proved by direct induction (no auxiliary lemma). Stated generically
+         # over the predicate `p` (modelled uninterpreted), independent of this record's concrete `> 0`.
+         "properties": [{"name": "idempotent",
+                         "expr": forall(["p", "xs"], op("eq", op("filter", var("p"), op("filter", var("p"), xs)),
+                                                       op("filter", var("p"), xs)))}],
+         "prove": True},
         # append — binary; length is additive (proved over the builtins via the length_append lemma).
         {"name": "concat", "intent": "Concatenate two lists.", "summary": "Appends the second list onto the first.",
          "tags": ["list", "lossless"],
@@ -530,6 +535,14 @@ def recursive_funcs():
          "examples": [{"args": [0], "result": 1}, {"args": [1], "result": 1}, {"args": [3], "result": 6}, {"args": [5], "result": 120}],
          # Terminates only for n >= 0 (recurses forever on a negative), so it isn't certified `always`.
          "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "triangular", "intent": "The nth triangular number.",
+         "summary": "0 when n is 0; otherwise n + the (n-1)th triangular number.", "tags": ["arithmetic", "recursion"],
+         "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], case_bool(bapp("eq", n, int_lit(0)), int_lit(0),
+                                          bapp("add", n, bself(bapp("sub", n, int_lit(1)))))),
+         "examples": [{"args": [0], "result": 0}, {"args": [1], "result": 1}, {"args": [3], "result": 6}, {"args": [5], "result": 15}],
+         # As with factorial, terminates only for n >= 0.
+         "properties": [], "prove": False, "terminates": "unknown"},
     ]
 
 
@@ -560,6 +573,24 @@ def recursive_list_funcs():
          "body_ast": lam(["xs"], case_null("xs", nil,
                                            bapp("cons", bapp("add", bapp("head", xs), int_lit(1)), bself(bapp("tail", xs))))),
          "examples": [{"args": [[]], "result": []}, {"args": [[0, 9, -5]], "result": [1, 10, -4]}],
+         "properties": [{"name": "length_preserving",
+                         "expr": forall(["xs"], op("eq", op("length", self_app(xs)), op("length", xs)))}],
+         "prove": True, "terminates": "always"},
+        {"name": "negate_all_rec", "intent": "Negate every number in a list, by recursion.",
+         "summary": "nil for the empty list; otherwise (-head) consed onto negating the tail.",
+         "tags": ["list", "recursion", "map", "elementwise"], "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], case_null("xs", nil,
+                                           bapp("cons", bapp("neg", bapp("head", xs)), bself(bapp("tail", xs))))),
+         "examples": [{"args": [[]], "result": []}, {"args": [[1, -2, 3]], "result": [-1, 2, -3]}],
+         "properties": [{"name": "length_preserving",
+                         "expr": forall(["xs"], op("eq", op("length", self_app(xs)), op("length", xs)))}],
+         "prove": True, "terminates": "always"},
+        {"name": "square_all_rec", "intent": "Square every number in a list, by recursion.",
+         "summary": "nil for the empty list; otherwise (head*head) consed onto squaring the tail.",
+         "tags": ["list", "recursion", "map", "elementwise"], "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], case_null("xs", nil,
+                                           bapp("cons", bapp("mul", bapp("head", xs), bapp("head", xs)), bself(bapp("tail", xs))))),
+         "examples": [{"args": [[]], "result": []}, {"args": [[1, -2, 3]], "result": [1, 4, 9]}],
          "properties": [{"name": "length_preserving",
                          "expr": forall(["xs"], op("eq", op("length", self_app(xs)), op("length", xs)))}],
          "prove": True, "terminates": "always"},

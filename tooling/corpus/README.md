@@ -114,19 +114,20 @@ to be rejected*, for the stated reason. Today's five:
 
 ## Scope and where it grows
 
-68 examples today (62 positive, 6 negative), in three `category`s:
+71 examples today (65 positive, 6 negative), in three `category`s:
 
-- **function** (54) — Nova Lingua function records across eleven families (unary integer incl. `double` /
+- **function** (57) — Nova Lingua function records across eleven families (unary integer incl. `double` /
   `quadruple` / `decrement` / `abs_val`, binary integer incl. `maximum` / `minimum` / `abs_diff`,
   boolean/predicate incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` / `is_even`, list,
   list-transform: `map`/`filter`/`append` (`negate_all` / `square_all` / `keep_positives` / `keep_evens`),
   composition: `foldl`-product / `length`∘`filter` / `sum_of_squares`, float: `square_f` / `double_f` /
   `negate_f` / `cube_f`, Maybe: `safe_div` / `safe_mod` / `first`, Result: `checked_div` / `checked_sub`,
   **recursion** — scalar/measure `self`-recursive `length_rec` / `sum_rec` / `product_rec` / `factorial`,
-  and **list-building recursion** — cons-recursive `double_all_rec` / `increment_all_rec` / `append_rec`
-  / `countdown_rec`), 27 with properties proved over the unbounded domain — including the `filter`/`reverse`
-  commutation (`filter(p, reverse xs) = reverse(filter p xs)`), discharged via an auxiliary lemma — plus
-  3 negatives.
+  and **list-building recursion** — cons-recursive `double_all_rec` / `increment_all_rec` / `negate_all_rec`
+  / `square_all_rec` / `append_rec` / `countdown_rec`), 30 with properties proved over the unbounded domain
+  — including the `filter`/`reverse` commutation (`filter(p, reverse xs) = reverse(filter p xs)`,
+  auxiliary-lemma) and `filter` idempotence (`filter(p, filter p xs) = filter p xs`, direct induction) —
+  plus 3 negatives.
   The sum-typed (Maybe/Result) functions construct their variant result with a computed payload
   (`Just(a / b)`, `Err(b)`); sum types are opaque to the prover, so they verify by schema +
   typecheck + run rather than proof. The recursion families call themselves via `self` — now bound in the
