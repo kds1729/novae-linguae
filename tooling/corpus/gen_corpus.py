@@ -618,10 +618,42 @@ def recursive_list_funcs():
     ]
 
 
+def arith_laws():
+    # Ternary functions whose properties are the classic algebraic laws — associativity, distributivity,
+    # an identity — each PROVED over the unbounded Int/Bool domain. The law is stated as a DIFFERENT
+    # expression than the body (e.g. body is `(a+b)+c`, law says it equals `a+(b+c)`), so the proof is
+    # non-trivial. These exercise three-argument signatures and the algebraic core a model must internalize.
+    a, b, c, n = var("a"), var("b"), var("c"), var("n")
+    return [
+        {"name": "sum3", "intent": "Add three numbers.", "summary": "Returns (a + b) + c.",
+         "tags": ["arithmetic", "associative"], "type_ast": fn([INT, INT, INT], INT),
+         "body_ast": lam(["a", "b", "c"], bapp("add", bapp("add", a, b), c)),
+         "examples": [{"args": [1, 2, 3], "result": 6}, {"args": [0, 0, 0], "result": 0}, {"args": [-1, 2, -3], "result": -2}],
+         "properties": [{"name": "associative",
+                         "expr": forall(["a", "b", "c"], op("eq", self_app(a, b, c), op("add", a, op("add", b, c))))}],
+         "prove": True},
+        {"name": "mul_sum", "intent": "Multiply a number by the sum of two others.", "summary": "Returns a * (b + c).",
+         "tags": ["arithmetic", "distributive"], "type_ast": fn([INT, INT, INT], INT),
+         "body_ast": lam(["a", "b", "c"], bapp("mul", a, bapp("add", b, c))),
+         "examples": [{"args": [2, 3, 4], "result": 14}, {"args": [0, 5, 6], "result": 0}, {"args": [-2, 1, 1], "result": -4}],
+         "properties": [{"name": "distributes_over_add",
+                         "expr": forall(["a", "b", "c"], op("eq", self_app(a, b, c),
+                                                       op("add", op("mul", a, b), op("mul", a, c))))}],
+         "prove": True},
+        {"name": "add_zero", "intent": "Add zero to a number.", "summary": "Returns n + 0.",
+         "tags": ["arithmetic", "identity"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], bapp("add", n, int_lit(0))),
+         "examples": [{"args": [0], "result": 0}, {"args": [7], "result": 7}, {"args": [-4], "result": -4}],
+         "properties": [{"name": "right_identity", "expr": forall(["n"], op("eq", self_app(n), n))}],
+         "prove": True},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + float_funcs()
-            + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs())
+            + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs()
+            + arith_laws())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -1187,7 +1219,8 @@ def main():
                 "composition_funcs": len(composition_funcs()), "float_funcs": len(float_funcs()),
                 "maybe_funcs": len(maybe_funcs()), "result_funcs": len(result_funcs()),
                 "recursive_funcs": len(recursive_funcs()),
-                "recursive_list_funcs": len(recursive_list_funcs())}
+                "recursive_list_funcs": len(recursive_list_funcs()),
+                "arith_laws": len(arith_laws())}
     proved = sum(1 for ex in examples if ex["category"] == "function" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")
     confirmed = sum(1 for ex in examples if ex["modality"] == "nova_locutio" and ex["polarity"] == "positive"
