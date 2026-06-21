@@ -124,9 +124,9 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
 
 ## Scope and where it grows
 
-159 examples today (145 positive, 14 negative), in four `category`s:
+173 examples today (159 positive, 14 negative), in four `category`s:
 
-- **function** (124) — Nova Lingua function records across **twenty-three families**: unary integer (8, incl.
+- **function** (136) — Nova Lingua function records across **twenty-five families**: unary integer (8, incl.
   `double` / `quadruple` / `decrement` / `abs_val`), binary integer (6, incl. `maximum` / `minimum` /
   `abs_diff`), boolean/predicate (8, incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` /
   `is_even`), list builtins (3: `sum` / `reverse` / `length`), list-transform (6: `map`/`filter`/`append`
@@ -144,7 +144,12 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   `is_negative`), **more proved identities** (2: `mul_one` right-identity / `mul_zero` annihilation),
   **more boolean functions** (2: `implies` / `iff`), **more recursion** (7: `member` /
   `count_occurrences` / `take_rec` / `drop_rec` / `repeat_rec` / `pow` / `last_rec`, the last with a
-  non-empty refinement), **higher-order** (10: `map_with` / `filter_with` / `foldl_with` / `foldr_with` /
+  non-empty refinement), **recursion shapes** (7 generative-`write`-focused: `fib` double recursion,
+  `gcd` Euclid two-arg, `sum_digits` div/mod, `range_rec` ascending build, `nth` indexing (refined),
+  `concat_lists` nested-list flatten, `keep_positives_rec` recursive filter), **compositional bodies**
+  (5: `max_of_list` / `min_of_list` folds with a builtin seeded by the head (refined), `count_between`
+  inline-predicate filter, `clamp_all` inline-lambda map, `sum_of_cubes` compound fold step),
+  **higher-order** (10: `map_with` / `filter_with` / `foldl_with` / `foldr_with` /
   `apply_to` / `twice` / `compose2` / `all_with` / `any_with` / `count_with` — records whose
   *type* takes a function argument, run end to end with the function supplied as an `fn_ref` to a helper
   record resolved from the run directory; the grader can render the fn_ref argument by the helper's name),
@@ -169,9 +174,10 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   asserts `double(21) = 42`, re-runs true) and `discover_then_validate` (→ asserts `reverse` verified).
   Principle 4 made multi-turn; a transcript is valid only if the ack actually lists the target the next
   turn uses, and the whole chain is threaded by `in_reply_to`.
-- **composition** (13) — assembled pipelines with the composite metadata `nl-validator compose` derives
+- **composition** (15) — assembled pipelines with the composite metadata `nl-validator compose` derives
   from the stages' signatures, up to a four-stage `keep_positives;square_all;reverse;sum` → `int` (and
-  pipelines over the recursion-based list functions, e.g. `increment_all_rec;sum`), plus 2 negatives (a
+  pipelines over the recursion-based list functions, e.g. `increment_all_rec;sum`, `keep_positives_rec;sum`,
+  `concat_lists;length`), plus 2 negatives (a
   `nat` and a `bool`, each unable to feed a `List` parameter). The category for "assemble, don't write"
   (principle 4).
 

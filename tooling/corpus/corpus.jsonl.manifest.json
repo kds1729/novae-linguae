@@ -1,19 +1,19 @@
 {
   "corpus": "corpus.jsonl",
-  "examples": 159,
+  "examples": 173,
   "by_modality": {
-    "nova_lingua": 137,
+    "nova_lingua": 151,
     "nova_locutio": 22
   },
   "by_polarity": {
-    "positive": 145,
+    "positive": 159,
     "negative": 14
   },
   "by_category": {
-    "function": 124,
+    "function": 136,
     "exchange": 20,
     "transcript": 2,
-    "composition": 13
+    "composition": 15
   },
   "nova_lingua_families": {
     "unary_arith": 8,
@@ -36,6 +36,8 @@
     "more_laws": 2,
     "bool_more": 2,
     "recursive_more": 7,
+    "recursive_shapes": 7,
+    "compositional_bodies": 5,
     "higher_order_funcs": 4,
     "higher_order_more": 6,
     "provenance_funcs": 2

@@ -1208,12 +1208,136 @@ def recursive_more():
     ]
 
 
+def recursive_shapes():
+    # Recursion *shapes* the earlier families don't cover — the point is generative breadth for the
+    # `write` task (the eval's weakest skill): double recursion (`fib`), Euclid-style two-argument
+    # recursion (`gcd`), digit recursion via div/mod (`sum_digits`), an *ascending* two-argument list
+    # build (`range_rec`, complementing the descending `countdown_rec`), indexing (`nth`, partial),
+    # nested-list flattening (`concat_lists`), and a hand-written recursive filter with a conditional
+    # cons (`keep_positives_rec`). Runnable; examples only. Counter-driven recursions aren't certified
+    # `always`; the structural ones (on the tail / nested list) are.
+    n, a, b, lo, hi, xs, xss = (var("n"), var("a"), var("b"), var("lo"), var("hi"), var("xs"), var("xss"))
+    nil = var("nil")
+    return [
+        {"name": "fib", "intent": "The nth Fibonacci number.",
+         "summary": "n when n < 2; otherwise fib(n-1) + fib(n-2) — double recursion.",
+         "tags": ["arithmetic", "recursion"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], case_bool(bapp("lt", n, int_lit(2)), n,
+                         bapp("add", bself(bapp("sub", n, int_lit(1))), bself(bapp("sub", n, int_lit(2)))))),
+         "examples": [{"args": [0], "result": 0}, {"args": [1], "result": 1}, {"args": [7], "result": 13},
+                      {"args": [10], "result": 55}],
+         "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "gcd", "intent": "The greatest common divisor of two non-negative integers.",
+         "summary": "a when b is 0; otherwise gcd(b, a mod b) — Euclid's algorithm.",
+         "tags": ["arithmetic", "recursion"], "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], case_bool(bapp("eq", b, int_lit(0)), a,
+                         bself(b, bapp("mod", a, b)))),
+         "examples": [{"args": [12, 8], "result": 4}, {"args": [48, 36], "result": 12},
+                      {"args": [7, 0], "result": 7}],
+         "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "sum_digits", "intent": "Sum the decimal digits of a non-negative integer.",
+         "summary": "0 when n is 0; otherwise (n mod 10) + sum_digits(n div 10).",
+         "tags": ["arithmetic", "recursion"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], case_bool(bapp("eq", n, int_lit(0)), int_lit(0),
+                         bapp("add", bapp("mod", n, int_lit(10)), bself(bapp("div", n, int_lit(10)))))),
+         "examples": [{"args": [0], "result": 0}, {"args": [123], "result": 6}, {"args": [9], "result": 9},
+                      {"args": [4070], "result": 11}],
+         "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "range_rec", "intent": "Build the ascending list lo, lo+1, …, hi.",
+         "summary": "nil when lo > hi; otherwise lo consed onto the range from lo+1 to hi.",
+         "tags": ["list", "recursion", "generative"], "type_ast": fn([INT, INT], list_of(INT)),
+         "body_ast": lam(["lo", "hi"], case_bool(bapp("gt", lo, hi), nil,
+                         bapp("cons", lo, bself(bapp("add", lo, int_lit(1)), hi)))),
+         "examples": [{"args": [1, 3], "result": [1, 2, 3]}, {"args": [5, 5], "result": [5]},
+                      {"args": [3, 1], "result": []}],
+         "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "nth", "intent": "The element at index n of a list (0-based).",
+         "summary": "head when n is 0; otherwise the (n-1)th element of the tail. Requires 0 <= n < length.",
+         "tags": ["list", "recursion", "partial", "refinement"], "type_ast": fn([INT, list_of(INT)], INT),
+         "body_ast": lam(["n", "xs"], case_bool(bapp("eq", n, int_lit(0)), bapp("head", xs),
+                         bself(bapp("sub", n, int_lit(1)), bapp("tail", xs)))),
+         "examples": [{"args": [0, [10, 20, 30]], "result": 10}, {"args": [2, [10, 20, 30]], "result": 30},
+                      {"args": [1, [7, 8]], "result": 8}],
+         "refinements": [{"kind": "pre", "expr": op("and", op("ge", n, int_lit(0)), op("lt", n, op("length", xs)))}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "concat_lists", "intent": "Flatten a list of lists into one list.",
+         "summary": "nil for the empty outer list; otherwise the head list appended onto flattening the rest.",
+         "tags": ["list", "recursion", "lossless"],
+         "type_ast": {"kind": "forall", "vars": ["a"],
+                      "body": fn([list_of(list_of(var("a")))], list_of(var("a")))},
+         "body_ast": lam(["xss"], case_null("xss", nil,
+                         bapp("append", bapp("head", xss), bself(bapp("tail", xss))))),
+         "examples": [{"args": [[[1, 2], [3], [4, 5]]], "result": [1, 2, 3, 4, 5]}, {"args": [[]], "result": []},
+                      {"args": [[[7]]], "result": [7]}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "keep_positives_rec", "intent": "Keep only the positive numbers in a list, by recursion.",
+         "summary": "nil for the empty list; cons the head when it is positive, else skip it, recursing on the tail.",
+         "tags": ["list", "recursion", "filter"], "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], case_null("xs", nil,
+                         case_bool(bapp("gt", bapp("head", xs), int_lit(0)),
+                                   bapp("cons", bapp("head", xs), bself(bapp("tail", xs))),
+                                   bself(bapp("tail", xs))))),
+         "examples": [{"args": [[1, -2, 3, 0]], "result": [1, 3]}, {"args": [[]], "result": []},
+                      {"args": [[-1, -2]], "result": []}],
+         "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
+def compositional_bodies():
+    # Non-recursive but multi-operator bodies — the other half of generative `write` breadth: a fold with
+    # a builtin as its function argument (`max_of_list`/`min_of_list`, partial), an inline-lambda filter
+    # with a range predicate (`count_between`), an inline-lambda map (`clamp_all`), and a fold whose step
+    # is a compound expression (`sum_of_cubes`). Runnable; examples only.
+    lo, hi, xs, x, acc = var("lo"), var("hi"), var("xs"), var("x"), var("acc")
+    return [
+        {"name": "max_of_list", "intent": "The largest element of a non-empty list.",
+         "summary": "foldl max over the tail, seeded with the head. Requires a non-empty list.",
+         "tags": ["list", "fold", "order", "partial", "refinement"], "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], bapp("foldl", var("max"), bapp("head", xs), bapp("tail", xs))),
+         "examples": [{"args": [[3, 1, 4, 1, 5]], "result": 5}, {"args": [[7]], "result": 7},
+                      {"args": [[-2, -9, -4]], "result": -2}],
+         "refinements": [{"kind": "pre", "expr": op("not", op("null", xs))}],
+         "properties": [], "prove": False},
+        {"name": "min_of_list", "intent": "The smallest element of a non-empty list.",
+         "summary": "foldl min over the tail, seeded with the head. Requires a non-empty list.",
+         "tags": ["list", "fold", "order", "partial", "refinement"], "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], bapp("foldl", var("min"), bapp("head", xs), bapp("tail", xs))),
+         "examples": [{"args": [[3, 1, 4, 1, 5]], "result": 1}, {"args": [[7]], "result": 7},
+                      {"args": [[-2, -9, -4]], "result": -9}],
+         "refinements": [{"kind": "pre", "expr": op("not", op("null", xs))}],
+         "properties": [], "prove": False},
+        {"name": "count_between", "intent": "Count the list elements within a [lo, hi] range.",
+         "summary": "length of the elements x with lo <= x and x <= hi (an inline predicate).",
+         "tags": ["list", "filter", "composition"], "type_ast": fn([INT, INT, list_of(INT)], NAT),
+         "body_ast": lam(["lo", "hi", "xs"], bapp("length", bapp("filter",
+                         lam(["x"], bapp("and", bapp("le", lo, x), bapp("le", x, hi))), xs))),
+         "examples": [{"args": [1, 3, [0, 1, 2, 3, 4]], "result": 3}, {"args": [0, 0, []], "result": 0},
+                      {"args": [2, 5, [1, 6, 3]], "result": 1}],
+         "properties": [], "prove": False},
+        {"name": "clamp_all", "intent": "Clamp every element of a list to a [lo, hi] range.",
+         "summary": "maps max(lo, min(hi, x)) over the list.", "tags": ["list", "map", "order"],
+         "type_ast": fn([INT, INT, list_of(INT)], list_of(INT)),
+         "body_ast": lam(["lo", "hi", "xs"], bapp("map",
+                         lam(["x"], bapp("max", lo, bapp("min", hi, x))), xs)),
+         "examples": [{"args": [0, 10, [-5, 5, 20]], "result": [0, 5, 10]}, {"args": [0, 10, []], "result": []}],
+         "properties": [], "prove": False},
+        {"name": "sum_of_cubes", "intent": "Sum the cubes of a list of numbers.",
+         "summary": "folds add over each element cubed, 0 for the empty list.", "tags": ["list", "fold", "composition"],
+         "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], bapp("foldl", lam(["acc", "x"], bapp("add", acc, bapp("mul", x, bapp("mul", x, x)))),
+                                      int_lit(0), xs)),
+         "examples": [{"args": [[]], "result": 0}, {"args": [[1, 2, 3]], "result": 36}, {"args": [[2, -3]], "result": -19}],
+         "properties": [], "prove": False},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + float_funcs()
             + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs()
             + arith_laws() + bool_laws() + order_laws()
-            + more_arith() + more_laws() + bool_more() + recursive_more())
+            + more_arith() + more_laws() + bool_more() + recursive_more()
+            + recursive_shapes() + compositional_bodies())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -1931,6 +2055,12 @@ def compose_examples(commons_dir, by_name):
         ("square_keeppos_count", "Compose: square every element, keep the positives, then count them.",
          "A three-stage pipeline square_all;keep_positives;length over a list of ints, yielding nat.",
          ["square_all", "keep_positives", "length"], True),
+        ("keepposrec_then_sum", "Compose: keep the positives (by recursion), then sum them.",
+         "A two-stage pipeline keep_positives_rec;sum over a list of ints, yielding int.",
+         ["keep_positives_rec", "sum"], True),
+        ("concatlists_then_length", "Compose: flatten a list of lists, then count the elements.",
+         "A two-stage pipeline concat_lists;length over a list of lists of ints, yielding nat.",
+         ["concat_lists", "length"], True),
         ("length_then_reverse", "Compose: take a list's length, then reverse it.",
          "length yields a nat, which cannot feed reverse's List parameter — the pipeline does NOT compose.",
          ["length", "reverse"], False),
@@ -2035,6 +2165,8 @@ def main():
                 "order_laws": len(order_laws()),
                 "more_arith": len(more_arith()), "more_laws": len(more_laws()),
                 "bool_more": len(bool_more()), "recursive_more": len(recursive_more()),
+                "recursive_shapes": len(recursive_shapes()),
+                "compositional_bodies": len(compositional_bodies()),
                 "higher_order_funcs": len(higher_order_funcs()),
                 "higher_order_more": len(higher_order_more()),
                 "provenance_funcs": len(provenance_funcs())}
