@@ -1436,6 +1436,10 @@ def nova_locutio_examples(commons_dir, by_name):
         ("apply_cube", "Ask an agent to cube 3.",
          "request/apply cube to 3 → the responder asserts cube(3) = 27, which re-runs true.",
          "request", "cube", [3], ["agent-loop", "request", "apply"]),
+        ("apply_member", "Ask an agent whether 2 occurs in [1, 2, 3].",
+         "request/apply member to (2, [1, 2, 3]) → the responder asserts member(2, [1, 2, 3]) = true, "
+         "which re-runs true (a two-argument apply of a recursive function, whose claim re-run binds self).",
+         "request", "member", [2, [1, 2, 3]], ["agent-loop", "request", "apply", "list", "search", "recursion"]),
         ("propose_double", "Propose that an agent compute double of 21.",
          "propose/apply double to 21 → the responder test-runs it and commits.",
          "propose", "double", [21], ["agent-loop", "propose"]),

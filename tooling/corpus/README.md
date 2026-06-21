@@ -124,7 +124,7 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
 
 ## Scope and where it grows
 
-158 examples today (144 positive, 14 negative), in four `category`s:
+159 examples today (145 positive, 14 negative), in four `category`s:
 
 - **function** (124) — Nova Lingua function records across **twenty-three families**: unary integer (8, incl.
   `double` / `quadruple` / `decrement` / `abs_val`), binary integer (6, incl. `maximum` / `minimum` /
@@ -157,9 +157,10 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   (sum types are opaque to the prover). The recursion families call themselves via `self` — bound in both
   the typechecker and the evaluator — and prove laws like distribution over `append` and length-preservation
   by induction over the supplied recursive body. (Includes 10 of the negatives — see the table above.)
-- **exchange** (19) — Nova Locutio signed agent-loop exchanges spanning all nine speech acts:
-  `request`/`apply` → `assert` (incl. applies over a *list* argument, a *boolean* result, and a `cube`
-  scalar, all `verify-claim` CONFIRMED), `request`/`validate` → `assert` (scalar *and* list functions),
+- **exchange** (20) — Nova Locutio signed agent-loop exchanges spanning all nine speech acts:
+  `request`/`apply` → `assert` (incl. applies over a *list* argument, a *boolean* result, a `cube`
+  scalar, and a **recursive** `member` whose claim re-run binds `self`, all `verify-claim` CONFIRMED),
+  `request`/`validate` → `assert` (scalar *and* list functions),
   `request`/`store` → `ack`, `propose` → `commit` (incl. over a list function), `commit` → `assert`,
   `delegate` → `ack`, `retract` → `ack`, and `query` → `ack` (by `list` and by `refinement` tag), plus 2
   negatives (a signed-but-false claim, a capability-denied apply).

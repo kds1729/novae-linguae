@@ -685,7 +685,11 @@ pub fn apply(f: Val, mut args: Vec<Val>) -> Result<Val> {
         }
         Val::FnRef(addr) => match resolve_fn_ref(&addr) {
             // Composition: resolve the referenced record's body and apply it (see RESOLVER above).
-            Some(body) => apply(eval(&body, &Env::new())?, args),
+            // Use `eval_recursive_body` (not bare `eval`) so a RECURSIVE referenced function binds
+            // `self` and recurses — otherwise a `self`-recursive commons function applied by address
+            // (e.g. an agent-loop `apply` whose target recurses, re-run by `verify_claim`) errors on
+            // the first self-call. Non-recursive bodies are unaffected (the RecClosure never re-binds).
+            Some(body) => apply(eval_recursive_body(&body)?, args),
             None => bail!("cannot apply unresolved fn_ref {addr} (run with --records to link it)"),
         },
         other => bail!("cannot apply a non-function value: {}", encode_value(&other)),
@@ -1163,6 +1167,38 @@ mod tests {
         let f = eval_recursive_body(&factorial).unwrap();
         assert!(matches!(f, Val::RecClosure { .. }));
         assert!(val_eq(&apply(f, vec![Val::Int(5)]).unwrap(), &Val::Int(120)));
+    }
+
+    #[test]
+    fn fn_ref_to_recursive_body_binds_self() {
+        // A recursive function applied BY ADDRESS (fn_ref) must still bind `self` and recurse — this is
+        // the path `verify_claim` takes when re-running an agent-loop `apply` whose target is recursive.
+        // Before the fix the fn_ref body was evaluated with plain `eval` (a non-recursive Closure), so the
+        // first `self`-call errored and the claim came back undecidable. `length([1,2,3]) == 3`.
+        let length = json!({
+            "kind": "lambda", "params": [{ "name": "xs" }],
+            "body": { "kind": "case",
+                "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "null" },
+                    "args": [{ "kind": "var", "name": "xs" }] },
+                "arms": [
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                      "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } },
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                      "body": { "kind": "app", "fn": { "kind": "var", "name": "add" }, "args": [
+                          { "kind": "lit", "value": { "kind": "int", "value": 1 } },
+                          { "kind": "app", "fn": { "kind": "var", "name": "self" }, "args": [
+                              { "kind": "app", "fn": { "kind": "var", "name": "tail" },
+                                "args": [{ "kind": "var", "name": "xs" }] }] }] } },
+                ] }
+        });
+        set_resolver(HashMap::from([("fn_test_length".to_string(), length)]));
+        let got = apply(
+            Val::FnRef("fn_test_length".to_string()),
+            vec![Val::List(vec![Val::Int(1), Val::Int(2), Val::Int(3)])],
+        )
+        .unwrap();
+        clear_resolver();
+        assert!(val_eq(&got, &Val::Int(3)));
     }
 
     #[test]
