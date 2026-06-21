@@ -124,9 +124,9 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
 
 ## Scope and where it grows
 
-173 examples today (159 positive, 14 negative), in four `category`s:
+185 examples today (171 positive, 14 negative), in four `category`s:
 
-- **function** (136) — Nova Lingua function records across **twenty-five families**: unary integer (8, incl.
+- **function** (148) — Nova Lingua function records across **twenty-seven families**: unary integer (8, incl.
   `double` / `quadruple` / `decrement` / `abs_val`), binary integer (6, incl. `maximum` / `minimum` /
   `abs_diff`), boolean/predicate (8, incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` /
   `is_even`), list builtins (3: `sum` / `reverse` / `length`), list-transform (6: `map`/`filter`/`append`
@@ -149,6 +149,11 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   `concat_lists` nested-list flatten, `keep_positives_rec` recursive filter), **compositional bodies**
   (5: `max_of_list` / `min_of_list` folds with a builtin seeded by the head (refined), `count_between`
   inline-predicate filter, `clamp_all` inline-lambda map, `sum_of_cubes` compound fold step),
+  **more compositional bodies** (9 generative-`write`-focused: `average_two` / `abs_diff` /
+  `sum_squares_two` / `square_diff` two-arg arithmetic, `at_least_zero` clamp-from-below, `triple_all`
+  map, `keep_negatives` filter, `count_negatives` `length`∘`filter`, `sum_evens` filter→fold pipeline),
+  **more recursion** (3: `mult_rec` multiply-by-repeated-addition, `pow2` doubling recursion,
+  `max_list_rec` recursive non-empty-list maximum (refined)),
   **higher-order** (10: `map_with` / `filter_with` / `foldl_with` / `foldr_with` /
   `apply_to` / `twice` / `compose2` / `all_with` / `any_with` / `count_with` — records whose
   *type* takes a function argument, run end to end with the function supplied as an `fn_ref` to a helper

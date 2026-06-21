@@ -1331,13 +1331,126 @@ def compositional_bodies():
     ]
 
 
+def more_compositional():
+    # A second batch of non-recursive, multi-operator bodies — more generative breadth for the `write`
+    # task (the eval's weakest skill), all in shapes not already covered: two-argument arithmetic
+    # compositions (`average_two`, `abs_diff`, `sum_squares_two`, `square_diff`), a clamp-from-below
+    # (`at_least_zero`), a `map` with a new scale factor (`triple_all`), a `filter` with a new predicate
+    # (`keep_negatives`), a `length`-of-`filter` count (`count_negatives`), and a filter→fold pipeline
+    # (`sum_evens`). Runnable; examples only.
+    a, b, n, x, xs = var("a"), var("b"), var("n"), var("x"), var("xs")
+    is_even_pred = lam(["x"], bapp("eq", bapp("mod", x, int_lit(2)), int_lit(0)))
+    is_neg_pred = lam(["x"], bapp("lt", x, int_lit(0)))
+    return [
+        {"name": "average_two", "intent": "The integer average of two integers.",
+         "summary": "(a + b) divided by 2.", "tags": ["arithmetic", "composition"],
+         "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], bapp("div", bapp("add", a, b), int_lit(2))),
+         "examples": [{"args": [4, 6], "result": 5}, {"args": [10, 4], "result": 7},
+                      {"args": [3, 3], "result": 3}, {"args": [0, 0], "result": 0}],
+         "properties": [], "prove": False},
+        {"name": "abs_diff", "intent": "The absolute difference of two integers.",
+         "summary": "the absolute value of a - b.", "tags": ["arithmetic", "composition"],
+         "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], bapp("abs", bapp("sub", a, b))),
+         "examples": [{"args": [3, 7], "result": 4}, {"args": [7, 3], "result": 4},
+                      {"args": [5, 5], "result": 0}],
+         "properties": [], "prove": False},
+        {"name": "sum_squares_two", "intent": "The sum of the squares of two integers.",
+         "summary": "a*a + b*b.", "tags": ["arithmetic", "composition"],
+         "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], bapp("add", bapp("mul", a, a), bapp("mul", b, b))),
+         "examples": [{"args": [3, 4], "result": 25}, {"args": [0, 0], "result": 0},
+                      {"args": [1, 2], "result": 5}],
+         "properties": [], "prove": False},
+        {"name": "square_diff", "intent": "The difference of the squares of two integers.",
+         "summary": "a*a - b*b.", "tags": ["arithmetic", "composition"],
+         "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], bapp("sub", bapp("mul", a, a), bapp("mul", b, b))),
+         "examples": [{"args": [3, 2], "result": 5}, {"args": [5, 5], "result": 0},
+                      {"args": [2, 3], "result": -5}],
+         "properties": [], "prove": False},
+        {"name": "at_least_zero", "intent": "Clamp an integer up to a minimum of zero.",
+         "summary": "the larger of 0 and n (negatives become 0).", "tags": ["arithmetic", "order"],
+         "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], bapp("max", int_lit(0), n)),
+         "examples": [{"args": [-5], "result": 0}, {"args": [5], "result": 5}, {"args": [0], "result": 0}],
+         "properties": [], "prove": False},
+        {"name": "triple_all", "intent": "Triple every element of a list.",
+         "summary": "maps x*3 over the list.", "tags": ["list", "map"],
+         "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], bapp("map", lam(["x"], bapp("mul", x, int_lit(3))), xs)),
+         "examples": [{"args": [[1, 2, 3]], "result": [3, 6, 9]}, {"args": [[]], "result": []},
+                      {"args": [[-1, 0]], "result": [-3, 0]}],
+         "properties": [], "prove": False},
+        {"name": "keep_negatives", "intent": "Keep only the negative numbers in a list.",
+         "summary": "filters the list to elements less than 0.", "tags": ["list", "filter"],
+         "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], bapp("filter", is_neg_pred, xs)),
+         "examples": [{"args": [[1, -2, 3, -4]], "result": [-2, -4]}, {"args": [[]], "result": []},
+                      {"args": [[1, 2]], "result": []}],
+         "properties": [], "prove": False},
+        {"name": "count_negatives", "intent": "Count the negative numbers in a list.",
+         "summary": "the length of the elements less than 0.", "tags": ["list", "filter", "composition"],
+         "type_ast": fn([list_of(INT)], NAT),
+         "body_ast": lam(["xs"], bapp("length", bapp("filter", is_neg_pred, xs))),
+         "examples": [{"args": [[1, -2, 3, -4]], "result": 2}, {"args": [[]], "result": 0},
+                      {"args": [[1, 2]], "result": 0}],
+         "properties": [], "prove": False},
+        {"name": "sum_evens", "intent": "Sum the even numbers in a list.",
+         "summary": "folds add over the elements that are even, 0 for none.",
+         "tags": ["list", "filter", "fold", "composition"], "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], bapp("foldl", var("add"), int_lit(0), bapp("filter", is_even_pred, xs))),
+         "examples": [{"args": [[1, 2, 3, 4]], "result": 6}, {"args": [[]], "result": 0},
+                      {"args": [[1, 3]], "result": 0}, {"args": [[2, 4, 6]], "result": 12}],
+         "properties": [], "prove": False},
+    ]
+
+
+def more_recursion():
+    # A third recursion batch in shapes the earlier families don't cover: multiplication by repeated
+    # addition (`mult_rec` — two-argument, recurses on the second), powers of two (`pow2` — a doubling
+    # recursion), and a recursive (rather than fold-based) maximum of a non-empty list (`max_list_rec`,
+    # structural on the tail). Runnable; examples only. Counter-driven recursions are `unknown`; the
+    # structural one is `always`.
+    a, b, n, xs = var("a"), var("b"), var("n"), var("xs")
+    return [
+        {"name": "mult_rec", "intent": "Multiply two non-negative integers by repeated addition.",
+         "summary": "0 when b is 0; otherwise a + mult_rec(a, b-1).",
+         "tags": ["arithmetic", "recursion"], "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], case_bool(bapp("eq", b, int_lit(0)), int_lit(0),
+                         bapp("add", a, bself(a, bapp("sub", b, int_lit(1)))))),
+         "examples": [{"args": [3, 4], "result": 12}, {"args": [5, 0], "result": 0},
+                      {"args": [2, 3], "result": 6}, {"args": [7, 1], "result": 7}],
+         "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "pow2", "intent": "Two raised to the nth power.",
+         "summary": "1 when n is 0; otherwise 2 * pow2(n-1).",
+         "tags": ["arithmetic", "recursion"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], case_bool(bapp("eq", n, int_lit(0)), int_lit(1),
+                         bapp("mul", int_lit(2), bself(bapp("sub", n, int_lit(1)))))),
+         "examples": [{"args": [0], "result": 1}, {"args": [3], "result": 8}, {"args": [5], "result": 32},
+                      {"args": [1], "result": 2}],
+         "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "max_list_rec", "intent": "The largest element of a non-empty list, by recursion.",
+         "summary": "the head when it is the only element; otherwise max(head, max_list_rec(tail)).",
+         "tags": ["list", "recursion", "order", "partial", "refinement"],
+         "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], case_bool(bapp("null", bapp("tail", xs)), bapp("head", xs),
+                         bapp("max", bapp("head", xs), bself(bapp("tail", xs))))),
+         "examples": [{"args": [[3, 1, 4]], "result": 4}, {"args": [[7]], "result": 7},
+                      {"args": [[-2, -9, -4]], "result": -2}],
+         "refinements": [{"kind": "pre", "expr": op("not", op("null", xs))}],
+         "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + float_funcs()
             + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs()
             + arith_laws() + bool_laws() + order_laws()
             + more_arith() + more_laws() + bool_more() + recursive_more()
-            + recursive_shapes() + compositional_bodies())
+            + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -1718,8 +1831,12 @@ def multiturn_examples(commons_dir, by_name):
     out = []
 
     def query_turn(tag):
+        # `limit` must exceed the size of any tagged family: this transcript requires a SPECIFIC target
+        # (double/reverse) to be among the returned matches, so a cap below the tag's population would
+        # silently truncate the target out as the corpus grows. 500 is generous headroom over the family
+        # sizes (a discover-then-use query, not a pagination test).
         q = {"schema_version": "0.2.0", "kind": "query", "in_reply_to": None, "timestamp": MSG_TS, "to": resp_did,
-             "constraints": None, "body": {"limit": 50, "pattern": {"intent_tags": [tag]}}}
+             "constraints": None, "body": {"limit": 500, "pattern": {"intent_tags": [tag]}}}
         sq = sign_message(q, SENDER_SEED)
         ack = respond_to(sq, commons_dir)
         matches = ack.get("body", {}).get("result", {}).get("matches", []) if ack else []
@@ -2167,6 +2284,8 @@ def main():
                 "bool_more": len(bool_more()), "recursive_more": len(recursive_more()),
                 "recursive_shapes": len(recursive_shapes()),
                 "compositional_bodies": len(compositional_bodies()),
+                "more_compositional": len(more_compositional()),
+                "more_recursion": len(more_recursion()),
                 "higher_order_funcs": len(higher_order_funcs()),
                 "higher_order_more": len(higher_order_more()),
                 "provenance_funcs": len(provenance_funcs())}
