@@ -80,6 +80,9 @@ def strip_answer(text: str) -> str:
         if lines and lines[-1].strip().startswith("```"):
             lines = lines[:-1]
         t = "\n".join(lines).strip()
+    # unwrap a single-backtick inline code span (e.g. `\a b -> a % b`)
+    if len(t) >= 2 and t.startswith("`") and t.endswith("`"):
+        t = t[1:-1].strip()
     return t
 
 
@@ -115,18 +118,39 @@ def _function_examples(corpus):
 
 WRITE_SYSTEM = (
     "You write programs in Nova Lingua, a compact functional language for AI agents. A function body is a "
-    "lambda in the surface syntax, e.g. `\\n -> add(n, n)` or "
-    "`\\xs -> case null(xs) of true -> 0 | false -> add(1, self(tail(xs)))`. Builtins include "
-    "add sub mul div mod neg abs min max eq neq lt le gt ge and or xor not "
-    "length append reverse cons head tail null map filter foldl foldr. `self` is the function itself "
-    "(for recursion). Given an intent, a type signature, and worked input/output examples, output ONLY the "
-    "body — the surface string, nothing else: no prose, no code fences, no `name =` prefix.\n\nExamples:\n"
+    "lambda in the surface syntax. Output ONLY the body — the surface string, nothing else: no prose, no "
+    "code fences, no `name =` prefix.\n\n"
+    "Surface conventions (follow exactly):\n"
+    "- Application is juxtaposition: write `f x y`, NEVER `f(x, y)`. Parenthesize a nested argument: "
+    "`self (tail xs)`, `length (filter p xs)`.\n"
+    "- A lambda binds all parameters at once, space-separated: `\\a b -> ...`, NEVER curried `\\a -> \\b -> ...`.\n"
+    "- Use infix operators: `+ - * / %` for arithmetic (`%` is modulo), `== != < <= > >=` for comparison, "
+    "`&& || !` for logic. Prefer these over named functions.\n"
+    "- Integer literals are written `int(N)`: `int(0)`, `int(1)`.\n"
+    "- Conditionals use brace/arrow case: `case <bool> of { true => <e>; false => <e> }`.\n"
+    "- Variant constructors: `None`, `Just(x)`, `Ok(x)`, `Err(x)`. `self` is the function itself (recursion).\n"
+    "- The empty list is `nil` (NOT `[]`); build lists with `cons x xs`, e.g. `cons (head xs) (self (tail xs))`.\n"
+    "- Other builtins, applied by juxtaposition: neg abs min max length append reverse cons head tail null "
+    "map filter foldl foldr.\n\n"
+    "Examples of well-formed bodies:\n"
+    "  \\a b -> a + b\n"
+    "  \\n -> n - int(1)\n"
+    "  \\xs ys -> append xs ys\n"
+    "  \\xs -> map (\\x -> x * x) xs\n"
+    "  \\xs -> case null xs of { true => int(0); false => head xs + self (tail xs) }\n"
+    "  \\xs -> case null xs of { true => nil; false => cons (head xs * head xs) (self (tail xs)) }\n"
+    "  \\a b -> case b == int(0) of { true => None; false => Just(a / b) }\n\n"
+    "More examples:\n"
 )
 
 READ_SYSTEM = (
     "You execute Nova Lingua programs by hand. Given a function body and an input, output ONLY the "
-    "resulting value in surface syntax (e.g. `42`, `true`, `[2, 4, 6]`) — nothing else, no prose, no "
-    "fences.\n\nExamples:\n"
+    "resulting value in surface syntax — nothing else, no prose, no fences.\n\n"
+    "Value conventions (follow exactly):\n"
+    "- Integers are written `int(N)`: `int(42)`, `int(-6)`. A bare `42` is WRONG (it parses as a different type).\n"
+    "- Lists: `[int(2), int(4), int(6)]` (each element in its own canonical form).\n"
+    "- Booleans: `true` / `false`. Variants: `None`, `Just(int(3))`, `Ok(int(2))`, `Err(int(0))`.\n\n"
+    "Examples:\n"
 )
 
 ASSEMBLE_SYSTEM = (

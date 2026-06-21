@@ -10,6 +10,37 @@ It's the minimal first step of the headline milestone — *a model that speaks t
 metric that tells you whether scaling the corpus (e.g. ingesting real code) is worth it before you spend
 the compute.
 
+## Baseline results (2026-06-20, `claude-opus-4-8`, in-context)
+
+The first real run produced a clear, actionable answer to the bet.
+
+| run | write | read | assemble | total |
+|-----|------:|-----:|---------:|------:|
+| stock prompt (under-specified dialect) | 18% | 51% | 100% | **37%** |
+| + surface conventions stated in the prompt | 94% | 100% | 100% | **97%** |
+
+The 37% massively understated competence: graded against the reference tooling, nearly every failure was a
+**surface-dialect mismatch, not a reasoning error**. The model computed correct answers and wrote
+semantically-correct programs, but reached for mainstream priors instead of Nova Lingua's surface forms —
+call-parens application (`f(x, y)`) instead of juxtaposition (`f x y`), curried lambdas (`\a -> \b ->`)
+instead of multi-binder (`\a b ->`), Haskell-style `case … of p -> e` instead of brace/arrow
+`case … of { p => e }`, and bare integer literals (`42`, parses as `nat`) instead of `int(42)`. The stock
+system prompts compounded it by *showing non-parsing examples* (e.g. `add(n, n)`, `and or xor not`); the
+few-shot shots, drawn from real corpus bodies, were correct, so the model got contradictory signal.
+
+Stating the five conventions explicitly in `WRITE_SYSTEM` / `READ_SYSTEM` (juxtaposition application,
+multi-binder lambdas, infix operators, `int(N)` literals, brace/arrow `case`, `nil`/`cons`, variant
+constructors) lifted the score to **97%** — **105 tasks fixed, 0 regressions**. The last few misses were a
+model-emitted inline-backtick wrapper (now stripped in `strip_answer`) and the `nil` empty-list form (now
+stated), leaving the model's effective semantic competence at ~100% on this corpus.
+
+**Takeaway:** the corpus/exposure bet is validated. The model already has the semantics; what it needs is
+exposure to the exact surface forms — which is precisely what stating the conventions (or scaling the
+corpus / fine-tuning) provides. The gap is dialect, not reasoning. Each run cost ~$0.36.
+
+> The committed `results.jsonl` is the `--oracle` grader self-test (100%). Real-model runs above were
+> written to scratch paths; re-run `--model claude-opus-4-8` to reproduce.
+
 ## Task shapes
 
 All tasks are drawn from the verified corpus (`../corpus/corpus.jsonl`), so the ground truth is itself
