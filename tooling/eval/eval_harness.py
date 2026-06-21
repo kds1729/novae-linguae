@@ -24,9 +24,13 @@ always answers correctly must score 100% on every task. It is the DEFAULT, so a 
     python3 eval_harness.py --model claude-opus-4-8    # REAL billed run (needs ANTHROPIC_API_KEY)
 
 COST: only `--model` triggers a real API call, which bills ANTHROPIC_API_KEY *outside* any Pro/Max
-subscription. A full-pool sweep at high effort has cost $10-30 — the eval is a benchmark scored over the
-whole pool, so control cost with `--effort` and by running only when you mean to, NOT by sampling. With no
-`--model` (or with `--oracle`) the run is the free, local grader self-test.
+subscription. A full-pool run (272 tasks) measures ~$1. Cost is driven by prompt length (stating the
+conventions roughly triples input tokens, so `--conventions on` costs ~2x `off`) and by how many runs you
+do — NOT by `--effort`: these short single-answer tasks need almost no thinking, so high and medium cost
+about the same (~$1) and score within a point of each other. The ~$10-30 figures seen historically were
+*many* runs (an on/off/shots sweep plus iteration), not one expensive run. Control cost by running only
+when you mean to and not sweeping repeatedly — the eval is a benchmark scored over the whole pool, so don't
+sample to save money. With no `--model` (or with `--oracle`) the run is the free, local grader self-test.
 """
 
 from __future__ import annotations
@@ -512,8 +516,9 @@ def main():
     ap.add_argument("--oracle", action="store_true",
                     help="force the free oracle model (no API, no cost). Also the default when --model is absent.")
     ap.add_argument("--effort", default="medium",
-                    help="effort level for the real model (low|medium|high|...). Default 'medium' — the long "
-                         "convention prompt at 'high' is the main cost driver.")
+                    help="effort level for the real model (low|medium|high|...). Default 'medium'. Measured: "
+                         "effort barely affects this eval's cost or score — these short tasks need almost no "
+                         "thinking, so high ~ medium (~$1 either way).")
     ap.add_argument("--tasks", default="all", choices=["all", "write", "read", "assemble"])
     ap.add_argument("--limit", type=int, default=0, help="cap tasks per kind (0 = all)")
     ap.add_argument("--conventions", default="on", choices=["on", "off"],
@@ -546,11 +551,13 @@ def main():
 
     # Cost guard: a real (billed) run happens ONLY when --model is given explicitly. With no --model (or
     # with --oracle) we run the free oracle self-test, so a forgotten flag can never bill the API. The eval
-    # is a benchmark — always scored over the FULL pool — so the cost lever is effort + intent, not sampling.
+    # is a benchmark — always scored over the FULL pool — so don't sample to save money. Cost scales with
+    # prompt length and run count (NOT effort — high ~ medium here), so the control is running sparingly.
     if args.model and not args.oracle:
         print(f"!! REAL MODEL RUN: '{args.model}' at effort '{args.effort}' over {len(tasks)} tasks — this\n"
               f"!! calls the Anthropic API and BILLS ANTHROPIC_API_KEY outside any Pro/Max subscription\n"
-              f"!! (a full-pool sweep at high effort has cost $10-30). Ctrl-C now to abort.",
+              f"!! (a full-pool run measures ~$1; cost scales with prompt length and run count, not effort).\n"
+              f"!! Ctrl-C now to abort.",
               file=sys.stderr)
         from model_client import AnthropicModel
         model = AnthropicModel(args.model, effort=args.effort)

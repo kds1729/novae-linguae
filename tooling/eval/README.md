@@ -36,10 +36,13 @@ stated), leaving the model's effective semantic competence at ~100% on this corp
 
 **Takeaway:** the corpus/exposure bet is validated. The model already has the semantics; what it needs is
 exposure to the exact surface forms — which is precisely what stating the conventions (or scaling the
-corpus / fine-tuning) provides. The gap is dialect, not reasoning. *(Cost note: that first short-prompt
-run was ~$0.36, but once the convention prompt grew and the on/off/shots A/B was swept at high effort a
-single day of runs reached ~$30. So a real run is now gated behind an explicit `--model` — the free
-oracle is the default — and effort, not subsetting, is the cost lever. See Running.)*
+corpus / fine-tuning) provides. The gap is dialect, not reasoning. *(Cost note: a full-pool run measures
+~$1, and **effort is not the cost lever** — measured high ≈ medium (~$1 each), because these short
+single-answer tasks need almost no thinking at any effort. Cost is driven by prompt length (stating the
+conventions roughly triples input tokens) and by how many runs you do; the historical ~$30 was a *day of
+many runs* (the on/off/shots sweep + iteration), not one expensive run. A real run is now gated behind an
+explicit `--model` (the free oracle is the default), and the cost control is running sparingly, not
+subsetting. See Running.)*
 
 ### Does the corpus *alone* teach the dialect? (`--conventions off`)
 
@@ -88,6 +91,21 @@ asserted by hand. The harness prints both columns; `assemble` has no surface dim
 function names) so its two columns coincide. The oracle scores 100% on both, and the test suite asserts
 the negative direction too: a genuinely wrong value fails `semantic_pass` as well.
 
+### Measured (2026-06-21, `claude-opus-4-8`, medium effort, 272-task pool)
+
+The verdict split earns its keep on `--conventions off`, where the model makes the dialect errors repair
+can catch:
+
+| condition | write surface → semantic | total surface → semantic |
+|-----------|:------:|:------:|
+| conventions **on** | 99.3% → 99.3% | 98.9% → 98.9% (no gap — near-perfect, the few misses are genuine) |
+| conventions **off** | **26.7% → 50.4%** | **58.1% → 71.3%** |
+
+Mechanical dialect repair **nearly doubles** conventions-off `write` (36→68 of 135) and lifts the total by
+13 points — so **~half of all write failures are dialect-only, not reasoning errors**. `read` barely moves
+(88.0% → 91.2%): comprehension of the surface forms was already robust; `write` is where the dialect tax
+lives. This is the "failures are dialect, not reasoning" thesis turned from a hand-read into a number.
+
 ## Task shapes
 
 All tasks are drawn from the verified corpus (`../corpus/corpus.jsonl`), so the ground truth is itself
@@ -115,10 +133,11 @@ address, so the output isn't predictable by hand.
 python3 eval_harness.py                  # equivalently: --oracle
 
 # 2. Run a REAL model — BILLS ANTHROPIC_API_KEY, *outside* any Pro/Max subscription. A real run happens
-#    only with an explicit --model, and the harness prints a cost warning first. The score is a benchmark
-#    over the FULL pool, so control cost with --effort (default 'medium'), never by sampling a subset.
+#    only with an explicit --model, and the harness prints a cost warning first. A full-pool run measures
+#    ~$1; cost is driven by prompt length and run count, NOT effort (high ~ medium for these short tasks).
+#    The score is a benchmark over the FULL pool, so don't sample to save money — just run it sparingly.
 python3 eval_harness.py --model claude-opus-4-8
-python3 eval_harness.py --model claude-opus-4-8 --effort high   # costlier; the Jun-21 sweep used this
+python3 eval_harness.py --model claude-opus-4-8 --effort high   # ~same cost as medium; marginally higher score
 
 # Experiment knobs (apply to oracle or real runs)
 python3 eval_harness.py --conventions off              # drop the rules; few-shot examples only
