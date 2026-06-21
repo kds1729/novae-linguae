@@ -99,9 +99,9 @@ class Task:
 
 
 def _has_fn_ref(e):
-    """True if any worked example takes a function-valued (fn_ref) argument. Such examples need the
-    referenced helper record in the run directory to execute, which the standalone write/read graders
-    don't supply — so they're excluded from the task pool (they remain valid corpus training data)."""
+    """True if any worked example takes a function-valued (fn_ref) argument. Such examples reference a
+    helper by content-address; to execute them the grader needs that helper's record + body in the run
+    directory. Examples that carry `views.helpers` supply exactly that (see gen_corpus build_and_verify)."""
     for ex in e.get("views", {}).get("examples", []):
         for a in ex.get("args", []):
             if isinstance(a, dict) and a.get("kind") == "fn_ref":
@@ -109,17 +109,40 @@ def _has_fn_ref(e):
     return False
 
 
-def _function_examples(corpus):
-    return [e for e in corpus
+def _function_examples(corpus, include_fn_ref=False):
+    """Positive Nova Lingua function records with a surface body. First-order records are always included.
+    Higher-order (fn_ref) records are included only when `include_fn_ref` is set AND they carry the
+    helper records needed to run them — the WRITE grader can then materialize the helpers and link the
+    referenced function by address. (READ excludes them: the helper is opaque by address, so a model
+    can't predict the output.)"""
+    base = [e for e in corpus
             if e.get("modality") == "nova_lingua" and e.get("category") == "function"
-            and e.get("polarity") == "positive" and e.get("views", {}).get("surface_body")
-            and not _has_fn_ref(e)]
+            and e.get("polarity") == "positive" and e.get("views", {}).get("surface_body")]
+    out = []
+    for e in base:
+        if _has_fn_ref(e):
+            if include_fn_ref and e["views"].get("helpers"):
+                out.append(e)
+        else:
+            out.append(e)
+    return out
 
 
-WRITE_SYSTEM = (
+# Each task's system prompt is assembled from an INTRO (always present — the task framing and output
+# format) and an optional CONVENTIONS block (the surface/value rules plus hand-curated example bodies).
+# The `--conventions off` mode drops the CONVENTIONS block entirely, leaving only the INTRO and the
+# few-shot examples drawn from the corpus. That isolates the standing question the corpus is built to
+# answer: do the corpus artifacts ALONE teach a model the dialect, or does it need the rules spelled out?
+# The 2026-06-20 baseline (conventions on) took Opus 4.8 from 37% to 97%; conventions-off measures how
+# much of that the corpus recovers on its own as a function of shot count.
+
+WRITE_INTRO = (
     "You write programs in Nova Lingua, a compact functional language for AI agents. A function body is a "
     "lambda in the surface syntax. Output ONLY the body — the surface string, nothing else: no prose, no "
     "code fences, no `name =` prefix.\n\n"
+)
+
+WRITE_CONVENTIONS = (
     "Surface conventions (follow exactly):\n"
     "- Application is juxtaposition: write `f x y`, NEVER `f(x, y)`. Parenthesize a nested argument: "
     "`self (tail xs)`, `length (filter p xs)`.\n"
@@ -140,17 +163,18 @@ WRITE_SYSTEM = (
     "  \\xs -> case null xs of { true => int(0); false => head xs + self (tail xs) }\n"
     "  \\xs -> case null xs of { true => nil; false => cons (head xs * head xs) (self (tail xs)) }\n"
     "  \\a b -> case b == int(0) of { true => None; false => Just(a / b) }\n\n"
-    "More examples:\n"
 )
 
-READ_SYSTEM = (
+READ_INTRO = (
     "You execute Nova Lingua programs by hand. Given a function body and an input, output ONLY the "
     "resulting value in surface syntax — nothing else, no prose, no fences.\n\n"
+)
+
+READ_CONVENTIONS = (
     "Value conventions (follow exactly):\n"
     "- Integers are written `int(N)`: `int(42)`, `int(-6)`. A bare `42` is WRONG (it parses as a different type).\n"
     "- Lists: `[int(2), int(4), int(6)]` (each element in its own canonical form).\n"
     "- Booleans: `true` / `false`. Variants: `None`, `Just(int(3))`, `Ok(int(2))`, `Err(int(0))`.\n\n"
-    "Examples:\n"
 )
 
 ASSEMBLE_SYSTEM = (
@@ -166,27 +190,46 @@ def _shot_write(e) -> str:
             f"body: {e['views']['surface_body']}\n")
 
 
-def build_write_tasks(corpus, n_shots=3):
-    fns = _function_examples(corpus)
-    shots = "".join(_shot_write(e) for e in fns[:n_shots])
-    system = WRITE_SYSTEM + shots
+def build_write_tasks(corpus, n_shots=3, conventions=True):
+    # Higher-order (fn_ref) records ARE in the write pool: the model writes the body from intent + type +
+    # examples, and the grader runs it by materializing the carried helpers and resolving the fn_ref by
+    # address. Few-shot examples are drawn from the first-order records (the fn_ref ones sort last), so the
+    # shots are unaffected.
+    fns = _function_examples(corpus, include_fn_ref=True)
+    shot_pool = [e for e in fns if not _has_fn_ref(e)]
+    shots = "".join(_shot_write(e) for e in shot_pool[:n_shots])
+    # Conventions on: INTRO + rules + curated bodies, then "More examples:" + corpus shots.
+    # Conventions off: INTRO + only the corpus shots under a plain "Examples:" header.
+    header = "More examples:\n" if conventions else "Examples:\n"
+    system = WRITE_INTRO + (WRITE_CONVENTIONS if conventions else "") + header + shots
+    shot_ids = {e["id"] for e in shot_pool[:n_shots]}
     tasks = []
-    for e in fns[n_shots:]:
+    for e in fns:
+        if e["id"] in shot_ids:
+            continue  # don't grade an example we showed as a shot
         v = e["views"]
+        # Render a function-valued (fn_ref) argument by the helper's name rather than its raw hash, so a
+        # higher-order example reads `double_dep, [..] -> [..]` instead of `fn_<64 hex>, [..] -> [..]`.
+        helper_name = {h["record"]["hash"]: h["name"] for h in v.get("helpers", [])}
+
+        def render_arg(a):
+            if isinstance(a, dict) and a.get("kind") == "fn_ref":
+                return helper_name.get(a.get("target"), "<fn>")
+            return canonical_value(a) or "?"
         ex_lines = "\n".join(
-            f"  {', '.join(canonical_value(a) or '?' for a in ex['args'])} -> {canonical_value(ex['result'])}"
+            f"  {', '.join(render_arg(a) for a in ex['args'])} -> {canonical_value(ex['result'])}"
             for ex in v["examples"]
         )
         user = (f"intent: {e['intent']}\ntype: {v['surface_type']}\nexamples:\n{ex_lines}\n\n"
                 f"Write the body.")
         tasks.append(Task(
             id=f"write/{e['id']}", kind="write", system=system, user=user,
-            gold=v["surface_body"], grade_ctx={"record": v["record"]},
+            gold=v["surface_body"], grade_ctx={"record": v["record"], "helpers": v.get("helpers", [])},
         ))
     return tasks
 
 
-def build_read_tasks(corpus, n_shots=3):
+def build_read_tasks(corpus, n_shots=3, conventions=True):
     fns = _function_examples(corpus)
     # Build few-shot read demonstrations from the first examples' first worked example.
     def demo(e):
@@ -195,7 +238,7 @@ def build_read_tasks(corpus, n_shots=3):
         args = ", ".join(canonical_value(a) or "?" for a in ex["args"])
         return f"body: {v['surface_body']}\ninput: {args}\noutput: {canonical_value(ex['result'])}\n"
     shots = "".join(demo(e) for e in fns[:n_shots])
-    system = READ_SYSTEM + shots
+    system = READ_INTRO + (READ_CONVENTIONS if conventions else "") + "Examples:\n" + shots
     tasks = []
     for e in fns[n_shots:]:
         v = e["views"]
@@ -269,7 +312,17 @@ def grade_write(task, out, workdir):
     rec_path.write_text(json.dumps(task.grade_ctx["record"]))
     body_path.write_text(json.dumps(body))
     res["well_typed"] = cli(["typecheck", str(rec_path), "--body", str(body_path)]).returncode == 0
-    res["runs"] = cli(["run", str(rec_path), "--body", str(body_path)]).returncode == 0
+    # Higher-order records carry helpers: drop the helper records + bodies into the dir and pass --records
+    # so the example's fn_ref argument resolves to the helper by address while the MODEL's body is run.
+    helpers = task.grade_ctx.get("helpers") or []
+    if helpers:
+        for i, h in enumerate(helpers):
+            (d / f"helper_{i}_rec.json").write_text(json.dumps(h["record"]))
+            (d / f"helper_{i}_body.json").write_text(json.dumps(h["body"]))
+        run_args = ["run", str(rec_path), "--body", str(body_path), "--records", str(d)]
+    else:
+        run_args = ["run", str(rec_path), "--body", str(body_path)]
+    res["runs"] = cli(run_args).returncode == 0
     res["pass"] = res["well_typed"] and res["runs"]
     return res
 
@@ -331,6 +384,10 @@ def main():
     ap.add_argument("--effort", default="high", help="effort level for the real model")
     ap.add_argument("--tasks", default="all", choices=["all", "write", "read", "assemble"])
     ap.add_argument("--limit", type=int, default=0, help="cap tasks per kind (0 = all)")
+    ap.add_argument("--conventions", default="on", choices=["on", "off"],
+                    help="on: spell out the surface/value conventions in the prompt (default). "
+                         "off: give only the corpus few-shot examples — tests whether the corpus alone teaches the dialect.")
+    ap.add_argument("--shots", type=int, default=3, help="number of corpus few-shot examples in the prompt (write/read)")
     ap.add_argument("--out", default=str(_HERE.parent / "results.jsonl"))
     args = ap.parse_args()
 
@@ -341,7 +398,12 @@ def main():
 
     corpus = [json.loads(line) for line in CORPUS.read_text().splitlines() if line.strip()]
 
-    builders = {"write": build_write_tasks, "read": build_read_tasks, "assemble": build_assemble_tasks}
+    conventions = args.conventions == "on"
+    builders = {
+        "write": lambda c: build_write_tasks(c, n_shots=args.shots, conventions=conventions),
+        "read": lambda c: build_read_tasks(c, n_shots=args.shots, conventions=conventions),
+        "assemble": build_assemble_tasks,  # no convention bullets; one-shot framing only
+    }
     kinds = ["write", "read", "assemble"] if args.tasks == "all" else [args.tasks]
     tasks = []
     for k in kinds:
@@ -365,7 +427,7 @@ def main():
         for r in rows:
             fh.write(json.dumps(r) + "\n")
 
-    print(f"model: {model.name}   tasks: {len(rows)}")
+    print(f"model: {model.name}   conventions: {args.conventions}   shots: {args.shots}   tasks: {len(rows)}")
     for k in kinds:
         if k in by_kind:
             s = by_kind[k]

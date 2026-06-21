@@ -184,11 +184,14 @@ enum Commands {
     /// Supply the body with `--body <body.json>`, or with `--records <dir>` to
     /// LINK: resolve the record's `body_hash` from the directory, and resolve any
     /// `fn_ref` arguments to their referenced records' bodies so composites run
-    /// end-to-end (e.g. map's example applying `double` by address).
+    /// end-to-end (e.g. map's example applying `double` by address). Passing BOTH
+    /// runs the supplied `--body` while still resolving `fn_ref`s against `--records`
+    /// — e.g. grading a hand-written higher-order body whose examples apply a helper.
     Run {
         /// Path to the function record (provides examples).
         record: PathBuf,
-        /// Path to the body-expression JSON AST to execute (alternative to --records).
+        /// Path to the body-expression JSON AST to execute. With --records, the supplied body is run
+        /// and fn_refs still resolve against the directory; without it, the body comes from --records.
         #[arg(long)]
         body: Option<PathBuf>,
         /// Directory of records/bodies to link `body_hash` and `fn_ref`s against.
@@ -1166,7 +1169,15 @@ fn cmd_eval(
 fn cmd_run(record: &PathBuf, body: Option<&PathBuf>, records: Option<&PathBuf>) -> Result<()> {
     let record = nl_validator::read_json(record)?;
     let body = match (body, records) {
-        (Some(b), _) => nl_validator::read_json(b)?,
+        (Some(b), Some(dir)) => {
+            // Supplied body, but still resolve `fn_ref` arguments against the directory — so a
+            // hand-supplied (or model-written) body whose examples reference commons helpers by
+            // address runs end-to-end, exactly as the `--records`-only path does.
+            let map = nl_validator::build_link_map(dir)?;
+            nl_validator::set_resolver(map);
+            nl_validator::read_json(b)?
+        }
+        (Some(b), None) => nl_validator::read_json(b)?,
         (None, Some(dir)) => {
             // Link: resolve the record's body_hash from the directory, and set the resolver so that
             // fn_ref arguments resolve to their referenced bodies (composition).

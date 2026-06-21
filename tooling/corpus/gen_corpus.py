@@ -962,6 +962,75 @@ def higher_order_funcs():
     ]
 
 
+def higher_order_more():
+    # A second higher-order batch — function application (apply_to), double application (twice), two-function
+    # composition (compose2), and predicate-driven aggregation (all_with/any_with/count_with). Each takes a
+    # function as an argument supplied as an `fn_ref` to a helper in `fn_deps`; the generator builds those
+    # helpers so the worked examples run end-to-end. Examples only.
+    DOUBLE = {"name": "double_dep", "type_ast": fn([INT], INT),
+              "body_ast": lam(["n"], bapp("add", var("n"), var("n"))), "examples": [{"args": [3], "result": 6}]}
+    INC = {"name": "inc_dep", "type_ast": fn([INT], INT),
+           "body_ast": lam(["n"], bapp("add", var("n"), int_lit(1))), "examples": [{"args": [3], "result": 4}]}
+    IS_POS = {"name": "is_pos_dep", "type_ast": fn([INT], BOOL),
+              "body_ast": lam(["n"], bapp("gt", var("n"), int_lit(0))),
+              "examples": [{"args": [3], "result": True}, {"args": [-1], "result": False}]}
+    a, b, c = var("a"), var("b"), var("c")
+    return [
+        {"name": "apply_to", "intent": "Apply a function to a value.",
+         "summary": "f x — applies the given function to the given argument.",
+         "tags": ["higher-order", "apply"],
+         "type_ast": {"kind": "forall", "vars": ["a", "b"], "body": fn([fn([a], b), a], b)},
+         "body_ast": lam(["f", "x"], bapp("f", var("x"))),
+         "examples": [{"args": [FnRef("double_dep"), 5], "result": 10},
+                      {"args": [FnRef("double_dep"), -3], "result": -6}],
+         "fn_deps": [DOUBLE], "properties": [], "prove": False},
+        {"name": "twice", "intent": "Apply a function to a value twice.",
+         "summary": "f (f x) — applies the function, then applies it again.",
+         "tags": ["higher-order", "apply"],
+         "type_ast": {"kind": "forall", "vars": ["a"], "body": fn([fn([a], a), a], a)},
+         "body_ast": lam(["f", "x"], bapp("f", bapp("f", var("x")))),
+         "examples": [{"args": [FnRef("double_dep"), 3], "result": 12},
+                      {"args": [FnRef("double_dep"), 1], "result": 4}],
+         "fn_deps": [DOUBLE], "properties": [], "prove": False},
+        {"name": "compose2", "intent": "Compose two functions and apply them to a value.",
+         "summary": "f (g x) — applies g, then f, to the argument.",
+         "tags": ["higher-order", "compose"],
+         "type_ast": {"kind": "forall", "vars": ["a", "b", "c"], "body": fn([fn([b], c), fn([a], b), a], c)},
+         "body_ast": lam(["f", "g", "x"], bapp("f", bapp("g", var("x")))),
+         "examples": [{"args": [FnRef("double_dep"), FnRef("inc_dep"), 3], "result": 8},
+                      {"args": [FnRef("double_dep"), FnRef("inc_dep"), 0], "result": 2}],
+         "fn_deps": [DOUBLE, INC], "properties": [], "prove": False},
+        {"name": "all_with", "intent": "Test whether every element of a list satisfies a predicate.",
+         "summary": "Right-folds (p x) and the accumulator with AND, true for the empty list.",
+         "tags": ["list", "higher-order", "fold", "predicate"],
+         "type_ast": {"kind": "forall", "vars": ["a"], "body": fn([fn([a], BOOL), list_of(a)], BOOL)},
+         "body_ast": lam(["p", "xs"], bapp("foldr", lam(["x", "acc"], bapp("and", bapp("p", var("x")), var("acc"))),
+                                           bool_lit(True), var("xs"))),
+         "examples": [{"args": [FnRef("is_pos_dep"), [1, 2, 3]], "result": True},
+                      {"args": [FnRef("is_pos_dep"), [1, -2, 3]], "result": False},
+                      {"args": [FnRef("is_pos_dep"), []], "result": True}],
+         "fn_deps": [IS_POS], "properties": [], "prove": False},
+        {"name": "any_with", "intent": "Test whether some element of a list satisfies a predicate.",
+         "summary": "Right-folds (p x) and the accumulator with OR, false for the empty list.",
+         "tags": ["list", "higher-order", "fold", "predicate"],
+         "type_ast": {"kind": "forall", "vars": ["a"], "body": fn([fn([a], BOOL), list_of(a)], BOOL)},
+         "body_ast": lam(["p", "xs"], bapp("foldr", lam(["x", "acc"], bapp("or", bapp("p", var("x")), var("acc"))),
+                                           bool_lit(False), var("xs"))),
+         "examples": [{"args": [FnRef("is_pos_dep"), [-1, 2, -3]], "result": True},
+                      {"args": [FnRef("is_pos_dep"), [-1, -2]], "result": False},
+                      {"args": [FnRef("is_pos_dep"), []], "result": False}],
+         "fn_deps": [IS_POS], "properties": [], "prove": False},
+        {"name": "count_with", "intent": "Count the elements of a list that satisfy a predicate.",
+         "summary": "length (filter p xs) — the number of elements passing the predicate.",
+         "tags": ["list", "higher-order", "filter", "composition"],
+         "type_ast": {"kind": "forall", "vars": ["a"], "body": fn([fn([a], BOOL), list_of(a)], NAT)},
+         "body_ast": lam(["p", "xs"], bapp("length", bapp("filter", var("p"), var("xs")))),
+         "examples": [{"args": [FnRef("is_pos_dep"), [1, -2, 3, 0, 4]], "result": 3},
+                      {"args": [FnRef("is_pos_dep"), []], "result": 0}],
+         "fn_deps": [IS_POS], "properties": [], "prove": False},
+    ]
+
+
 def provenance_funcs():
     # Records carrying DERIVATION HISTORY (principle 1): `derived_from` / `supersedes` point at the
     # content-address of a prior function — the corpus's first non-null provenance. The parent is declared
@@ -986,11 +1055,165 @@ def provenance_funcs():
     ]
 
 
+def more_arith():
+    # A second arithmetic batch widening the scalar vocabulary: a cube, a three-way sign, a clamp and a
+    # range test (both ternary), and two more predicates. Runnable; examples only (the proof surface is
+    # already covered by arith_laws/order_laws). `sign` exercises a NESTED boolean case.
+    n, lo, hi, x = var("n"), var("lo"), var("hi"), var("x")
+    return [
+        {"name": "cube", "intent": "Cube a number.", "summary": "Returns n * n * n.",
+         "tags": ["arithmetic"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], bapp("mul", n, bapp("mul", n, n))),
+         "examples": [{"args": [0], "result": 0}, {"args": [2], "result": 8}, {"args": [-3], "result": -27}],
+         "properties": [], "prove": False},
+        {"name": "sign", "intent": "The sign of a number (-1, 0, or 1).",
+         "summary": "1 when n > 0, -1 when n < 0, 0 when n is zero.", "tags": ["arithmetic", "comparison"],
+         "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], case_bool(bapp("gt", n, int_lit(0)), int_lit(1),
+                                          case_bool(bapp("lt", n, int_lit(0)), int_lit(-1), int_lit(0)))),
+         "examples": [{"args": [5], "result": 1}, {"args": [-3], "result": -1}, {"args": [0], "result": 0}],
+         "properties": [], "prove": False},
+        {"name": "clamp", "intent": "Clamp a number to a [lo, hi] range.",
+         "summary": "Returns max(lo, min(hi, x)).", "tags": ["arithmetic", "order"],
+         "type_ast": fn([INT, INT, INT], INT),
+         "body_ast": lam(["lo", "hi", "x"], bapp("max", lo, bapp("min", hi, x))),
+         "examples": [{"args": [0, 10, 5], "result": 5}, {"args": [0, 10, -3], "result": 0},
+                      {"args": [0, 10, 20], "result": 10}],
+         "properties": [], "prove": False},
+        {"name": "in_range", "intent": "Test whether a number lies in a [lo, hi] range.",
+         "summary": "Returns true iff lo <= x and x <= hi.", "tags": ["predicate", "comparison"],
+         "type_ast": fn([INT, INT, INT], BOOL),
+         "body_ast": lam(["lo", "hi", "x"], bapp("and", bapp("le", lo, x), bapp("le", x, hi))),
+         "examples": [{"args": [0, 10, 5], "result": True}, {"args": [0, 10, -1], "result": False},
+                      {"args": [0, 10, 10], "result": True}],
+         "properties": [], "prove": False},
+        {"name": "is_odd", "intent": "Test whether a number is odd.", "summary": "Returns true iff n mod 2 != 0.",
+         "tags": ["predicate", "arithmetic"], "type_ast": fn([INT], BOOL),
+         "body_ast": lam(["n"], bapp("neq", bapp("mod", n, int_lit(2)), int_lit(0))),
+         "examples": [{"args": [3], "result": True}, {"args": [4], "result": False}, {"args": [0], "result": False}],
+         "properties": [], "prove": False},
+        {"name": "is_negative", "intent": "Test whether a number is negative.", "summary": "Returns true iff n < 0.",
+         "tags": ["predicate", "comparison"], "type_ast": fn([INT], BOOL),
+         "body_ast": lam(["n"], bapp("lt", n, int_lit(0))),
+         "examples": [{"args": [-2], "result": True}, {"args": [0], "result": False}, {"args": [5], "result": False}],
+         "properties": [], "prove": False},
+    ]
+
+
+def more_laws():
+    # Two more PROVED identities mirroring add_zero / sub_self — a multiplicative right-identity and a
+    # multiplicative annihilator — each stated as a different expression than the body and proved over Int.
+    n = var("n")
+    return [
+        {"name": "mul_one", "intent": "Multiply a number by one.", "summary": "Returns n * 1.",
+         "tags": ["arithmetic", "identity"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], bapp("mul", n, int_lit(1))),
+         "examples": [{"args": [0], "result": 0}, {"args": [7], "result": 7}, {"args": [-4], "result": -4}],
+         "properties": [{"name": "right_identity", "expr": forall(["n"], op("eq", self_app(n), n))}],
+         "prove": True},
+        {"name": "mul_zero", "intent": "Multiply a number by zero.", "summary": "Returns n * 0.",
+         "tags": ["arithmetic", "identity"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], bapp("mul", n, int_lit(0))),
+         "examples": [{"args": [0], "result": 0}, {"args": [7], "result": 0}, {"args": [-4], "result": 0}],
+         "properties": [{"name": "annihilates", "expr": forall(["n"], op("eq", self_app(n), int_lit(0)))}],
+         "prove": True},
+    ]
+
+
+def bool_more():
+    # Two more boolean functions: material implication and biconditional. Examples only (the boolean proof
+    # surface — associativity, De Morgan, idempotence, absorption — is already covered by bool_laws).
+    a, b = var("a"), var("b")
+    return [
+        {"name": "implies", "intent": "Material implication of two booleans.", "summary": "Returns (not a) or b.",
+         "tags": ["boolean"], "type_ast": fn([BOOL, BOOL], BOOL),
+         "body_ast": lam(["a", "b"], bapp("or", bapp("not", a), b)),
+         "examples": [{"args": [True, True], "result": True}, {"args": [True, False], "result": False},
+                      {"args": [False, True], "result": True}, {"args": [False, False], "result": True}],
+         "properties": [], "prove": False},
+        {"name": "iff", "intent": "Biconditional of two booleans.", "summary": "Returns true iff a equals b.",
+         "tags": ["boolean"], "type_ast": fn([BOOL, BOOL], BOOL),
+         "body_ast": lam(["a", "b"], bapp("eq", a, b)),
+         "examples": [{"args": [True, True], "result": True}, {"args": [True, False], "result": False},
+                      {"args": [False, False], "result": True}],
+         "properties": [], "prove": False},
+    ]
+
+
+def recursive_more():
+    # A second self-recursion batch — list membership and counting (scalar results), two-argument list
+    # slicing (take/drop), a generative repeat, an exponent, and a last-element accessor with a non-empty
+    # refinement. These widen the recursion vocabulary beyond `recursive_funcs`; runnable, examples only.
+    # `take`/`drop`/`repeat`/`pow` recurse on a counter that loops on a negative argument, so they are not
+    # certified `always`; `member`/`count_occurrences`/`last_rec` recurse structurally on the tail.
+    x, xs, n, b, e = var("x"), var("xs"), var("n"), var("b"), var("e")
+    return [
+        {"name": "member", "intent": "Test whether a value occurs in a list.",
+         "summary": "false for the empty list; otherwise (x == head) or x occurs in the tail.",
+         "tags": ["list", "recursion", "predicate", "search"], "type_ast": fn([INT, list_of(INT)], BOOL),
+         "body_ast": lam(["x", "xs"], case_null("xs", bool_lit(False),
+                         case_bool(bapp("eq", x, bapp("head", xs)), bool_lit(True), bself(x, bapp("tail", xs))))),
+         "examples": [{"args": [2, [1, 2, 3]], "result": True}, {"args": [5, [1, 2, 3]], "result": False},
+                      {"args": [1, []], "result": False}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "count_occurrences", "intent": "Count how many times a value occurs in a list.",
+         "summary": "0 for the empty list; add 1 when the head matches, then count the tail.",
+         "tags": ["list", "recursion", "search", "measure"], "type_ast": fn([INT, list_of(INT)], INT),
+         "body_ast": lam(["x", "xs"], case_null("xs", int_lit(0),
+                         case_bool(bapp("eq", x, bapp("head", xs)),
+                                   bapp("add", int_lit(1), bself(x, bapp("tail", xs))),
+                                   bself(x, bapp("tail", xs))))),
+         "examples": [{"args": [2, [2, 1, 2, 3, 2]], "result": 3}, {"args": [9, [1, 2, 3]], "result": 0},
+                      {"args": [1, []], "result": 0}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "take_rec", "intent": "Take the first n elements of a list, by recursion.",
+         "summary": "nil when n is 0 or the list is empty; otherwise head consed onto taking n-1 of the tail.",
+         "tags": ["list", "recursion", "slice"], "type_ast": fn([INT, list_of(INT)], list_of(INT)),
+         "body_ast": lam(["n", "xs"], case_bool(bapp("eq", n, int_lit(0)), var("nil"),
+                         case_null("xs", var("nil"),
+                                   bapp("cons", bapp("head", xs), bself(bapp("sub", n, int_lit(1)), bapp("tail", xs)))))),
+         "examples": [{"args": [2, [1, 2, 3, 4]], "result": [1, 2]}, {"args": [0, [1, 2, 3]], "result": []},
+                      {"args": [5, [1, 2]], "result": [1, 2]}],
+         "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "drop_rec", "intent": "Drop the first n elements of a list, by recursion.",
+         "summary": "the list when n is 0 or it is empty; otherwise drop n-1 of the tail.",
+         "tags": ["list", "recursion", "slice"], "type_ast": fn([INT, list_of(INT)], list_of(INT)),
+         "body_ast": lam(["n", "xs"], case_bool(bapp("eq", n, int_lit(0)), xs,
+                         case_null("xs", var("nil"), bself(bapp("sub", n, int_lit(1)), bapp("tail", xs))))),
+         "examples": [{"args": [2, [1, 2, 3, 4]], "result": [3, 4]}, {"args": [0, [1, 2, 3]], "result": [1, 2, 3]},
+                      {"args": [5, [1, 2]], "result": []}],
+         "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "repeat_rec", "intent": "Build a list of n copies of a value, by recursion.",
+         "summary": "nil when n is 0; otherwise x consed onto repeating it n-1 times.",
+         "tags": ["list", "recursion", "generative"], "type_ast": fn([INT, INT], list_of(INT)),
+         "body_ast": lam(["n", "x"], case_bool(bapp("eq", n, int_lit(0)), var("nil"),
+                         bapp("cons", x, bself(bapp("sub", n, int_lit(1)), x)))),
+         "examples": [{"args": [3, 7], "result": [7, 7, 7]}, {"args": [0, 5], "result": []},
+                      {"args": [1, 9], "result": [9]}],
+         "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "pow", "intent": "Raise a base to a non-negative integer power.",
+         "summary": "1 when the exponent is 0; otherwise base times base^(exponent-1).",
+         "tags": ["arithmetic", "recursion"], "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["b", "e"], case_bool(bapp("eq", e, int_lit(0)), int_lit(1),
+                         bapp("mul", b, bself(b, bapp("sub", e, int_lit(1)))))),
+         "examples": [{"args": [2, 3], "result": 8}, {"args": [5, 0], "result": 1}, {"args": [3, 2], "result": 9}],
+         "properties": [], "prove": False, "terminates": "unknown"},
+        {"name": "last_rec", "intent": "The last element of a list, with a non-empty precondition.",
+         "summary": "head when the tail is empty; otherwise the last element of the tail. Requires a non-empty list.",
+         "tags": ["list", "recursion", "partial", "refinement"], "type_ast": poly_list_fn(var("a")),
+         "body_ast": lam(["xs"], case_bool(bapp("null", bapp("tail", xs)), bapp("head", xs), bself(bapp("tail", xs)))),
+         "examples": [{"args": [[1, 2, 3]], "result": 3}, {"args": [[9]], "result": 9}],
+         "refinements": [{"kind": "pre", "expr": op("not", op("null", var("xs")))}],
+         "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + float_funcs()
             + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs()
-            + arith_laws() + bool_laws() + order_laws())
+            + arith_laws() + bool_laws() + order_laws()
+            + more_arith() + more_laws() + bool_more() + recursive_more())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -1023,7 +1246,7 @@ def build_and_verify(spec, workdir):
     # A higher-order spec references helper functions by `fn_deps`; build those records first so their
     # content-addresses are known, then resolve any FnRef example argument to an `fn_ref` value pointing at
     # the helper's hash. The helpers are written into the run directory so `run` resolves the fn_ref.
-    dep_records, dep_bodies, dep_hashes = [], {}, {}
+    dep_records, dep_bodies, dep_hashes, helpers = [], {}, {}, []
     for dep in spec.get("fn_deps", []):
         dep_ex = [{"args": [to_value_ast(a) for a in e["args"]], "result": to_value_ast(e["result"])}
                   for e in dep["examples"]]
@@ -1031,6 +1254,10 @@ def build_and_verify(spec, workdir):
         dep_records.append(dep_rec)
         dep_bodies[expr_address(dep["body_ast"])] = dep["body_ast"]
         dep_hashes[dep["name"]] = dep_rec["hash"]
+        # Carry the helper record + body so a downstream consumer (e.g. the eval grader) can rebuild a
+        # runnable directory and resolve the example's fn_ref by address — making higher-order records
+        # executable without re-deriving the helper.
+        helpers.append({"name": dep["name"], "record": dep_rec, "body": dep["body_ast"]})
 
     def resolve_arg(a):
         return {"kind": "fn_ref", "target": dep_hashes[a.name]} if isinstance(a, FnRef) else to_value_ast(a)
@@ -1086,6 +1313,7 @@ def build_and_verify(spec, workdir):
             "body": body,
             "examples": record["examples"],
             "properties": spec.get("properties") or [],
+            **({"helpers": helpers} if helpers else {}),
         },
         "verification": {
             "schema_valid": schema_valid,
@@ -1205,6 +1433,9 @@ def nova_locutio_examples(commons_dir, by_name):
          "request/apply all_positive to [2, 4, 6] → the responder asserts all_positive([2, 4, 6]) = true, "
          "which re-runs true (an apply whose result is a boolean).",
          "request", "all_positive", [[2, 4, 6]], ["agent-loop", "request", "apply", "list", "predicate"]),
+        ("apply_cube", "Ask an agent to cube 3.",
+         "request/apply cube to 3 → the responder asserts cube(3) = 27, which re-runs true.",
+         "request", "cube", [3], ["agent-loop", "request", "apply"]),
         ("propose_double", "Propose that an agent compute double of 21.",
          "propose/apply double to 21 → the responder test-runs it and commits.",
          "propose", "double", [21], ["agent-loop", "propose"]),
@@ -1621,6 +1852,19 @@ def negative_examples(workdir, commons_dir, by_name):
          "add takes two arguments; applied to one it yields a function, not an int, so the type checker rejects the body.",
          ["negative", "type-error"], {"record": rec9, "body": body9},
          "typecheck", "ILL-TYPED", (tc9.stdout + tc9.stderr), tc9.returncode != 0)
+
+    # 10. cons onto a non-list — the body conses an int onto another int. `cons : a -> List a -> List a`
+    #     needs a list as its second argument, so the type checker rejects it (a constructor misuse).
+    body10 = lam(["n"], bapp("cons", n, n))
+    rec10 = build_v2_record("badcons", fn([INT], list_of(INT)),
+                            [{"args": [to_value_ast(3)], "result": to_value_ast([3, 3])}], body10, terminates="always")
+    _, r10, b10 = write_rec("consonscalar", rec10, body10)
+    tc10 = cli(["typecheck", r10, "--body", b10])
+    emit("cons_onto_scalar", "nova_lingua",
+         "A function whose body conses a number onto a number.",
+         "cons needs a list as its second argument, but it is given an int; the type checker rejects the body as ill-typed.",
+         ["negative", "type-error", "list"], {"record": rec10, "body": body10},
+         "typecheck", "ILL-TYPED", (tc10.stdout + tc10.stderr), tc10.returncode != 0)
     return out
 
 
@@ -1675,6 +1919,14 @@ def compose_examples(commons_dir, by_name):
         ("filter_square_reverse_sum", "Compose: keep positives, square, reverse, then sum.",
          "A four-stage pipeline keep_positives;square_all;reverse;sum — the corpus's longest assembled pipeline.",
          ["keep_positives", "square_all", "reverse", "sum"], True),
+        ("incrall_then_sum", "Compose: add one to every element (by recursion), then sum.",
+         "A two-stage pipeline increment_all_rec;sum over a list of ints, yielding int.",
+         ["increment_all_rec", "sum"], True),
+        ("doubleall_then_reverse", "Compose: double every element (by recursion), then reverse.",
+         "A two-stage pipeline double_all_rec;reverse over a list of ints.", ["double_all_rec", "reverse"], True),
+        ("square_keeppos_count", "Compose: square every element, keep the positives, then count them.",
+         "A three-stage pipeline square_all;keep_positives;length over a list of ints, yielding nat.",
+         ["square_all", "keep_positives", "length"], True),
         ("length_then_reverse", "Compose: take a list's length, then reverse it.",
          "length yields a nat, which cannot feed reverse's List parameter — the pipeline does NOT compose.",
          ["length", "reverse"], False),
@@ -1722,7 +1974,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="nlcorpus-") as wd:
         # Nova Lingua — verified function records (first-order specs, then the higher-order ones whose
         # examples reference helper functions by fn_ref).
-        for spec in specs + higher_order_funcs() + provenance_funcs():
+        for spec in specs + higher_order_funcs() + higher_order_more() + provenance_funcs():
             ex, ok = build_and_verify(spec, wd)
             if ok or args.keep_unverified:
                 examples.append(ex)
@@ -1776,7 +2028,11 @@ def main():
                 "recursive_funcs": len(recursive_funcs()),
                 "recursive_list_funcs": len(recursive_list_funcs()),
                 "arith_laws": len(arith_laws()), "bool_laws": len(bool_laws()),
-                "order_laws": len(order_laws()), "higher_order_funcs": len(higher_order_funcs()),
+                "order_laws": len(order_laws()),
+                "more_arith": len(more_arith()), "more_laws": len(more_laws()),
+                "bool_more": len(bool_more()), "recursive_more": len(recursive_more()),
+                "higher_order_funcs": len(higher_order_funcs()),
+                "higher_order_more": len(higher_order_more()),
                 "provenance_funcs": len(provenance_funcs())}
     proved = sum(1 for ex in examples if ex["category"] == "function" and ex["polarity"] == "positive"
                  for p in ex["verification"]["proofs"] if p["verdict"] == "PROVED")

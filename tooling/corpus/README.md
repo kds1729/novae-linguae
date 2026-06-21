@@ -103,13 +103,14 @@ Every example carries a `polarity`. A **negative** example is a deliberately-wro
 the verifier's **rejection** — the "is this wrong?" signal — and it is valid only if the reference
 verifier actually rejects it (the generator drops a negative the verifier accepts, since that would be a
 verifier bug or a mislabel, not training signal). So a negative is verified in the dual sense: *verified
-to be rejected*, for the stated reason. Today's 13 span eight distinct verifier gates:
+to be rejected*, for the stated reason. Today's 14 span eight distinct verifier gates:
 
 | id | wrong because | caught by | verdict |
 |----|---------------|-----------|---------|
 | `neg_wrong_return_type` | declares `int -> bool`, body returns `int` | `typecheck` | ILL-TYPED |
 | `neg_list_op_on_scalar` | reverses an `int` (a list op on a scalar) | `typecheck` | ILL-TYPED |
 | `neg_arity_mismatch` | applies `add` to one argument | `typecheck` | ILL-TYPED |
+| `neg_cons_onto_scalar` | conses an `int` onto an `int` (needs a `List`) | `typecheck` | ILL-TYPED |
 | `neg_refuted_property` | claims `double(n) = n + 1` | `prove` | REFUTED (counterexample) |
 | `neg_refuted_commutativity` | claims subtraction is commutative | `prove` | REFUTED (counterexample) |
 | `neg_wrong_example` | claims `double(3) = 7` | `run` | EXAMPLE-FAILED |
@@ -123,9 +124,9 @@ to be rejected*, for the stated reason. Today's 13 span eight distinct verifier 
 
 ## Scope and where it grows
 
-130 examples today (117 positive, 13 negative), in four `category`s:
+158 examples today (144 positive, 14 negative), in four `category`s:
 
-- **function** (100) — Nova Lingua function records across **eighteen families**: unary integer (8, incl.
+- **function** (124) — Nova Lingua function records across **twenty-three families**: unary integer (8, incl.
   `double` / `quadruple` / `decrement` / `abs_val`), binary integer (6, incl. `maximum` / `minimum` /
   `abs_diff`), boolean/predicate (8, incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` /
   `is_even`), list builtins (3: `sum` / `reverse` / `length`), list-transform (6: `map`/`filter`/`append`
@@ -139,20 +140,26 @@ to be rejected*, for the stated reason. Today's 13 span eight distinct verifier 
   `countdown_rec`), integer algebraic laws (7: associativity / distributivity over `+` *and* `−` / identity
   / annihilation / involution / idempotence), boolean laws (7: associativity, De Morgan for AND and OR,
   idempotence, absorption), order laws (7: `max`/`min` idempotence / commutativity / associativity /
-  absorption), **higher-order** (4: `map_with` / `filter_with` / `foldl_with` / `foldr_with` — records whose
+  absorption), **more integer functions** (6: `cube` / `sign` / `clamp` / `in_range` / `is_odd` /
+  `is_negative`), **more proved identities** (2: `mul_one` right-identity / `mul_zero` annihilation),
+  **more boolean functions** (2: `implies` / `iff`), **more recursion** (7: `member` /
+  `count_occurrences` / `take_rec` / `drop_rec` / `repeat_rec` / `pow` / `last_rec`, the last with a
+  non-empty refinement), **higher-order** (10: `map_with` / `filter_with` / `foldl_with` / `foldr_with` /
+  `apply_to` / `twice` / `compose2` / `all_with` / `any_with` / `count_with` — records whose
   *type* takes a function argument, run end to end with the function supplied as an `fn_ref` to a helper
-  record resolved from the run directory), and **provenance** (2: `quadruple_derived` `derived_from`
-  doubling, `negate_v2` `supersedes` a `0 − n` implementation). **54 properties are proved over the
+  record resolved from the run directory; the grader can render the fn_ref argument by the helper's name),
+  and **provenance** (2: `quadruple_derived` `derived_from`
+  doubling, `negate_v2` `supersedes` a `0 − n` implementation). **56 properties are proved over the
   unbounded domain**, including the `filter`/`reverse` commutation and the `reverse`-over-`append`
   antihomomorphism (both via lemma discovery), `filter` idempotence (direct induction), and the recursion
   families' laws by induction over the supplied body. Sum-typed (Maybe/Result) functions construct their
   variant result with a computed payload (`Just(a / b)`, `Err(b)`) and verify by schema + typecheck + run
   (sum types are opaque to the prover). The recursion families call themselves via `self` — bound in both
   the typechecker and the evaluator — and prove laws like distribution over `append` and length-preservation
-  by induction over the supplied recursive body. (Includes 9 of the negatives — see the table above.)
-- **exchange** (18) — Nova Locutio signed agent-loop exchanges spanning all nine speech acts:
-  `request`/`apply` → `assert` (incl. applies over a *list* argument and a *boolean* result, all
-  `verify-claim` CONFIRMED), `request`/`validate` → `assert` (scalar *and* list functions),
+  by induction over the supplied recursive body. (Includes 10 of the negatives — see the table above.)
+- **exchange** (19) — Nova Locutio signed agent-loop exchanges spanning all nine speech acts:
+  `request`/`apply` → `assert` (incl. applies over a *list* argument, a *boolean* result, and a `cube`
+  scalar, all `verify-claim` CONFIRMED), `request`/`validate` → `assert` (scalar *and* list functions),
   `request`/`store` → `ack`, `propose` → `commit` (incl. over a list function), `commit` → `assert`,
   `delegate` → `ack`, `retract` → `ack`, and `query` → `ack` (by `list` and by `refinement` tag), plus 2
   negatives (a signed-but-false claim, a capability-denied apply).
@@ -161,10 +168,11 @@ to be rejected*, for the stated reason. Today's 13 span eight distinct verifier 
   asserts `double(21) = 42`, re-runs true) and `discover_then_validate` (→ asserts `reverse` verified).
   Principle 4 made multi-turn; a transcript is valid only if the ack actually lists the target the next
   turn uses, and the whole chain is threaded by `in_reply_to`.
-- **composition** (10) — assembled pipelines with the composite metadata `nl-validator compose` derives
-  from the stages' signatures, up to a four-stage `keep_positives;square_all;reverse;sum` → `int`, plus 2
-  negatives (a `nat` and a `bool`, each unable to feed a `List` parameter). The category for "assemble,
-  don't write" (principle 4).
+- **composition** (13) — assembled pipelines with the composite metadata `nl-validator compose` derives
+  from the stages' signatures, up to a four-stage `keep_positives;square_all;reverse;sum` → `int` (and
+  pipelines over the recursion-based list functions, e.g. `increment_all_rec;sum`), plus 2 negatives (a
+  `nat` and a `bool`, each unable to feed a `List` parameter). The category for "assemble, don't write"
+  (principle 4).
 
 This is the seam, not the ceiling, all behind the same "generate → verify → emit" pipeline: more breadth
 within each family, richer multi-turn transcripts, and more negative cases.

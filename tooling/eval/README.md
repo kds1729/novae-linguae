@@ -38,16 +38,40 @@ stated), leaving the model's effective semantic competence at ~100% on this corp
 exposure to the exact surface forms — which is precisely what stating the conventions (or scaling the
 corpus / fine-tuning) provides. The gap is dialect, not reasoning. Each run cost ~$0.36.
 
+### Does the corpus *alone* teach the dialect? (`--conventions off`)
+
+The 97% above states the conventions in the prompt. The sharper question the corpus is built to answer is
+whether the **examples alone** teach the dialect, with the rules removed entirely. `--conventions off`
+drops the convention block and leaves only the few-shot examples drawn from the corpus; `--shots N` scales
+how many. Run on `claude-opus-4-8` over the corpus's write/read/assemble pool (179 tasks):
+
+| condition | write | read | assemble | total |
+|-----------|------:|-----:|---------:|------:|
+| conventions **on**, 3 shots | 98.9% | 98.8% | 100% | **98.9%** |
+| conventions **off**, 3 shots | 37.5% | 89.3% | 100% | **64.2%** |
+| conventions **off**, 10 shots | 71.6% | 98.7% | 100% | **85.5%** |
+
+The two skills come apart. **Reading** recovers almost entirely from examples alone — 89% at 3 shots,
+99% at 10 — so comprehension of the surface forms is learnable from exposure. **Writing** is the hard
+half: 37.5% with 3 examples and no rules (right on the original stock-prompt 37% baseline), rising to
+71.6% at 10 shots but still well short of the 99% the stated rules buy. So the corpus, as few-shot
+context, teaches comprehension readily and generation only partially — more examples help, but generation
+is where explicit conventions (or, the corpus bet, *enough* examples via fine-tuning rather than a handful
+in-context) still pay off most. This is the quantitative case for scaling the corpus, and for `write`
+being the metric to watch as it grows.
+
 > The committed `results.jsonl` is the `--oracle` grader self-test (100%). Real-model runs above were
-> written to scratch paths; re-run `--model claude-opus-4-8` to reproduce.
+> written to scratch paths; re-run `--model claude-opus-4-8 [--conventions off] [--shots N]` to reproduce.
 
 ## Task shapes
 
 All tasks are drawn from the verified corpus (`../corpus/corpus.jsonl`), so the ground truth is itself
-machine-checked. The write/read pool is restricted to **self-contained** examples — a higher-order record
-whose worked example takes a function-valued (`fn_ref`) argument needs its helper record in the run
-directory to execute, which the standalone graders don't supply, so those examples are excluded from
-tasks (they remain valid corpus training data).
+machine-checked. **Higher-order records are now in the `write` pool**: an example whose worked argument is
+a function-valued (`fn_ref`) reference carries its helper record + body in the corpus (`views.helpers`),
+which the grader materializes into the run directory and links via `run --body … --records …` so the
+model-written body executes end-to-end (the model writes the body from the intent + type; the fn_ref
+argument is rendered by the helper's name). They stay out of the `read` pool — the helper is opaque by
+address, so the output isn't predictable by hand.
 
 - **write** — given an intent, a type signature, and worked examples, the model emits a function *body*
   in the surface syntax. Graded by `parse-body` → `typecheck` (does it have the declared type?) → `run`
@@ -71,6 +95,8 @@ python3 eval_harness.py --model claude-opus-4-8
 # Options
 python3 eval_harness.py --tasks write --limit 10   # one task kind, capped
 python3 eval_harness.py --effort xhigh             # effort for the real model
+python3 eval_harness.py --conventions off          # drop the rules; few-shot examples only
+python3 eval_harness.py --conventions off --shots 10   # …and scale the number of shots
 ```
 
 Output is a per-kind pass-rate summary plus `results.jsonl` (every task's prompt output and verdict).
