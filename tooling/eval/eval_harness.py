@@ -17,10 +17,16 @@ Three task shapes, all drawn from the verified corpus (`tooling/corpus/corpus.js
   Graded by `compose` (does the chosen pipeline actually type-compose?).
 
 `OracleModel` (see `model_client.py`) lets you self-test the grader with no API access: a model that
-always answers correctly must score 100% on every task. Run that first.
+always answers correctly must score 100% on every task. It is the DEFAULT, so a forgotten flag never bills.
 
-    python3 eval_harness.py --oracle                 # verify the grader (no key needed)
-    python3 eval_harness.py --model claude-opus-4-8   # run a real model (needs ANTHROPIC_API_KEY)
+    python3 eval_harness.py                           # free oracle self-test (default — no key, no cost)
+    python3 eval_harness.py --oracle                  # same, stated explicitly
+    python3 eval_harness.py --model claude-opus-4-8    # REAL billed run (needs ANTHROPIC_API_KEY)
+
+COST: only `--model` triggers a real API call, which bills ANTHROPIC_API_KEY *outside* any Pro/Max
+subscription. A full-pool sweep at high effort has cost $10-30 — the eval is a benchmark scored over the
+whole pool, so control cost with `--effort` and by running only when you mean to, NOT by sampling. With no
+`--model` (or with `--oracle`) the run is the free, local grader self-test.
 """
 
 from __future__ import annotations
@@ -499,9 +505,15 @@ def summarize(rows):
 
 def main():
     ap = argparse.ArgumentParser(description="Evaluate a model on reading/writing/assembling Nova Lingua.")
-    ap.add_argument("--model", default="claude-opus-4-8", help="Anthropic model id (needs ANTHROPIC_API_KEY)")
-    ap.add_argument("--oracle", action="store_true", help="use the perfect oracle model (self-tests the grader; no key)")
-    ap.add_argument("--effort", default="high", help="effort level for the real model")
+    ap.add_argument("--model", default=None,
+                    help="Anthropic model id for a REAL (billed) run, e.g. claude-opus-4-8. Requires "
+                         "ANTHROPIC_API_KEY and bills it OUTSIDE any Pro/Max subscription. Omit to run the "
+                         "free oracle self-test (the default).")
+    ap.add_argument("--oracle", action="store_true",
+                    help="force the free oracle model (no API, no cost). Also the default when --model is absent.")
+    ap.add_argument("--effort", default="medium",
+                    help="effort level for the real model (low|medium|high|...). Default 'medium' — the long "
+                         "convention prompt at 'high' is the main cost driver.")
     ap.add_argument("--tasks", default="all", choices=["all", "write", "read", "assemble"])
     ap.add_argument("--limit", type=int, default=0, help="cap tasks per kind (0 = all)")
     ap.add_argument("--conventions", default="on", choices=["on", "off"],
@@ -532,12 +544,19 @@ def main():
             kt = kt[: args.limit]
         tasks.extend(kt)
 
-    if args.oracle:
-        from model_client import OracleModel
-        model = OracleModel()
-    else:
+    # Cost guard: a real (billed) run happens ONLY when --model is given explicitly. With no --model (or
+    # with --oracle) we run the free oracle self-test, so a forgotten flag can never bill the API. The eval
+    # is a benchmark — always scored over the FULL pool — so the cost lever is effort + intent, not sampling.
+    if args.model and not args.oracle:
+        print(f"!! REAL MODEL RUN: '{args.model}' at effort '{args.effort}' over {len(tasks)} tasks — this\n"
+              f"!! calls the Anthropic API and BILLS ANTHROPIC_API_KEY outside any Pro/Max subscription\n"
+              f"!! (a full-pool sweep at high effort has cost $10-30). Ctrl-C now to abort.",
+              file=sys.stderr)
         from model_client import AnthropicModel
         model = AnthropicModel(args.model, effort=args.effort)
+    else:
+        from model_client import OracleModel
+        model = OracleModel()
 
     with tempfile.TemporaryDirectory(prefix="nleval-") as wd:
         rows = run_eval(model, tasks, wd)

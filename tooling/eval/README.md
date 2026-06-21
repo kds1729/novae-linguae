@@ -36,7 +36,10 @@ stated), leaving the model's effective semantic competence at ~100% on this corp
 
 **Takeaway:** the corpus/exposure bet is validated. The model already has the semantics; what it needs is
 exposure to the exact surface forms — which is precisely what stating the conventions (or scaling the
-corpus / fine-tuning) provides. The gap is dialect, not reasoning. Each run cost ~$0.36.
+corpus / fine-tuning) provides. The gap is dialect, not reasoning. *(Cost note: that first short-prompt
+run was ~$0.36, but once the convention prompt grew and the on/off/shots A/B was swept at high effort a
+single day of runs reached ~$30. So a real run is now gated behind an explicit `--model` — the free
+oracle is the default — and effort, not subsetting, is the cost lever. See Running.)*
 
 ### Does the corpus *alone* teach the dialect? (`--conventions off`)
 
@@ -107,18 +110,21 @@ address, so the output isn't predictable by hand.
 ## Running
 
 ```sh
-# 1. Self-test the GRADER with no API access — a perfect 'oracle' model must score 100%.
-#    Run this first; if it isn't 100%, the grader is rejecting valid answers.
-python3 eval_harness.py --oracle
+# 1. Self-test the GRADER with no API access — a perfect 'oracle' model must score 100%. This is the
+#    DEFAULT (no --model needed); run it first. If it isn't 100%, the grader is rejecting valid answers.
+python3 eval_harness.py                  # equivalently: --oracle
 
-# 2. Run a real model (needs ANTHROPIC_API_KEY in the environment).
+# 2. Run a REAL model — BILLS ANTHROPIC_API_KEY, *outside* any Pro/Max subscription. A real run happens
+#    only with an explicit --model, and the harness prints a cost warning first. The score is a benchmark
+#    over the FULL pool, so control cost with --effort (default 'medium'), never by sampling a subset.
 python3 eval_harness.py --model claude-opus-4-8
+python3 eval_harness.py --model claude-opus-4-8 --effort high   # costlier; the Jun-21 sweep used this
 
-# Options
-python3 eval_harness.py --tasks write --limit 10   # one task kind, capped
-python3 eval_harness.py --effort xhigh             # effort for the real model
-python3 eval_harness.py --conventions off          # drop the rules; few-shot examples only
+# Experiment knobs (apply to oracle or real runs)
+python3 eval_harness.py --conventions off              # drop the rules; few-shot examples only
 python3 eval_harness.py --conventions off --shots 10   # …and scale the number of shots
+# (--tasks {write,read,assemble} and --limit N exist for harness debugging only — a score must cover the
+#  whole pool to be comparable, so don't use them to cut cost.)
 ```
 
 Output is a per-kind pass-rate summary with two columns — **surface** (`pass`, graded as written) and
