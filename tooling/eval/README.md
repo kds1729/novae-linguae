@@ -63,6 +63,28 @@ being the metric to watch as it grows.
 > The committed `results.jsonl` is the `--oracle` grader self-test (100%). Real-model runs above were
 > written to scratch paths; re-run `--model claude-opus-4-8 [--conventions off] [--shots N]` to reproduce.
 
+## Surface vs. semantic: measuring the dialect tax directly
+
+The baseline finding — *failures are dialect, not reasoning* — was an interpretation of the verdicts. The
+grader now **measures it** instead of leaving it to read-off. Every `write` and `read` verdict carries two
+results:
+
+- **`pass`** — *surface-exact*: the answer graded exactly as written.
+- **`semantic_pass`** — the answer graded again after `repair_surface()`, a set of mechanical,
+  value-preserving rewrites that normalize the known dialect deviations to Nova Lingua's surface forms:
+  call-parens → juxtaposition (`max(a, b)` → `max(a)(b)`), bare integers → `int(N)`, curried lambdas
+  (`\a -> \b ->`) → multi-binder (`\a b ->`), and `[]` → `nil`.
+
+Every repair is a pure *notational* rewrite — it changes spelling, never the computed value or a number's
+magnitude. The safety property that makes the metric trustworthy: a botched rewrite produces a string that
+fails to parse / typecheck / run, so it only ever *lowers* `semantic_pass`; it can never turn a wrong
+answer into a passing one (wrapping `5` as `int(5)` fixes an encoding, never makes a wrong number right).
+So **`semantic_pass` is a conservative lower bound on "right modulo dialect"**, and the gap
+`semantic_pass − pass` is a measured floor on the surface-dialect tax — the exact quantity the baseline
+asserted by hand. The harness prints both columns; `assemble` has no surface dimension (answers are exact
+function names) so its two columns coincide. The oracle scores 100% on both, and the test suite asserts
+the negative direction too: a genuinely wrong value fails `semantic_pass` as well.
+
 ## Task shapes
 
 All tasks are drawn from the verified corpus (`../corpus/corpus.jsonl`), so the ground truth is itself
@@ -99,7 +121,9 @@ python3 eval_harness.py --conventions off          # drop the rules; few-shot ex
 python3 eval_harness.py --conventions off --shots 10   # …and scale the number of shots
 ```
 
-Output is a per-kind pass-rate summary plus `results.jsonl` (every task's prompt output and verdict).
+Output is a per-kind pass-rate summary with two columns — **surface** (`pass`, graded as written) and
+**semantic** (`semantic_pass`, graded after mechanical dialect repair; see above) — plus `results.jsonl`
+(every task's prompt, output, and full verdict, including the `repaired` flag).
 
 ## Why the oracle matters
 

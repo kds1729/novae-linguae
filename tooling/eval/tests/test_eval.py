@@ -49,6 +49,9 @@ class GraderSelfTest(unittest.TestCase):
                 out = model.answer(t)
                 verdict = eh.GRADERS[t.kind](t, out, wd)
                 self.assertTrue(verdict.get("pass"), f"oracle failed {t.id}: {verdict} (output={out!r})")
+                # The oracle's answer is already canonical, so semantic_pass must also hold with no repair.
+                self.assertTrue(verdict.get("semantic_pass"), f"oracle semantic miss {t.id}: {verdict}")
+                self.assertFalse(verdict.get("repaired"), f"oracle should need no repair {t.id}: {verdict}")
 
     def test_grader_rejects_wrong_answers(self):
         # Negative control: a grader that passes everything would also pass these. It must not.
@@ -63,6 +66,42 @@ class GraderSelfTest(unittest.TestCase):
             # A wrong read answer.
             self.assertFalse(eh.grade_read(read, "999999", wd).get("pass"))
             self.assertFalse(eh.grade_read(read, "garbage", wd).get("pass"))
+
+    def test_semantic_pass_recovers_a_dialect_only_miss(self):
+        # A read task whose gold is a plain integer: answering with a bare `N` (mainstream prior) instead of
+        # `int(N)` is a SURFACE miss — the value is right, only the encoding differs. The grader must mark it
+        # pass=False (surface-exact) but semantic_pass=True (right modulo dialect), via repair_surface.
+        reads = eh.build_read_tasks(self.corpus)
+        scalar = next((t for t in reads if (eh.canonical_value(t.grade_ctx["expected"]) or "").startswith("int(")
+                       and "[" not in (eh.canonical_value(t.grade_ctx["expected"]) or "")), None)
+        if scalar is None:
+            self.skipTest("no scalar-int read task to probe")
+        bare = (eh.canonical_value(scalar.grade_ctx["expected"]) or "")[len("int("):-1]  # int(120) -> 120
+        with tempfile.TemporaryDirectory() as wd:
+            v = eh.grade_read(scalar, bare, wd)
+        self.assertFalse(v["pass"], f"bare int should fail surface-exact: {v}")
+        self.assertTrue(v["semantic_pass"], f"bare int should pass after repair: {v}")
+        self.assertTrue(v["repaired"])
+
+    def test_semantic_pass_does_not_rescue_a_wrong_value(self):
+        # Negative control for the semantic verdict: repair changes spelling, never magnitude, so a wrong
+        # number must fail BOTH verdicts. (If semantic_pass passed this, the metric would be inflating.)
+        read = eh.build_read_tasks(self.corpus)[0]
+        with tempfile.TemporaryDirectory() as wd:
+            self.assertFalse(eh.grade_read(read, "999999", wd).get("semantic_pass"))
+            self.assertFalse(eh.grade_write(eh.build_write_tasks(self.corpus)[0],
+                                            "this is not nova lingua", wd).get("semantic_pass"))
+
+    def test_repair_surface_rewrites(self):
+        # repair_surface is pure string->string; assert each rule and that canonical forms are left alone.
+        self.assertEqual(eh.repair_surface(r"\a b -> max(a, b)"), r"\a b -> max(a)(b)")
+        self.assertEqual(eh.repair_surface("120"), "int(120)")
+        self.assertEqual(eh.repair_surface("[3, 2, 1]"), "[int(3), int(2), int(1)]")
+        self.assertEqual(eh.repair_surface(r"\a -> \b -> a + b"), r"\a b -> a + b")
+        self.assertEqual(eh.repair_surface("[]"), "nil")
+        # Canonical / constructor forms must be untouched (no double-wrap, ctors and int() preserved).
+        for canon in ("int(5)", "int(-6)", r"\a b -> a + b", "Just(int(3))", "[int(2), int(4)]", "nil", "true"):
+            self.assertEqual(eh.repair_surface(canon), canon, f"repair mutated canonical {canon!r}")
 
     def test_assemble_rejects_a_non_composing_pipeline(self):
         tasks = eh.build_assemble_tasks(self.corpus)

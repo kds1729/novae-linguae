@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -84,6 +85,95 @@ def strip_answer(text: str) -> str:
     if len(t) >= 2 and t.startswith("`") and t.endswith("`"):
         t = t[1:-1].strip()
     return t
+
+
+# --- surface repair: separating semantic competence from the surface-dialect tax -----------------
+#
+# A model can compute the right answer yet lose the point to a surface convention that differs from its
+# mainstream priors — call-parens application (`max(a, b)`), bare integer literals (`42`, which parses as
+# `nat`), curried lambdas (`\a -> \b ->`). To tell *reasoning* failures apart from *dialect* failures,
+# every grader reports two verdicts: `pass` (surface-exact — the answer graded as written) and
+# `semantic_pass` (the answer graded after a set of mechanical, value-preserving rewrites that normalize
+# known dialect deviations to Nova Lingua's surface forms).
+#
+# The safety property that makes `semantic_pass` trustworthy: every repair is a pure NOTATIONAL rewrite —
+# it changes spelling, never the computed value or a number's magnitude. A botched rewrite produces a
+# string that fails to parse / typecheck / run, which *lowers* `semantic_pass`; it can never turn a wrong
+# answer into a passing one (e.g. wrapping a bare `5` as `int(5)` changes only the type tag, so it can fix
+# an encoding mismatch but never make a wrong number right). `semantic_pass` is therefore a conservative
+# LOWER BOUND on "right modulo dialect", and `semantic_pass - pass` is a measured floor on the dialect tax.
+
+_INT_LIT = re.compile(r"int\(\s*-?\d+\s*\)|nat\(\s*-?\d+\s*\)|(?<![\w.])(-?\d+)(?![\w.])")
+
+
+def _wrap_ints(s: str) -> str:
+    """Bare integer literals -> `int(N)`. A bare `42` parses as `nat`; the corpus gold uses `int`. Only the
+    type tag changes. Existing `int(...)`/`nat(...)` spans match first and pass through untouched, so this
+    never double-wraps and never alters a magnitude."""
+    return _INT_LIT.sub(lambda m: m.group(0) if m.group(1) is None else f"int({m.group(1)})", s)
+
+
+def _calls_to_juxt(s: str) -> str:
+    """`f(a, b)` -> `f(a)(b)`. The parser already reads `f(x)` as application (juxtaposition with a
+    parenthesized argument); only the *comma* breaks a multi-arg call. So we rewrite each top-level comma
+    inside a round-paren group that follows a lowercase call head into `)(`, turning call-parens into
+    curried application. Commas inside list brackets `[...]` are left alone, as are capitalized constructor
+    heads (`Just(...)`, `Ok(...)`) and the `int(...)`/`nat(...)` literal forms."""
+    out, stack = [], []  # stack entry True => a comma-rewriting call paren
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "(":
+            prev = s[i - 1] if i > 0 else ""
+            is_call = prev.isalnum() or prev in "_)]"
+            if is_call:
+                j = i - 1
+                while j >= 0 and (s[j].isalnum() or s[j] == "_"):
+                    j -= 1
+                head = s[j + 1:i]
+                if head[:1].isupper() or head in ("int", "nat"):
+                    is_call = False
+            stack.append(is_call)
+            out.append(c)
+        elif c == "[":
+            stack.append(False)
+            out.append(c)
+        elif c in ")]":
+            if stack:
+                stack.pop()
+            out.append(c)
+        elif c == "," and stack and stack[-1]:
+            out.append(")(")
+            while i + 1 < n and s[i + 1] == " ":  # swallow whitespace after the rewritten separator
+                i += 1
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+_CURRY = re.compile(r"\\\s*([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*->\s*\\")
+
+
+def _collapse_curry(s: str) -> str:
+    """`\\a -> \\b -> e` -> `\\a b -> e`. Curried and multi-binder lambdas both parse, but the corpus gold
+    and the declared multi-arg type use the multi-binder form; collapsing matches it. Same computation,
+    different arity grouping. Iterated so deeper chains (`\\a -> \\b -> \\c ->`) fully collapse."""
+    prev = None
+    while prev != s:
+        prev = s
+        s = _CURRY.sub(r"\\\1 ", s)
+    return s
+
+
+def repair_surface(s: str) -> str:
+    """Normalize known, value-preserving dialect deviations to Nova Lingua's surface forms (see the module
+    note above). Used to compute `semantic_pass`; never used to compute the surface-exact `pass`."""
+    s = _calls_to_juxt(s)
+    s = _collapse_curry(s)
+    s = _wrap_ints(s)
+    s = re.sub(r"\[\s*\]", "nil", s)  # empty list literal -> nil
+    return s
 
 
 # --- tasks ---------------------------------------------------------------------------------------
@@ -300,13 +390,14 @@ def build_assemble_tasks(corpus):
 
 # --- grading (every verdict comes from nl-validator) ---------------------------------------------
 
-def grade_write(task, out, workdir):
-    surface = strip_answer(out)
+def _run_write(task, surface, workdir, sub):
+    """Grade a single write surface string: parse-body -> typecheck -> run the worked examples. `sub`
+    keeps the raw and repaired attempts in separate scratch dirs."""
     body = parse("body", surface)
-    res = {"parsed": body is not None, "well_typed": False, "runs": False}
+    res = {"parsed": body is not None, "well_typed": False, "runs": False, "pass": False}
     if body is None:
         return res
-    d = Path(workdir) / task.id.replace("/", "_")
+    d = Path(workdir) / (task.id.replace("/", "_") + sub)
     d.mkdir(parents=True, exist_ok=True)
     rec_path, body_path = d / "record.json", d / "body.json"
     rec_path.write_text(json.dumps(task.grade_ctx["record"]))
@@ -327,21 +418,48 @@ def grade_write(task, out, workdir):
     return res
 
 
+def grade_write(task, out, workdir):
+    surface = strip_answer(out)
+    res = _run_write(task, surface, workdir, "")
+    # semantic_pass: would a mechanical dialect repair of the same answer have passed? (See repair_surface.)
+    res["semantic_pass"], res["repaired"] = res["pass"], False
+    if not res["pass"]:
+        rep = repair_surface(surface)
+        if rep != surface and _run_write(task, rep, workdir, "_rep")["pass"]:
+            res["semantic_pass"], res["repaired"] = True, True
+    return res
+
+
+def _read_correct(task, surface):
+    """(parsed?, matches-expected?) for a single read surface string, compared canonically."""
+    got = parse("value", surface)
+    if got is None:
+        return False, False
+    got_canon = canonical_value(got)
+    return True, (got_canon is not None and got_canon == canonical_value(task.grade_ctx["expected"]))
+
+
 def grade_read(task, out, workdir):
     surface = strip_answer(out)
-    got = parse("value", surface)
-    expected_canon = canonical_value(task.grade_ctx["expected"])
-    got_canon = canonical_value(got) if got is not None else None
-    correct = got_canon is not None and got_canon == expected_canon
-    return {"parsed": got is not None, "correct": correct, "pass": correct}
+    parsed, correct = _read_correct(task, surface)
+    res = {"parsed": parsed, "correct": correct, "pass": correct,
+           "semantic_pass": correct, "repaired": False}
+    if not correct:
+        rep = repair_surface(surface)
+        if rep != surface and _read_correct(task, rep)[1]:
+            res["semantic_pass"], res["repaired"] = True, True
+    return res
 
 
 def grade_assemble(task, out, workdir):
     surface = strip_answer(out)
     names = [n.strip() for n in surface.replace("\n", ",").split(",") if n.strip()]
     meta = task.grade_ctx["name_meta"]
+    # assemble has no surface-dialect dimension — the answer is a list of exact function names — so
+    # semantic_pass tracks pass exactly. The fields are still emitted so every verdict has a uniform shape.
     if not names or any(n not in meta for n in names):
-        return {"valid_names": False, "composes": False, "pass": False}
+        return {"valid_names": False, "composes": False, "pass": False,
+                "semantic_pass": False, "repaired": False}
     d = Path(workdir) / task.id.replace("/", "_")
     d.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -350,7 +468,8 @@ def grade_assemble(task, out, workdir):
         p.write_text(json.dumps(meta[n]))
         paths.append(str(p))
     composes = cli(["compose"] + paths).returncode == 0
-    return {"valid_names": True, "composes": composes, "pass": composes}
+    return {"valid_names": True, "composes": composes, "pass": composes,
+            "semantic_pass": composes, "repaired": False}
 
 
 GRADERS = {"write": grade_write, "read": grade_read, "assemble": grade_assemble}
@@ -371,9 +490,10 @@ def summarize(rows):
     by_kind = {}
     for r in rows:
         k = r["kind"]
-        s = by_kind.setdefault(k, {"n": 0, "pass": 0})
+        s = by_kind.setdefault(k, {"n": 0, "pass": 0, "semantic": 0})
         s["n"] += 1
         s["pass"] += 1 if r["verdict"].get("pass") else 0
+        s["semantic"] += 1 if r["verdict"].get("semantic_pass") else 0
     return by_kind
 
 
@@ -427,15 +547,21 @@ def main():
         for r in rows:
             fh.write(json.dumps(r) + "\n")
 
+    def col(passed, n):
+        return f"{passed:3d}/{n:<3d} ({100.0 * passed / n if n else 0.0:5.1f}%)"
+
     print(f"model: {model.name}   conventions: {args.conventions}   shots: {args.shots}   tasks: {len(rows)}")
+    # surface = graded as written; semantic = graded after mechanical dialect repair (a conservative lower
+    # bound on "right modulo dialect"). The gap between them is the surface-dialect tax.
+    print(f"  {'kind':9s}  {'surface':>16s}  {'semantic':>16s}")
     for k in kinds:
         if k in by_kind:
             s = by_kind[k]
-            pct = 100.0 * s["pass"] / s["n"] if s["n"] else 0.0
-            print(f"  {k:9s}  {s['pass']:3d}/{s['n']:<3d}  ({pct:5.1f}%)")
+            print(f"  {k:9s}  {col(s['pass'], s['n']):>16s}  {col(s['semantic'], s['n']):>16s}")
     total_n = sum(s["n"] for s in by_kind.values())
     total_p = sum(s["pass"] for s in by_kind.values())
-    print(f"  {'TOTAL':9s}  {total_p:3d}/{total_n:<3d}  ({100.0 * total_p / total_n if total_n else 0:5.1f}%)")
+    total_m = sum(s["semantic"] for s in by_kind.values())
+    print(f"  {'TOTAL':9s}  {col(total_p, total_n):>16s}  {col(total_m, total_n):>16s}")
     print(f"  -> {args.out}")
 
 
