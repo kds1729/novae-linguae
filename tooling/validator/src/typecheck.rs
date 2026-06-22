@@ -516,14 +516,37 @@ pub fn typecheck(declared: &J, body: &J) -> Result<String> {
     // single monotype, not re-generalized — which is exactly what these records need.
     let mut env = Env::new();
     env.insert("self".to_string(), dt.clone());
-    let bt = infer(body, &env, &mut inf)?;
-    match inf.unify(&bt, &dt) {
-        Ok(()) => Ok(format!("WELL-TYPED  {}", show(&inf.zonk(&dt)))),
-        Err(e) => Err(anyhow!(
-            "ILL-TYPED: body has type {}, declared {} — {e}",
-            show(&inf.zonk(&bt)),
-            show(&inf.zonk(&dt))
-        )),
+
+    // CHECKING MODE for the top-level lambda. When the body is a lambda whose arity matches the declared
+    // function type, bind each parameter to its DECLARED type before inferring the body, then check the
+    // body against the declared result. Why: the surface parser builds `f x y` as curried application
+    // (`(f x) y`), so a multi-arg function-typed *parameter* applied that way would otherwise be pinned
+    // to a 1-arg function by the first application (the unknown-callee branch of apply_ty) and then clash
+    // with its declared multi-arg type — an arity mismatch on a body the evaluator happily curries and
+    // runs. Giving the parameter its declared arity up front lets apply_ty's existing partial-application
+    // path type the curried calls. Falls back to plain infer + unify otherwise.
+    let checked: Result<Ty> = match (&dt, body.get("kind").and_then(|k| k.as_str())) {
+        (Ty::Fun(dparams, dret), Some("lambda"))
+            if body.get("params").and_then(|p| p.as_array()).is_some_and(|p| p.len() == dparams.len()) =>
+        {
+            let mut env2 = env.clone();
+            for (p, pt) in body["params"].as_array().unwrap().iter().zip(dparams.iter()) {
+                let name = p["name"].as_str().ok_or_else(|| anyhow!("param name"))?.to_string();
+                env2.insert(name, pt.clone());
+            }
+            infer(&body["body"], &env2, &mut inf).and_then(|rt| {
+                inf.unify(&rt, dret)?;
+                Ok(rt)
+            })
+        }
+        _ => infer(body, &env, &mut inf).and_then(|bt| {
+            inf.unify(&bt, &dt)?;
+            Ok(bt)
+        }),
+    };
+    match checked {
+        Ok(_) => Ok(format!("WELL-TYPED  {}", show(&inf.zonk(&dt)))),
+        Err(e) => Err(anyhow!("ILL-TYPED: body does not match declared {} — {e}", show(&inf.zonk(&dt)))),
     }
 }
 
@@ -593,6 +616,37 @@ mod tests {
             "body": { "kind": "app", "fn": { "kind": "var", "name": "add" },
                       "args": [{ "kind": "var", "name": "x" }, { "kind": "var", "name": "x" }] } });
         assert!(typecheck(&poly, &dbl).is_err());
+    }
+
+    #[test]
+    fn curried_application_of_a_multiarg_param_typechecks() {
+        // A hand-written recursive foldr against `forall a b. (a -> b -> b) -> b -> List a -> b`.
+        // The body applies the 2-arg parameter `f` via juxtaposition `f x y`, which the parser builds as
+        // curried application `(f x) y`. The checker must accept this (partial application of a multi-arg
+        // function) rather than pinning `f` to a 1-arg function and reporting an arity mismatch — the
+        // evaluator curries it and the body runs, so the typechecker has to agree.
+        let ty = json!({ "kind": "forall", "vars": ["a", "b"], "body": {
+            "kind": "fn", "params": [
+                { "kind": "fn", "params": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }],
+                  "result": { "kind": "var", "name": "b" } },
+                { "kind": "var", "name": "b" },
+                { "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "var", "name": "a" }] }],
+            "result": { "kind": "var", "name": "b" } } });
+        let app = |fnj: serde_json::Value, args: serde_json::Value| json!({ "kind": "app", "fn": fnj, "args": args });
+        let v = |n: &str| json!({ "kind": "var", "name": n });
+        let body = json!({ "kind": "lambda",
+            "params": [{ "name": "f" }, { "name": "z" }, { "name": "xs" }],
+            "body": {
+                "kind": "case",
+                "scrutinee": app(v("null"), json!([v("xs")])),
+                "arms": [
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": v("z") },
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                      "body": app(
+                          app(v("f"), json!([app(v("head"), json!([v("xs")]))])),
+                          json!([app(app(app(v("self"), json!([v("f")])), json!([v("z")])),
+                                     json!([app(v("tail"), json!([v("xs")]))]))])) }] } });
+        assert!(typecheck(&ty, &body).is_ok(), "hand-recursive foldr should typecheck under currying");
     }
 
     #[test]
