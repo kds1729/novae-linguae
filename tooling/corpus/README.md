@@ -124,9 +124,9 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
 
 ## Scope and where it grows
 
-185 examples today (171 positive, 14 negative), in four `category`s:
+198 examples today (184 positive, 14 negative), in four `category`s:
 
-- **function** (148) — Nova Lingua function records across **twenty-seven families**: unary integer (8, incl.
+- **function** (161) — Nova Lingua function records across **twenty-nine families**: unary integer (8, incl.
   `double` / `quadruple` / `decrement` / `abs_val`), binary integer (6, incl. `maximum` / `minimum` /
   `abs_diff`), boolean/predicate (8, incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` /
   `is_even`), list builtins (3: `sum` / `reverse` / `length`), list-transform (6: `map`/`filter`/`append`
@@ -154,6 +154,12 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   map, `keep_negatives` filter, `count_negatives` `length`∘`filter`, `sum_evens` filter→fold pipeline),
   **more recursion** (3: `mult_rec` multiply-by-repeated-addition, `pow2` doubling recursion,
   `max_list_rec` recursive non-empty-list maximum (refined)),
+  **variant-consuming** (7 generative-`write`-focused: the first records to *pattern-match on* sum types —
+  `unwrap_or` / `is_some` / `maybe_double` over `Maybe`, `unwrap_result` / `result_to_maybe` over `Result`
+  — plus the constructors `predecessor` (→ `Maybe`) and `to_result_nonneg` (→ `Result`)),
+  **nested higher-order + multi-clause case** (6: `count_even_positives` compound-predicate filter,
+  `doubled_evens` map∘filter, `sum_doubled` fold∘map, `any_even` not∘null∘filter, and the nested-`case`
+  chains `grade` (4-way threshold) and `compare_to` (3-way comparison)),
   **higher-order** (10: `map_with` / `filter_with` / `foldl_with` / `foldr_with` /
   `apply_to` / `twice` / `compose2` / `all_with` / `any_with` / `count_with` — records whose
   *type* takes a function argument, run end to end with the function supplied as an `fn_ref` to a helper

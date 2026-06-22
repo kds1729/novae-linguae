@@ -1444,13 +1444,144 @@ def more_recursion():
     ]
 
 
+def _vpat(tag, bind=None):
+    """A variant case-pattern: `Just(x)` (with a payload binder) or nullary `None`."""
+    p = {"kind": "variant", "tag": tag}
+    if bind is not None:
+        p["payload"] = {"kind": "bind", "name": bind}
+    return p
+
+
+def _case_of(scrutinee, *arms):
+    """`case <scrutinee> of { p1 => e1; ... }` from (pattern, body) pairs — the general case (the
+    case_bool/case_null helpers only cover boolean scrutinees; this one takes variant patterns)."""
+    return {"kind": "case", "scrutinee": scrutinee, "arms": [{"pattern": p, "body": b} for p, b in arms]}
+
+
+def variant_consuming_funcs():
+    # The write shape the corpus most lacked: bodies that CONSUME a sum type by pattern-matching its
+    # variants (the existing maybe_funcs/result_funcs only CONSTRUCT variants). Plus two more constructors
+    # for breadth. Sum types are opaque to the prover, so these verify by validate + typecheck + run.
+    m, d, r, n, x = var("m"), var("d"), var("r"), var("n"), var("x")
+    return [
+        {"name": "unwrap_or", "intent": "Get the value inside an optional, or a default if there is none.",
+         "summary": "the payload of Just; the default for None.", "tags": ["maybe", "variant", "case"],
+         "type_ast": fn([maybe_t(INT), INT], INT),
+         "body_ast": lam(["m", "d"], _case_of(m, (_vpat("Just", "x"), x), (_vpat("None"), d))),
+         "examples": [{"args": [V("Just", 5), 0], "result": 5}, {"args": [V("None"), 9], "result": 9},
+                      {"args": [V("Just", -3), 1], "result": -3}],
+         "properties": [], "prove": False},
+        {"name": "is_some", "intent": "Test whether an optional holds a value.",
+         "summary": "true for Just, false for None.", "tags": ["maybe", "variant", "case", "predicate"],
+         "type_ast": fn([maybe_t(INT)], BOOL),
+         "body_ast": lam(["m"], _case_of(m, (_vpat("Just", "x"), bool_lit(True)), (_vpat("None"), bool_lit(False)))),
+         "examples": [{"args": [V("Just", 7)], "result": True}, {"args": [V("None")], "result": False}],
+         "properties": [], "prove": False},
+        {"name": "maybe_double", "intent": "Double the value inside an optional, leaving None unchanged.",
+         "summary": "Just(x*2) for Just(x); None for None — a map over the optional.",
+         "tags": ["maybe", "variant", "case"], "type_ast": fn([maybe_t(INT)], maybe_t(INT)),
+         "body_ast": lam(["m"], _case_of(m, (_vpat("Just", "x"), variant_expr("Just", bapp("mul", x, int_lit(2)))),
+                                         (_vpat("None"), variant_expr("None")))),
+         "examples": [{"args": [V("Just", 5)], "result": V("Just", 10)}, {"args": [V("None")], "result": V("None")},
+                      {"args": [V("Just", -4)], "result": V("Just", -8)}],
+         "properties": [], "prove": False},
+        {"name": "unwrap_result", "intent": "Get the success value of a result, or zero on error.",
+         "summary": "the payload of Ok; 0 for Err.", "tags": ["result", "variant", "case"],
+         "type_ast": fn([result_t(INT, INT)], INT),
+         "body_ast": lam(["r"], _case_of(r, (_vpat("Ok", "x"), x), (_vpat("Err", "e"), int_lit(0)))),
+         "examples": [{"args": [V("Ok", 4)], "result": 4}, {"args": [V("Err", 9)], "result": 0},
+                      {"args": [V("Ok", -2)], "result": -2}],
+         "properties": [], "prove": False},
+        {"name": "result_to_maybe", "intent": "Convert a result to an optional, discarding the error.",
+         "summary": "Just(x) for Ok(x); None for Err.", "tags": ["result", "maybe", "variant", "case"],
+         "type_ast": fn([result_t(INT, INT)], maybe_t(INT)),
+         "body_ast": lam(["r"], _case_of(r, (_vpat("Ok", "x"), variant_expr("Just", x)),
+                                         (_vpat("Err", "e"), variant_expr("None")))),
+         "examples": [{"args": [V("Ok", 4)], "result": V("Just", 4)}, {"args": [V("Err", 9)], "result": V("None")}],
+         "properties": [], "prove": False},
+        {"name": "predecessor", "intent": "The predecessor of a positive integer, or nothing at zero or below.",
+         "summary": "Just(n-1) when n > 0; None otherwise.", "tags": ["arithmetic", "maybe", "partial"],
+         "type_ast": fn([INT], maybe_t(INT)),
+         "body_ast": lam(["n"], case_bool(bapp("gt", n, int_lit(0)),
+                                          variant_expr("Just", bapp("sub", n, int_lit(1))), variant_expr("None"))),
+         "examples": [{"args": [5], "result": V("Just", 4)}, {"args": [0], "result": V("None")},
+                      {"args": [1], "result": V("Just", 0)}],
+         "properties": [], "prove": False},
+        {"name": "to_result_nonneg", "intent": "Tag a number Ok if non-negative, else Err with the value.",
+         "summary": "Ok(n) when n >= 0; Err(n) otherwise.", "tags": ["arithmetic", "result"],
+         "type_ast": fn([INT], result_t(INT, INT)),
+         "body_ast": lam(["n"], case_bool(bapp("ge", n, int_lit(0)),
+                                          variant_expr("Ok", n), variant_expr("Err", n))),
+         "examples": [{"args": [5], "result": V("Ok", 5)}, {"args": [-3], "result": V("Err", -3)},
+                      {"args": [0], "result": V("Ok", 0)}],
+         "properties": [], "prove": False},
+    ]
+
+
+def nested_hof_funcs():
+    # Nested higher-order bodies (one higher-order builtin applied to the result of another, with inline
+    # lambdas) and multi-clause `case` chains — both write shapes thin in the corpus. First-order records,
+    # runnable; examples only.
+    xs, x, a, b, n = var("xs"), var("x"), var("a"), var("b"), var("n")
+    is_even = lam(["x"], bapp("eq", bapp("mod", x, int_lit(2)), int_lit(0)))
+    return [
+        {"name": "count_even_positives", "intent": "Count the elements that are both positive and even.",
+         "summary": "length of the elements x with x > 0 and x even (a compound inline predicate).",
+         "tags": ["list", "filter", "composition"], "type_ast": fn([list_of(INT)], NAT),
+         "body_ast": lam(["xs"], bapp("length", bapp("filter",
+                         lam(["x"], bapp("and", bapp("gt", x, int_lit(0)),
+                                         bapp("eq", bapp("mod", x, int_lit(2)), int_lit(0)))), xs))),
+         "examples": [{"args": [[1, 2, 3, 4, -2]], "result": 2}, {"args": [[]], "result": 0},
+                      {"args": [[1, 3, 5]], "result": 0}],
+         "properties": [], "prove": False},
+        {"name": "doubled_evens", "intent": "Keep the even numbers and double each.",
+         "summary": "maps x*2 over the even elements — a map applied to a filter.",
+         "tags": ["list", "map", "filter", "composition"], "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], bapp("map", lam(["x"], bapp("mul", x, int_lit(2))), bapp("filter", is_even, xs))),
+         "examples": [{"args": [[1, 2, 3, 4]], "result": [4, 8]}, {"args": [[]], "result": []},
+                      {"args": [[1, 3]], "result": []}],
+         "properties": [], "prove": False},
+        {"name": "sum_doubled", "intent": "Sum a list after doubling every element.",
+         "summary": "folds add over each element doubled — a fold applied to a map.",
+         "tags": ["list", "map", "fold", "composition"], "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], bapp("foldl", var("add"), int_lit(0),
+                         bapp("map", lam(["x"], bapp("mul", x, int_lit(2))), xs))),
+         "examples": [{"args": [[1, 2, 3]], "result": 12}, {"args": [[]], "result": 0}, {"args": [[5]], "result": 10}],
+         "properties": [], "prove": False},
+        {"name": "any_even", "intent": "Test whether a list contains an even number.",
+         "summary": "true when the even-filtered list is non-empty — filter, then null, then not.",
+         "tags": ["list", "filter", "predicate", "composition"], "type_ast": fn([list_of(INT)], BOOL),
+         "body_ast": lam(["xs"], bapp("not", bapp("null", bapp("filter", is_even, xs)))),
+         "examples": [{"args": [[1, 3, 4]], "result": True}, {"args": [[1, 3]], "result": False},
+                      {"args": [[]], "result": False}],
+         "properties": [], "prove": False},
+        {"name": "grade", "intent": "Map a score to a 4/3/2/0 grade by threshold.",
+         "summary": "4 if >=90, else 3 if >=80, else 2 if >=70, else 0 — a nested case chain.",
+         "tags": ["arithmetic", "case"], "type_ast": fn([INT], INT),
+         "body_ast": lam(["n"], case_bool(bapp("ge", n, int_lit(90)), int_lit(4),
+                         case_bool(bapp("ge", n, int_lit(80)), int_lit(3),
+                         case_bool(bapp("ge", n, int_lit(70)), int_lit(2), int_lit(0))))),
+         "examples": [{"args": [95], "result": 4}, {"args": [85], "result": 3}, {"args": [75], "result": 2},
+                      {"args": [50], "result": 0}],
+         "properties": [], "prove": False},
+        {"name": "compare_to", "intent": "Three-way compare two integers to -1, 0, or 1.",
+         "summary": "-1 if a < b, 0 if equal, 1 otherwise — a nested case.",
+         "tags": ["arithmetic", "order", "case"], "type_ast": fn([INT, INT], INT),
+         "body_ast": lam(["a", "b"], case_bool(bapp("lt", a, b), int_lit(-1),
+                         case_bool(bapp("eq", a, b), int_lit(0), int_lit(1)))),
+         "examples": [{"args": [2, 5], "result": -1}, {"args": [5, 5], "result": 0}, {"args": [7, 3], "result": 1}],
+         "properties": [], "prove": False},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + float_funcs()
             + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs()
             + arith_laws() + bool_laws() + order_laws()
             + more_arith() + more_laws() + bool_more() + recursive_more()
-            + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion())
+            + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion()
+            + variant_consuming_funcs() + nested_hof_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -2286,6 +2417,8 @@ def main():
                 "compositional_bodies": len(compositional_bodies()),
                 "more_compositional": len(more_compositional()),
                 "more_recursion": len(more_recursion()),
+                "variant_consuming_funcs": len(variant_consuming_funcs()),
+                "nested_hof_funcs": len(nested_hof_funcs()),
                 "higher_order_funcs": len(higher_order_funcs()),
                 "higher_order_more": len(higher_order_more()),
                 "provenance_funcs": len(provenance_funcs())}
