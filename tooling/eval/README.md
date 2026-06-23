@@ -180,3 +180,21 @@ is the runbook (fine-tune `gpt-4o-mini` on OpenAI; train conventions-off; eval t
 harness). The grader is provider-agnostic; the only provider-specific piece is `model_client.py`, which
 now has **both** an `AnthropicModel` (Claude, `ANTHROPIC_API_KEY`) and an `OpenAIModel` (OpenAI / fine-tuned
 `ft:*` ids, `OPENAI_API_KEY`) — the harness routes to whichever the `--model` id names.
+
+### The fine-tune bet, confirmed — open-weights, local, $0
+
+The headline test is **done**, on the open-weights arm (see [`FINETUNING_OPENWEIGHTS.md`](FINETUNING_OPENWEIGHTS.md)):
+a Qwen2.5-1.5B (Apache-2.0) LoRA fine-tune, trained conventions-OFF on the combinatorial corpus and run
+entirely **on-device via Apple MLX** (no API, no key, no cost). Evaluated **conventions-OFF / shots-0** on
+the curated pool — nothing in the prompt teaches the dialect, so any lift is from the weights:
+
+| condition | write | read | total |
+|---|---|---|---|
+| base (no adapter)        | **0/151 (0.0%)** | 43/141 (30.5%) | 55/304 (18.1%) |
+| **+ LoRA (corpus-tuned)** | **129/151 (85.4%)** | 111/141 (78.7%) | **252/304 (82.9%)** |
+
+`write` goes **0% → 85.4%** purely from SFT, and tuned **surface ≈ semantic** (85.4 vs 86.1) — training
+learned the *surface dialect itself*, closing the exact gap few-shot couldn't (in-context conventions-off
+`write` plateaued at ~26% surface / ~50% modulo-dialect). The harness routes `mlx:<repo>[::<adapter>]` to a
+local MLX run via `MLXModel`. The OpenAI path in `FINETUNING.md` remains a billed cross-check on a different
+base family; the open-weights adapter is the artifact the OSS commons can actually redistribute.

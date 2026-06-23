@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 
@@ -32,6 +33,11 @@ def main():
     ap = argparse.ArgumentParser(description="Export the verified corpus as chat-format SFT pairs.")
     ap.add_argument("--corpus", default=str(eh.CORPUS), help="corpus JSONL to export (default: curated corpus.jsonl)")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "sft.jsonl"), help="output SFT JSONL")
+    ap.add_argument("--mlx-data", default=None,
+                    help="instead of one SFT file, write an MLX --data dir (train.jsonl + valid.jsonl, "
+                         "messages-only chat format) for mlx_lm.lora. Deterministic shuffle + split.")
+    ap.add_argument("--valid-frac", type=float, default=0.05, help="held-out fraction for MLX valid.jsonl (--mlx-data)")
+    ap.add_argument("--seed", type=int, default=0, help="shuffle seed for the MLX train/valid split (reproducible)")
     ap.add_argument("--conventions", default="on", choices=["on", "off"],
                     help="on: state the surface conventions in the system prompt (default). off: examples only.")
     ap.add_argument("--shots", type=int, default=0,
@@ -54,19 +60,40 @@ def main():
     }
 
     counts = {}
-    with open(args.out, "w", encoding="utf-8") as fh:
-        for kind in [k.strip() for k in args.kinds.split(",") if k.strip()]:
-            tasks = builders[kind]()
-            for t in tasks:
-                rec = {"kind": kind, "messages": [
-                    {"role": "system", "content": t.system},
-                    {"role": "user", "content": t.user},
-                    {"role": "assistant", "content": t.gold},
-                ]}
-                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            counts[kind] = len(tasks)
-
+    records = []
+    for kind in [k.strip() for k in args.kinds.split(",") if k.strip()]:
+        tasks = builders[kind]()
+        for t in tasks:
+            records.append({"kind": kind, "messages": [
+                {"role": "system", "content": t.system},
+                {"role": "user", "content": t.user},
+                {"role": "assistant", "content": t.gold},
+            ]})
+        counts[kind] = len(tasks)
     total = sum(counts.values())
+
+    if args.mlx_data:
+        # MLX-LM expects a --data directory of {"messages": [...]} lines (it applies the chat template and
+        # masks the prompt, training on the assistant completion). Drop the bookkeeping `kind` key. A fixed
+        # seed makes the train/valid split byte-reproducible.
+        data_dir = Path(args.mlx_data)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        shuffled = list(records)
+        random.Random(args.seed).shuffle(shuffled)
+        n_valid = max(1, int(len(shuffled) * args.valid_frac)) if len(shuffled) > 1 else 0
+        valid, train = shuffled[:n_valid], shuffled[n_valid:]
+        for name, rows in (("train", train), ("valid", valid)):
+            with open(data_dir / f"{name}.jsonl", "w", encoding="utf-8") as fh:
+                for r in rows:
+                    fh.write(json.dumps({"messages": r["messages"]}, ensure_ascii=False) + "\n")
+        print(f"wrote MLX data ({total} pairs) -> {data_dir}/  (train {len(train)}, valid {len(valid)})")
+        for k, n in counts.items():
+            print(f"  {k:9s} {n}")
+        return
+
+    with open(args.out, "w", encoding="utf-8") as fh:
+        for rec in records:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     print(f"wrote {total} SFT pairs -> {args.out}")
     for k, n in counts.items():
         print(f"  {k:9s} {n}")

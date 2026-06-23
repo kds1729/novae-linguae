@@ -12,6 +12,9 @@ seam:
 - `OpenAIModel` calls an OpenAI chat model — including a fine-tuned `ft:...` id — via the OpenAI SDK,
   reading `OPENAI_API_KEY`. This is how we evaluate a model fine-tuned on the corpus (the headline test;
   see `FINETUNING.md` + `export_finetune.py`).
+- `MLXModel` runs an open-weights model LOCALLY via Apple MLX (no API, no key, no cost) — optionally with
+  a LoRA adapter fine-tuned on the corpus. This is the open-weights, self-hostable arm of the fine-tune
+  experiment (see `FINETUNING_OPENWEIGHTS.md`): the same `answer(task)` seam, so the grader is identical.
 """
 
 from __future__ import annotations
@@ -83,3 +86,39 @@ class OpenAIModel:
             ],
         )
         return (resp.choices[0].message.content or "").strip()
+
+
+class MLXModel:
+    """An open-weights model run LOCALLY via Apple MLX — no API, no key, no cost. Optionally loads a LoRA
+    adapter fine-tuned on the corpus, so the same client evaluates both the base model and the tuned one.
+
+    The spec is `<repo>` for the base model or `<repo>::<adapter_dir>` for base + LoRA adapter (the harness
+    passes whatever followed the `mlx:` prefix). Greedy decoding (temp 0) for a stable, comparable read of
+    the dialect — matching `OpenAIModel`. `mlx_lm` is imported lazily so the oracle self-test and the
+    API-model paths never need it installed.
+    """
+
+    def __init__(self, spec: str, max_tokens: int = 512):
+        from mlx_lm import load, generate  # lazy: only the local-eval path needs MLX
+        from mlx_lm.sample_utils import make_sampler
+
+        repo, _, adapter = spec.partition("::")
+        model, tokenizer = load(repo, adapter_path=(adapter or None))
+        self._model = model
+        self._tokenizer = tokenizer
+        self._generate = generate
+        self._sampler = make_sampler(temp=0.0)  # greedy
+        self.max_tokens = max_tokens
+        self.name = f"mlx:{repo}" + (f"::{adapter}" if adapter else "")
+
+    def answer(self, task) -> str:
+        prompt = self._tokenizer.apply_chat_template(
+            [{"role": "system", "content": task.system},
+             {"role": "user", "content": task.user}],
+            add_generation_prompt=True,
+        )
+        text = self._generate(
+            self._model, self._tokenizer, prompt=prompt,
+            max_tokens=self.max_tokens, sampler=self._sampler, verbose=False,
+        )
+        return (text or "").strip()

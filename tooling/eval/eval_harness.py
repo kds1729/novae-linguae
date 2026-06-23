@@ -510,9 +510,10 @@ def summarize(rows):
 def main():
     ap = argparse.ArgumentParser(description="Evaluate a model on reading/writing/assembling Nova Lingua.")
     ap.add_argument("--model", default=None,
-                    help="Anthropic model id for a REAL (billed) run, e.g. claude-opus-4-8. Requires "
-                         "ANTHROPIC_API_KEY and bills it OUTSIDE any Pro/Max subscription. Omit to run the "
-                         "free oracle self-test (the default).")
+                    help="Model to evaluate. `mlx:<repo>[::<adapter_dir>]` runs an open-weights model "
+                         "LOCALLY via Apple MLX (no API, no key, no cost). A bare provider id, e.g. "
+                         "claude-opus-4-8 or gpt-4o-mini / ft:..., is a REAL billed run (ANTHROPIC_API_KEY / "
+                         "OPENAI_API_KEY, outside any subscription). Omit to run the free oracle self-test.")
     ap.add_argument("--oracle", action="store_true",
                     help="force the free oracle model (no API, no cost). Also the default when --model is absent.")
     ap.add_argument("--effort", default="medium",
@@ -554,19 +555,27 @@ def main():
     # is a benchmark — always scored over the FULL pool — so don't sample to save money. Cost scales with
     # prompt length and run count (NOT effort — high ~ medium here), so the control is running sparingly.
     if args.model and not args.oracle:
-        # Route by model id: OpenAI chat / fine-tuned ids -> OpenAIModel (OPENAI_API_KEY), else Anthropic.
-        is_openai = args.model.startswith(("gpt", "ft:", "o1", "o3", "o4", "chatgpt"))
-        print(f"!! REAL MODEL RUN: '{args.model}' over {len(tasks)} tasks — this calls the provider API and\n"
-              f"!! BILLS the provider key ({'OPENAI_API_KEY' if is_openai else 'ANTHROPIC_API_KEY'}), outside\n"
-              f"!! any subscription. A full-pool run measures ~$1; cost scales with prompt length and run\n"
-              f"!! count. Ctrl-C now to abort.",
-              file=sys.stderr)
-        if is_openai:
-            from model_client import OpenAIModel
-            model = OpenAIModel(args.model)
+        # Route by model id. `mlx:<repo>[::<adapter_dir>]` runs LOCALLY via Apple MLX — no API, no key, no
+        # cost (the open-weights arm; see FINETUNING_OPENWEIGHTS.md). Otherwise it's a billed provider call:
+        # OpenAI chat / fine-tuned ids -> OpenAIModel (OPENAI_API_KEY), else Anthropic (ANTHROPIC_API_KEY).
+        if args.model.startswith("mlx:"):
+            print(f"Local MLX run: '{args.model}' over {len(tasks)} tasks — runs on-device, no API or cost.",
+                  file=sys.stderr)
+            from model_client import MLXModel
+            model = MLXModel(args.model[len("mlx:"):])
         else:
-            from model_client import AnthropicModel
-            model = AnthropicModel(args.model, effort=args.effort)
+            is_openai = args.model.startswith(("gpt", "ft:", "o1", "o3", "o4", "chatgpt"))
+            print(f"!! REAL MODEL RUN: '{args.model}' over {len(tasks)} tasks — this calls the provider API and\n"
+                  f"!! BILLS the provider key ({'OPENAI_API_KEY' if is_openai else 'ANTHROPIC_API_KEY'}), outside\n"
+                  f"!! any subscription. A full-pool run measures ~$1; cost scales with prompt length and run\n"
+                  f"!! count. Ctrl-C now to abort.",
+                  file=sys.stderr)
+            if is_openai:
+                from model_client import OpenAIModel
+                model = OpenAIModel(args.model)
+            else:
+                from model_client import AnthropicModel
+                model = AnthropicModel(args.model, effort=args.effort)
     else:
         from model_client import OracleModel
         model = OracleModel()
