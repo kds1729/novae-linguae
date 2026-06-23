@@ -105,12 +105,15 @@ families enumerate a fixed set, no RNG — principle 5), so the corpus is byte-r
 The default run emits the **curated** corpus (the committed `corpus.jsonl`) — families chosen for breadth
 of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **parameterized** specs
 (`combinatorial_specs`): each hand-authored shape multiplied over a fixed set of constants, operators, and
-comparisons — unary/two-step arithmetic, `map`/`filter`/`count`/predicate over a comparison, `filter`→`map`
-pipelines, guarded optionals, range tests — for the *volume* a fine-tuning dataset needs. It currently
-yields **498 generated function records (696 examples total with the curated set)**, every one through the
-same validate → typecheck → run gate, and is byte-reproducible. The large combinatorial file is regenerable
-from the generator, so it is **gitignored, not committed** — the generator is the artifact. Widen the
-`_K*` constant sets in `combinatorial_specs` to scale the count further.
+comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
+`filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates — for the
+*volume* a fine-tuning dataset needs. It currently yields **2,164 generated function records (2,362
+examples total with the curated set)**, every one through the same validate → typecheck → run gate, and is
+byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
+~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
+to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,
+not committed** — the generator is the artifact. Widen the `_K*` constant sets in `combinatorial_specs` to
+scale further (the count grows quadratically in the two-step sets, cubically in the three-step set).
 
 ## Negative examples
 

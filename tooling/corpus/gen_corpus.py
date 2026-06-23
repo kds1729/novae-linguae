@@ -34,6 +34,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 _HERE = Path(__file__).resolve()
@@ -1591,10 +1592,11 @@ def nested_hof_funcs():
 # so the output is byte-reproducible. Opt-in via `gen_corpus.py --combinatorial --out <scratch path>`; the
 # curated corpus.jsonl (default, no flag) is unchanged. Widen the sets below to scale the count further.
 
-_KADD = [1, 2, 3, 4, 5, 6, 10]      # constants for add/sub
-_KMUL = [2, 3, 4, 5, 6, 10]         # constants for mul (1 omitted — identity)
-_KCMP = [0, 1, 2, 3, 4, 5, 10]      # constants for comparisons
-_K2 = {"add": [1, 2, 3, 4, 5, 10], "sub": [1, 2, 3, 4, 5, 10], "mul": [2, 3, 4, 5, 10]}  # two-step
+_KADD = list(range(1, 13))                            # add/sub constants: 1..12
+_KMUL = list(range(2, 13))                            # mul constants: 2..12 (1 omitted — identity)
+_KCMP = [-5, -3, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10]   # comparison constants (incl. negatives)
+_K2 = {"add": list(range(1, 13)), "sub": list(range(1, 13)), "mul": list(range(2, 13))}  # two-step: 1..12 / 2..12
+_K3 = {"add": [1, 2, 3], "sub": [1, 2, 3], "mul": [2, 3]}  # three-step (smaller, to bound the cube)
 _INT_IN = [0, 1, -1, 4, -3, 7, 12]                              # worked inputs for INT-domain functions
 _LIST_IN = [[], [1, 2, 3], [5, -2, 4, 0], [-1, -2], [3, 3, 7]]  # worked inputs for List-domain functions
 _AOP = {"add": lambda a, b: a + b, "sub": lambda a, b: a - b, "mul": lambda a, b: a * b}
@@ -1707,6 +1709,34 @@ def combinatorial_specs(exclude_names=()):
                            lam(["xs"], bapp("map", lam(["x"], bapp(op, x, int_lit(k2))),
                                             bapp("filter", lam(["x"], bapp(cmp, x, int_lit(k))), xs))),
                            [{"args": [lst], "result": [pf(v, k2) for v in lst if cf(v, k)]} for lst in _LIST_IN]))
+
+    # 10. three-step scalar arithmetic:  \n -> op3 (op2 (op1 n k1) k2) k3   (smaller per-step sets)
+    steps3 = [(op, k) for op in ("add", "sub", "mul") for k in _K3[op]]
+    for op1, k1 in steps3:
+        for op2, k2 in steps3:
+            for op3, k3 in steps3:
+                pf1, pf2, pf3 = _AOP[op1], _AOP[op2], _AOP[op3]
+                add(_cspec(f"{op1}{k1}_{op2}{k2}_{op3}{k3}",
+                           f"{_OPWORD[op1].capitalize()} {k1}, then {_OPWORD[op2]} {k2}, then {_OPWORD[op3]} {k3}.",
+                           f"{op3} ({op2} ({op1} n {k1}) {k2}) {k3}", ["arithmetic", "composition", "three-step"],
+                           fn([INT], INT),
+                           lam(["n"], bapp(op3, bapp(op2, bapp(op1, n, int_lit(k1)), int_lit(k2)), int_lit(k3))),
+                           [{"args": [v], "result": pf3(pf2(pf1(v, k1), k2), k3)} for v in _INT_IN]))
+
+    # 11. compound predicate:  \n -> logic (cmp1 n k1) (cmp2 n k2)
+    _LOGIC = {"and": lambda a, b: a and b, "or": lambda a, b: a or b}
+    for logic, lf in _LOGIC.items():
+        for cmp1 in ("gt", "ge", "lt", "le"):
+            for cmp2 in ("gt", "ge", "lt", "le"):
+                cf1, cf2 = _CMP[cmp1], _CMP[cmp2]
+                for k1, k2 in [(0, 5), (1, 10), (2, 8)]:
+                    nm = f"{logic}_{cmp1}_{k1}_{cmp2}_{k2}".replace("-", "m")
+                    add(_cspec(nm,
+                               f"Test whether a number is {_CMPWORD[cmp1]} {k1} {logic} {_CMPWORD[cmp2]} {k2}.",
+                               f"{logic} ({cmp1} n {k1}) ({cmp2} n {k2})", ["predicate", "comparison", "compound"],
+                               fn([INT], BOOL),
+                               lam(["n"], bapp(logic, bapp(cmp1, n, int_lit(k1)), bapp(cmp2, n, int_lit(k2)))),
+                               [{"args": [v], "result": lf(cf1(v, k1), cf2(v, k2))} for v in _INT_IN]))
 
     return out
 
@@ -2503,12 +2533,18 @@ def main():
             existing = {s["name"] for s in specs + ho}
             combo = combinatorial_specs(existing)
             print(f"combinatorial: generating {len(combo)} parameterized specs", file=sys.stderr)
-        for spec in specs + ho + combo:
-            ex, ok = build_and_verify(spec, wd)
-            if ok or args.keep_unverified:
-                examples.append(ex)
-            if not ok:
-                dropped.append((spec["name"], ex["verification"]))
+        fn_specs = specs + ho + combo
+        # build_and_verify is independent per spec (each writes its own subdir + spawns short-lived
+        # validator subprocesses), so run them on a thread pool — the gate is subprocess-bound, not
+        # Python-CPU-bound. Results are consumed in INPUT order (executor.map is ordered), so the output
+        # stays byte-reproducible and the default (curated) corpus is byte-identical to the serial run.
+        workers = min(12, (os.cpu_count() or 4) * 2)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for spec, (ex, ok) in zip(fn_specs, pool.map(lambda s: build_and_verify(s, wd), fn_specs)):
+                if ok or args.keep_unverified:
+                    examples.append(ex)
+                if not ok:
+                    dropped.append((spec["name"], ex["verification"]))
         # Nova Locutio — verified agent-loop exchanges over a shared commons of the same functions.
         commons_dir, by_name = build_commons(wd, specs)
         for ex in nova_locutio_examples(commons_dir, by_name):
