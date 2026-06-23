@@ -1,2 +1,4 @@
 results.jsonl
+sft.jsonl
+sft*.jsonl
 __pycache__/
