@@ -516,38 +516,42 @@ pub fn typecheck(declared: &J, body: &J) -> Result<String> {
     // single monotype, not re-generalized — which is exactly what these records need.
     let mut env = Env::new();
     env.insert("self".to_string(), dt.clone());
-
-    // CHECKING MODE for the top-level lambda. When the body is a lambda whose arity matches the declared
-    // function type, bind each parameter to its DECLARED type before inferring the body, then check the
-    // body against the declared result. Why: the surface parser builds `f x y` as curried application
-    // (`(f x) y`), so a multi-arg function-typed *parameter* applied that way would otherwise be pinned
-    // to a 1-arg function by the first application (the unknown-callee branch of apply_ty) and then clash
-    // with its declared multi-arg type — an arity mismatch on a body the evaluator happily curries and
-    // runs. Giving the parameter its declared arity up front lets apply_ty's existing partial-application
-    // path type the curried calls. Falls back to plain infer + unify otherwise.
-    let checked: Result<Ty> = match (&dt, body.get("kind").and_then(|k| k.as_str())) {
-        (Ty::Fun(dparams, dret), Some("lambda"))
-            if body.get("params").and_then(|p| p.as_array()).is_some_and(|p| p.len() == dparams.len()) =>
-        {
-            let mut env2 = env.clone();
-            for (p, pt) in body["params"].as_array().unwrap().iter().zip(dparams.iter()) {
-                let name = p["name"].as_str().ok_or_else(|| anyhow!("param name"))?.to_string();
-                env2.insert(name, pt.clone());
-            }
-            infer(&body["body"], &env2, &mut inf).and_then(|rt| {
-                inf.unify(&rt, dret)?;
-                Ok(rt)
-            })
-        }
-        _ => infer(body, &env, &mut inf).and_then(|bt| {
-            inf.unify(&bt, &dt)?;
-            Ok(bt)
-        }),
-    };
-    match checked {
-        Ok(_) => Ok(format!("WELL-TYPED  {}", show(&inf.zonk(&dt)))),
+    match check(body, &dt, &env, &mut inf) {
+        Ok(()) => Ok(format!("WELL-TYPED  {}", show(&inf.zonk(&dt)))),
         Err(e) => Err(anyhow!("ILL-TYPED: body does not match declared {} — {e}", show(&inf.zonk(&dt)))),
     }
+}
+
+/// Check an expression against an EXPECTED type (bidirectional checking mode). For a lambda checked
+/// against a function type, bind as many leading parameters as the lambda *has* to the declared parameter
+/// types, then check the (possibly still-function) body against the residual arrow type — recursively.
+/// This makes the typechecker agree with the parser + evaluator, which curry uniformly: `f x y` parses as
+/// `(f x) y`, multi-arg functions partially apply, and an N-ary arrow `(a,b)->c` is the same as its
+/// curried form `a->(b->c)`. So a multi-binder lambda (`\a b -> …`), a curried lambda (`\a -> \b -> …`),
+/// and a function-returning body (`\x -> add x`) all check against a flat multi-arg declared type — each
+/// of which the evaluator runs identically. Without this, the curried/nested lambda type
+/// (`(?)->(?)->?`) clashes by arity with the flat declared type (`(a,b)->c`). Anything that isn't a
+/// lambda-against-a-function-type falls back to inference + unification (the standard rule), so
+/// ill-typed and non-lambda bodies are still rejected exactly as before.
+fn check(expr: &J, expected: &Ty, env: &Env, inf: &mut Infer) -> Result<()> {
+    if expr.get("kind").and_then(|k| k.as_str()) == Some("lambda") {
+        if let Ty::Fun(dparams, dret) = inf.resolve(expected) {
+            if let Some(params) = expr.get("params").and_then(|p| p.as_array()) {
+                let k = params.len();
+                if (1..=dparams.len()).contains(&k) {
+                    let mut env2 = env.clone();
+                    for (p, pt) in params.iter().zip(dparams.iter()) {
+                        let name = p["name"].as_str().ok_or_else(|| anyhow!("param name"))?.to_string();
+                        env2.insert(name, pt.clone());
+                    }
+                    let residual = if k == dparams.len() { *dret } else { Ty::Fun(dparams[k..].to_vec(), dret) };
+                    return check(&expr["body"], &residual, &env2, inf);
+                }
+            }
+        }
+    }
+    let t = infer(expr, env, inf)?;
+    inf.unify(&t, expected)
 }
 
 /// Check a function record's `signature.type` against its `body`.
@@ -647,6 +651,30 @@ mod tests {
                           json!([app(app(app(v("self"), json!([v("f")])), json!([v("z")])),
                                      json!([app(v("tail"), json!([v("xs")]))]))])) }] } });
         assert!(typecheck(&ty, &body).is_ok(), "hand-recursive foldr should typecheck under currying");
+    }
+
+    #[test]
+    fn curried_and_partial_lambdas_check_against_flat_arrow() {
+        // A flat 2-arg arrow type. The parser/evaluator treat `int -> int -> int` and its curried forms
+        // identically; the checker must too.
+        let ty = json!({ "kind": "fn",
+            "params": [{ "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "int" }],
+            "result": { "kind": "builtin", "name": "int" } });
+        // Curried lambda: \a -> \b -> add a b
+        let curried = json!({ "kind": "lambda", "params": [{ "name": "a" }], "body":
+            { "kind": "lambda", "params": [{ "name": "b" }], "body":
+                { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                  "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] } } });
+        assert!(typecheck(&ty, &curried).is_ok(), "curried lambda should check against a flat arrow");
+        // Function-returning body: \x -> add x  (partial application of a builtin)
+        let partial = json!({ "kind": "lambda", "params": [{ "name": "x" }], "body":
+            { "kind": "app", "fn": { "kind": "var", "name": "add" }, "args": [{ "kind": "var", "name": "x" }] } });
+        assert!(typecheck(&ty, &partial).is_ok(), "function-returning body should check against a flat arrow");
+        // Soundness guard: too MANY binders for the declared arity must still be rejected.
+        let three = json!({ "kind": "lambda",
+            "params": [{ "name": "a" }, { "name": "b" }, { "name": "c" }],
+            "body": { "kind": "var", "name": "a" } });
+        assert!(typecheck(&ty, &three).is_err(), "more binders than the declared arity must be rejected");
     }
 
     #[test]
