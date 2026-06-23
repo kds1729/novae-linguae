@@ -554,13 +554,19 @@ def main():
     # is a benchmark — always scored over the FULL pool — so don't sample to save money. Cost scales with
     # prompt length and run count (NOT effort — high ~ medium here), so the control is running sparingly.
     if args.model and not args.oracle:
-        print(f"!! REAL MODEL RUN: '{args.model}' at effort '{args.effort}' over {len(tasks)} tasks — this\n"
-              f"!! calls the Anthropic API and BILLS ANTHROPIC_API_KEY outside any Pro/Max subscription\n"
-              f"!! (a full-pool run measures ~$1; cost scales with prompt length and run count, not effort).\n"
-              f"!! Ctrl-C now to abort.",
+        # Route by model id: OpenAI chat / fine-tuned ids -> OpenAIModel (OPENAI_API_KEY), else Anthropic.
+        is_openai = args.model.startswith(("gpt", "ft:", "o1", "o3", "o4", "chatgpt"))
+        print(f"!! REAL MODEL RUN: '{args.model}' over {len(tasks)} tasks — this calls the provider API and\n"
+              f"!! BILLS the provider key ({'OPENAI_API_KEY' if is_openai else 'ANTHROPIC_API_KEY'}), outside\n"
+              f"!! any subscription. A full-pool run measures ~$1; cost scales with prompt length and run\n"
+              f"!! count. Ctrl-C now to abort.",
               file=sys.stderr)
-        from model_client import AnthropicModel
-        model = AnthropicModel(args.model, effort=args.effort)
+        if is_openai:
+            from model_client import OpenAIModel
+            model = OpenAIModel(args.model)
+        else:
+            from model_client import AnthropicModel
+            model = AnthropicModel(args.model, effort=args.effort)
     else:
         from model_client import OracleModel
         model = OracleModel()

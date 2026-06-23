@@ -9,6 +9,9 @@ seam:
   end to end with no API access — run it before ever spending a token.
 - `AnthropicModel` calls a real Claude model (default Opus 4.8) via the Anthropic SDK. It reads
   `ANTHROPIC_API_KEY` from the environment; nothing is hard-coded.
+- `OpenAIModel` calls an OpenAI chat model — including a fine-tuned `ft:...` id — via the OpenAI SDK,
+  reading `OPENAI_API_KEY`. This is how we evaluate a model fine-tuned on the corpus (the headline test;
+  see `FINETUNING.md` + `export_finetune.py`).
 """
 
 from __future__ import annotations
@@ -52,3 +55,31 @@ class AnthropicModel:
         if resp.stop_reason == "refusal":
             return ""
         return "".join(b.text for b in resp.content if b.type == "text").strip()
+
+
+class OpenAIModel:
+    """An OpenAI chat model (including a fine-tuned `ft:...` id), via the OpenAI SDK. Reads OPENAI_API_KEY.
+
+    Used to evaluate a model fine-tuned on the corpus: the same `answer(task)` seam, so the grader is
+    identical. Greedy decoding (temperature 0) for a stable, comparable read of the dialect.
+    """
+
+    def __init__(self, model: str, max_tokens: int = 1024):
+        import openai  # imported lazily so the harness + oracle self-test run without the SDK
+
+        self.client = openai.OpenAI()  # resolves OPENAI_API_KEY from the environment
+        self.model = model
+        self.max_tokens = max_tokens
+        self.name = model
+
+    def answer(self, task) -> str:
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": task.system},
+                {"role": "user", "content": task.user},
+            ],
+        )
+        return (resp.choices[0].message.content or "").strip()

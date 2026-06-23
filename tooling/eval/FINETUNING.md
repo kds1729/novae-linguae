@@ -35,37 +35,50 @@ Hold out a **disjoint** evaluation set to avoid leakage:
   shapes/constants), OR generate a held-out combinatorial slice with constants excluded from training.
 - Dedup across splits by body-AST/content hash (the corpus is content-addressed, so this is exact).
 
-## 3. Base model + method (recommendation)
+## 3. Base model + method (the choice: OpenAI `gpt-4o-mini`)
 
-The task is a **narrow DSL**, not open-ended language — a small open-weight instruct model fine-tuned with
-**LoRA/QLoRA** should learn the surface dialect from enough examples; a frontier model is unnecessary.
-Recommended starting point: a 7–8B instruct model (e.g. Qwen2.5-7B-Instruct or Llama-3.1-8B-Instruct),
-LoRA, 2–3 epochs over the SFT pairs. Scale the dataset (more `_K*` breadth, more families) before scaling
-the model.
+This is a **narrow DSL**, not open-ended language — a small model plus enough verified examples should learn
+the surface dialect; a frontier model is unnecessary. The pick is **OpenAI managed supervised fine-tuning
+of `gpt-4o-mini`** for three concrete reasons: the exported SFT is already OpenAI's exact chat format (zero
+reformatting), it's the cheapest turnkey self-serve fine-tuning path, and the eval client is trivial
+(`OpenAIModel` is wired into `model_client.py`; the harness routes any `gpt*`/`ft:*` id to it). Train
+**conventions-OFF** — that's the bet: the model must internalize the dialect from the examples, not from
+rules spelled out in the prompt.
 
-## 4. Eval protocol (mostly free; the run bills)
+## 4. Runbook
 
-Reuse this harness. Add a client for the chosen provider to `model_client.py` (a thin `answer(task)` over
-an OpenAI-compatible / provider endpoint — small, free to write). Then:
+All steps are scripted; only the last two bill.
+
 ```sh
-python3 eval_harness.py --model <fine-tuned-id> --conventions off   # the key comparison
+# (free) build a training-scale corpus and the conventions-OFF SFT training file
+python3 ../corpus/gen_corpus.py --combinatorial --out /tmp/corpus-train.jsonl
+python3 export_finetune.py --corpus /tmp/corpus-train.jsonl --conventions off --kinds write,read --out /tmp/sft-train.jsonl
+
+# (free) a held-out eval file is NOT needed for training — eval is the curated corpus.jsonl (disjoint
+# shapes), graded by nl-validator, so there is no train/test leakage.
+
+# (billed) baseline: how does the BASE model do, in-context, before any training?
+python3 eval_harness.py --model gpt-4o-mini --conventions off    # ~$1
+python3 eval_harness.py --model gpt-4o-mini --conventions on     # ~$1 (the in-context ceiling for this model)
+
+# (billed) fine-tune on OpenAI, then evaluate the tuned model conventions-OFF
+openai api fine_tuning.jobs.create -t /tmp/sft-train.jsonl -m gpt-4o-mini   # or the dashboard / SDK
+python3 eval_harness.py --model ft:gpt-4o-mini:<job-suffix> --conventions off   # ~$1 — the headline result
 ```
-**Success criterion:** fine-tuned **conventions-off** `write` should rise from the ~26%/50% in-context
-baseline toward the ~99% that stated conventions buy in-context — i.e., the model has internalized the
-dialect from training rather than needing the rules spelled out. Watch `write` (the gap); `read` is
-already strong. The surface-vs-semantic split still applies (dialect tax vs reasoning).
+
+**Success criterion:** the fine-tuned model's **conventions-off** `write` should rise from the base model's
+conventions-off baseline toward what *stated conventions* buy it in-context — i.e., training internalized
+the dialect. Watch `write` (the gap); `read` is already strong. The surface-vs-semantic split still applies.
 
 ---
 
-## The money gate (needs sign-off + API key)
+## The money gate (needs the OpenAI key + go-ahead)
 
-Two costs, both the user's call:
-1. **The fine-tune run.** Managed LoRA SFT on ~5–10k short examples is typically inexpensive (rough order:
-   single-digit to low-tens of dollars on Together/Fireworks/OpenAI managed fine-tuning; self-host on one
-   GPU trades dollars for GPU-hours). Exact pricing to confirm at provider selection.
-2. **Evaluating the fine-tuned model** through `eval_harness.py` — bills per the provider's inference
-   pricing, like the in-context runs (those measured ~$1/full-pool run on Opus 4.8 at medium effort).
+Everything above the runbook's "(billed)" lines is done and free. The billed steps:
+1. **Base-model eval** (2 runs, ~$1 each on `gpt-4o-mini`) — establishes the before.
+2. **The fine-tune job** — OpenAI managed SFT on ~5k short pairs; rough order single-digit-to-low-tens of
+   dollars (confirm against current OpenAI fine-tuning pricing at run time).
+3. **Tuned-model eval** (~$1) — the headline after/before comparison.
 
-**Decision needed:** pick a provider/base model and a budget. Once chosen, the remaining work is: add the
-provider client to `model_client.py` (free), export the dataset (free), run the fine-tune + held-out eval
-(billed). Everything up to that point is done.
+Total rough order **~$10–25**. **The only thing needed: an `OPENAI_API_KEY` with fine-tuning enabled.**
+Once it's set, everything is scripted — no further decisions.
