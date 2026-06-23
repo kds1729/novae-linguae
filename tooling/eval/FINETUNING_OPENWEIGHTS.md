@@ -41,16 +41,26 @@ uv pip install --python /var/tmp/claude/mlx-venv2/bin/python mlx-lm
 ## 1. Data (free) — same corpus + exporter as the OpenAI path
 
 `export_finetune.py --mlx-data DIR` writes an MLX `--data` directory (`train.jsonl` + `valid.jsonl`,
-messages-only chat format; deterministic seeded split). Train conventions-OFF, shots-0:
+messages-only chat format; deterministic seeded split). Train conventions-OFF, shots-0.
+
+**Train/test integrity — this is load-bearing, don't skip it.** `gen_corpus.py --combinatorial` emits the
+curated corpus *plus* the combinatorial specs — it is a **SUPERSET of the curated eval set**. Train on it
+naively and the curated eval is **100% leaked** (every eval prompt+gold seen verbatim), and the score
+measures memorization, not generalization. **Always pass `--holdout-corpus <curated corpus.jsonl>`** so the
+exporter drops every training task whose `(prompt, gold)` matches an eval task:
 
 ```sh
+CURATED=../corpus/corpus.jsonl
 $MLX_PY ../corpus/gen_corpus.py --combinatorial --out /var/tmp/claude/corpus-train.jsonl   # ~2.7k verified examples
-$MLX_PY export_finetune.py --corpus /var/tmp/claude/corpus-train.jsonl \
-        --conventions off --shots 0 --mlx-data /var/tmp/claude/mlxdata                      # ~5.3k SFT pairs
+$MLX_PY export_finetune.py --corpus /var/tmp/claude/corpus-train.jsonl --holdout-corpus "$CURATED" \
+        --conventions off --shots 0 --mlx-data /var/tmp/claude/mlxdata                      # ~5k SFT pairs (304 leaked tasks dropped)
 ```
 
-**Train/test integrity:** train on the **combinatorial** corpus, evaluate on the **curated** `corpus.jsonl`
-(disjoint shapes/constants), graded by `nl-validator` — no leakage.
+Even with the exact eval tasks removed, the combinatorial set still contains **parametric twins** of many
+curated shapes (same template, different constants), so the held-out curated score is closer to a
+*generalize-across-constants* test than a *generalize-to-unseen-shapes* test — read the curated number with
+that ceiling in mind. Curated shapes with no combinatorial twin (variant-match, nested HOF, multi-clause
+case, Locutio) are the genuinely novel held-out tasks.
 
 ## 2. Train (free, local) — MLX LoRA
 
@@ -91,23 +101,35 @@ toward what *stated conventions* buy a capable model in-context — i.e., traini
 Watch `write` (the gap); `read` is already comparatively strong. The surface-vs-semantic split still
 applies (a tuned model that learns the dialect should close the gap from the *surface* side).
 
-## Results — the bet, confirmed (Qwen2.5-1.5B, MLX LoRA, local, $0)
-
-First local run, **2026-06-23**: trained conventions-OFF on the combinatorial corpus (5,028 pairs, 1200
-iters), evaluated **conventions-OFF / shots-0** on the curated 304-task pool (surface-exact `pass`):
+## Results (Qwen2.5-1.5B, MLX LoRA, local, $0) — **2026-06-23**, conventions-OFF / shots-0, curated 304-task pool
 
 | condition | write | read | assemble | total |
 |---|---|---|---|---|
-| base (no adapter)     | **0/151 (0.0%)** | 43/141 (30.5%) | 12/12 (100%) | 55/304 (18.1%) |
-| **+ LoRA (corpus-tuned)** | **129/151 (85.4%)** | 111/141 (78.7%) | 12/12 (100%) | **252/304 (82.9%)** |
+| base (no adapter)                | 0/151 (0.0%)   | 43/141 (30.5%) | 12/12 (100%) | 55/304 (18.1%) |
+| tuned, **LEAKED** (curated in training) | 129/151 (85.4%) | 111/141 (78.7%) | 12/12 (100%) | 252/304 (82.9%) |
+| tuned, **held-out** (curated removed via `--holdout-corpus`) | **37/151 (24.5%)** | **51/141 (36.2%)** | 0/12 (0%) | **88/304 (28.9%)** |
 
-**`write`: 0% → 85.4%, purely from SFT** — no conventions in the prompt, no few-shot. The base model
-literally cannot emit Nova Lingua surface; the fine-tuned one writes it. `read` likewise jumps 30.5% →
-78.7%. Decisively, **tuned surface ≈ semantic** (write 85.4% surface vs 86.1% after dialect-repair) — i.e.
-training learned the *surface dialect itself*, closing the very gap that 3–10 few-shot examples never could
-(the in-context conventions-off ceiling for `write` was ~26% surface / ~50% semantic). This is the
-corpus-teaches-the-dialect thesis, validated on a **trainable, redistributable, Apache-2.0 open-weights
-model** — and the adapter is the artifact the OSS commons can actually ship.
+**The held-out row is the real result; the leaked row is a cautionary contrast.** A first run trained on the
+naive combinatorial corpus and scored 82.9% — but that corpus is a superset of the eval set, so the model
+had memorized every eval task; the number measured recall, not learning. With the curated eval set held out
+of training, the honest generalization lift is **write 0% → 24.5%, read 30.5% → 36.2%**.
+
+What that means, read straight:
+- **The dialect IS partially learnable from SFT.** Base `write` is a hard 0% (the model cannot emit Nova
+  Lingua surface at all), so 24.5% on genuinely held-out tasks is real learning, not lookup.
+- **But 1.5B + ~5k pairs is far from "speaks the language."** 24.5% is well below both the memorized number
+  and the in-context conventions-*on* ceiling (~99%), and it's likely an *upper* bound on novel-shape
+  generalization because parametric twins remain in training (see the integrity note above).
+- **`read` barely moves (+5.7pts)** — comprehension was already the stronger skill and gains little here.
+- **`assemble` regresses 100% → 0%** — the held-out training had *zero* assemble examples (all 12 curated
+  ones were held out, and the combinatorial generator emits none), so the adapter shifted the model out of
+  the assemble format (catastrophic interference). Fix: include assemble shapes in training data.
+
+**Honest bottom line:** open-weights SFT teaches the surface dialect *partially* and cheaply, but this run
+does **not** establish "a model that speaks Nova Lingua." Next levers — a larger base (3B/7B), training data
+with more *distinct shapes* (not just more constants of the same shapes), and keeping `assemble` in the mix.
+The infra and the leakage guard are the durable deliverables; the adapter is a redistributable artifact, but
+not yet a strong one.
 
 ## Notes
 

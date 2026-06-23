@@ -181,20 +181,25 @@ harness). The grader is provider-agnostic; the only provider-specific piece is `
 now has **both** an `AnthropicModel` (Claude, `ANTHROPIC_API_KEY`) and an `OpenAIModel` (OpenAI / fine-tuned
 `ft:*` ids, `OPENAI_API_KEY`) — the harness routes to whichever the `--model` id names.
 
-### The fine-tune bet, confirmed — open-weights, local, $0
+### The fine-tune bet — open-weights, local, $0: a partial, honestly-measured result
 
-The headline test is **done**, on the open-weights arm (see [`FINETUNING_OPENWEIGHTS.md`](FINETUNING_OPENWEIGHTS.md)):
-a Qwen2.5-1.5B (Apache-2.0) LoRA fine-tune, trained conventions-OFF on the combinatorial corpus and run
-entirely **on-device via Apple MLX** (no API, no key, no cost). Evaluated **conventions-OFF / shots-0** on
-the curated pool — nothing in the prompt teaches the dialect, so any lift is from the weights:
+The first open-weights run (see [`FINETUNING_OPENWEIGHTS.md`](FINETUNING_OPENWEIGHTS.md)): a Qwen2.5-1.5B
+(Apache-2.0) LoRA fine-tune, trained conventions-OFF and run entirely **on-device via Apple MLX** (no API,
+no key, no cost), evaluated **conventions-OFF / shots-0** on the curated pool (nothing in the prompt teaches
+the dialect, so any lift is from the weights):
 
 | condition | write | read | total |
 |---|---|---|---|
-| base (no adapter)        | **0/151 (0.0%)** | 43/141 (30.5%) | 55/304 (18.1%) |
-| **+ LoRA (corpus-tuned)** | **129/151 (85.4%)** | 111/141 (78.7%) | **252/304 (82.9%)** |
+| base (no adapter)                                | 0/151 (0.0%)   | 43/141 (30.5%) | 55/304 (18.1%) |
+| tuned — curated **LEAKED** into training (recall) | 129/151 (85.4%) | 111/141 (78.7%) | 252/304 (82.9%) |
+| tuned — curated **held out** (true generalization) | **37/151 (24.5%)** | **51/141 (36.2%)** | **88/304 (28.9%)** |
 
-`write` goes **0% → 85.4%** purely from SFT, and tuned **surface ≈ semantic** (85.4 vs 86.1) — training
-learned the *surface dialect itself*, closing the exact gap few-shot couldn't (in-context conventions-off
-`write` plateaued at ~26% surface / ~50% modulo-dialect). The harness routes `mlx:<repo>[::<adapter>]` to a
-local MLX run via `MLXModel`. The OpenAI path in `FINETUNING.md` remains a billed cross-check on a different
-base family; the open-weights adapter is the artifact the OSS commons can actually redistribute.
+**Read the held-out row, not the leaked one.** `gen_corpus.py --combinatorial` is a *superset* of the curated
+eval set, so training on it naively leaks 100% of the eval and scores recall (82.9%), not learning. With the
+eval held out (`export_finetune.py --holdout-corpus`), the honest lift is **write 0% → 24.5%** — real (base
+is a hard 0%), but well short of "speaks the language" and likely an upper bound (parametric twins remain in
+training). `read` barely moves and `assemble` regresses (no assemble examples survived the holdout). So:
+open-weights SFT teaches the surface dialect *partially* and cheaply; it is **not yet** a model that speaks
+Nova Lingua. Next levers: larger base (3B/7B), more *distinct shapes* in training, keep assemble in the mix.
+The harness routes `mlx:<repo>[::<adapter>]` to a local `MLXModel`; the OpenAI path (`FINETUNING.md`) is a
+billed cross-check, deferred.

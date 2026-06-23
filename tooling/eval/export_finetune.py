@@ -43,6 +43,10 @@ def main():
     ap.add_argument("--shots", type=int, default=0,
                     help="few-shot demos in the system prompt; 0 (default) trains every example as a target.")
     ap.add_argument("--kinds", default="write,read,assemble", help="comma-separated task kinds to export")
+    ap.add_argument("--holdout-corpus", default=None,
+                    help="exclude any training task whose (prompt,gold) appears in this corpus's tasks — "
+                         "the eval set, to prevent train/eval leakage. The combinatorial corpus is a "
+                         "SUPERSET of the curated corpus, so without this the curated eval is 100%% leaked.")
     args = ap.parse_args()
 
     if not eh.VALIDATOR.exists():
@@ -53,24 +57,46 @@ def main():
 
     corpus = [json.loads(line) for line in corpus_path.read_text().splitlines() if line.strip()]
     conv = args.conventions == "on"
-    builders = {
-        "write": lambda: eh.build_write_tasks(corpus, n_shots=args.shots, conventions=conv),
-        "read": lambda: eh.build_read_tasks(corpus, n_shots=args.shots, conventions=conv),
-        "assemble": lambda: eh.build_assemble_tasks(corpus),
-    }
+
+    def build(c, kind):
+        if kind == "write":
+            return eh.build_write_tasks(c, n_shots=args.shots, conventions=conv)
+        if kind == "read":
+            return eh.build_read_tasks(c, n_shots=args.shots, conventions=conv)
+        return eh.build_assemble_tasks(c)
+
+    # Leakage guard: build the holdout (eval) tasks the same way and drop any training task whose
+    # (prompt, gold) matches one of them. Keyed on (user, gold) — the prompt+answer the model would
+    # otherwise memorize verbatim.
+    holdout = set()
+    if args.holdout_corpus:
+        hpath = Path(args.holdout_corpus)
+        if not hpath.exists():
+            sys.exit(f"holdout corpus not found at {hpath}")
+        hcorpus = [json.loads(line) for line in hpath.read_text().splitlines() if line.strip()]
+        for kind in [k.strip() for k in args.kinds.split(",") if k.strip()]:
+            for t in build(hcorpus, kind):
+                holdout.add((t.user, t.gold))
 
     counts = {}
+    excluded = 0
     records = []
     for kind in [k.strip() for k in args.kinds.split(",") if k.strip()]:
-        tasks = builders[kind]()
-        for t in tasks:
+        kept = 0
+        for t in build(corpus, kind):
+            if (t.user, t.gold) in holdout:
+                excluded += 1
+                continue
             records.append({"kind": kind, "messages": [
                 {"role": "system", "content": t.system},
                 {"role": "user", "content": t.user},
                 {"role": "assistant", "content": t.gold},
             ]})
-        counts[kind] = len(tasks)
+            kept += 1
+        counts[kind] = kept
     total = sum(counts.values())
+    if args.holdout_corpus:
+        print(f"leakage guard: excluded {excluded} training tasks that matched the holdout corpus")
 
     if args.mlx_data:
         # MLX-LM expects a --data directory of {"messages": [...]} lines (it applies the chat template and
