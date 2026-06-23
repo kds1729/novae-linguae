@@ -90,12 +90,27 @@ deterministic (fixed seeds), so the signed exchanges are byte-reproducible.
 # build the validator first (the corpus is gated through it)
 cargo build --release --manifest-path ../validator/Cargo.toml
 
-python3 gen_corpus.py --out corpus.jsonl     # writes corpus.jsonl + corpus.jsonl.manifest.json
+python3 gen_corpus.py --out corpus.jsonl     # curated corpus.jsonl + corpus.jsonl.manifest.json
+
+# training-scale: ALSO emit the parameterized (combinatorial) function specs to a scratch path
+python3 gen_corpus.py --combinatorial --out /tmp/corpus-train.jsonl
 ```
 
 The generator **drops any example that fails a verification step and exits non-zero** if it had to — so a
 clean run is itself the guarantee that every committed example is fully verified. It is deterministic (the
 families enumerate a fixed set, no RNG — principle 5), so the corpus is byte-reproducible.
+
+### Two scales: curated vs combinatorial
+
+The default run emits the **curated** corpus (the committed `corpus.jsonl`) — families chosen for breadth
+of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **parameterized** specs
+(`combinatorial_specs`): each hand-authored shape multiplied over a fixed set of constants, operators, and
+comparisons — unary/two-step arithmetic, `map`/`filter`/`count`/predicate over a comparison, `filter`→`map`
+pipelines, guarded optionals, range tests — for the *volume* a fine-tuning dataset needs. It currently
+yields **498 generated function records (696 examples total with the curated set)**, every one through the
+same validate → typecheck → run gate, and is byte-reproducible. The large combinatorial file is regenerable
+from the generator, so it is **gitignored, not committed** — the generator is the artifact. Widen the
+`_K*` constant sets in `combinatorial_specs` to scale the count further.
 
 ## Negative examples
 

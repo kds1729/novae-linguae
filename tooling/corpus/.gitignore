@@ -1,0 +1,6 @@
+# The combinatorial / training-scale corpus is large and regenerable from the generator
+# (`gen_corpus.py --combinatorial`), so it is NOT committed — the generator is the artifact.
+# The curated corpus.jsonl (default run) IS committed.
+corpus-train.jsonl
+corpus-train.jsonl.manifest.json
+corpus-train*.jsonl

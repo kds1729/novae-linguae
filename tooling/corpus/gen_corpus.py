@@ -18,6 +18,14 @@ the verification that backs it.
 
 Deterministic by construction (principle 5): the families enumerate a fixed set, no RNG, so the corpus is
 byte-reproducible. Run `python3 gen_corpus.py --out corpus.jsonl` (also writes `<out>.manifest.json`).
+
+Two scales. By default this emits the **curated** corpus (the committed `corpus.jsonl`): hand-authored
+families chosen for breadth of shape, plus agent-loop exchanges, transcripts, negatives, and compositions
+— the eval pool and the showcase. With `--combinatorial` it ALSO emits **parameterized** function specs —
+each hand-authored shape multiplied over a fixed set of constants/operators/comparisons — for a
+training-scale corpus (point `--out` at a scratch path; see `combinatorial_specs`). Every generated spec
+still flows through the same verify gate. The large combinatorial file is regenerable, so it is gitignored
+and not committed — the generator is the artifact.
 """
 
 import argparse
@@ -1574,6 +1582,135 @@ def nested_hof_funcs():
     ]
 
 
+# --- combinatorial generation: parameterized templates, verified at scale ------------------------
+#
+# The hand-authored families above give breadth of SHAPE; these multiply each shape over a fixed set of
+# constants/operators/comparisons to give the VOLUME a fine-tuning dataset needs. Every generated spec
+# still flows through the same build_and_verify gate (validate + typecheck + run), so each is
+# correct-by-construction AND checked by the reference tooling. Deterministic (fixed enumeration, no RNG)
+# so the output is byte-reproducible. Opt-in via `gen_corpus.py --combinatorial --out <scratch path>`; the
+# curated corpus.jsonl (default, no flag) is unchanged. Widen the sets below to scale the count further.
+
+_KADD = [1, 2, 3, 4, 5, 6, 10]      # constants for add/sub
+_KMUL = [2, 3, 4, 5, 6, 10]         # constants for mul (1 omitted — identity)
+_KCMP = [0, 1, 2, 3, 4, 5, 10]      # constants for comparisons
+_K2 = {"add": [1, 2, 3, 4, 5, 10], "sub": [1, 2, 3, 4, 5, 10], "mul": [2, 3, 4, 5, 10]}  # two-step
+_INT_IN = [0, 1, -1, 4, -3, 7, 12]                              # worked inputs for INT-domain functions
+_LIST_IN = [[], [1, 2, 3], [5, -2, 4, 0], [-1, -2], [3, 3, 7]]  # worked inputs for List-domain functions
+_AOP = {"add": lambda a, b: a + b, "sub": lambda a, b: a - b, "mul": lambda a, b: a * b}
+_CMP = {"lt": lambda a, b: a < b, "le": lambda a, b: a <= b, "gt": lambda a, b: a > b,
+        "ge": lambda a, b: a >= b, "eq": lambda a, b: a == b}
+_CMPWORD = {"lt": "less than", "le": "at most", "gt": "greater than", "ge": "at least", "eq": "equal to"}
+_OPWORD = {"add": "add", "sub": "subtract", "mul": "multiply by"}
+_INTENT1 = {"add": lambda k: f"Add {k} to a number.", "sub": lambda k: f"Subtract {k} from a number.",
+            "mul": lambda k: f"Multiply a number by {k}."}
+
+
+def _cspec(name, intent, summary, tags, ty, body, examples):
+    return {"name": name, "intent": intent, "summary": summary, "tags": ["combinatorial"] + tags,
+            "type_ast": ty, "body_ast": body, "examples": examples, "properties": [], "prove": False}
+
+
+def combinatorial_specs(exclude_names=()):
+    """Parameterized function specs (same format as the hand-authored families). See the section note."""
+    out, seen_body, seen_name = [], set(), set(exclude_names)
+
+    def add(spec):
+        key = json.dumps(spec["body_ast"], sort_keys=True)
+        if spec["name"] in seen_name or key in seen_body:
+            return
+        seen_name.add(spec["name"])
+        seen_body.add(key)
+        out.append(spec)
+
+    x, n, xs = var("x"), var("n"), var("xs")
+
+    # 1. unary scalar arithmetic:  \n -> op n k   (+ reversed subtraction  k - n)
+    for op in ("add", "sub", "mul"):
+        pf = _AOP[op]
+        for k in (_KMUL if op == "mul" else _KADD):
+            add(_cspec(f"{op}_{k}", _INTENT1[op](k), f"{op} n {k}", ["arithmetic", "unary", op],
+                       fn([INT], INT), lam(["n"], bapp(op, n, int_lit(k))),
+                       [{"args": [v], "result": pf(v, k)} for v in _INT_IN]))
+    for k in _KADD:
+        add(_cspec(f"from_{k}", f"Subtract a number from {k}.", f"{k} - n", ["arithmetic", "unary", "sub"],
+                   fn([INT], INT), lam(["n"], bapp("sub", int_lit(k), n)),
+                   [{"args": [v], "result": k - v} for v in _INT_IN]))
+
+    # 2. map a unary op over a list:  \xs -> map (\x -> op x k) xs
+    for op in ("add", "sub", "mul"):
+        pf = _AOP[op]
+        for k in (_KMUL if op == "mul" else _KADD):
+            add(_cspec(f"map_{op}_{k}", f"{_OPWORD[op].capitalize()} {k} over every element of a list.",
+                       f"map ({op} x {k}) xs", ["list", "map", op], fn([list_of(INT)], list_of(INT)),
+                       lam(["xs"], bapp("map", lam(["x"], bapp(op, x, int_lit(k))), xs)),
+                       [{"args": [lst], "result": [pf(v, k) for v in lst]} for lst in _LIST_IN]))
+
+    # 3. filter / 4. count / 5. predicate, by comparison:  cmp _ k
+    for cmp, cf in _CMP.items():
+        for k in _KCMP:
+            add(_cspec(f"filter_{cmp}_{k}", f"Keep the list elements {_CMPWORD[cmp]} {k}.",
+                       f"filter ({cmp} x {k}) xs", ["list", "filter", "predicate"], fn([list_of(INT)], list_of(INT)),
+                       lam(["xs"], bapp("filter", lam(["x"], bapp(cmp, x, int_lit(k))), xs)),
+                       [{"args": [lst], "result": [v for v in lst if cf(v, k)]} for lst in _LIST_IN]))
+            add(_cspec(f"count_{cmp}_{k}", f"Count the list elements {_CMPWORD[cmp]} {k}.",
+                       f"length (filter ({cmp} x {k}) xs)", ["list", "filter", "count"], fn([list_of(INT)], NAT),
+                       lam(["xs"], bapp("length", bapp("filter", lam(["x"], bapp(cmp, x, int_lit(k))), xs))),
+                       [{"args": [lst], "result": sum(1 for v in lst if cf(v, k))} for lst in _LIST_IN]))
+            add(_cspec(f"is_{cmp}_{k}", f"Test whether a number is {_CMPWORD[cmp]} {k}.", f"{cmp} n {k}",
+                       ["predicate", "comparison"], fn([INT], BOOL), lam(["n"], bapp(cmp, n, int_lit(k))),
+                       [{"args": [v], "result": cf(v, k)} for v in _INT_IN]))
+
+    # 6. two-step scalar arithmetic:  \n -> op2 (op1 n k1) k2
+    steps = [(op, k) for op in ("add", "sub", "mul") for k in _K2[op]]
+    for op1, k1 in steps:
+        for op2, k2 in steps:
+            pf1, pf2 = _AOP[op1], _AOP[op2]
+            add(_cspec(f"{op1}{k1}_{op2}{k2}",
+                       f"{_OPWORD[op1].capitalize()} {k1}, then {_OPWORD[op2]} {k2}.",
+                       f"{op2} ({op1} n {k1}) {k2}", ["arithmetic", "composition", "two-step"], fn([INT], INT),
+                       lam(["n"], bapp(op2, bapp(op1, n, int_lit(k1)), int_lit(k2))),
+                       [{"args": [v], "result": pf2(pf1(v, k1), k2)} for v in _INT_IN]))
+
+    # 7. guarded optional:  \n -> case cmp n k of { true => Just(op n k2); false => None }
+    for cmp in ("gt", "ge", "lt"):
+        cf = _CMP[cmp]
+        for op in ("add", "sub", "mul"):
+            pf, k2 = _AOP[op], (2 if op == "mul" else 1)
+            for k in (1, 2, 3):
+                add(_cspec(f"guard_{cmp}_{k}_{op}",
+                           f"When a number is {_CMPWORD[cmp]} {k}, return it {_OPWORD[op]} {k2} wrapped in Just; else None.",
+                           f"case {cmp} n {k} => Just({op} n {k2}) / None", ["maybe", "variant", "case", "guarded"],
+                           fn([INT], maybe_t(INT)),
+                           lam(["n"], case_bool(bapp(cmp, n, int_lit(k)),
+                                                variant_expr("Just", bapp(op, n, int_lit(k2))), variant_expr("None"))),
+                           [{"args": [v], "result": (V("Just", pf(v, k2)) if cf(v, k) else V("None"))} for v in _INT_IN]))
+
+    # 8. range predicate:  \n -> and (ge n lo) (le n hi)
+    for lo, hi in [(0, 5), (1, 10), (2, 8), (-5, 5), (0, 9), (3, 7)]:
+        add(_cspec(f"in_range_{lo}_{hi}".replace("-", "m"),
+                   f"Test whether a number is in the range {lo} to {hi} inclusive.",
+                   f"and (ge n {lo}) (le n {hi})", ["predicate", "comparison", "range"], fn([INT], BOOL),
+                   lam(["n"], bapp("and", bapp("ge", n, int_lit(lo)), bapp("le", n, int_lit(hi)))),
+                   [{"args": [v], "result": (lo <= v <= hi)} for v in _INT_IN]))
+
+    # 9. filter then map:  \xs -> map (\x -> op x k2) (filter (\x -> cmp x k) xs)
+    for cmp in ("gt", "ge", "lt", "le"):
+        cf = _CMP[cmp]
+        for op in ("add", "mul"):
+            pf, k2 = _AOP[op], (2 if op == "mul" else 1)
+            for k in (0, 1, 3):
+                add(_cspec(f"map_{op}{k2}_filter_{cmp}_{k}",
+                           f"Keep the elements {_CMPWORD[cmp]} {k}, then {_OPWORD[op]} {k2}.",
+                           f"map ({op} x {k2}) (filter ({cmp} x {k}) xs)", ["list", "map", "filter", "composition"],
+                           fn([list_of(INT)], list_of(INT)),
+                           lam(["xs"], bapp("map", lam(["x"], bapp(op, x, int_lit(k2))),
+                                            bapp("filter", lam(["x"], bapp(cmp, x, int_lit(k))), xs))),
+                           [{"args": [lst], "result": [pf(v, k2) for v in lst if cf(v, k)]} for lst in _LIST_IN]))
+
+    return out
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + float_funcs()
@@ -2346,6 +2483,9 @@ def main():
     ap.add_argument("--out", default=str(_HERE.parent / "corpus.jsonl"), help="output JSONL path")
     ap.add_argument("--keep-unverified", action="store_true",
                     help="emit examples even if a verification step fails (default: drop them, loudly)")
+    ap.add_argument("--combinatorial", action="store_true",
+                    help="ALSO generate combinatorial (parameterized) function specs for a training-scale "
+                         "corpus — point --out at a scratch path. The curated corpus.jsonl (no flag) is unchanged.")
     args = ap.parse_args()
 
     if not VALIDATOR.exists():
@@ -2355,8 +2495,15 @@ def main():
     examples, dropped = [], []
     with tempfile.TemporaryDirectory(prefix="nlcorpus-") as wd:
         # Nova Lingua — verified function records (first-order specs, then the higher-order ones whose
-        # examples reference helper functions by fn_ref).
-        for spec in specs + higher_order_funcs() + higher_order_more() + provenance_funcs():
+        # examples reference helper functions by fn_ref). With --combinatorial, append the parameterized
+        # specs (deduped against all hand-authored names) for a training-scale corpus.
+        ho = higher_order_funcs() + higher_order_more() + provenance_funcs()
+        combo = []
+        if args.combinatorial:
+            existing = {s["name"] for s in specs + ho}
+            combo = combinatorial_specs(existing)
+            print(f"combinatorial: generating {len(combo)} parameterized specs", file=sys.stderr)
+        for spec in specs + ho + combo:
             ex, ok = build_and_verify(spec, wd)
             if ok or args.keep_unverified:
                 examples.append(ex)
