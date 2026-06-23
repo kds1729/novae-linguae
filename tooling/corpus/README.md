@@ -106,10 +106,11 @@ The default run emits the **curated** corpus (the committed `corpus.jsonl`) — 
 of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **parameterized** specs
 (`combinatorial_specs`): each hand-authored shape multiplied over a fixed set of constants, operators, and
 comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
-`filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates — for the
-*volume* a fine-tuning dataset needs. It currently yields **2,164 generated function records (2,362
-examples total with the curated set)**, every one through the same validate → typecheck → run gate, and is
-byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
+`filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
+**structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
+parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **2,494 generated
+function records (2,692 examples total with the curated set)**, every one through the same validate →
+typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,
 not committed** — the generator is the artifact. Widen the `_K*` constant sets in `combinatorial_specs` to

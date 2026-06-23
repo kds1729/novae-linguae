@@ -1738,6 +1738,49 @@ def combinatorial_specs(exclude_names=()):
                                lam(["n"], bapp(logic, bapp(cmp1, n, int_lit(k1)), bapp(cmp2, n, int_lit(k2)))),
                                [{"args": [v], "result": lf(cf1(v, k1), cf2(v, k2))} for v in _INT_IN]))
 
+    # 12. STRUCTURAL RECURSION on the tail — the write-hardest shapes (recursion + nested case), at scale.
+    # The measured weak spot is generating recursion conventions-off; these parameterize it heavily.
+    nil = var("nil")
+    h = bapp("head", xs)
+    t = bapp("tail", xs)
+    for op in ("add", "sub", "mul"):
+        pf = _AOP[op]
+        for k in (_KMUL if op == "mul" else _KADD):
+            add(_cspec(f"rec_map_{op}_{k}", f"{_OPWORD[op].capitalize()} {k} over a list, by recursion.",
+                       f"nil / cons ({op} (head xs) {k}) (self (tail xs))", ["list", "recursion", "map", op],
+                       fn([list_of(INT)], list_of(INT)),
+                       lam(["xs"], case_null("xs", nil, bapp("cons", bapp(op, h, int_lit(k)), bself(t)))),
+                       [{"args": [lst], "result": [pf(v, k) for v in lst]} for lst in _LIST_IN]))
+            add(_cspec(f"rec_sumof_{op}_{k}", f"Sum each list element after {_OPWORD[op]} {k}, by recursion.",
+                       f"0 / add ({op} (head xs) {k}) (self (tail xs))", ["list", "recursion", "fold", op],
+                       fn([list_of(INT)], INT),
+                       lam(["xs"], case_null("xs", int_lit(0), bapp("add", bapp(op, h, int_lit(k)), bself(t)))),
+                       [{"args": [lst], "result": sum(pf(v, k) for v in lst)} for lst in _LIST_IN]))
+    for cmp, cf in _CMP.items():
+        for k in _KCMP:
+            add(_cspec(f"rec_filter_{cmp}_{k}", f"Keep the list elements {_CMPWORD[cmp]} {k}, by recursion.",
+                       f"nil / (cons head | skip) on {cmp} (head xs) {k}, recursing on the tail",
+                       ["list", "recursion", "filter", "case"], fn([list_of(INT)], list_of(INT)),
+                       lam(["xs"], case_null("xs", nil,
+                            case_bool(bapp(cmp, h, int_lit(k)), bapp("cons", h, bself(t)), bself(t)))),
+                       [{"args": [lst], "result": [v for v in lst if cf(v, k)]} for lst in _LIST_IN]))
+            add(_cspec(f"rec_count_{cmp}_{k}", f"Count the list elements {_CMPWORD[cmp]} {k}, by recursion.",
+                       f"0 / (1 + self) when {cmp} (head xs) {k} else self, on the tail",
+                       ["list", "recursion", "count", "case"], fn([list_of(INT)], INT),
+                       lam(["xs"], case_null("xs", int_lit(0),
+                            case_bool(bapp(cmp, h, int_lit(k)), bapp("add", int_lit(1), bself(t)), bself(t)))),
+                       [{"args": [lst], "result": sum(1 for v in lst if cf(v, k))} for lst in _LIST_IN]))
+            add(_cspec(f"rec_all_{cmp}_{k}", f"Test whether every list element is {_CMPWORD[cmp]} {k}, by recursion.",
+                       f"true / and ({cmp} (head xs) {k}) (self (tail xs))", ["list", "recursion", "predicate", "case"],
+                       fn([list_of(INT)], BOOL),
+                       lam(["xs"], case_null("xs", bool_lit(True), bapp("and", bapp(cmp, h, int_lit(k)), bself(t)))),
+                       [{"args": [lst], "result": all(cf(v, k) for v in lst)} for lst in _LIST_IN]))
+            add(_cspec(f"rec_any_{cmp}_{k}", f"Test whether any list element is {_CMPWORD[cmp]} {k}, by recursion.",
+                       f"false / or ({cmp} (head xs) {k}) (self (tail xs))", ["list", "recursion", "predicate", "case"],
+                       fn([list_of(INT)], BOOL),
+                       lam(["xs"], case_null("xs", bool_lit(False), bapp("or", bapp(cmp, h, int_lit(k)), bself(t)))),
+                       [{"args": [lst], "result": any(cf(v, k) for v in lst)} for lst in _LIST_IN]))
+
     return out
 
 
