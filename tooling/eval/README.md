@@ -139,6 +139,11 @@ python3 eval_harness.py                  # equivalently: --oracle
 python3 eval_harness.py --model claude-opus-4-8
 python3 eval_harness.py --model claude-opus-4-8 --effort high   # ~same cost as medium; marginally higher score
 
+# 3. Evaluate an OpenAI or FINE-TUNED model — any gpt*/ft:* id routes to the OpenAI client and BILLS
+#    OPENAI_API_KEY. This is how the headline fine-tune result is measured (see FINETUNING.md).
+python3 eval_harness.py --model gpt-4o-mini --conventions off
+python3 eval_harness.py --model ft:gpt-4o-mini:<job-suffix> --conventions off
+
 # Experiment knobs (apply to oracle or real runs)
 python3 eval_harness.py --conventions off              # drop the rules; few-shot examples only
 python3 eval_harness.py --conventions off --shots 10   # …and scale the number of shots
@@ -163,10 +168,15 @@ literals weren't parsed back to literals), which is now fixed in the validator. 
 python3 -m unittest discover -s tests
 ```
 
-## Scope (v0.1)
+## Scope, and the fine-tuning step
 
-The eval is **in-context / few-shot** — it measures whether a capable model, shown the format and a few
-examples, can produce *valid* Nova Lingua; it is not a fine-tuning loop. That's deliberate: in-context
-performance is the cheapest signal for whether the corpus representation works at all, and it's the
-metric that should gate the decision to scale corpus generation. The model client is the only
-provider-specific piece (`model_client.py`, Anthropic SDK); the grader is provider-agnostic.
+The eval started **in-context / few-shot** — the cheapest signal for whether the corpus representation
+works at all. That signal is now in: stated conventions reach ~99%, but conventions-OFF `write` plateaus
+(~26% surface / ~50% modulo dialect), and more shots only partly close it — three to ten in-context
+examples can't teach ~29 families. So in-context has served its purpose, and the project moves to the step
+the corpus was always for: **fine-tuning**. [`export_finetune.py`](export_finetune.py) turns the verified
+corpus into chat-format SFT pairs (training format == the eval prompts here), and [`FINETUNING.md`](FINETUNING.md)
+is the runbook (fine-tune `gpt-4o-mini` on OpenAI; train conventions-off; eval the tuned model with this
+harness). The grader is provider-agnostic; the only provider-specific piece is `model_client.py`, which
+now has **both** an `AnthropicModel` (Claude, `ANTHROPIC_API_KEY`) and an `OpenAIModel` (OpenAI / fine-tuned
+`ft:*` ids, `OPENAI_API_KEY`) — the harness routes to whichever the `--model` id names.
