@@ -1999,6 +1999,124 @@ def combinatorial_specs(exclude_names=()):
                        [{"args": [FnRef("double_dep"), lst], "result": [v for v in lst if cf(dbl(v), k)]}
                         for lst in ([1, -2, 3, 0], [])], fn_deps=[DBL]))
 
+    # 20. RICHER variant matching — the measured-flat `variant/case` family (held-out write ~33%). Family 13
+    # only parameterized the unwrap/map-maybe shapes; these add the four uncovered sub-shapes: consume a
+    # variant to a Bool, predicate ON the bound payload, use the Err/None-side payload (not a constant),
+    # convert between sum types, and a nested case INSIDE a variant branch. Each is structurally DISTINCT
+    # from the eval's held-out variant records (unwrap_or/is_some/maybe_double/unwrap_result/result_to_maybe/
+    # predecessor/to_result_nonneg) — different gold bodies — so they teach the skill without leaking.
+    e = var("e")
+
+    # 20a. consume a variant to a Bool (is_some is held out; these are its distinct siblings).
+    add(_cspec("is_none", "Test whether an optional is empty.", "false for Just; true for None.",
+               ["maybe", "variant", "case", "predicate"], fn([maybe_t(INT)], BOOL),
+               lam(["m"], _case_of(m, (_vpat("Just", "x"), bool_lit(False)), (_vpat("None"), bool_lit(True)))),
+               [{"args": [V("Just", 7)], "result": False}, {"args": [V("None")], "result": True}]))
+    add(_cspec("is_ok", "Test whether a result is a success.", "true for Ok; false for Err.",
+               ["result", "variant", "case", "predicate"], fn([result_t(INT, INT)], BOOL),
+               lam(["r"], _case_of(r, (_vpat("Ok", "x"), bool_lit(True)), (_vpat("Err", "e"), bool_lit(False)))),
+               [{"args": [V("Ok", 4)], "result": True}, {"args": [V("Err", 9)], "result": False}]))
+    add(_cspec("is_err", "Test whether a result is an error.", "false for Ok; true for Err.",
+               ["result", "variant", "case", "predicate"], fn([result_t(INT, INT)], BOOL),
+               lam(["r"], _case_of(r, (_vpat("Ok", "x"), bool_lit(False)), (_vpat("Err", "e"), bool_lit(True)))),
+               [{"args": [V("Ok", 4)], "result": False}, {"args": [V("Err", 9)], "result": True}]))
+
+    # 20b. predicate ON the bound payload:  case m { Just x => cmp x k ; None => false }
+    for cmp, cf in _CMP.items():
+        for k in (0, 1, 2, 5):
+            add(_cspec(f"just_{cmp}_{k}", f"Test whether an optional holds a value {_CMPWORD[cmp]} {k}.",
+                       f"({cmp} x {k}) for Just(x); false for None.", ["maybe", "variant", "case", "predicate"],
+                       fn([maybe_t(INT)], BOOL),
+                       lam(["m"], _case_of(m, (_vpat("Just", "x"), bapp(cmp, x, int_lit(k))),
+                                           (_vpat("None"), bool_lit(False)))),
+                       [{"args": [V("Just", 3)], "result": cf(3, k)}, {"args": [V("Just", -2)], "result": cf(-2, k)},
+                        {"args": [V("None")], "result": False}]))
+
+    # 20c. USE the bound payloads of both branches (unwrap_* return a constant on the empty side; these don't).
+    add(_cspec("result_either", "Get the value of a result, whichever side it is.",
+               "the payload of Ok, or the payload of Err.", ["result", "variant", "case"],
+               fn([result_t(INT, INT)], INT),
+               lam(["r"], _case_of(r, (_vpat("Ok", "x"), x), (_vpat("Err", "e"), e))),
+               [{"args": [V("Ok", 4)], "result": 4}, {"args": [V("Err", 9)], "result": 9},
+                {"args": [V("Ok", -2)], "result": -2}]))
+    for op in ("add", "sub", "mul"):
+        pf = _AOP[op]
+        for k in (1, 2, 3):
+            add(_cspec(f"result_ok_{op}_{k}", f"On success {_OPWORD[op]} {k}; on error return the error value.",
+                       f"({op} x {k}) for Ok(x); the payload for Err.", ["result", "variant", "case"],
+                       fn([result_t(INT, INT)], INT),
+                       lam(["r"], _case_of(r, (_vpat("Ok", "x"), bapp(op, x, int_lit(k))), (_vpat("Err", "e"), e))),
+                       [{"args": [V("Ok", 4)], "result": pf(4, k)}, {"args": [V("Err", 7)], "result": 7}]))
+
+    # 20d. convert between sum types (Maybe<->Result), distinct from the held-out result_to_maybe body.
+    for k in (0, -1, 1, 99):
+        add(_cspec(f"maybe_to_result_{k}".replace("-", "m"),
+                   f"Convert an optional to a result, using {k} as the error.",
+                   f"Ok(x) for Just(x); Err({k}) for None.", ["maybe", "result", "variant", "case"],
+                   fn([maybe_t(INT)], result_t(INT, INT)),
+                   lam(["m"], _case_of(m, (_vpat("Just", "x"), variant_expr("Ok", x)),
+                                       (_vpat("None"), variant_expr("Err", int_lit(k))))),
+                   [{"args": [V("Just", 4)], "result": V("Ok", 4)}, {"args": [V("None")], "result": V("Err", k)}]))
+    add(_cspec("result_swap", "Swap the success and error sides of a result.",
+               "Err(x) for Ok(x); Ok(e) for Err(e).", ["result", "variant", "case"],
+               fn([result_t(INT, INT)], result_t(INT, INT)),
+               lam(["r"], _case_of(r, (_vpat("Ok", "x"), variant_expr("Err", x)),
+                                   (_vpat("Err", "e"), variant_expr("Ok", e)))),
+               [{"args": [V("Ok", 4)], "result": V("Err", 4)}, {"args": [V("Err", 9)], "result": V("Ok", 9)}]))
+    add(_cspec("err_to_maybe", "Keep only the error value of a result as an optional.",
+               "None for Ok; Just(e) for Err(e).", ["result", "maybe", "variant", "case"],
+               fn([result_t(INT, INT)], maybe_t(INT)),
+               lam(["r"], _case_of(r, (_vpat("Ok", "x"), variant_expr("None")),
+                                   (_vpat("Err", "e"), variant_expr("Just", e)))),
+               [{"args": [V("Ok", 4)], "result": V("None")}, {"args": [V("Err", 9)], "result": V("Just", 9)}]))
+
+    # 20e. map over ONE side of a Result (the other passes through) — distinct from map_maybe (over Maybe).
+    for op in ("add", "mul"):
+        pf = _AOP[op]
+        for k in (1, 2, 3):
+            add(_cspec(f"map_ok_{op}_{k}", f"{_OPWORD[op].capitalize()} {k} on the success value, leaving Err unchanged.",
+                       f"Ok({op} x {k}) for Ok(x); Err(e) for Err.", ["result", "variant", "case", "map"],
+                       fn([result_t(INT, INT)], result_t(INT, INT)),
+                       lam(["r"], _case_of(r, (_vpat("Ok", "x"), variant_expr("Ok", bapp(op, x, int_lit(k)))),
+                                           (_vpat("Err", "e"), variant_expr("Err", e)))),
+                       [{"args": [V("Ok", 4)], "result": V("Ok", pf(4, k))}, {"args": [V("Err", 5)], "result": V("Err", 5)}]))
+            add(_cspec(f"map_err_{op}_{k}", f"{_OPWORD[op].capitalize()} {k} on the error value, leaving Ok unchanged.",
+                       f"Ok(x) for Ok; Err({op} e {k}) for Err(e).", ["result", "variant", "case", "map"],
+                       fn([result_t(INT, INT)], result_t(INT, INT)),
+                       lam(["r"], _case_of(r, (_vpat("Ok", "x"), variant_expr("Ok", x)),
+                                           (_vpat("Err", "e"), variant_expr("Err", bapp(op, e, int_lit(k)))))),
+                       [{"args": [V("Ok", 4)], "result": V("Ok", 4)}, {"args": [V("Err", 5)], "result": V("Err", pf(5, k))}]))
+
+    # 20f. a guard INSIDE the Just branch — a nested case under a variant pattern (the richest shape).
+    for cmp, cf in (("gt", lambda a, b: a > b), ("ge", lambda a, b: a >= b), ("lt", lambda a, b: a < b)):
+        for k in (0, 1, 2):
+            add(_cspec(f"keep_just_{cmp}_{k}",
+                       f"Keep the optional's value only when it is {_CMPWORD[cmp]} {k}, else empty.",
+                       f"Just(x) when {cmp} x {k}; None otherwise; None for None.",
+                       ["maybe", "variant", "case", "guarded"], fn([maybe_t(INT)], maybe_t(INT)),
+                       lam(["m"], _case_of(m,
+                            (_vpat("Just", "x"), case_bool(bapp(cmp, x, int_lit(k)),
+                                                           variant_expr("Just", x), variant_expr("None"))),
+                            (_vpat("None"), variant_expr("None")))),
+                       [{"args": [V("Just", 3)], "result": (V("Just", 3) if cf(3, k) else V("None"))},
+                        {"args": [V("Just", -1)], "result": (V("Just", -1) if cf(-1, k) else V("None"))},
+                        {"args": [V("None")], "result": V("None")}]))
+
+    # 20g. more multi-clause case chains (distinct from grade/compare_to/threshold3): unary sign, hi-clamp.
+    add(_cspec("sign", "Map a number to its sign: -1, 0, or 1.",
+               "-1 if n < 0; 0 if n == 0; 1 otherwise — a nested case.", ["arithmetic", "order", "case"],
+               fn([INT], INT),
+               lam(["n"], case_bool(bapp("lt", n, int_lit(0)), int_lit(-1),
+                    case_bool(bapp("eq", n, int_lit(0)), int_lit(0), int_lit(1)))),
+               [{"args": [v], "result": (-1 if v < 0 else 0 if v == 0 else 1)} for v in (-5, -1, 0, 3, 7)]))
+    for k in (5, 10, 100):
+        add(_cspec(f"clamp_hi_{k}", f"Clamp a number to between 0 and {k} inclusive.",
+                   f"0 if n < 0; {k} if n > {k}; n otherwise — a nested case.", ["arithmetic", "order", "case"],
+                   fn([INT], INT),
+                   lam(["n"], case_bool(bapp("lt", n, int_lit(0)), int_lit(0),
+                        case_bool(bapp("gt", n, int_lit(k)), int_lit(k), n))),
+                   [{"args": [v], "result": (0 if v < 0 else k if v > k else v)} for v in (-3, 0, 2, k, k + 5)]))
+
     return out
 
 
