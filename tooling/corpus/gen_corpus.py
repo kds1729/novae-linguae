@@ -1906,6 +1906,99 @@ def combinatorial_specs(exclude_names=()):
                    [{"args": [v], "result": (2 if v >= hi else 1 if v >= lo else 0)}
                     for v in (-1, 0, lo, hi, lo + 1, hi + 5)]))
 
+    # 19. fn_ref HIGHER-ORDER shapes — bodies that APPLY a function-valued parameter (the measured-flat
+    # `list/hof` gap). Each example supplies the function as an fn_ref to a helper in `fn_deps` (built by
+    # build_and_verify so it runs end to end); the model writes the polymorphic body, which doesn't depend
+    # on the helper. Monomorphic INT typing keeps verification robust (the skill — writing `\f xs -> map f …`
+    # — transfers regardless of the type annotation). Shapes are DISTINCT from the eval's held-out fn_ref
+    # records (map_with/filter_with/apply_to/twice/compose2/all_with/…), so they teach the skill without
+    # leaking those answers.
+    def _hu(nm, b, py):  # unary INT->INT helper record + its Python evaluator
+        return {"name": nm, "type_ast": fn([INT], INT), "body_ast": b,
+                "examples": [{"args": [3], "result": py(3)}, {"args": [-2], "result": py(-2)}]}, py
+    DBL, dbl = _hu("double_dep", lam(["n"], bapp("add", var("n"), var("n"))), lambda v: 2 * v)
+    INC, inc = _hu("inc_dep", lam(["n"], bapp("add", var("n"), int_lit(1))), lambda v: v + 1)
+    SQ, sq = _hu("square_dep", lam(["n"], bapp("mul", var("n"), var("n"))), lambda v: v * v)
+    ISPOS = {"name": "is_pos_dep", "type_ast": fn([INT], BOOL),
+             "body_ast": lam(["n"], bapp("gt", var("n"), int_lit(0))),
+             "examples": [{"args": [3], "result": True}, {"args": [-1], "result": False}]}
+    ISEVEN = {"name": "is_even_dep", "type_ast": fn([INT], BOOL),
+              "body_ast": lam(["n"], bapp("eq", bapp("mod", var("n"), int_lit(2)), int_lit(0))),
+              "examples": [{"args": [4], "result": True}, {"args": [3], "result": False}]}
+    ADD2 = {"name": "add2_dep", "type_ast": fn([INT, INT], INT),
+            "body_ast": lam(["a", "b"], bapp("add", var("a"), var("b"))), "examples": [{"args": [1, 2], "result": 3}]}
+    MAX2 = {"name": "max2_dep", "type_ast": fn([INT, INT], INT),
+            "body_ast": lam(["a", "b"], bapp("max", var("a"), var("b"))), "examples": [{"args": [1, 2], "result": 2}]}
+    unary_fn, binary_fn, pred_fn = fn([INT], INT), fn([INT, INT], INT), fn([INT], BOOL)
+
+    # apply a function to a fixed constant:  \f -> f k
+    for k in range(0, 13):
+        add(_cspec(f"apply_to_{k}", f"Apply a function to {k}.", f"f {k}", ["higher-order", "apply", "fn-ref"],
+                   fn([unary_fn], INT), lam(["f"], bapp("f", int_lit(k))),
+                   [{"args": [FnRef("double_dep")], "result": dbl(k)}, {"args": [FnRef("inc_dep")], "result": inc(k)}],
+                   fn_deps=[DBL, INC]))
+    # nested application:  \f x -> f (f (f x))   and   \f g h x -> f (g (h x))
+    add(_cspec("thrice", "Apply a function to a value three times.", "f (f (f x))",
+               ["higher-order", "apply", "fn-ref"], fn([unary_fn, INT], INT),
+               lam(["f", "x"], bapp("f", bapp("f", bapp("f", var("x"))))),
+               [{"args": [FnRef("double_dep"), 3], "result": dbl(dbl(dbl(3)))},
+                {"args": [FnRef("inc_dep"), 5], "result": inc(inc(inc(5)))}], fn_deps=[DBL, INC]))
+    add(_cspec("compose3", "Compose three functions and apply them to a value.", "f (g (h x))",
+               ["higher-order", "compose", "fn-ref"], fn([unary_fn, unary_fn, unary_fn, INT], INT),
+               lam(["f", "g", "h", "x"], bapp("f", bapp("g", bapp("h", var("x"))))),
+               [{"args": [FnRef("double_dep"), FnRef("inc_dep"), FnRef("double_dep"), 3], "result": dbl(inc(dbl(3)))},
+                {"args": [FnRef("inc_dep"), FnRef("double_dep"), FnRef("inc_dep"), 2], "result": inc(dbl(inc(2)))}],
+               fn_deps=[DBL, INC]))
+    # two function arguments through builtins:  map f (map g xs) / map f (filter p xs)
+    add(_cspec("map_compose", "Map one function over the result of mapping another.", "map f (map g xs)",
+               ["list", "higher-order", "map", "fn-ref"], fn([unary_fn, unary_fn, list_of(INT)], list_of(INT)),
+               lam(["f", "g", "xs"], bapp("map", var("f"), bapp("map", var("g"), var("xs")))),
+               [{"args": [FnRef("double_dep"), FnRef("inc_dep"), [1, 2, 3]], "result": [dbl(inc(v)) for v in [1, 2, 3]]},
+                {"args": [FnRef("double_dep"), FnRef("inc_dep"), []], "result": []}], fn_deps=[DBL, INC]))
+    add(_cspec("filter_map_with", "Map a function over the elements that pass a predicate.", "map f (filter p xs)",
+               ["list", "higher-order", "map", "filter", "fn-ref"],
+               fn([pred_fn, unary_fn, list_of(INT)], list_of(INT)),
+               lam(["p", "f", "xs"], bapp("map", var("f"), bapp("filter", var("p"), var("xs")))),
+               [{"args": [FnRef("is_pos_dep"), FnRef("double_dep"), [1, -2, 3]], "result": [dbl(v) for v in [1, 3]]},
+                {"args": [FnRef("is_pos_dep"), FnRef("double_dep"), []], "result": []}], fn_deps=[ISPOS, DBL]))
+    # function argument combined with a builtin fold / a lambda:
+    add(_cspec("sum_with", "Sum a list after applying a function to each element.", "foldl add 0 (map f xs)",
+               ["list", "higher-order", "map", "fold", "fn-ref"], fn([unary_fn, list_of(INT)], INT),
+               lam(["f", "xs"], bapp("foldl", var("add"), int_lit(0), bapp("map", var("f"), var("xs")))),
+               [{"args": [FnRef("double_dep"), [1, 2, 3]], "result": sum(dbl(v) for v in [1, 2, 3])},
+                {"args": [FnRef("square_dep"), [1, 2, 3]], "result": sum(sq(v) for v in [1, 2, 3])}], fn_deps=[DBL, SQ]))
+    add(_cspec("reject_with", "Keep the elements that FAIL a predicate.", "filter (not (p x)) xs",
+               ["list", "higher-order", "filter", "fn-ref"], fn([pred_fn, list_of(INT)], list_of(INT)),
+               lam(["p", "xs"], bapp("filter", lam(["x"], bapp("not", bapp("p", var("x")))), var("xs"))),
+               [{"args": [FnRef("is_pos_dep"), [1, -2, 3, 0]], "result": [v for v in [1, -2, 3, 0] if not v > 0]},
+                {"args": [FnRef("is_even_dep"), [1, 2, 3, 4]], "result": [v for v in [1, 2, 3, 4] if not v % 2 == 0]}],
+               fn_deps=[ISPOS, ISEVEN]))
+    # fold with a function argument and a fixed seed:  \f xs -> foldl f k xs
+    for k in (0, 1, 2, 5, 10):
+        add(_cspec(f"fold_with_{k}", f"Left-fold a list with a function, seeded with {k}.", f"foldl f {k} xs",
+                   ["list", "higher-order", "fold", "fn-ref"], fn([binary_fn, list_of(INT)], INT),
+                   lam(["f", "xs"], bapp("foldl", var("f"), int_lit(k), var("xs"))),
+                   [{"args": [FnRef("add2_dep"), [1, 2, 3]], "result": k + 6},
+                    {"args": [FnRef("max2_dep"), [1, 2, 3]], "result": max(k, 3)}], fn_deps=[ADD2, MAX2]))
+    # apply f to each element, THEN a builtin (inside a map / filter lambda):
+    for op in ("add", "mul"):
+        pf = _AOP[op]
+        for k in (1, 2, 3):
+            add(_cspec(f"map_apply_{op}_{k}", f"Apply a function to each element, then {_OPWORD[op]} {k}.",
+                       f"map ({op} (f x) {k}) xs", ["list", "higher-order", "map", "fn-ref"],
+                       fn([unary_fn, list_of(INT)], list_of(INT)),
+                       lam(["f", "xs"], bapp("map", lam(["x"], bapp(op, bapp("f", var("x")), int_lit(k))), var("xs"))),
+                       [{"args": [FnRef("double_dep"), lst], "result": [pf(dbl(v), k) for v in lst]}
+                        for lst in ([1, 2, 3], [])], fn_deps=[DBL]))
+    for cmp, cf in (("gt", lambda a, b: a > b), ("lt", lambda a, b: a < b)):
+        for k in (0, 2, 4):
+            add(_cspec(f"filter_apply_{cmp}_{k}", f"Keep the elements whose function-image is {_CMPWORD[cmp]} {k}.",
+                       f"filter ({cmp} (f x) {k}) xs", ["list", "higher-order", "filter", "fn-ref"],
+                       fn([unary_fn, list_of(INT)], list_of(INT)),
+                       lam(["f", "xs"], bapp("filter", lam(["x"], bapp(cmp, bapp("f", var("x")), int_lit(k))), var("xs"))),
+                       [{"args": [FnRef("double_dep"), lst], "result": [v for v in lst if cf(dbl(v), k)]}
+                        for lst in ([1, -2, 3, 0], [])], fn_deps=[DBL]))
+
     return out
 
 

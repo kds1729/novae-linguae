@@ -180,9 +180,33 @@ Held-out `write` **31.8% → 41.1% (+9.3 pts)** on leak-free data — the diagno
 is the lever. The per-family write breakdown shows the gains where the new shapes landed (arithmetic 45→56%,
 comparisons 56→70%, recursion 0→14%, other 9→15%); the genuinely *higher-order* families (`list/hof`,
 `variant/case` — which pass function-valued arguments the templates don't yet parameterize) stayed flat. So
-the next coverage frontier is function-argument (`fn_ref`) HOF shapes and richer variant matching. Still not
-"speaks Nova Lingua" at 41%, but each turn of generator-breadth → retrain → measure moves it, cheaply and
-locally.
+the next coverage frontier is function-argument (`fn_ref`) HOF shapes.
+
+### Closing the fn_ref gap (v3) — the targeted family moves
+
+`combinatorial_specs()` section 19 adds **36 `fn_ref` higher-order shapes** — bodies that APPLY a
+function-valued parameter, supplied in examples as an `fn_ref` to a helper built by `build_and_verify`. They
+are *structurally distinct* from the eval's held-out fn_ref records (`map_with`/`apply_to`/`twice`/`compose2`/
+…) so they teach the skill without leaking those answers: `apply_to_k` (`\f -> f k`), `thrice`, `compose3`,
+`map_compose` (`\f g xs -> map f (map g xs)`), `filter_map_with`, `sum_with`, `reject_with`, `fold_with_k`,
+and apply-f-then-builtin shapes (`map_apply_op_k`, `filter_apply_cmp_k`). Monomorphic INT typing keeps
+verification robust; all verify, zero drops, default corpus byte-identical.
+
+Same 3B, retrained on the v3 data (v2 + the 36 fn_ref shapes):
+
+| 3B training data | write | read | total |
+|---|---|---|---|
+| narrow (1-12)            | 31.8% | 44.7% | 38.2% |
+| + broadened (13-18)      | 41.1% | 47.5% | 44.7% |
+| **+ fn_ref (19)**        | **43.0%** | **55.3%** | **48.7%** |
+
+The targeted family moved: per-family write **`list/hof` 5% → 18%** (the rest flat, as expected — untouched).
+And a spillover — **`read` +7.8 pts (47.5 → 55.3)**: the +36 fn_ref *write* examples (read training data
+unchanged) exposed more higher-order surface forms, which also helped *reading* list/HOF code. Net write
++1.9, total +4.0. The fn_ref skill is now partially learned rather than flat. Still write 43% — not "speaks
+Nova Lingua" — but the breadth → retrain → measure loop reliably moves the family each new coverage area
+targets. Remaining frontiers: richer variant-matching, deeper recursion shapes, and a larger base / more
+iters once coverage saturates.
 
 ## Notes
 
