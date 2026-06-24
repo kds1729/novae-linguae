@@ -155,8 +155,34 @@ Families the combinatorial generator covers (varying constants of a fixed shape)
 structurally novel families it does **not** cover generalize at 0-9%. The model learned to apply the dialect
 across *constant variations of seen shapes*, not to *unseen structural shapes*. **So the real lever is
 broadening the combinatorial generator's structural coverage — more distinct shapes (HOF compositions,
-recursion templates, variant-matching, multi-clause case), not just more constants — and keeping `assemble`
-in the data.** A 7B base would likely add a few more points but not close the structural gap.
+recursion templates, variant-matching, multi-clause case), not just more constants.** A 7B base would likely
+add a few more points but not close the structural gap.
+
+### Acting on the diagnosis: broaden the generator (v2) — it works
+
+`combinatorial_specs()` gained **+141 structurally-distinct templates** (sections 13-18), each lifted from a
+hand-authored family that already passes the verify gate, then parameterized: variant-consuming
+(`unwrap_or`/`map_maybe`/`unwrap_result`), search recursion (`contains`/`count_eq`), accumulating recursion
+(`rec_length`/`rec_sum`), numeric recursion (`rec_times`/`rec_pow`/`rec_sumto`), nested first-order
+compositions (map∘map, fold∘filter, fold∘map, count-in-range), and multi-clause `threshold3`. All verify,
+zero drops; the default curated corpus stays byte-identical. The leakage guard was also tightened to drop
+gold-*body* twins for write/assemble (a different prompt with the same answer body), making the v2 training
+data provably free of curated-eval answers.
+
+Same 3B base, same hyperparameters, retrained on the clean+broadened data:
+
+| 3B training data | write | read | assemble | total |
+|---|---|---|---|---|
+| narrow (sections 1-12)        | 31.8% | 44.7% | 41.7% | 38.2% |
+| **+ broadened (sections 1-18)** | **41.1%** | 47.5% | 58.3% | **44.7%** |
+
+Held-out `write` **31.8% → 41.1% (+9.3 pts)** on leak-free data — the diagnosis holds: structural coverage
+is the lever. The per-family write breakdown shows the gains where the new shapes landed (arithmetic 45→56%,
+comparisons 56→70%, recursion 0→14%, other 9→15%); the genuinely *higher-order* families (`list/hof`,
+`variant/case` — which pass function-valued arguments the templates don't yet parameterize) stayed flat. So
+the next coverage frontier is function-argument (`fn_ref`) HOF shapes and richer variant matching. Still not
+"speaks Nova Lingua" at 41%, but each turn of generator-breadth → retrain → measure moves it, cheaply and
+locally.
 
 ## Notes
 

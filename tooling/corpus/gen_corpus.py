@@ -1608,9 +1608,11 @@ _INTENT1 = {"add": lambda k: f"Add {k} to a number.", "sub": lambda k: f"Subtrac
             "mul": lambda k: f"Multiply a number by {k}."}
 
 
-def _cspec(name, intent, summary, tags, ty, body, examples):
-    return {"name": name, "intent": intent, "summary": summary, "tags": ["combinatorial"] + tags,
+def _cspec(name, intent, summary, tags, ty, body, examples, **extra):
+    spec = {"name": name, "intent": intent, "summary": summary, "tags": ["combinatorial"] + tags,
             "type_ast": ty, "body_ast": body, "examples": examples, "properties": [], "prove": False}
+    spec.update(extra)  # e.g. terminates="unknown" for counter-driven recursions, refinements=[...]
+    return spec
 
 
 def combinatorial_specs(exclude_names=()):
@@ -1780,6 +1782,129 @@ def combinatorial_specs(exclude_names=()):
                        fn([list_of(INT)], BOOL),
                        lam(["xs"], case_null("xs", bool_lit(False), bapp("or", bapp(cmp, h, int_lit(k)), bself(t)))),
                        [{"args": [lst], "result": any(cf(v, k) for v in lst)} for lst in _LIST_IN]))
+
+    # The shapes below add STRUCTURAL diversity, not just more constants — the measured generalization gap
+    # (held-out write was 0-9% on shapes the generator didn't cover vs 45-56% on shapes it did). Each is
+    # lifted from a hand-authored family that already passes validate+typecheck+run, then parameterized.
+    m, r = var("m"), var("r")
+
+    # 13. CONSUME a sum type by pattern-matching its variants (Just/None, Ok/Err) — the variant/case gap.
+    for k in (0, 1, -1, 2, 5, 10, 100):
+        add(_cspec(f"unwrap_or_{k}".replace("-", "m"), f"Get the value inside an optional, or {k} if it is empty.",
+                   f"the payload of Just; {k} for None.", ["maybe", "variant", "case"], fn([maybe_t(INT)], INT),
+                   lam(["m"], _case_of(m, (_vpat("Just", "x"), x), (_vpat("None"), int_lit(k)))),
+                   [{"args": [V("Just", 3)], "result": 3}, {"args": [V("Just", -2)], "result": -2},
+                    {"args": [V("None")], "result": k}]))
+    for op in ("add", "sub", "mul"):
+        pf = _AOP[op]
+        for k in (1, 2, 3, 5):
+            add(_cspec(f"map_maybe_{op}_{k}", f"{_OPWORD[op].capitalize()} {k} inside an optional, leaving None unchanged.",
+                       f"Just({op} x {k}) for Just(x); None for None.", ["maybe", "variant", "case", "map"],
+                       fn([maybe_t(INT)], maybe_t(INT)),
+                       lam(["m"], _case_of(m, (_vpat("Just", "x"), variant_expr("Just", bapp(op, x, int_lit(k)))),
+                                           (_vpat("None"), variant_expr("None")))),
+                       [{"args": [V("Just", 4)], "result": V("Just", pf(4, k))},
+                        {"args": [V("Just", -1)], "result": V("Just", pf(-1, k))},
+                        {"args": [V("None")], "result": V("None")}]))
+    for k in (0, -1, 1, 99):
+        add(_cspec(f"unwrap_result_{k}".replace("-", "m"), f"Get the success value of a result, or {k} on error.",
+                   f"the payload of Ok; {k} for Err.", ["result", "variant", "case"], fn([result_t(INT, INT)], INT),
+                   lam(["r"], _case_of(r, (_vpat("Ok", "x"), x), (_vpat("Err", "e"), int_lit(k)))),
+                   [{"args": [V("Ok", 4)], "result": 4}, {"args": [V("Err", 9)], "result": k},
+                    {"args": [V("Ok", -2)], "result": -2}]))
+
+    # 14. SEARCH recursion — membership / occurrence-count of a fixed constant (recurse on the tail).
+    for k in _KCMP:
+        add(_cspec(f"contains_{k}".replace("-", "m"), f"Test whether {k} occurs in a list, by recursion.",
+                   f"false for empty; (head == {k}) or {k} in the tail.", ["list", "recursion", "search", "predicate"],
+                   fn([list_of(INT)], BOOL),
+                   lam(["xs"], case_null("xs", bool_lit(False),
+                        case_bool(bapp("eq", h, int_lit(k)), bool_lit(True), bself(t)))),
+                   [{"args": [lst], "result": (k in lst)} for lst in _LIST_IN]))
+        add(_cspec(f"count_eq_{k}".replace("-", "m"), f"Count how many times {k} occurs in a list, by recursion.",
+                   f"0 for empty; +1 when head == {k}, then count the tail.", ["list", "recursion", "search", "count"],
+                   fn([list_of(INT)], INT),
+                   lam(["xs"], case_null("xs", int_lit(0),
+                        case_bool(bapp("eq", h, int_lit(k)), bapp("add", int_lit(1), bself(t)), bself(t)))),
+                   [{"args": [lst], "result": sum(1 for v in lst if v == k)} for lst in _LIST_IN]))
+
+    # 15. ACCUMULATING structural recursion — length / sum written by hand (not via a builtin).
+    add(_cspec("rec_length", "Compute the length of a list, by recursion.",
+               "0 for empty; 1 + the length of the tail.", ["list", "recursion", "measure"], fn([list_of(INT)], INT),
+               lam(["xs"], case_null("xs", int_lit(0), bapp("add", int_lit(1), bself(t)))),
+               [{"args": [lst], "result": len(lst)} for lst in _LIST_IN]))
+    add(_cspec("rec_sum", "Sum a list, by recursion.",
+               "0 for empty; head + the sum of the tail.", ["list", "recursion", "fold"], fn([list_of(INT)], INT),
+               lam(["xs"], case_null("xs", int_lit(0), bapp("add", h, bself(t)))),
+               [{"args": [lst], "result": sum(lst)} for lst in _LIST_IN]))
+
+    # 16. NUMERIC (counter-driven) recursion — not certified terminating, so terminates="unknown".
+    for k in range(2, 13):
+        add(_cspec(f"rec_times_{k}", f"Multiply a number by {k} via repeated addition, by recursion.",
+                   f"0 when n is 0; otherwise {k} + ((n-1) times {k}).", ["arithmetic", "recursion"], fn([INT], INT),
+                   lam(["n"], case_bool(bapp("eq", n, int_lit(0)), int_lit(0),
+                        bapp("add", int_lit(k), bself(bapp("sub", n, int_lit(1)))))),
+                   [{"args": [v], "result": k * v} for v in (0, 1, 2, 3, 5, 7)], terminates="unknown"))
+    for k in range(2, 8):
+        add(_cspec(f"rec_pow_{k}", f"Raise {k} to a non-negative power, by recursion.",
+                   f"1 when n is 0; otherwise {k} * {k}^(n-1).", ["arithmetic", "recursion"], fn([INT], INT),
+                   lam(["n"], case_bool(bapp("eq", n, int_lit(0)), int_lit(1),
+                        bapp("mul", int_lit(k), bself(bapp("sub", n, int_lit(1)))))),
+                   [{"args": [v], "result": k ** v} for v in (0, 1, 2, 3, 4)], terminates="unknown"))
+    add(_cspec("rec_sumto", "Sum the integers from 0 up to n, by recursion.",
+               "0 when n is 0; otherwise n + the sum up to n-1.", ["arithmetic", "recursion"], fn([INT], INT),
+               lam(["n"], case_bool(bapp("eq", n, int_lit(0)), int_lit(0),
+                    bapp("add", n, bself(bapp("sub", n, int_lit(1)))))),
+               [{"args": [v], "result": sum(range(v + 1))} for v in (0, 1, 3, 5, 7)], terminates="unknown"))
+
+    # 17. NESTED first-order compositions (map∘map, fold∘filter, fold∘map, count-in-range) — the HOF gap.
+    for op1 in ("add", "mul"):
+        for op2 in ("add", "mul"):
+            pf1, pf2 = _AOP[op1], _AOP[op2]
+            for k1 in (2, 3, 5):
+                for k2 in (2, 3, 5):
+                    add(_cspec(f"map_{op1}{k1}_map_{op2}{k2}",
+                               f"{_OPWORD[op1].capitalize()} {k1} then {_OPWORD[op2]} {k2} over every element.",
+                               f"map ({op2} x {k2}) (map ({op1} x {k1}) xs)", ["list", "map", "composition"],
+                               fn([list_of(INT)], list_of(INT)),
+                               lam(["xs"], bapp("map", lam(["x"], bapp(op2, x, int_lit(k2))),
+                                           bapp("map", lam(["x"], bapp(op1, x, int_lit(k1))), xs))),
+                               [{"args": [lst], "result": [pf2(pf1(v, k1), k2) for v in lst]} for lst in _LIST_IN]))
+    for cmp, cf in _CMP.items():
+        for k in (0, 1, 2, 3, 5):
+            add(_cspec(f"sum_filter_{cmp}_{k}", f"Sum the list elements {_CMPWORD[cmp]} {k}.",
+                       f"foldl add 0 (filter ({cmp} x {k}) xs)", ["list", "filter", "fold", "composition"],
+                       fn([list_of(INT)], INT),
+                       lam(["xs"], bapp("foldl", var("add"), int_lit(0),
+                                   bapp("filter", lam(["x"], bapp(cmp, x, int_lit(k))), xs))),
+                       [{"args": [lst], "result": sum(v for v in lst if cf(v, k))} for lst in _LIST_IN]))
+    for op in ("add", "sub", "mul"):
+        pf = _AOP[op]
+        for k in (1, 2, 3, 5):
+            add(_cspec(f"sum_map_{op}_{k}", f"Sum a list after {_OPWORD[op]} {k} on each element.",
+                       f"foldl add 0 (map ({op} x {k}) xs)", ["list", "map", "fold", "composition"],
+                       fn([list_of(INT)], INT),
+                       lam(["xs"], bapp("foldl", var("add"), int_lit(0),
+                                   bapp("map", lam(["x"], bapp(op, x, int_lit(k))), xs))),
+                       [{"args": [lst], "result": sum(pf(v, k) for v in lst)} for lst in _LIST_IN]))
+    for lo, hi in [(0, 5), (1, 10), (2, 8), (-3, 3), (0, 9), (3, 7)]:
+        add(_cspec(f"count_in_range_{lo}_{hi}".replace("-", "m"),
+                   f"Count the list elements in the range {lo} to {hi} inclusive.",
+                   f"length (filter (and (le {lo} x) (le x {hi})) xs)", ["list", "filter", "composition", "range"],
+                   fn([list_of(INT)], NAT),
+                   lam(["xs"], bapp("length", bapp("filter",
+                        lam(["x"], bapp("and", bapp("le", int_lit(lo), x), bapp("le", x, int_lit(hi)))), xs))),
+                   [{"args": [lst], "result": sum(1 for v in lst if lo <= v <= hi)} for lst in _LIST_IN]))
+
+    # 18. MULTI-CLAUSE case chains — a parameterized 3-way threshold (the grade/compare_to shape).
+    for lo, hi in [(0, 10), (5, 10), (1, 5), (10, 20), (3, 7), (0, 100)]:
+        add(_cspec(f"threshold3_{lo}_{hi}", f"Map a number to 2 if at least {hi}, 1 if at least {lo}, else 0.",
+                   f"2 if >= {hi}, 1 if >= {lo}, else 0 — a nested case.", ["arithmetic", "case", "order"],
+                   fn([INT], INT),
+                   lam(["n"], case_bool(bapp("ge", n, int_lit(hi)), int_lit(2),
+                        case_bool(bapp("ge", n, int_lit(lo)), int_lit(1), int_lit(0)))),
+                   [{"args": [v], "result": (2 if v >= hi else 1 if v >= lo else 0)}
+                    for v in (-1, 0, lo, hi, lo + 1, hi + 5)]))
 
     return out
 

@@ -65,10 +65,14 @@ def main():
             return eh.build_read_tasks(c, n_shots=args.shots, conventions=conv)
         return eh.build_assemble_tasks(c)
 
-    # Leakage guard: build the holdout (eval) tasks the same way and drop any training task whose
-    # (prompt, gold) matches one of them. Keyed on (user, gold) — the prompt+answer the model would
-    # otherwise memorize verbatim.
-    holdout = set()
+    # Leakage guard: build the holdout (eval) tasks the same way and drop any leaking training task. Two
+    # leakage channels, both closed:
+    #   1. (prompt, gold) pair — the exact task seen verbatim. Applies to every kind.
+    #   2. gold BODY alone, for write/assemble — a different prompt with the SAME answer body still lets the
+    #      model memorize the exact surface string (e.g. a combinatorial `contains_0` vs the eval's
+    #      `contains_zero`). NOT applied to `read`, whose gold is a value (e.g. `6`) that collides constantly
+    #      across unrelated tasks — there the prompt (which carries the body+input) is the unique key.
+    holdout_pairs, holdout_golds = set(), set()
     if args.holdout_corpus:
         hpath = Path(args.holdout_corpus)
         if not hpath.exists():
@@ -76,7 +80,9 @@ def main():
         hcorpus = [json.loads(line) for line in hpath.read_text().splitlines() if line.strip()]
         for kind in [k.strip() for k in args.kinds.split(",") if k.strip()]:
             for t in build(hcorpus, kind):
-                holdout.add((t.user, t.gold))
+                holdout_pairs.add((t.user, t.gold))
+                if kind in ("write", "assemble"):
+                    holdout_golds.add(t.gold)
 
     counts = {}
     excluded = 0
@@ -84,7 +90,8 @@ def main():
     for kind in [k.strip() for k in args.kinds.split(",") if k.strip()]:
         kept = 0
         for t in build(corpus, kind):
-            if (t.user, t.gold) in holdout:
+            leaked = (t.user, t.gold) in holdout_pairs or (kind in ("write", "assemble") and t.gold in holdout_golds)
+            if leaked:
                 excluded += 1
                 continue
             records.append({"kind": kind, "messages": [

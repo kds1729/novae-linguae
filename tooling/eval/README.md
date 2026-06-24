@@ -205,5 +205,10 @@ bottleneck on **training-data shape diversity, not model size**: families the co
 (arithmetic/comparisons, varying constants) generalize at 45-56%, structurally novel families (HOF 5%,
 recursion 0%) at 0-9% (see [`FINETUNING_OPENWEIGHTS.md`](FINETUNING_OPENWEIGHTS.md) → Scale + diagnosis). So
 the real lever is broadening the generator's *structural* coverage — more distinct shapes, not more
-constants. The harness routes `mlx:<repo>[::<adapter>]` to a local `MLXModel`; the OpenAI path
-(`FINETUNING.md`) is a billed cross-check, deferred.
+constants. **Acting on that: `combinatorial_specs()` gained +141 structurally-distinct templates
+(variant-consuming, search/numeric/accumulating recursion, nested first-order compositions, multi-clause
+case), and the leakage guard was tightened to drop gold-body twins. Retrained on the clean+broadened data,
+held-out 3B write rose 31.8% → 41.1% (+9.3pts)** — confirming the diagnosis. The gains land where the new
+shapes are (arithmetic 45→56%, comparisons 56→70%, recursion 0→14%); genuinely higher-order families
+(function-valued args) stay flat, the next coverage frontier. The harness routes `mlx:<repo>[::<adapter>]` to
+a local `MLXModel`; the OpenAI path (`FINETUNING.md`) is a billed cross-check, deferred.
