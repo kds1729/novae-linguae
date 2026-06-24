@@ -126,10 +126,37 @@ What that means, read straight:
   the assemble format (catastrophic interference). Fix: include assemble shapes in training data.
 
 **Honest bottom line:** open-weights SFT teaches the surface dialect *partially* and cheaply, but this run
-does **not** establish "a model that speaks Nova Lingua." Next levers — a larger base (3B/7B), training data
-with more *distinct shapes* (not just more constants of the same shapes), and keeping `assemble` in the mix.
-The infra and the leakage guard are the durable deliverables; the adapter is a redistributable artifact, but
-not yet a strong one.
+does **not** establish "a model that speaks Nova Lingua." The infra and the leakage guard are the durable
+deliverables; the adapter is a redistributable artifact, but not yet a strong one.
+
+### Scale + diagnosis: the bottleneck is data diversity, not model size
+
+Same held-out data, same hyperparameters, larger base:
+
+| base | write | read | assemble | total |
+|---|---|---|---|---|
+| Qwen2.5-1.5B | 24.5% | 36.2% | 0%    | 28.9% |
+| Qwen2.5-3B   | **31.8%** | 44.7% | 41.7% | **38.2%** |
+
+Doubling the base buys only **+7-9 pts** on write/total (3B also partly recovered `assemble`, 0→42%, being
+more robust to the no-assemble-in-training interference). Far short of the conventions-*on* in-context
+ceiling (~99%), so capacity is not the main lever. The **per-family** 3B write breakdown shows why:
+
+| curated write family | 3B pass | has a parametric twin in training? |
+|---|---|---|
+| simple arithmetic   | 45% | yes (same shape, other constants) |
+| comparisons / bool  | 56% | yes |
+| list / higher-order | **5%**  | structurally novel |
+| recursion           | **0%**  | structurally novel |
+| variant / case-match| 33% | structurally novel |
+| other               | **9%**  | structurally novel |
+
+Families the combinatorial generator covers (varying constants of a fixed shape) generalize at 45-56%; the
+structurally novel families it does **not** cover generalize at 0-9%. The model learned to apply the dialect
+across *constant variations of seen shapes*, not to *unseen structural shapes*. **So the real lever is
+broadening the combinatorial generator's structural coverage — more distinct shapes (HOF compositions,
+recursion templates, variant-matching, multi-clause case), not just more constants — and keeping `assemble`
+in the data.** A 7B base would likely add a few more points but not close the structural gap.
 
 ## Notes
 

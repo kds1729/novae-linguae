@@ -200,6 +200,10 @@ eval held out (`export_finetune.py --holdout-corpus`), the honest lift is **writ
 is a hard 0%), but well short of "speaks the language" and likely an upper bound (parametric twins remain in
 training). `read` barely moves and `assemble` regresses (no assemble examples survived the holdout). So:
 open-weights SFT teaches the surface dialect *partially* and cheaply; it is **not yet** a model that speaks
-Nova Lingua. Next levers: larger base (3B/7B), more *distinct shapes* in training, keep assemble in the mix.
-The harness routes `mlx:<repo>[::<adapter>]` to a local `MLXModel`; the OpenAI path (`FINETUNING.md`) is a
-billed cross-check, deferred.
+Nova Lingua. A scale test (3B) lifted held-out write only 24.5%→31.8%, and the per-family breakdown pins the
+bottleneck on **training-data shape diversity, not model size**: families the combinatorial generator covers
+(arithmetic/comparisons, varying constants) generalize at 45-56%, structurally novel families (HOF 5%,
+recursion 0%) at 0-9% (see [`FINETUNING_OPENWEIGHTS.md`](FINETUNING_OPENWEIGHTS.md) → Scale + diagnosis). So
+the real lever is broadening the generator's *structural* coverage — more distinct shapes, not more
+constants. The harness routes `mlx:<repo>[::<adapter>]` to a local `MLXModel`; the OpenAI path
+(`FINETUNING.md`) is a billed cross-check, deferred.
