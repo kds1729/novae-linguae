@@ -2218,6 +2218,82 @@ def combinatorial_specs(exclude_names=()):
                         bapp("cons", int_lit(x0), bself(bapp("sub", n, int_lit(1)))))),
                    [{"args": [c], "result": [x0] * c} for c in (0, 1, 2, 3, 5)], terminates="unknown"))
 
+    # 25. MODULAR ARITHMETIC & PARITY — the `mod` operator, which no family taught; the biggest measured
+    # 1.5B write-failure cluster (is_even/is_odd/modulo/keep_evens/count_evens/sum_evens). Parameterized
+    # over the modulus, so the eval's specific instances (e.g. is_even = divisible-by-2) stay held out but
+    # the SHAPE is taught. Non-negative inputs only (mod-on-negatives differs Python vs. the evaluator).
+    _NN = [0, 1, 2, 3, 4, 5, 7, 12]
+    _LNN = [[], [1, 2, 3, 4], [2, 4, 6], [1, 3, 5, 7], [0, 6, 12]]
+    # 25a. divisibility predicate:  \n -> eq (mod n m) 0
+    for mm in range(2, 10):
+        add(_cspec(f"divisible_by_{mm}", f"Test whether a number is divisible by {mm}.",
+                   f"eq (mod n {mm}) 0", ["arithmetic", "modular", "predicate"], fn([INT], BOOL),
+                   lam(["n"], bapp("eq", bapp("mod", n, int_lit(mm)), int_lit(0))),
+                   [{"args": [v], "result": (v % mm == 0)} for v in _NN]))
+    # 25b. remainder:  \n -> mod n m
+    for mm in range(2, 10):
+        add(_cspec(f"remainder_{mm}", f"Compute the remainder of a number divided by {mm}.",
+                   f"mod n {mm}", ["arithmetic", "modular"], fn([INT], INT),
+                   lam(["n"], bapp("mod", n, int_lit(mm))),
+                   [{"args": [v], "result": (v % mm)} for v in _NN]))
+    # 25c. divisibility filter:  \xs -> filter (\x -> eq (mod x m) 0) xs
+    for mm in (2, 3, 4, 5):
+        add(_cspec(f"keep_divisible_{mm}", f"Keep the list elements divisible by {mm}.",
+                   f"filter (mod x {mm} == 0) xs", ["list", "filter", "modular"], fn([list_of(INT)], list_of(INT)),
+                   lam(["xs"], bapp("filter", lam(["x"], bapp("eq", bapp("mod", x, int_lit(mm)), int_lit(0))), xs)),
+                   [{"args": [lst], "result": [v for v in lst if v % mm == 0]} for lst in _LNN]))
+    # 25d. count divisible:  \xs -> length (filter ... xs)
+    for mm in (2, 3, 5):
+        add(_cspec(f"count_divisible_{mm}", f"Count the list elements divisible by {mm}.",
+                   f"length (filter (mod x {mm} == 0) xs)", ["list", "filter", "count", "modular"],
+                   fn([list_of(INT)], NAT),
+                   lam(["xs"], bapp("length", bapp("filter", lam(["x"], bapp("eq", bapp("mod", x, int_lit(mm)), int_lit(0))), xs))),
+                   [{"args": [lst], "result": sum(1 for v in lst if v % mm == 0)} for lst in _LNN]))
+    # 25e. sum divisible:  \xs -> foldl add 0 (filter ... xs)
+    for mm in (2, 3):
+        add(_cspec(f"sum_divisible_{mm}", f"Sum the list elements divisible by {mm}.",
+                   f"foldl add 0 (filter (mod x {mm} == 0) xs)", ["list", "filter", "fold", "modular"],
+                   fn([list_of(INT)], INT),
+                   lam(["xs"], bapp("foldl", var("add"), int_lit(0),
+                        bapp("filter", lam(["x"], bapp("eq", bapp("mod", x, int_lit(mm)), int_lit(0))), xs))),
+                   [{"args": [lst], "result": sum(v for v in lst if v % mm == 0)} for lst in _LNN]))
+
+    # 26. EXTENDED BOOLEAN — compositions of not/and/or over two boolean args (the xor/nand/nor/implies
+    # shape). Parameterized over the outer connective and each arg's polarity; the eval's named instances
+    # (implies/nand/nor/logical_xor) stay held out, the rest teach the not/and/or composition shape.
+    _BPY = {"and": lambda p, q: p and q, "or": lambda p, q: p or q}
+    for outer in ("and", "or"):
+        of = _BPY[outer]
+        for pa in (False, True):
+            for pb in (False, True):
+                la = bapp("not", var("a")) if pa else var("a")
+                lb = bapp("not", var("b")) if pb else var("b")
+                sa, sb = ("not a" if pa else "a"), ("not b" if pb else "b")
+                add(_cspec(f"bool_{outer}_{'na' if pa else 'a'}_{'nb' if pb else 'b'}",
+                           f"Combine two booleans: {outer} of {sa} and {sb}.", f"{outer} ({sa}) ({sb})",
+                           ["boolean", "logic", "compound"], fn([BOOL, BOOL], BOOL),
+                           lam(["a", "b"], bapp(outer, la, lb)),
+                           [{"args": [u, w], "result": of((not u) if pa else u, (not w) if pb else w)}
+                            for u in (False, True) for w in (False, True)]))
+    for outer in ("and", "or"):
+        of = _BPY[outer]
+        add(_cspec(f"bool_n{outer}", f"The negation of {outer} over two booleans.", f"not ({outer} a b)",
+                   ["boolean", "logic", "compound"], fn([BOOL, BOOL], BOOL),
+                   lam(["a", "b"], bapp("not", bapp(outer, var("a"), var("b")))),
+                   [{"args": [u, w], "result": (not of(u, w))} for u in (False, True) for w in (False, True)]))
+
+    # 27. POLYMORPHIC two-list structural recursion — write/append_rec & write/concat still fail at 1.5B;
+    # family 21 is monomorphic INT (it does element arithmetic). interleave is forall a, no element op,
+    # a distinct body from the held-out append_rec/concat/reverse_concat.
+    poly2 = {"kind": "forall", "vars": ["a"],
+             "body": fn([list_of(var("a")), list_of(var("a"))], list_of(var("a")))}
+    add(_cspec("interleave", "Interleave two lists, alternating elements; the rest of the longer one when the other runs out.",
+               "ys when xs is empty; else cons (head xs) (self ys (tail xs))", ["list", "recursion", "two-list", "poly"],
+               poly2, lam(["xs", "ys"], case_null("xs", ys, bapp("cons", bapp("head", xs), bself(ys, bapp("tail", xs))))),
+               [{"args": [[1, 2, 3], [4, 5, 6]], "result": [1, 4, 2, 5, 3, 6]},
+                {"args": [[1], [2, 3, 4]], "result": [1, 2, 3, 4]},
+                {"args": [[], [7, 8]], "result": [7, 8]}, {"args": [[5], []], "result": [5]}]))
+
     return out
 
 
