@@ -563,6 +563,11 @@ def main():
                   file=sys.stderr)
             from model_client import MLXModel
             model = MLXModel(args.model[len("mlx:"):])
+        elif args.model.startswith("hf:"):
+            print(f"Local HF run: '{args.model}' over {len(tasks)} tasks — runs on CPU via transformers, "
+                  f"no API or cost.", file=sys.stderr)
+            from model_client import HFModel
+            model = HFModel(args.model[len("hf:"):])
         else:
             is_openai = args.model.startswith(("gpt", "ft:", "o1", "o3", "o4", "chatgpt"))
             print(f"!! REAL MODEL RUN: '{args.model}' over {len(tasks)} tasks — this calls the provider API and\n"

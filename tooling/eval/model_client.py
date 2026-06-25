@@ -122,3 +122,53 @@ class MLXModel:
             max_tokens=self.max_tokens, sampler=self._sampler, verbose=False,
         )
         return (text or "").strip()
+
+
+class HFModel:
+    """An open-weights model run LOCALLY on CPU via Hugging Face `transformers` — no API, no key, no cost.
+    Optionally loads a PEFT/LoRA adapter fine-tuned on the corpus, so the same client evaluates both the
+    base model and the tuned one. This is the non-Apple counterpart to `MLXModel` (a Linux/CPU box has no
+    MLX and no CUDA): the same `answer(task)` seam, so the grader is identical (see `train_lora_cpu.py` +
+    `FINETUNING_CPU.md`).
+
+    The spec is `<repo>` for the base model or `<repo>::<adapter_dir>` for base + LoRA adapter (the harness
+    passes whatever followed the `hf:` prefix). Greedy decoding (temp 0) for a stable, comparable read of
+    the dialect — matching `OpenAIModel`/`MLXModel`. `torch`/`transformers` are imported lazily so the
+    oracle self-test and the API-model paths never need them installed.
+    """
+
+    def __init__(self, spec: str, max_tokens: int = 512):
+        import torch  # lazy: only the local CPU-eval path needs the PyTorch stack
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        repo, _, adapter = spec.partition("::")
+        self._torch = torch
+        self._tokenizer = AutoTokenizer.from_pretrained(repo)
+        try:  # newer transformers takes `dtype`, older took `torch_dtype`
+            model = AutoModelForCausalLM.from_pretrained(repo, dtype=torch.float32)
+        except TypeError:
+            model = AutoModelForCausalLM.from_pretrained(repo, torch_dtype=torch.float32)
+        if adapter:
+            from peft import PeftModel
+            model = PeftModel.from_pretrained(model, adapter)
+        model.eval()
+        self._model = model
+        self.max_tokens = max_tokens
+        self.name = f"hf:{repo}" + (f"::{adapter}" if adapter else "")
+
+    def answer(self, task) -> str:
+        enc = self._tokenizer.apply_chat_template(
+            [{"role": "system", "content": task.system},
+             {"role": "user", "content": task.user}],
+            add_generation_prompt=True, return_tensors="pt", return_dict=True,
+        )
+        input_len = enc["input_ids"].shape[1]
+        pad_id = self._tokenizer.pad_token_id
+        if pad_id is None:
+            pad_id = self._tokenizer.eos_token_id
+        with self._torch.no_grad():
+            out = self._model.generate(
+                **enc, max_new_tokens=self.max_tokens, do_sample=False, pad_token_id=pad_id,
+            )
+        text = self._tokenizer.decode(out[0, input_len:], skip_special_tokens=True)
+        return (text or "").strip()
