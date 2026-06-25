@@ -81,6 +81,11 @@ def bself(*args):
     return {"kind": "app", "fn": {"kind": "var", "name": "self"}, "args": list(args)}
 
 
+def blet(name, value, body):
+    """`let name = value in body` — a single-binding let BODY expression."""
+    return {"kind": "let", "name": name, "value": value, "body": body}
+
+
 def lam(params, body):
     return {"kind": "lambda", "params": [{"name": p} for p in params], "body": body}
 
@@ -2118,21 +2123,22 @@ def combinatorial_specs(exclude_names=()):
                    [{"args": [v], "result": (0 if v < 0 else k if v > k else v)} for v in (-3, 0, 2, k, k + 5)]))
 
     # 21. TWO-LIST-PARAMETER recursion — a shape the combinatorial families never produced, though the
-    # curated eval has it (append_rec). Two structurally-distinct sub-shapes, both with gold bodies
-    # DIFFERENT from append_rec's, so they teach the two-list idiom without leaking it: (a) zipWith —
-    # recurse on BOTH lists with a nested case, stopping at the shorter; (b) transform-then-append —
-    # recurse on the FIRST list with the second a spectator (append_rec's structural idiom) while
-    # applying op _ k to each head. Monomorphic INT typing, like the other combinatorial families.
+    # curated eval has it (append_rec). Sub-shapes with gold bodies DIFFERENT from append_rec's, so they
+    # teach the two-list idiom without leaking it: (a) zipWith — recurse on BOTH lists with a nested case,
+    # stopping at the shorter; (b) transform-then-append — recurse on the FIRST list with the second a
+    # spectator (append_rec's idiom) while applying op _ k to each head. Monomorphic INT typing.
     ys = var("ys")
     hx, hy = bapp("head", xs), bapp("head", ys)
     tx, ty = bapp("tail", xs), bapp("tail", ys)
     two_lists = fn([list_of(INT), list_of(INT)], list_of(INT))
-    _ZWORD = {"add": "sum", "sub": "difference", "mul": "product"}
+    _ZPY = {"add": lambda a, b: a + b, "sub": lambda a, b: a - b, "mul": lambda a, b: a * b,
+            "min": min, "max": max}
+    _ZWORD = {"add": "sum", "sub": "difference", "mul": "product", "min": "minimum", "max": "maximum"}
 
     # 21a. zipWith op — element-wise combine of two lists, truncating to the shorter (DUAL recursion).
     _ZIN = [([1, 2, 3], [4, 5, 6]), ([5, -2, 4], [1, 1, 1]), ([], []), ([3], [7, 8]), ([1, 2], [])]
-    for op in ("add", "sub", "mul"):
-        pf = _AOP[op]
+    for op in ("add", "sub", "mul", "min", "max"):
+        pf = _ZPY[op]
         add(_cspec(f"zip_{op}",
                    f"Combine two lists element by element into their pairwise {_ZWORD[op]}, truncating to the shorter list.",
                    f"nil if either list is empty; else cons ({op} (head xs) (head ys)) (self (tail xs) (tail ys))",
@@ -2146,7 +2152,7 @@ def combinatorial_specs(exclude_names=()):
     _AIN = [([1, 2, 3], [10, 20]), ([5, -2], [0]), ([], [7, 8]), ([4], [])]
     for op in ("add", "sub", "mul"):
         pf = _AOP[op]
-        for k in (1, 2, 3):
+        for k in (1, 2, 3, 4, 5):
             add(_cspec(f"appendmap_{op}_{k}",
                        f"Build a new list: each element of the first list {_OPWORD[op]} {k}, followed by the second list unchanged.",
                        f"ys when xs is empty; else cons ({op} (head xs) {k}) (self (tail xs) ys)",
@@ -2154,6 +2160,63 @@ def combinatorial_specs(exclude_names=()):
                        lam(["xs", "ys"], case_null("xs", ys,
                             bapp("cons", bapp(op, hx, int_lit(k)), bself(tx, ys)))),
                        [{"args": [a, b], "result": [pf(u, k) for u in a] + b} for a, b in _AIN]))
+
+    # 22. LET-BINDINGS — introduce `let name = value in body`, a body node NO other family emits. Two
+    # forms: (a) bind a subcomputation and REUSE it (the canonical motivation for let), (b) a two-step
+    # computation written as a let (the model learns the let form of a known shape).
+    # 22a. let-reuse:  \n -> let d = op n k in add d d   ( = 2 * (op n k) )
+    for op in ("add", "sub", "mul"):
+        pf = _AOP[op]
+        for k in (_KMUL if op == "mul" else _KADD):
+            add(_cspec(f"let_twice_{op}_{k}",
+                       f"{_OPWORD[op].capitalize()} {k}, then double the result, binding it once with let.",
+                       f"let d = {op} n {k} in add d d", ["arithmetic", "let", "binding"], fn([INT], INT),
+                       lam(["n"], blet("d", bapp(op, n, int_lit(k)), bapp("add", var("d"), var("d")))),
+                       [{"args": [v], "result": 2 * pf(v, k)} for v in _INT_IN]))
+    # 22b. let-as-two-step:  \n -> let y = op1 n k1 in op2 y k2   (a small, bounded cross-product)
+    steps_small = [("add", k) for k in (1, 2, 3)] + [("mul", k) for k in (2, 3)]
+    for op1, k1 in steps_small:
+        for op2, k2 in steps_small:
+            pf1, pf2 = _AOP[op1], _AOP[op2]
+            add(_cspec(f"let_{op1}{k1}_{op2}{k2}",
+                       f"{_OPWORD[op1].capitalize()} {k1}, bind it with let, then {_OPWORD[op2]} {k2}.",
+                       f"let y = {op1} n {k1} in {op2} y {k2}", ["arithmetic", "let", "binding", "two-step"],
+                       fn([INT], INT),
+                       lam(["n"], blet("y", bapp(op1, n, int_lit(k1)), bapp(op2, var("y"), int_lit(k2)))),
+                       [{"args": [v], "result": pf2(pf1(v, k1), k2)} for v in _INT_IN]))
+
+    # 23. ACCUMULATOR (tail) recursion — \xs acc -> case xs of nil -> acc | cons -> self (tail xs)
+    # (op acc (head xs)). A foldl written by hand: two parameters (list + accumulator), threading the
+    # accumulator (distinct from family 15's non-tail 1+self). Structurally decreasing — terminates=always.
+    _FPY = {"add": lambda a, b: a + b, "sub": lambda a, b: a - b, "mul": lambda a, b: a * b,
+            "min": min, "max": max}
+
+    def _fold(opf, seq, init):
+        a = init
+        for v in seq:
+            a = opf(a, v)
+        return a
+    list_int_to_int = fn([list_of(INT), INT], INT)
+    for op in ("add", "sub", "mul", "min", "max"):
+        opf = _FPY[op]
+        add(_cspec(f"foldl_{op}",
+                   f"Left-fold a list into an accumulator using {op}, starting from a given seed.",
+                   f"acc when xs is empty; else self (tail xs) ({op} acc (head xs))",
+                   ["list", "recursion", "accumulator", "fold", op], list_int_to_int,
+                   lam(["xs", "acc"], case_null("xs", var("acc"), bself(tx, bapp(op, var("acc"), hx)))),
+                   [{"args": [lst, seed], "result": _fold(opf, lst, seed)}
+                    for lst in ([1, 2, 3], [5, -2, 4], [], [10]) for seed in (0, 1)]))
+
+    # 24. REPLICATE — counter recursion BUILDING a list:  \n -> case n==0 of true -> nil | false ->
+    # cons x0 (self (n-1)). A counter-driven recursion whose result is a LIST (family 16 is int->int);
+    # terminates="unknown" (not certified for negative n).
+    for x0 in (0, 1, 2, 7, -1):
+        add(_cspec(f"replicate_{x0}".replace("-", "m"), f"Build a list of n copies of {x0}.",
+                   f"nil when n is 0; else cons {x0} (self (n-1))", ["list", "recursion", "build", "counter"],
+                   fn([INT], list_of(INT)),
+                   lam(["n"], case_bool(bapp("eq", n, int_lit(0)), var("nil"),
+                        bapp("cons", int_lit(x0), bself(bapp("sub", n, int_lit(1)))))),
+                   [{"args": [c], "result": [x0] * c} for c in (0, 1, 2, 3, 5)], terminates="unknown"))
 
     return out
 
