@@ -2117,6 +2117,44 @@ def combinatorial_specs(exclude_names=()):
                         case_bool(bapp("gt", n, int_lit(k)), int_lit(k), n))),
                    [{"args": [v], "result": (0 if v < 0 else k if v > k else v)} for v in (-3, 0, 2, k, k + 5)]))
 
+    # 21. TWO-LIST-PARAMETER recursion — a shape the combinatorial families never produced, though the
+    # curated eval has it (append_rec). Two structurally-distinct sub-shapes, both with gold bodies
+    # DIFFERENT from append_rec's, so they teach the two-list idiom without leaking it: (a) zipWith —
+    # recurse on BOTH lists with a nested case, stopping at the shorter; (b) transform-then-append —
+    # recurse on the FIRST list with the second a spectator (append_rec's structural idiom) while
+    # applying op _ k to each head. Monomorphic INT typing, like the other combinatorial families.
+    ys = var("ys")
+    hx, hy = bapp("head", xs), bapp("head", ys)
+    tx, ty = bapp("tail", xs), bapp("tail", ys)
+    two_lists = fn([list_of(INT), list_of(INT)], list_of(INT))
+    _ZWORD = {"add": "sum", "sub": "difference", "mul": "product"}
+
+    # 21a. zipWith op — element-wise combine of two lists, truncating to the shorter (DUAL recursion).
+    _ZIN = [([1, 2, 3], [4, 5, 6]), ([5, -2, 4], [1, 1, 1]), ([], []), ([3], [7, 8]), ([1, 2], [])]
+    for op in ("add", "sub", "mul"):
+        pf = _AOP[op]
+        add(_cspec(f"zip_{op}",
+                   f"Combine two lists element by element into their pairwise {_ZWORD[op]}, truncating to the shorter list.",
+                   f"nil if either list is empty; else cons ({op} (head xs) (head ys)) (self (tail xs) (tail ys))",
+                   ["list", "recursion", "two-list", "zip", op], two_lists,
+                   lam(["xs", "ys"], case_null("xs", var("nil"),
+                        case_null("ys", var("nil"),
+                                  bapp("cons", bapp(op, hx, hy), bself(tx, ty))))),
+                   [{"args": [a, b], "result": [pf(u, v) for u, v in zip(a, b)]} for a, b in _ZIN]))
+
+    # 21b. transform-then-append — recurse on the FIRST list (second is a spectator), op-ing each head by k.
+    _AIN = [([1, 2, 3], [10, 20]), ([5, -2], [0]), ([], [7, 8]), ([4], [])]
+    for op in ("add", "sub", "mul"):
+        pf = _AOP[op]
+        for k in (1, 2, 3):
+            add(_cspec(f"appendmap_{op}_{k}",
+                       f"Build a new list: each element of the first list {_OPWORD[op]} {k}, followed by the second list unchanged.",
+                       f"ys when xs is empty; else cons ({op} (head xs) {k}) (self (tail xs) ys)",
+                       ["list", "recursion", "two-list", "map", op], two_lists,
+                       lam(["xs", "ys"], case_null("xs", ys,
+                            bapp("cons", bapp(op, hx, int_lit(k)), bself(tx, ys)))),
+                       [{"args": [a, b], "result": [pf(u, k) for u in a] + b} for a, b in _AIN]))
+
     return out
 
 
