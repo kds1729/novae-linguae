@@ -2294,6 +2294,123 @@ def combinatorial_specs(exclude_names=()):
                 {"args": [[1], [2, 3, 4]], "result": [1, 2, 3, 4]},
                 {"args": [[], [7, 8]], "result": [7, 8]}, {"args": [[5], []], "result": [5]}]))
 
+    # 28. QUANTIFIED MODULAR PREDICATES — "every / some element divisible by m", the all_even/any_even
+    # holdouts. all_even's gold is foldr-AND over an INLINED mod-predicate; any_even's is !null . filter.
+    # No combinatorial family taught the inlined modular predicate (all_with/any_with are higher-order,
+    # predicate-as-arg). Parameterized over m; m=2 omitted so all_even/any_even stay held out.
+    _MLST = [[], [2, 4, 6], [1, 2, 3, 4, 5, 6], [3, 5, 9], [0, 6, 12], [7, 11, 13]]
+    for mm in (3, 4, 5):
+        add(_cspec(f"all_divisible_{mm}", f"Test whether every number in a list is divisible by {mm}.",
+                   f"foldr (\\x acc -> mod x {mm} == 0 && acc) true xs", ["list", "fold", "predicate", "modular"],
+                   fn([list_of(INT)], BOOL),
+                   lam(["xs"], bapp("foldr", lam(["x", "acc"], bapp("and", bapp("eq", bapp("mod", x, int_lit(mm)), int_lit(0)), var("acc"))),
+                                    bool_lit(True), xs)),
+                   [{"args": [lst], "result": all(v % mm == 0 for v in lst)} for lst in _MLST]))
+    for mm in (3, 4, 5):
+        add(_cspec(f"any_divisible_{mm}", f"Test whether a list contains a number divisible by {mm}.",
+                   f"!null (filter (\\x -> mod x {mm} == 0) xs)", ["list", "filter", "predicate", "modular"],
+                   fn([list_of(INT)], BOOL),
+                   lam(["xs"], bapp("not", bapp("null", bapp("filter", lam(["x"], bapp("eq", bapp("mod", x, int_lit(mm)), int_lit(0))), xs)))),
+                   [{"args": [lst], "result": any(v % mm == 0 for v in lst)} for lst in _MLST]))
+    for mm in (3, 4):
+        add(_cspec(f"any_divisible_fold_{mm}", f"Test (by fold) whether a list contains a number divisible by {mm}.",
+                   f"foldr (\\x acc -> mod x {mm} == 0 || acc) false xs", ["list", "fold", "predicate", "modular"],
+                   fn([list_of(INT)], BOOL),
+                   lam(["xs"], bapp("foldr", lam(["x", "acc"], bapp("or", bapp("eq", bapp("mod", x, int_lit(mm)), int_lit(0)), var("acc"))),
+                                    bool_lit(False), xs)),
+                   [{"args": [lst], "result": any(v % mm == 0 for v in lst)} for lst in _MLST]))
+
+    # 29. TWO-ARGUMENT MODULAR ARITHMETIC — `mod` with a VARIABLE divisor (the `modulo` holdout: \a b -> a % b).
+    # Family 25b only did a CONSTANT divisor. The exact \a b -> mod a b is the eval gold (leakage-dropped), so
+    # teach the shape via compositions whose divisor is the variable b. Non-negative inputs, b != 0.
+    _AB = [(7, 3), (10, 4), (5, 2), (12, 5), (0, 3), (9, 4), (8, 3), (11, 6)]
+    for k in (1, 2, 3):
+        add(_cspec(f"mod_plus_{k}", f"Add {k} to a number, then take it modulo a second number.",
+                   f"mod (a + {k}) b", ["arithmetic", "modular", "two-arg"], fn([INT, INT], INT),
+                   lam(["a", "b"], bapp("mod", bapp("add", var("a"), int_lit(k)), var("b"))),
+                   [{"args": [a, b], "result": (a + k) % b} for (a, b) in _AB]))
+    for k in (2, 3):
+        add(_cspec(f"mod_times_{k}", f"Multiply a number by {k}, then take it modulo a second number.",
+                   f"mod (a * {k}) b", ["arithmetic", "modular", "two-arg"], fn([INT, INT], INT),
+                   lam(["a", "b"], bapp("mod", bapp("mul", var("a"), int_lit(k)), var("b"))),
+                   [{"args": [a, b], "result": (a * k) % b} for (a, b) in _AB]))
+    for k in (1, 2, 3):
+        add(_cspec(f"mod_then_add_{k}", f"Take a number modulo a second number, then add {k}.",
+                   f"(mod a b) + {k}", ["arithmetic", "modular", "two-arg"], fn([INT, INT], INT),
+                   lam(["a", "b"], bapp("add", bapp("mod", var("a"), var("b")), int_lit(k))),
+                   [{"args": [a, b], "result": (a % b) + k} for (a, b) in _AB]))
+
+    # 30. EXTENDED BOOLEAN, deeper — De-Morgan-equivalent forms (distinct surfaces from family 26) and
+    # 3-argument compositions, adding not/and/or mass so the noisy implies/nand holdouts (shape already in
+    # family 26) get reinforced. Exhaustive examples over all boolean assignments.
+    _BB = [(u, w) for u in (False, True) for w in (False, True)]
+    _BBB = [(u, w, z) for u in (False, True) for w in (False, True) for z in (False, True)]
+    add(_cspec("bool_or_not_not", "Or of the negations of two booleans.", "(not a) || (not b)",
+               ["boolean", "logic", "de-morgan"], fn([BOOL, BOOL], BOOL),
+               lam(["a", "b"], bapp("or", bapp("not", var("a")), bapp("not", var("b")))),
+               [{"args": [u, w], "result": ((not u) or (not w))} for (u, w) in _BB]))
+    add(_cspec("bool_and_not_not", "And of the negations of two booleans.", "(not a) && (not b)",
+               ["boolean", "logic", "de-morgan"], fn([BOOL, BOOL], BOOL),
+               lam(["a", "b"], bapp("and", bapp("not", var("a")), bapp("not", var("b")))),
+               [{"args": [u, w], "result": ((not u) and (not w))} for (u, w) in _BB]))
+    add(_cspec("bool_not_or_notb", "Not of (a or not b).", "not (a || not b)",
+               ["boolean", "logic"], fn([BOOL, BOOL], BOOL),
+               lam(["a", "b"], bapp("not", bapp("or", var("a"), bapp("not", var("b"))))),
+               [{"args": [u, w], "result": (not (u or (not w)))} for (u, w) in _BB]))
+    add(_cspec("bool_and3", "And of three booleans.", "(a && b) && c",
+               ["boolean", "logic", "ternary"], fn([BOOL, BOOL, BOOL], BOOL),
+               lam(["a", "b", "c"], bapp("and", bapp("and", var("a"), var("b")), var("c"))),
+               [{"args": [u, w, z], "result": (u and w and z)} for (u, w, z) in _BBB]))
+    add(_cspec("bool_or3", "Or of three booleans.", "(a || b) || c",
+               ["boolean", "logic", "ternary"], fn([BOOL, BOOL, BOOL], BOOL),
+               lam(["a", "b", "c"], bapp("or", bapp("or", var("a"), var("b")), var("c"))),
+               [{"args": [u, w, z], "result": (u or w or z)} for (u, w, z) in _BBB]))
+    add(_cspec("bool_or_and", "a or (b and c).", "a || (b && c)",
+               ["boolean", "logic", "ternary"], fn([BOOL, BOOL, BOOL], BOOL),
+               lam(["a", "b", "c"], bapp("or", var("a"), bapp("and", var("b"), var("c")))),
+               [{"args": [u, w, z], "result": (u or (w and z))} for (u, w, z) in _BBB]))
+    add(_cspec("bool_and_or", "a and (b or c).", "a && (b || c)",
+               ["boolean", "logic", "ternary"], fn([BOOL, BOOL, BOOL], BOOL),
+               lam(["a", "b", "c"], bapp("and", var("a"), bapp("or", var("b"), var("c")))),
+               [{"args": [u, w, z], "result": (u and (w or z))} for (u, w, z) in _BBB]))
+    add(_cspec("bool_nand3", "Not of (a and b and c).", "not ((a && b) && c)",
+               ["boolean", "logic", "ternary"], fn([BOOL, BOOL, BOOL], BOOL),
+               lam(["a", "b", "c"], bapp("not", bapp("and", bapp("and", var("a"), var("b")), var("c")))),
+               [{"args": [u, w, z], "result": (not (u and w and z))} for (u, w, z) in _BBB]))
+
+    # 31. NESTED-LIST / APPEND RECURSION — flatten a list of lists via `append (f (head)) (self (tail))`,
+    # the concat_lists holdout's skeleton (its exact body is held out, so vary f on the head), plus a
+    # non-recursive triple `append` chain.
+    nil = var("nil")
+    poly_nest = {"kind": "forall", "vars": ["a"],
+                 "body": fn([list_of(list_of(var("a")))], list_of(var("a")))}
+    add(_cspec("flatten_each_reversed", "Flatten a list of lists, reversing each inner list.",
+               "nil when empty; else append (reverse (head xss)) (self (tail xss))",
+               ["list", "recursion", "nested", "poly"], poly_nest,
+               lam(["xss"], case_null("xss", nil,
+                    bapp("append", bapp("reverse", bapp("head", var("xss"))), bself(bapp("tail", var("xss")))))),
+               [{"args": [[]], "result": []},
+                {"args": [[[1, 2], [3]]], "result": [2, 1, 3]},
+                {"args": [[[1], [2], [3, 4]]], "result": [1, 2, 4, 3]},
+                {"args": [[[5, 6], [], [7]]], "result": [6, 5, 7]}]))
+    add(_cspec("flatten_rightfirst", "Flatten a list of lists, the later inner lists first.",
+               "nil when empty; else append (self (tail xss)) (head xss)",
+               ["list", "recursion", "nested", "poly"], poly_nest,
+               lam(["xss"], case_null("xss", nil,
+                    bapp("append", bself(bapp("tail", var("xss"))), bapp("head", var("xss"))))),
+               [{"args": [[]], "result": []},
+                {"args": [[[1, 2], [3]]], "result": [3, 1, 2]},
+                {"args": [[[1], [2], [3, 4]]], "result": [3, 4, 2, 1]},
+                {"args": [[[5, 6], [], [7]]], "result": [7, 5, 6]}]))
+    poly_tri = {"kind": "forall", "vars": ["a"],
+                "body": fn([list_of(var("a")), list_of(var("a")), list_of(var("a"))], list_of(var("a")))}
+    add(_cspec("triple_concat", "Concatenate three lists.", "append (append xs ys) zs",
+               ["list", "append", "poly"], poly_tri,
+               lam(["xs", "ys", "zs"], bapp("append", bapp("append", var("xs"), var("ys")), var("zs"))),
+               [{"args": [[], [], []], "result": []},
+                {"args": [[1], [2, 3], [4]], "result": [1, 2, 3, 4]},
+                {"args": [[1, 2], [], [3]], "result": [1, 2, 3]}]))
+
     return out
 
 
