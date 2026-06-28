@@ -138,16 +138,20 @@ class HFModel:
     """
 
     def __init__(self, spec: str, max_tokens: int = 512):
+        import os
         import torch  # lazy: only the local CPU-eval path needs the PyTorch stack
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         repo, _, adapter = spec.partition("::")
         self._torch = torch
         self._tokenizer = AutoTokenizer.from_pretrained(repo)
+        # fp32 by default (best CPU op support); set NL_HF_DTYPE=bfloat16 to fit a 3B+ base in 15 GB.
+        dt = {"float32": torch.float32, "bfloat16": torch.bfloat16,
+              "float16": torch.float16}.get(os.environ.get("NL_HF_DTYPE", "float32"), torch.float32)
         try:  # newer transformers takes `dtype`, older took `torch_dtype`
-            model = AutoModelForCausalLM.from_pretrained(repo, dtype=torch.float32)
+            model = AutoModelForCausalLM.from_pretrained(repo, dtype=dt)
         except TypeError:
-            model = AutoModelForCausalLM.from_pretrained(repo, torch_dtype=torch.float32)
+            model = AutoModelForCausalLM.from_pretrained(repo, torch_dtype=dt)
         if adapter:
             from peft import PeftModel
             model = PeftModel.from_pretrained(model, adapter)

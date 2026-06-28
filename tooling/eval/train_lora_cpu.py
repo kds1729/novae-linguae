@@ -57,6 +57,8 @@ def main():
     ap.add_argument("--lora-dropout", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--threads", type=int, default=0, help="torch CPU threads (0 = leave default)")
+    ap.add_argument("--dtype", default="float32", choices=["float32", "bfloat16", "float16"],
+                    help="base-model load dtype (use bfloat16 for 3B+ to fit 15 GB CPU; fp32 for <=1.5B)")
     args = ap.parse_args()
 
     import torch
@@ -75,10 +77,11 @@ def main():
 
     # float32 on CPU: bf16/fp16 matmul is slow or unsupported for many CPU ops, and a 0.5-1.5B base in
     # fp32 fits comfortably in 15 GB. Newer transformers takes `dtype`; older took `torch_dtype`.
+    dt = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[args.dtype]
     try:
-        model = AutoModelForCausalLM.from_pretrained(args.base, dtype=torch.float32)
+        model = AutoModelForCausalLM.from_pretrained(args.base, dtype=dt)
     except TypeError:
-        model = AutoModelForCausalLM.from_pretrained(args.base, torch_dtype=torch.float32)
+        model = AutoModelForCausalLM.from_pretrained(args.base, torch_dtype=dt)
     model.config.use_cache = False
 
     lora = LoraConfig(
