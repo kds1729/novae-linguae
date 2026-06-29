@@ -216,3 +216,27 @@ iters once coverage saturates.
 - **Cost: $0.** Everything here is local. The only network traffic is the one-time base-model download from
   the HF Hub. Contrast `FINETUNING.md` (OpenAI), which bills ~$10–25 but is a clean cross-check on a
   different base family.
+
+## Addendum — GPU scale-out (2026-06-29): the residuals were a *capacity* limit
+
+The conclusion above ("the real lever is structural coverage; a 7B base would add a few points but not
+close the gap") was bounded by the small-model ceiling a CPU can train. Renting a cloud GPU (a few dollars
+for the whole sweep — a full train+eval cycle drops from **~12 hr on a CPU to ~15 min**) let us run the
+ladder properly, and it **revises that takeaway: model capacity is the binding lever for the hard residuals.**
+The CPU path stays the $0 option; the GPU is the cost-for-speed trade when you want the bigger bases or fast iteration.
+
+Held-out `write` (of 150, conventions-off/shots-0, 2 epochs on the broadened corpus `ftdata5`, bf16):
+
+| base | 1.5B | 3B | 7B |
+|---|---|---|---|
+| **Qwen2.5-Coder** | 118 | **129 (86%)** | 127 |
+| Qwen2.5 (general) | ~107 | 117 | 128 |
+
+- **The "permanent" 1.5B residuals crack with scale.** `implies` cracks at ≥3B; `nand` (which survived every
+  corpus/epoch change at 1.5B) cracks at **7B on both bases**; `concat_lists` needs a **code-pretrained** base
+  (Coder gets it at 3B, the general base never does). `modulo` stays flaky (edge). So the corpus taught the
+  *shapes*; capacity supplies the headroom to *apply* them.
+- **Code-pretraining is a large edge at small size that converges at 7B:** Coder − general ≈ +11 (1.5B),
+  +12 (3B), ~−1 (7B). Below ~7B, use Coder; at 7B the base barely matters.
+- **Best config: Coder-3B** (write 129/150 = 86%, half the size of 7B). The CPU path here remains the $0
+  fallback for the small end; any rented GPU box runs the same `train_lora_cpu.py` + eval (they auto-use CUDA).
