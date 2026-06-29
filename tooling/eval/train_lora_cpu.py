@@ -142,7 +142,8 @@ def main():
         save_strategy="no",
         report_to=[],
         seed=args.seed,
-        use_cpu=True,
+        use_cpu=not torch.cuda.is_available(),  # auto: GPU if present (e.g. a rented box), else CPU
+        bf16=torch.cuda.is_available(),
         dataloader_num_workers=0,
     )
 

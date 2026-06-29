@@ -155,6 +155,8 @@ class HFModel:
         if adapter:
             from peft import PeftModel
             model = PeftModel.from_pretrained(model, adapter)
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        model.to(self._device)
         model.eval()
         self._model = model
         self.max_tokens = max_tokens
@@ -166,6 +168,7 @@ class HFModel:
              {"role": "user", "content": task.user}],
             add_generation_prompt=True, return_tensors="pt", return_dict=True,
         )
+        enc = enc.to(self._device)
         input_len = enc["input_ids"].shape[1]
         pad_id = self._tokenizer.pad_token_id
         if pad_id is None:
