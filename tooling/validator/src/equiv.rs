@@ -459,6 +459,45 @@ mod tests {
     }
 
     #[test]
+    fn distinct_pairs_never_report_equivalent() {
+        // Adversarial soundness guard for the whole pipeline. Each pair is genuinely DISTINCT but a
+        // *near-miss* for one of the normalize rewrites (subtraction-as-addition, neg-distribution,
+        // min/max AC, De Morgan, comparison negation) — exactly the shape a buggy rewrite would wrongly
+        // collapse. The normalization fast-path is solver-free, so a false EquivalentByNormalization would
+        // be caught here even with no solver installed; the assertion forbids BOTH equivalent verdicts.
+        let op = |o: &str, args: Vec<J>| json!({ "kind": "app", "op": o, "args": args });
+        let var = |n: &str| json!({ "kind": "var", "name": n });
+        let lam2 = |body: J| json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }], "body": body });
+        let lam3 = |body: J| json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }, { "name": "c" }], "body": body });
+        let (a, b, c) = (var("a"), var("b"), var("c"));
+        let pairs: Vec<(J, J)> = vec![
+            // a - b  vs  a + b  (sub→add(neg b); neg b ≠ b)
+            (lam2(op("sub", vec![a.clone(), b.clone()])), lam2(op("add", vec![a.clone(), b.clone()]))),
+            // a - b  vs  b - a  (subtraction does not commute)
+            (lam2(op("sub", vec![a.clone(), b.clone()])), lam2(op("sub", vec![b.clone(), a.clone()]))),
+            // min vs max
+            (lam2(op("min", vec![a.clone(), b.clone()])), lam2(op("max", vec![a.clone(), b.clone()]))),
+            // and vs or
+            (lam2(op("and", vec![a.clone(), b.clone()])), lam2(op("or", vec![a.clone(), b.clone()]))),
+            // De Morgan near-miss: not(and(a,b)) = or(not a, not b)  ≠  and(not a, not b)
+            (lam2(op("not", vec![op("and", vec![a.clone(), b.clone()])])),
+             lam2(op("and", vec![op("not", vec![a.clone()]), op("not", vec![b.clone()])]))),
+            // comparison-negation near-miss: not(a<b) = a>=b  ≠  a>b
+            (lam2(op("not", vec![op("lt", vec![a.clone(), b.clone()])])), lam2(op("gt", vec![a.clone(), b.clone()]))),
+            // neg-distribution: a-(b-c) = a-b+c  ≠  a-b-c  (differ by 2c)
+            (lam3(op("sub", vec![a.clone(), op("sub", vec![b.clone(), c.clone()])])),
+             lam3(op("sub", vec![op("sub", vec![a.clone(), b.clone()]), c.clone()]))),
+        ];
+        for (f, g) in pairs {
+            let verdict = prove_equivalent(&f, &g, "z3");
+            assert!(
+                !matches!(verdict, EquivVerdict::Equivalent(_) | EquivVerdict::EquivalentByNormalization),
+                "distinct pair wrongly reported EQUIVALENT:\n  f = {f}\n  g = {g}\n  verdict = {verdict:?}"
+            );
+        }
+    }
+
+    #[test]
     fn distinct_binary_gives_counterexample() {
         let Some(s) = solver() else { return };
         // \a b -> add(a, b) ≢ \a b -> sub(a, b) — differ wherever b ≠ 0.
