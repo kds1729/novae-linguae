@@ -413,10 +413,24 @@ mod tests {
     }
 
     #[test]
+    fn equivalent_by_normalization_double() {
+        // double-via-add ≡ double-via-mul: `add(n,n)` and `mul(2,n)` now share a normal form (the linear
+        // like-term combining), so this is decided solver-free — no longer the first-order SMT path.
+        assert_eq!(prove_equivalent(&double_add(), &double_mul(), "z3"), EquivVerdict::EquivalentByNormalization);
+    }
+
+    #[test]
     fn equivalent_first_order() {
         let Some(s) = solver() else { return };
-        // double-via-add ≡ double-via-mul.
-        assert_eq!(prove_equivalent(&double_add(), &double_mul(), s), EquivVerdict::Equivalent(vec![]));
+        // `\a b -> sub(add(a, b), b)` ≡ `\a b -> a`. This is a cancellation (`a + b - b = a`) — which the
+        // linear normal form deliberately does NOT apply (dropping the cancelling `b` is unsound under a
+        // diverging `b`), so normalization leaves the two distinct and the **first-order SMT** path proves it.
+        let f = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }], "body":
+            { "kind": "app", "op": "sub", "args": [
+                { "kind": "app", "op": "add", "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] },
+                { "kind": "var", "name": "b" }] } });
+        let g = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }], "body": { "kind": "var", "name": "a" } });
+        assert_eq!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(vec![]));
     }
 
     #[test]
@@ -583,17 +597,17 @@ mod tests {
     #[test]
     fn both_recursive_lockstep_sums_are_equivalent() {
         let Some(s) = solver() else { return };
-        // Double-the-sum two ways: the step is `2*head + self(tail)` vs `(head+head) + self(tail)`. Both
-        // recurse identically and compute 2·Σ, but normalization can't bridge `2x` vs `x+x` (no
-        // distributivity rule), so this is decided by the two-recursive structural induction — whose SMT
-        // step obligation discharges `2*head = head+head`. (The simpler sub/neg-vs-add pairing this test
-        // used to carry is now reconciled solver-free by `normalize`, so it no longer exercises induction.)
+        // Double-the-sum two ways: the step element is `2*head` vs `head+head`. Both recurse identically
+        // and compute 2·Σ. The **linear normal form** now bridges `2x` vs `x+x` (like-term combining), so
+        // the two whole bodies share a normal form and this is decided **solver-free by normalization** —
+        // it no longer reaches the two-recursive induction at all. (Before the linear normal form this was
+        // an induction case whose SMT step discharged `2*head = head+head`.)
         let two_head =
             json!({ "kind": "app", "op": "mul", "args": [{ "kind": "lit", "value": { "kind": "int", "value": 2 } }, head_xs()] });
         let head_plus_head = json!({ "kind": "app", "op": "add", "args": [head_xs(), head_xs()] });
         let f = rec_over_list(json!({ "kind": "app", "op": "add", "args": [two_head, self_tail()] }));
         let g = rec_over_list(json!({ "kind": "app", "op": "add", "args": [head_plus_head, self_tail()] }));
-        assert_eq!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(vec![]));
+        assert_eq!(prove_equivalent(&f, &g, s), EquivVerdict::EquivalentByNormalization);
     }
 
     #[test]
@@ -756,14 +770,15 @@ mod tests {
     #[test]
     fn both_recursive_arity2_equivalent_carried_spectator() {
         let Some(s) = solver() else { return };
-        // Two recursive "double-each-of-xs, then append ys": the element is `2*head` one way and
-        // `head+head` the other, the second list `ys` carried unchanged through the recursion. Both equal
-        // `map(2·) xs ++ ys`. normalization can't bridge `2x` vs `x+x`, so this is decided by the arity-2
-        // two-recursive induction — `ys` declared free in the goal and ∀-quantified in the IH.
-        let two_head = ap("mul", vec![li(2), ap("head", vec![vr("xs")])]);
-        let head_plus = ap("add", vec![ap("head", vec![vr("xs")]), ap("head", vec![vr("xs")])]);
-        let f = rec2(vr("ys"), ap("cons", vec![two_head, self2(ap("tail", vec![vr("xs")]), vr("ys"))]));
-        let g = rec2(vr("ys"), ap("cons", vec![head_plus, self2(ap("tail", vec![vr("xs")]), vr("ys"))]));
+        // Two recursive list-builders over xs with `ys` carried unchanged. The element differs by a
+        // datatype-selector fact the solver knows but normalization cannot see: `head(cons(h, nil)) ≡ h`.
+        // So this does NOT short-circuit to normalization — it exercises the arity-2 two-recursive
+        // induction (`ys` declared free in the goal, ∀-quantified in the IH; the step discharges the
+        // selector equality and matches tails via the IH).
+        let hx = ap("head", vec![vr("xs")]);
+        let head_of_singleton = ap("head", vec![ap("cons", vec![hx.clone(), vr("nil")])]);
+        let f = rec2(vr("ys"), ap("cons", vec![head_of_singleton, self2(ap("tail", vec![vr("xs")]), vr("ys"))]));
+        let g = rec2(vr("ys"), ap("cons", vec![hx, self2(ap("tail", vec![vr("xs")]), vr("ys"))]));
         assert_eq!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(vec![]));
     }
 
@@ -772,12 +787,13 @@ mod tests {
         let Some(s) = solver() else { return };
         // zipWith-style: the second list `ys` ALSO descends (`tail ys`) each step, so the proof needs the
         // *generalized* (∀-quantified) IH — a fixed-constant IH at `ys` would not match the recursive call
-        // at `tail ys`. Element is `2*head xs + head ys` vs `(head xs + head xs) + head ys`; equal, and
-        // normalization can't bridge `2x` vs `x+x`. Locks in the descending-spectator IH.
+        // at `tail ys`. The element differs by the selector fact `head(cons(hx+hy, nil)) ≡ hx+hy`, which
+        // normalization can't see, so this stays an induction case and locks in the descending-spectator IH.
         let hx = ap("head", vec![vr("xs")]);
         let hy = ap("head", vec![vr("ys")]);
-        let elem_f = ap("add", vec![ap("mul", vec![li(2), hx.clone()]), hy.clone()]);
-        let elem_g = ap("add", vec![ap("add", vec![hx.clone(), hx.clone()]), hy.clone()]);
+        let sum = ap("add", vec![hx.clone(), hy.clone()]);
+        let elem_f = ap("head", vec![ap("cons", vec![sum.clone(), vr("nil")])]);
+        let elem_g = sum;
         let rec = |elem: J| {
             rec2(vr("nil"), ap("cons", vec![elem, self2(ap("tail", vec![vr("xs")]), ap("tail", vec![vr("ys")]))]))
         };

@@ -29,6 +29,14 @@
 //!   - **negation-normal form** — `not` is pushed toward the leaves: De Morgan (`not(and(a,b)) →
 //!     or(not a, not b)`, and dually) and comparison negation (`not(lt(a,b)) → ge(a,b)`, `not(eq(a,b)) →
 //!     neq(a,b)`, …, over the Int/Bool total order). Sound — each retains every subterm.
+//!   - **linear like-term combining** — an `add` is read as a linear combination `Σ cᵢ·atomᵢ + c₀` over
+//!     its atoms (a `mul(c, t)` factor contributes coefficient `c`, a `neg(t)` contributes `−1`), the
+//!     coefficients are summed per atom, and it is re-emitted — so `x + x` and `2·x` coincide, as do
+//!     `2·x + 3·x` and `5·x`. This decides the *linear* integer fragment (distributivity of `·` by a
+//!     constant over `+`), which plain AC ordering cannot. Sound by construction: it **never drops an
+//!     atom** — a net-zero coefficient (`x + (−x)`, which the value-only property test would *not* flag as
+//!     a divergence hazard) aborts the rewrite, leaving the plain form with both copies, exactly as
+//!     `mul(x,0)`/`xor(x,x)` are left.
 //!
 //! For the recognized arithmetic/boolean builtins the rebuilt node uses the compact `op` form, so a body
 //! that wrote `{fn: {var: add}}` and one that wrote `{op: add}` normalize alike. Operators outside that
@@ -176,6 +184,96 @@ fn fold_ac_literals(op: &str, lits: &[J]) -> Option<J> {
     }
 }
 
+// --- linear-arithmetic normal form ----------------------------------------------------------------
+
+/// Interpret an additive operand as `coeff · atom`: `neg(t) → (−1, t)`, `mul(c, t…)` with exactly one
+/// literal factor `c` → `(c, product-of-the-rest)`, and any other term → `(1, term)`. Never called on a
+/// bare literal (those are summed into the constant). The atom is returned as-is (already normalized,
+/// since children are rewritten bottom-up before their parent `add`), so equal atoms share a sort key.
+fn as_coeff_atom(operand: &J) -> (i128, J) {
+    if head_op(operand).as_deref() == Some("neg") {
+        if let Some(t) = operand.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()) {
+            return (-1, t.clone());
+        }
+    }
+    if head_op(operand).as_deref() == Some("mul") {
+        if let Some(args) = operand.get("args").and_then(|a| a.as_array()) {
+            let lits: Vec<i128> = args.iter().filter_map(as_int).collect();
+            let nonlits: Vec<J> = args.iter().filter(|a| as_int(a).is_none()).cloned().collect();
+            // Exactly one literal factor: it's the coefficient; the remaining factors form the atom.
+            if lits.len() == 1 && !nonlits.is_empty() {
+                let atom = if nonlits.len() == 1 {
+                    nonlits.into_iter().next().unwrap()
+                } else {
+                    simplify_app(&app("mul", nonlits))
+                };
+                return (lits[0], atom);
+            }
+        }
+    }
+    (1, operand.clone())
+}
+
+/// Emit a `coeff · atom` term in canonical form: `1 → atom`, `−1 → neg(atom)`, else `mul(coeff, atom)`
+/// (run through `simplify_app` so it matches the form an AC-`mul` produces — keeping the result a fixpoint).
+fn coeff_term(coeff: i128, atom: J) -> J {
+    match coeff {
+        1 => atom,
+        -1 => simplify_app(&app("neg", vec![atom])),
+        c => simplify_app(&app("mul", vec![int_lit(c), atom])),
+    }
+}
+
+/// Canonicalize an `add` by **combining like terms**: collect every operand as `coeff · atom`, sum the
+/// coefficients per atom (and the literal operands into a constant), and re-emit. This is the linear
+/// fragment's decision step — it reconciles `x + x` with `2·x`, `2·x + 3·x` with `5·x`, etc., which the
+/// plain AC ordering cannot.
+///
+/// Returns `None` (leaving the plain AC path to run) in two cases:
+///   - **nothing repeats** — no atom occurs in ≥ 2 operands, so there is nothing to combine and the plain
+///     path already produces the canonical form (avoids needlessly reshaping every `add`);
+///   - **an atom cancels to coefficient 0** — emitting the combination would *drop* that atom, which is
+///     unsound if it could diverge (the same stance as `mul(x,0)`/`xor(x,x)`). Aborting keeps every
+///     occurrence, so the linear form NEVER drops an atom — divergence-soundness holds by construction,
+///     not by the (value-only) reference property test.
+fn try_linear_add(add_args: &[J]) -> Option<J> {
+    let flat: Vec<J> = add_args.iter().flat_map(|a| flatten_ac("add", a)).collect();
+    let mut const_sum: i128 = 0;
+    // atom sort-key → (summed coefficient, a representative atom node, occurrence count).
+    let mut groups: std::collections::BTreeMap<Vec<u8>, (i128, J, usize)> = std::collections::BTreeMap::new();
+    for operand in &flat {
+        if let Some(c) = as_int(operand) {
+            const_sum += c;
+            continue;
+        }
+        let (coeff, atom) = as_coeff_atom(operand);
+        let key = sort_key(&atom);
+        let entry = groups.entry(key).or_insert((0, atom, 0));
+        entry.0 += coeff;
+        entry.2 += 1;
+    }
+    // Only reshape when combining actually merges something; otherwise defer to the plain AC path.
+    if !groups.values().any(|(_, _, count)| *count >= 2) {
+        return None;
+    }
+    // Soundness gate: a net-zero atom would be dropped — abort instead (the plain path keeps both copies).
+    if groups.values().any(|(coeff, _, _)| *coeff == 0) {
+        return None;
+    }
+    let mut terms: Vec<J> = groups.into_values().map(|(coeff, atom, _)| coeff_term(coeff, atom)).collect();
+    if const_sum != 0 {
+        terms.push(int_lit(const_sum));
+    }
+    // Canonical ordering + right-nested association (mirrors the AC rebuild). The emitted operands have
+    // distinct atoms, so re-running `try_linear_add` on this returns `None` — it is a fixpoint.
+    terms.sort_by(|a, b| sort_key(a).cmp(&sort_key(b)));
+    Some(match terms.len() {
+        0 => int_lit(0),
+        1 => terms.into_iter().next().unwrap(),
+        _ => terms.into_iter().rev().reduce(|acc, x| app("add", vec![x, acc])).unwrap(),
+    })
+}
+
 // --- the rewrite ----------------------------------------------------------------------------------
 
 /// One bottom-up rewrite pass: rewrite every child, then simplify this node if it is a recognized
@@ -283,6 +381,13 @@ fn simplify_app(node: &J) -> J {
 
     // Associative + commutative operators: flatten, fold literals, drop identity, sort, rebuild.
     if AC_OPS.contains(&op.as_str()) {
+        // `add` first attempts linear like-term combining (`x + x → 2·x`); it returns `None` when there is
+        // nothing to combine or an atom would cancel to zero, in which case the plain AC path below runs.
+        if op == "add" {
+            if let Some(linear) = try_linear_add(&args) {
+                return linear;
+            }
+        }
         let flat: Vec<J> = args.iter().flat_map(|a| flatten_ac(&op, a)).collect();
         let (lits, mut rest): (Vec<J>, Vec<J>) =
             flat.into_iter().partition(|x| as_int(x).is_some() || as_bool(x).is_some());
@@ -488,6 +593,47 @@ mod tests {
             &app("or", vec![app("ge", vec![v("a"), v("b")]), app("neq", vec![v("c"), v("d")])])));
     }
 
+    // --- linear-arithmetic normal form -----------------------------------------------------------
+
+    #[test]
+    fn like_terms_combine() {
+        // x + x ≡ 2·x — the gap the linear form closes (plain AC kept these distinct).
+        assert!(normal_equivalent(&app("add", vec![v("x"), v("x")]), &app("mul", vec![int_lit(2), v("x")])));
+        // 2·x + x ≡ 3·x ; 2·x + 3·x ≡ 5·x ; x + x + x ≡ 3·x.
+        assert!(normal_equivalent(
+            &app("add", vec![app("mul", vec![int_lit(2), v("x")]), v("x")]),
+            &app("mul", vec![int_lit(3), v("x")])));
+        assert!(normal_equivalent(
+            &app("add", vec![app("mul", vec![int_lit(2), v("x")]), app("mul", vec![int_lit(3), v("x")])]),
+            &app("mul", vec![int_lit(5), v("x")])));
+        assert!(normal_equivalent(
+            &app("add", vec![v("x"), v("x"), v("x")]),
+            &app("mul", vec![int_lit(3), v("x")])));
+        // Combining works over a compound atom too: head(xs) + head(xs) ≡ 2·head(xs).
+        let h = app("head", vec![v("xs")]);
+        assert!(normal_equivalent(&app("add", vec![h.clone(), h.clone()]), &app("mul", vec![int_lit(2), h])));
+        // Mixed: 2·a + b + 3·a ≡ 5·a + b.
+        assert!(normal_equivalent(
+            &app("add", vec![app("mul", vec![int_lit(2), v("a")]), v("b"), app("mul", vec![int_lit(3), v("a")])]),
+            &app("add", vec![app("mul", vec![int_lit(5), v("a")]), v("b")])));
+    }
+
+    #[test]
+    fn cancellation_is_not_applied() {
+        // x + (−x) is 0 by value, but combining would DROP x — unsound under a diverging x. So it must NOT
+        // collapse to 0 (the same stance as mul-by-0 / xor(x,x)); the linear path aborts, leaving the plain
+        // form with both copies retained.
+        assert_ne!(normalize(&app("add", vec![v("x"), app("neg", vec![v("x")])])), int_lit(0));
+        // 2·x + (−x) + (−x) = 0·x — also a net-zero cancellation; must not collapse to 0.
+        let e = app("add", vec![app("mul", vec![int_lit(2), v("x")]), app("neg", vec![v("x")]), app("neg", vec![v("x")])]);
+        assert_ne!(normalize(&e), int_lit(0));
+        // And a net-zero atom must not let the rest collapse either: x + (−x) + y keeps x, so it is NOT
+        // equal to y (which would require dropping the cancelling x).
+        assert!(!normal_equivalent(
+            &app("add", vec![v("x"), app("neg", vec![v("x")]), v("y")]),
+            &v("y")));
+    }
+
     // --- soundness property test: a reference evaluator over the fragment must agree on a body and its
     // normal form for every input. A single unsound rewrite (a false equivalence) would be caught here.
 
@@ -585,6 +731,13 @@ mod tests {
             app("add", vec![app("mul", vec![a(), int_lit(2)]), app("sub", vec![b(), a()])]),
             app("min", vec![app("add", vec![a(), int_lit(1)]), app("sub", vec![a(), b()])]),
             app("abs", vec![app("sub", vec![a(), b()])]),
+            // linear like-term combining (and the cancellation-abort case, which must stay value-correct):
+            app("add", vec![a(), a()]),
+            app("add", vec![app("mul", vec![int_lit(2), a()]), a()]),
+            app("add", vec![app("mul", vec![int_lit(2), a()]), app("mul", vec![int_lit(3), b()])]),
+            app("add", vec![a(), a(), app("neg", vec![b()])]),
+            app("add", vec![a(), app("neg", vec![a()]), b()]),
+            app("add", vec![app("mul", vec![int_lit(3), a()]), app("neg", vec![a()]), int_lit(1)]),
         ];
         let bool_exprs: Vec<J> = vec![
             app("and", vec![p(), p()]),
