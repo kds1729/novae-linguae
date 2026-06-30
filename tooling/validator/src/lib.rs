@@ -55,6 +55,9 @@ pub use cluster::{cluster, cluster_dir};
 pub mod refine;
 pub use refine::{check_nat_refinement, RefinementOutcome};
 
+pub mod terminate;
+pub use terminate::{analyze_termination, TerminationOutcome};
+
 pub mod effects;
 pub use effects::{check_effects, infer_effects};
 

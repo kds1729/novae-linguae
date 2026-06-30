@@ -240,6 +240,19 @@ enum Commands {
         #[arg(long, default_value = "z3")]
         solver: String,
     },
+    /// Verify a record's declared `signature.terminates: always` by **structural** analysis (no solver):
+    /// a non-recursive first-order body, or one whose every `self`-call descends `tail^k` of a fixed
+    /// parameter, provably halts. Prints SOUND (declared `always`, verified), VERIFIED (provably always
+    /// but declared weaker — could be strengthened), or UNVERIFIABLE (declared `always`, not provable
+    /// here — a higher-order/opaque callee or a non-structural recursion). Sound and conservative: never a
+    /// false `always`. The body AST is supplied with `--body`.
+    CheckTermination {
+        /// Path to the function record (provides signature.terminates).
+        record: PathBuf,
+        /// Path to the body-expression JSON AST.
+        #[arg(long)]
+        body: PathBuf,
+    },
     /// Prove a record's `forall` `properties[]` over the UNBOUNDED domain with an SMT solver — the rung
     /// above bounded `check-properties`. Each property + the function body is translated to SMT-LIB 2
     /// (the Int/Bool fragment); the solver checks the negation of the law. Reports PROVED (unsat — holds
@@ -553,6 +566,7 @@ fn main() -> ExitCode {
         }
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
         Commands::CheckRefinement { record, body, solver } => (cmd_check_refinement(&record, &body, &solver), false),
+        Commands::CheckTermination { record, body } => (cmd_check_termination(&record, &body), false),
         Commands::Respond { request, records, seed, timestamp } => {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
         }
@@ -778,6 +792,26 @@ fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str) -> Resul
         }
         RefinementOutcome::NoSolver => Err(anyhow::anyhow!("NO-SOLVER    `{solver}` not found")),
     }
+}
+
+fn cmd_check_termination(record: &PathBuf, body: &PathBuf) -> Result<()> {
+    use nl_validator::TerminationOutcome;
+    let record = nl_validator::read_json(record)?;
+    let body = nl_validator::read_json(body)?;
+    let declared = record.pointer("/signature/terminates").and_then(|v| v.as_str()).unwrap_or("unknown");
+    match nl_validator::analyze_termination(&body) {
+        TerminationOutcome::Always => match declared {
+            "always" => println!("SOUND        the body provably always terminates (matches declared `always`)"),
+            other => {
+                println!("VERIFIED     provably always-terminates — declared `{other}` could be strengthened to `always`")
+            }
+        },
+        TerminationOutcome::Unknown(why) => match declared {
+            "always" => println!("UNVERIFIABLE declared `always`, but structural analysis can't prove it: {why}"),
+            other => println!("UNKNOWN      not provably terminating ({why}); consistent with declared `{other}`"),
+        },
+    }
+    Ok(())
 }
 
 fn cmd_respond(
