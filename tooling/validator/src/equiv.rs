@@ -443,14 +443,11 @@ mod tests {
     }
 
     #[test]
-    fn equivalent_list_law_via_induction() {
-        let Some(s) = solver() else { return };
-        // \xs. reverse(reverse(xs)) ≡ \xs. xs — both non-recursive (builtin reverse), proved by the
-        // inductive lemma-discovery path.
-        match prove_equivalent(&rev_rev(), &ident(), s) {
-            EquivVerdict::Equivalent(_) => {}
-            other => panic!("expected EQUIVALENT, got {other:?}"),
-        }
+    fn equivalent_list_law_by_normalization() {
+        // \xs. reverse(reverse(xs)) ≡ \xs. xs — now decided **solver-free** by the reverse-involution
+        // normal-form rewrite (was previously the inductive lemma-discovery path; that path is still
+        // covered by the map/filter laws below and by `induct`'s own tests).
+        assert_eq!(prove_equivalent(&rev_rev(), &ident(), "z3"), EquivVerdict::EquivalentByNormalization);
     }
 
     #[test]
@@ -832,16 +829,19 @@ mod tests {
     }
 
     #[test]
-    fn both_recursive_step_closes_with_append_nil_lemma() {
+    fn both_recursive_step_closes_with_append_assoc_lemma() {
         let Some(s) = solver() else { return };
-        // Two recursive naive-reverses: `f xs = reverse(tail xs) ++ [head xs]` (written with `self`), and
-        // `g` the same with a redundant trailing `++ nil`. Both compute reverse, but the step needs
-        // `append(W, nil) = W` (`append_nil`) — an inductive fact normalization can't fold and the bare
-        // step can't discharge. The two-recursive lemma machinery proves `append_nil` by its own induction
-        // and closes the step, so the verdict is EQUIVALENT *with* a non-empty lemma list.
+        // Two recursive list-builders that append `[head]` twice onto the recursive result but **associate
+        // the append differently**: `f` builds `append(append(self(tail), [h]), [h])`, `g` builds
+        // `append(self(tail), append([h], [h]))`. Both compute the same list, but because the *symbolic*
+        // recursive result is the first append argument, z3 can't unfold it, so the step genuinely needs
+        // `append(append(a,b),c) = append(a, append(b,c))` (`append_assoc`) — which normalization does NOT
+        // reassociate (append isn't AC) and the bare step can't discharge. The two-recursive lemma machinery
+        // proves `append_assoc` by its own induction and closes the step.
         let single = ap("cons", vec![ap("head", vec![vr("xs")]), vr("nil")]);
-        let f = rec1(ap("append", vec![self1(ap("tail", vec![vr("xs")])), single.clone()]));
-        let g = rec1(ap("append", vec![ap("append", vec![self1(ap("tail", vec![vr("xs")])), single]), vr("nil")]));
+        let rec_tail = self1(ap("tail", vec![vr("xs")]));
+        let f = rec1(ap("append", vec![ap("append", vec![rec_tail.clone(), single.clone()]), single.clone()]));
+        let g = rec1(ap("append", vec![rec_tail, ap("append", vec![single.clone(), single])]));
         match prove_equivalent(&f, &g, s) {
             EquivVerdict::Equivalent(ls) => assert!(!ls.is_empty(), "expected a lemma to be used, got none"),
             other => panic!("expected EQUIVALENT (with a lemma), got {other:?}"),

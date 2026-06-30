@@ -39,6 +39,10 @@
 //!     monomial* and still be sound when its atom lives on in another (`(a+1)(a−1)`'s `−a + a` cancels
 //!     because `a` remains in `a²`), so the check is per-atom, not per-monomial — a divergence hazard the
 //!     value-only property test would not catch on its own.
+//!   - **sound list-algebra rewrites** — `reverse(reverse(x)) → x`, `reverse(nil) → nil`, and `append(x,
+//!     nil) → x` / `append(nil, x) → x`. Each retains every subterm, so it is sound even under a diverging
+//!     operand (unlike a *selector* `head(cons h t) → h`, which drops `t` and is therefore NOT applied), and
+//!     it pulls common list equivalences (notably `reverse(reverse xs) ≡ xs`) onto this solver-free path.
 //!
 //! For the recognized arithmetic/boolean builtins the rebuilt node uses the compact `op` form, so a body
 //! that wrote `{fn: {var: add}}` and one that wrote `{op: add}` normalize alike. Operators outside that
@@ -134,6 +138,12 @@ fn bool_lit(b: bool) -> J {
 
 fn app(op: &str, args: Vec<J>) -> J {
     json!({ "kind": "app", "op": op, "args": args })
+}
+
+/// Whether a node is the empty-list constant `nil` (a `var` named `nil` — the spelling the bodies use).
+fn is_nil(node: &J) -> bool {
+    node.get("kind").and_then(|k| k.as_str()) == Some("var")
+        && node.get("name").and_then(|n| n.as_str()) == Some("nil")
 }
 
 /// A naming-invariant sort key: the operand's own α-normal form, canonically serialized. Two operands
@@ -507,7 +517,34 @@ fn simplify_app(node: &J) -> J {
         return app(&op, args);
     }
 
-    // Unrecognized head (list op, fn_ref application): leave the application form untouched.
+    // Sound list-algebra rewrites — each RETAINS every subterm, so no false equivalence. (Selectors like
+    // `head(cons h t) → h` and `tail(cons h t) → t` are deliberately NOT applied: they drop the other
+    // field, which is unsound under a diverging operand — the same stance as `mul(x,0)`.)
+    match op.as_str() {
+        "reverse" if args.len() == 1 => {
+            // reverse(reverse(x)) → x (involution); reverse(nil) → nil.
+            if head_op(&args[0]).as_deref() == Some("reverse") {
+                if let Some(inner) = args[0].get("args").and_then(|a| a.as_array()).and_then(|a| a.first()) {
+                    return inner.clone();
+                }
+            }
+            if is_nil(&args[0]) {
+                return args[0].clone();
+            }
+        }
+        "append" if args.len() == 2 => {
+            // append(x, nil) → x; append(nil, x) → x (nil is the identity of append; `nil` can't diverge).
+            if is_nil(&args[1]) {
+                return args[0].clone();
+            }
+            if is_nil(&args[0]) {
+                return args[1].clone();
+            }
+        }
+        _ => {}
+    }
+
+    // Unrecognized head (other list op, fn_ref application): leave the application form untouched.
     node.clone()
 }
 
@@ -918,5 +955,119 @@ mod tests {
             }
         }
         assert!(checked > 1000, "soundness battery should exercise many envs (got {checked})");
+    }
+
+    // --- sound list-algebra rewrites --------------------------------------------------------------
+
+    fn rev(x: J) -> J {
+        app("reverse", vec![x])
+    }
+    fn apnd(x: J, y: J) -> J {
+        app("append", vec![x, y])
+    }
+    fn nil() -> J {
+        v("nil")
+    }
+
+    #[test]
+    fn list_rewrites_decide_solver_free() {
+        // reverse∘reverse = id, and nil is the identity of append — all solver-free.
+        assert!(normal_equivalent(&rev(rev(v("xs"))), &v("xs")));
+        assert!(normal_equivalent(&apnd(v("xs"), nil()), &v("xs")));
+        assert!(normal_equivalent(&apnd(nil(), v("xs")), &v("xs")));
+        assert_eq!(normalize(&rev(nil())), normalize(&nil()));
+        // Compose: reverse(append(reverse(reverse(xs)), nil)) ≡ reverse(xs).
+        assert!(normal_equivalent(&rev(apnd(rev(rev(v("xs"))), nil())), &rev(v("xs"))));
+    }
+
+    #[test]
+    fn unsound_list_rewrites_are_not_applied() {
+        // Selectors drop a field, so they are NOT rewritten: head(cons(h, t)) must NOT become h (would drop
+        // t), nor tail(cons(h, t)) become t (would drop h) — both unsound under a diverging operand.
+        let cons = app("cons", vec![v("h"), v("t")]);
+        assert!(!normal_equivalent(&app("head", vec![cons.clone()]), &v("h")));
+        assert!(!normal_equivalent(&app("tail", vec![cons]), &v("t")));
+        // A single reverse is genuinely not the identity: reverse(xs) ≢ xs.
+        assert!(!normal_equivalent(&rev(v("xs")), &v("xs")));
+        // append does not commute: append(xs, ys) ≢ append(ys, xs).
+        assert!(!normal_equivalent(&apnd(v("xs"), v("ys")), &apnd(v("ys"), v("xs"))));
+    }
+
+    /// Reference evaluator for the list fragment: a list-valued expression over list variables. `None` on a
+    /// partial op (`tail` of empty). Guards the list rewrites the same way `eval_ref` guards the int/bool ones.
+    fn eval_list(node: &J, env: &std::collections::HashMap<String, Vec<i128>>) -> Option<Vec<i128>> {
+        if is_nil(node) {
+            return Some(Vec::new());
+        }
+        if node.get("kind").and_then(|k| k.as_str()) == Some("var") {
+            return env.get(node.get("name")?.as_str()?).cloned();
+        }
+        let op = head_op(node)?;
+        let args = node.get("args")?.as_array()?;
+        match op.as_str() {
+            "reverse" => {
+                let mut x = eval_list(&args[0], env)?;
+                x.reverse();
+                Some(x)
+            }
+            "append" => {
+                let mut a = eval_list(&args[0], env)?;
+                a.extend(eval_list(&args[1], env)?);
+                Some(a)
+            }
+            "cons" => {
+                let h = as_int(&args[0])?;
+                let mut t = eval_list(&args[1], env)?;
+                t.insert(0, h);
+                Some(t)
+            }
+            "tail" => {
+                let x = eval_list(&args[0], env)?;
+                if x.is_empty() {
+                    None
+                } else {
+                    Some(x[1..].to_vec())
+                }
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn list_normalization_preserves_meaning() {
+        use std::collections::HashMap;
+        let xs = || v("xs");
+        let ys = || v("ys");
+        let exprs: Vec<J> = vec![
+            rev(rev(xs())),
+            apnd(xs(), nil()),
+            apnd(nil(), xs()),
+            rev(nil()),
+            rev(rev(rev(xs()))),
+            rev(apnd(xs(), nil())),
+            apnd(rev(xs()), rev(rev(ys()))),
+            apnd(rev(rev(xs())), rev(rev(ys()))),
+            // a cons-built list flows through unchanged (no unsound selector fires):
+            app("cons", vec![int_lit(9), rev(rev(xs()))]),
+        ];
+        let lists: &[&[i128]] = &[&[], &[1], &[1, 2], &[3, 2, 1], &[1, 2, 3], &[5, 5]];
+        let mut checked = 0u64;
+        for expr in &exprs {
+            let norm = normalize(expr);
+            for x in lists {
+                for y in lists {
+                    let env: HashMap<String, Vec<i128>> =
+                        [("xs".into(), x.to_vec()), ("ys".into(), y.to_vec())].into_iter().collect();
+                    let before = eval_list(expr, &env);
+                    let after = eval_list(&norm, &env);
+                    if before.is_none() || after.is_none() {
+                        continue;
+                    }
+                    assert_eq!(before, after, "normalize changed meaning of {expr} -> {norm} at xs={x:?} ys={y:?}");
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 100, "list soundness battery should exercise many envs (got {checked})");
     }
 }
