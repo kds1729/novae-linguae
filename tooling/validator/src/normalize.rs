@@ -26,6 +26,9 @@
 //!     operand is still evaluated — safe even if it could diverge (unlike `xor(x, x) → false`, which
 //!     drops both copies and is therefore NOT applied).
 //!   - **involution** — `neg(neg(x)) → x`, `not(not(x)) → x`; `id(x) → x`; literal `nat` → `int`.
+//!   - **negation-normal form** — `not` is pushed toward the leaves: De Morgan (`not(and(a,b)) →
+//!     or(not a, not b)`, and dually) and comparison negation (`not(lt(a,b)) → ge(a,b)`, `not(eq(a,b)) →
+//!     neq(a,b)`, …, over the Int/Bool total order). Sound — each retains every subterm.
 //!
 //! For the recognized arithmetic/boolean builtins the rebuilt node uses the compact `op` form, so a body
 //! that wrote `{fn: {var: add}}` and one that wrote `{op: add}` normalize alike. Operators outside that
@@ -244,6 +247,36 @@ fn simplify_app(node: &J) -> J {
                     return inner.clone();
                 }
             }
+            // Push negation toward the leaves (negation-normal form). Each rule is meaning-preserving and
+            // retains every subterm, so it cannot create a false equivalence.
+            if let (Some(inner_op), Some(inner_args)) =
+                (head_op(&args[0]), args[0].get("args").and_then(|a| a.as_array()))
+            {
+                // De Morgan: ¬(a ∧ b) ≡ ¬a ∨ ¬b, ¬(a ∨ b) ≡ ¬a ∧ ¬b.
+                if let Some(dual) = match inner_op.as_str() {
+                    "and" => Some("or"),
+                    "or" => Some("and"),
+                    _ => None,
+                } {
+                    let negated: Vec<J> =
+                        inner_args.iter().map(|t| simplify_app(&app("not", vec![t.clone()]))).collect();
+                    return simplify_app(&app(dual, negated));
+                }
+                // Comparison negation over the Int/Bool total order: ¬(a<b) ≡ a≥b, ¬(a=b) ≡ a≠b, etc.
+                if inner_args.len() == 2 {
+                    if let Some(neg) = match inner_op.as_str() {
+                        "lt" => Some("ge"),
+                        "le" => Some("gt"),
+                        "gt" => Some("le"),
+                        "ge" => Some("lt"),
+                        "eq" => Some("neq"),
+                        "neq" => Some("eq"),
+                        _ => None,
+                    } {
+                        return simplify_app(&app(neg, inner_args.clone()));
+                    }
+                }
+            }
         }
         _ => {}
     }
@@ -437,6 +470,24 @@ mod tests {
         assert_ne!(normalize(&app("xor", vec![v("p"), v("p")])), normalize(&v("p")));
     }
 
+    #[test]
+    fn negation_normal_form() {
+        // De Morgan: not(and(p,q)) ≡ or(not p, not q); not(or(p,q)) ≡ and(not p, not q).
+        assert!(normal_equivalent(&app("not", vec![app("and", vec![v("p"), v("q")])]),
+                                  &app("or", vec![app("not", vec![v("p")]), app("not", vec![v("q")])])));
+        assert!(normal_equivalent(&app("not", vec![app("or", vec![v("p"), v("q")])]),
+                                  &app("and", vec![app("not", vec![v("p")]), app("not", vec![v("q")])])));
+        // Comparison negation: not(a<b) ≡ a>=b ; not(a=b) ≡ a!=b.
+        assert!(normal_equivalent(&app("not", vec![app("lt", vec![v("a"), v("b")])]),
+                                  &app("ge", vec![v("a"), v("b")])));
+        assert!(normal_equivalent(&app("not", vec![app("eq", vec![v("a"), v("b")])]),
+                                  &app("neq", vec![v("a"), v("b")])));
+        // Nested: not(and(a<b, c=d)) ≡ or(a>=b, c!=d).
+        assert!(normal_equivalent(
+            &app("not", vec![app("and", vec![app("lt", vec![v("a"), v("b")]), app("eq", vec![v("c"), v("d")])])]),
+            &app("or", vec![app("ge", vec![v("a"), v("b")]), app("neq", vec![v("c"), v("d")])])));
+    }
+
     // --- soundness property test: a reference evaluator over the fragment must agree on a body and its
     // normal form for every input. A single unsound rewrite (a false equivalence) would be caught here.
 
@@ -542,6 +593,12 @@ mod tests {
             app("eq", vec![app("sub", vec![a(), b()]), int_lit(0)]),
             app("lt", vec![app("min", vec![a(), b()]), app("max", vec![a(), b()])]),
             app("and", vec![app("lt", vec![a(), b()]), app("lt", vec![a(), b()])]),
+            // negation-normal-form cases
+            app("not", vec![app("and", vec![p(), q()])]),
+            app("not", vec![app("or", vec![p(), q()])]),
+            app("not", vec![app("lt", vec![a(), b()])]),
+            app("not", vec![app("eq", vec![a(), b()])]),
+            app("not", vec![app("and", vec![app("lt", vec![a(), b()]), app("ge", vec![b(), c()])])]),
         ];
         let ivals = [-3i128, -1, 0, 2, 5];
         let bvals = [false, true];
