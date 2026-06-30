@@ -9,9 +9,11 @@
 //! is impossible):
 //!   - **α-canonicalization** — bound variables (lambda params, `let`, `case` binds, `forall` vars) are
 //!     renamed to positional names; free variables (builtins, the function head, `self`) are untouched.
-//!   - **AC ordering** — associative+commutative operators (`add`, `mul`, `and`, `or`, `xor`) are
-//!     flattened across nesting and their operands sorted by a naming-invariant key, so `add(a, b)` and
-//!     `add(b, a)` — and `add(add(a, b), c)` and `add(c, add(b, a))` — coincide.
+//!   - **AC ordering** — associative+commutative operators (`add`, `mul`, `and`, `or`, `xor`, `min`,
+//!     `max`) are flattened across nesting and their operands sorted by a naming-invariant key, so
+//!     `add(a, b)` and `add(b, a)` — and `add(add(a, b), c)` and `add(c, add(b, a))` — coincide.
+//!   - **subtraction as addition** — `sub(a, b) → add(a, neg(b))`, so subtraction folds into the additive
+//!     AC group (`a - b`, `a + (-b)`, and `(-b) + a` all coincide). Sound: both subterms are retained.
 //!   - **commutative ordering** — `eq`/`neq` operands are sorted (they commute but don't associate).
 //!   - **constant folding** — applications all of whose operands are literals are evaluated (the total
 //!     `Int`/`Bool` operators; `div`/`mod` are left alone to avoid a divide-by-zero rewrite).
@@ -19,6 +21,10 @@
 //!     `mul(x, 1) → x`, `and(x, true) → x`, `or(x, false) → x`, `xor(x, false) → x`). *Absorbing*
 //!     elements (`mul(x, 0)`, `and(x, false)`, …) are deliberately NOT applied: under a possibly
 //!     non-terminating `x` they would not be meaning-preserving.
+//!   - **idempotence** — for the idempotent AC operators (`and`, `or`, `min`, `max`) a repeated operand
+//!     collapses (`and(x, x) → x`, `max(a, max(a, b)) → max(a, b)`). Sound: *one* copy is kept, so the
+//!     operand is still evaluated — safe even if it could diverge (unlike `xor(x, x) → false`, which
+//!     drops both copies and is therefore NOT applied).
 //!   - **involution** — `neg(neg(x)) → x`, `not(not(x)) → x`; `id(x) → x`; literal `nat` → `int`.
 //!
 //! For the recognized arithmetic/boolean builtins the rebuilt node uses the compact `op` form, so a body
@@ -35,7 +41,12 @@ use serde_json::{json, Value as J};
 use crate::equiv::alpha_canonical;
 
 /// Associative + commutative operators: flattened across nesting, operands sorted, identity dropped.
-const AC_OPS: &[&str] = &["add", "mul", "and", "or", "xor"];
+/// `min`/`max` are AC too (and idempotent, below) but have no integer identity element.
+const AC_OPS: &[&str] = &["add", "mul", "and", "or", "xor", "min", "max"];
+/// AC operators that are also idempotent: a repeated operand collapses to one copy. Keeping one copy is
+/// sound even under a possibly-diverging operand (the operand is still evaluated). `add`/`mul`/`xor` are
+/// NOT idempotent (`add(x,x)=2x`, `xor(x,x)=false` — the latter would drop both copies).
+const IDEMPOTENT_OPS: &[&str] = &["and", "or", "min", "max"];
 /// Commutative (but not associative) binary operators: operands sorted, not flattened.
 const COMM_OPS: &[&str] = &["eq", "neq"];
 /// The arithmetic/boolean builtins we recognize — rebuilt in `op` form (and constant-folded). Anything
@@ -155,6 +166,9 @@ fn fold_ac_literals(op: &str, lits: &[J]) -> Option<J> {
         "and" => Some(bool_lit(lits.iter().filter_map(as_bool).all(|b| b))),
         "or" => Some(bool_lit(lits.iter().filter_map(as_bool).any(|b| b))),
         "xor" => Some(bool_lit(lits.iter().filter_map(as_bool).fold(false, |a, b| a ^ b))),
+        // min/max have no identity element, so `lits` may yield nothing — then there is no folded literal.
+        "min" => lits.iter().filter_map(as_int).min().map(int_lit),
+        "max" => lits.iter().filter_map(as_int).max().map(int_lit),
         _ => None,
     }
 }
@@ -196,6 +210,13 @@ fn simplify_app(node: &J) -> J {
     // Involutions and id (checked before the generic builtin rebuild).
     match op.as_str() {
         "id" if args.len() == 1 => return args[0].clone(),
+        // Subtraction as addition: a - b ≡ a + (-b). Folds subtraction into the additive AC group so
+        // `a - b`, `a + (-b)`, `(-b) + a` coincide. Sound — both subterms are retained (negation never
+        // drops `b`), and over ℤ it is an identity. `neg` is simplified first so literals fold (3 - 1 → 2).
+        "sub" if args.len() == 2 => {
+            let neg_b = simplify_app(&app("neg", vec![args[1].clone()]));
+            return simplify_app(&app("add", vec![args[0].clone(), neg_b]));
+        }
         "neg" if args.len() == 1 => {
             if let Some(n) = as_int(&args[0]) {
                 return int_lit(-n);
@@ -203,6 +224,14 @@ fn simplify_app(node: &J) -> J {
             if head_op(&args[0]).as_deref() == Some("neg") {
                 if let Some(inner) = args[0].get("args").and_then(|a| a.as_array()).and_then(|a| a.first()) {
                     return inner.clone();
+                }
+            }
+            // Distribute negation over addition: -(x + y) ≡ (-x) + (-y). Sound (every subterm retained),
+            // and it completes the subtraction-as-addition canonicalization for nested `a - (b - c)`.
+            if head_op(&args[0]).as_deref() == Some("add") {
+                if let Some(inner) = args[0].get("args").and_then(|a| a.as_array()) {
+                    let negated: Vec<J> = inner.iter().map(|t| simplify_app(&app("neg", vec![t.clone()]))).collect();
+                    return simplify_app(&app("add", negated));
                 }
             }
         }
@@ -233,6 +262,11 @@ fn simplify_app(node: &J) -> J {
             }
         }
         rest.sort_by(|a, b| sort_key(a).cmp(&sort_key(b)));
+        // Idempotence: for and/or/min/max, collapse repeated operands (now adjacent after the sort). One
+        // copy is kept, so the operand is still evaluated — sound even if it could diverge.
+        if IDEMPOTENT_OPS.contains(&op.as_str()) {
+            rest.dedup_by(|a, b| sort_key(a) == sort_key(b));
+        }
         return match rest.len() {
             0 => ac_identity(&op).unwrap_or_else(|| int_lit(0)),
             1 => rest.into_iter().next().unwrap(),
@@ -355,5 +389,190 @@ mod tests {
         let f = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }], "body": app("add", vec![v("a"), v("b")]) });
         let g = json!({ "kind": "lambda", "params": [{ "name": "x" }, { "name": "y" }], "body": app("add", vec![v("y"), v("x")]) });
         assert!(normal_equivalent(&f, &g));
+    }
+
+    // --- new rewrites (subtraction-as-addition, neg distribution, min/max AC, idempotence) -----------
+
+    #[test]
+    fn subtraction_folds_into_addition() {
+        // a - b ≡ a + (-b) ≡ (-b) + a.
+        assert!(normal_equivalent(&app("sub", vec![v("a"), v("b")]),
+                                  &app("add", vec![v("a"), app("neg", vec![v("b")])])));
+        assert!(normal_equivalent(&app("sub", vec![v("a"), v("b")]),
+                                  &app("add", vec![app("neg", vec![v("b")]), v("a")])));
+        // a - (b - c) ≡ a - b + c  (needs neg distribution over add).
+        let lhs = app("sub", vec![v("a"), app("sub", vec![v("b"), v("c")])]);
+        let rhs = app("add", vec![app("sub", vec![v("a"), v("b")]), v("c")]);
+        assert!(normal_equivalent(&lhs, &rhs));
+        // a - a is NOT collapsed to 0 (would be unsound under a diverging a — same stance as mul-by-0).
+        assert_ne!(normalize(&app("sub", vec![v("a"), v("a")])), int_lit(0));
+    }
+
+    #[test]
+    fn min_max_are_ac_and_idempotent() {
+        // commutative + associative
+        assert!(normal_equivalent(&app("max", vec![v("a"), v("b")]), &app("max", vec![v("b"), v("a")])));
+        assert!(normal_equivalent(&app("min", vec![app("min", vec![v("a"), v("b")]), v("c")]),
+                                  &app("min", vec![v("c"), app("min", vec![v("b"), v("a")])])));
+        // idempotent: max(a, a) → a, min(a, min(a, b)) → min(a, b)
+        assert_eq!(normalize(&app("max", vec![v("a"), v("a")])), normalize(&v("a")));
+        assert!(normal_equivalent(&app("min", vec![v("a"), app("min", vec![v("a"), v("b")])]),
+                                  &app("min", vec![v("a"), v("b")])));
+        // literal folding: max(5, a, 3) ≡ max(a, 5)
+        assert!(normal_equivalent(&app("max", vec![int_lit(5), v("a"), int_lit(3)]),
+                                  &app("max", vec![v("a"), int_lit(5)])));
+        // min and max stay distinct
+        assert!(!normal_equivalent(&app("min", vec![v("a"), v("b")]), &app("max", vec![v("a"), v("b")])));
+    }
+
+    #[test]
+    fn and_or_idempotence() {
+        assert_eq!(normalize(&app("and", vec![v("p"), v("p")])), normalize(&v("p")));
+        assert_eq!(normalize(&app("or", vec![v("p"), v("p")])), normalize(&v("p")));
+        // or(p, or(p, q)) → or(p, q)
+        assert!(normal_equivalent(&app("or", vec![v("p"), app("or", vec![v("p"), v("q")])]),
+                                  &app("or", vec![v("p"), v("q")])));
+        // xor is NOT idempotent: xor(p, p) must NOT collapse to p (it is false, but dropping both copies
+        // is unsound under divergence, so it stays as the un-collapsed form).
+        assert_ne!(normalize(&app("xor", vec![v("p"), v("p")])), normalize(&v("p")));
+    }
+
+    // --- soundness property test: a reference evaluator over the fragment must agree on a body and its
+    // normal form for every input. A single unsound rewrite (a false equivalence) would be caught here.
+
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Val {
+        I(i128),
+        B(bool),
+    }
+
+    fn ei(v: &Val) -> Option<i128> {
+        if let Val::I(x) = v { Some(*x) } else { None }
+    }
+    fn eb(v: &Val) -> Option<bool> {
+        if let Val::B(x) = v { Some(*x) } else { None }
+    }
+
+    /// Reference evaluator over the normal-form fragment. `None` on a partial op (div/mod by zero) — those
+    /// envs are skipped. div/mod use any fixed semantics: they are never rewritten, so the choice only has
+    /// to be *consistent* across a body and its normal form.
+    fn eval_ref(node: &J, env: &std::collections::HashMap<String, Val>) -> Option<Val> {
+        if let Some(i) = as_int(node) {
+            return Some(Val::I(i));
+        }
+        if let Some(b) = as_bool(node) {
+            return Some(Val::B(b));
+        }
+        if node.get("kind").and_then(|k| k.as_str()) == Some("var") {
+            return env.get(node.get("name")?.as_str()?).copied();
+        }
+        let op = head_op(node)?;
+        let args = node.get("args")?.as_array()?;
+        let ev: Vec<Val> = args.iter().map(|a| eval_ref(a, env)).collect::<Option<_>>()?;
+        // n-ary fold for the AC ops (the normal form rebuilds them as nested binaries; inputs may be n-ary).
+        let int_fold = |f: fn(i128, i128) -> i128| -> Option<Val> {
+            let mut it = ev.iter().map(ei);
+            let first = it.next()??;
+            it.try_fold(first, |a, b| Some(f(a, b?))).map(Val::I)
+        };
+        let bool_fold = |f: fn(bool, bool) -> bool| -> Option<Val> {
+            let mut it = ev.iter().map(eb);
+            let first = it.next()??;
+            it.try_fold(first, |a, b| Some(f(a, b?))).map(Val::B)
+        };
+        Some(match op.as_str() {
+            "add" => int_fold(|a, b| a + b)?,
+            "mul" => int_fold(|a, b| a * b)?,
+            "min" => int_fold(|a, b| a.min(b))?,
+            "max" => int_fold(|a, b| a.max(b))?,
+            "and" => bool_fold(|a, b| a && b)?,
+            "or" => bool_fold(|a, b| a || b)?,
+            "xor" => bool_fold(|a, b| a ^ b)?,
+            "sub" => Val::I(ei(&ev[0])? - ei(&ev[1])?),
+            "neg" => Val::I(-ei(&ev[0])?),
+            "abs" => Val::I(ei(&ev[0])?.abs()),
+            "id" => ev[0],
+            "not" => Val::B(!eb(&ev[0])?),
+            "div" => {
+                let d = ei(&ev[1])?;
+                if d == 0 { return None; }
+                Val::I(ei(&ev[0])? / d)
+            }
+            "mod" => {
+                let d = ei(&ev[1])?;
+                if d == 0 { return None; }
+                Val::I(ei(&ev[0])? % d)
+            }
+            "eq" => Val::B(ev[0] == ev[1]),
+            "neq" => Val::B(ev[0] != ev[1]),
+            "lt" => Val::B(ei(&ev[0])? < ei(&ev[1])?),
+            "le" => Val::B(ei(&ev[0])? <= ei(&ev[1])?),
+            "gt" => Val::B(ei(&ev[0])? > ei(&ev[1])?),
+            "ge" => Val::B(ei(&ev[0])? >= ei(&ev[1])?),
+            _ => return None,
+        })
+    }
+
+    #[test]
+    fn normalization_preserves_meaning() {
+        use std::collections::HashMap;
+        let a = || v("a");
+        let b = || v("b");
+        let c = || v("c");
+        let p = || v("p");
+        let q = || v("q");
+        // A battery exercising every new rewrite plus the existing ones, with free vars.
+        let int_exprs: Vec<J> = vec![
+            app("sub", vec![a(), b()]),
+            app("sub", vec![a(), app("sub", vec![b(), c()])]),
+            app("sub", vec![app("sub", vec![a(), b()]), c()]),
+            app("add", vec![app("neg", vec![b()]), a()]),
+            app("neg", vec![app("add", vec![a(), app("neg", vec![b()])])]),
+            app("max", vec![int_lit(5), a(), int_lit(3)]),
+            app("min", vec![a(), app("min", vec![a(), b()])]),
+            app("max", vec![app("max", vec![a(), b()]), a()]),
+            app("add", vec![app("mul", vec![a(), int_lit(2)]), app("sub", vec![b(), a()])]),
+            app("min", vec![app("add", vec![a(), int_lit(1)]), app("sub", vec![a(), b()])]),
+            app("abs", vec![app("sub", vec![a(), b()])]),
+        ];
+        let bool_exprs: Vec<J> = vec![
+            app("and", vec![p(), p()]),
+            app("or", vec![p(), app("or", vec![p(), q()])]),
+            app("xor", vec![p(), p()]),
+            app("eq", vec![app("sub", vec![a(), b()]), int_lit(0)]),
+            app("lt", vec![app("min", vec![a(), b()]), app("max", vec![a(), b()])]),
+            app("and", vec![app("lt", vec![a(), b()]), app("lt", vec![a(), b()])]),
+        ];
+        let ivals = [-3i128, -1, 0, 2, 5];
+        let bvals = [false, true];
+        let mut checked = 0u64;
+        for expr in int_exprs.iter().chain(bool_exprs.iter()) {
+            let norm = normalize(expr);
+            for &av in &ivals {
+                for &bv in &ivals {
+                    for &cv in &ivals {
+                        for &pv in &bvals {
+                            for &qv in &bvals {
+                                let env: HashMap<String, Val> = [
+                                    ("a".into(), Val::I(av)), ("b".into(), Val::I(bv)),
+                                    ("c".into(), Val::I(cv)), ("p".into(), Val::B(pv)),
+                                    ("q".into(), Val::B(qv)),
+                                ].into_iter().collect();
+                                let before = eval_ref(expr, &env);
+                                let after = eval_ref(&norm, &env);
+                                // Skip envs that make a subexpression partial (div/mod by zero) on either side.
+                                if before.is_none() || after.is_none() {
+                                    continue;
+                                }
+                                assert_eq!(before, after,
+                                    "normalize changed meaning of {expr} -> {norm} at env a={av} b={bv} c={cv} p={pv} q={qv}");
+                                checked += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 1000, "soundness battery should exercise many envs (got {checked})");
     }
 }

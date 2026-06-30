@@ -542,12 +542,16 @@ mod tests {
     #[test]
     fn both_recursive_lockstep_sums_are_equivalent() {
         let Some(s) = solver() else { return };
-        // sum, two ways: add(head, self(tail))  vs  sub(self(tail), neg(head)). Both recurse, both equal
-        // the list sum, and normalization can't reconcile them (sub/neg vs add) — decided by the
-        // two-recursive structural induction.
-        let f = rec_over_list(json!({ "kind": "app", "op": "add", "args": [head_xs(), self_tail()] }));
-        let g = rec_over_list(json!({ "kind": "app", "op": "sub",
-            "args": [self_tail(), { "kind": "app", "op": "neg", "args": [head_xs()] }] }));
+        // Double-the-sum two ways: the step is `2*head + self(tail)` vs `(head+head) + self(tail)`. Both
+        // recurse identically and compute 2·Σ, but normalization can't bridge `2x` vs `x+x` (no
+        // distributivity rule), so this is decided by the two-recursive structural induction — whose SMT
+        // step obligation discharges `2*head = head+head`. (The simpler sub/neg-vs-add pairing this test
+        // used to carry is now reconciled solver-free by `normalize`, so it no longer exercises induction.)
+        let two_head =
+            json!({ "kind": "app", "op": "mul", "args": [{ "kind": "lit", "value": { "kind": "int", "value": 2 } }, head_xs()] });
+        let head_plus_head = json!({ "kind": "app", "op": "add", "args": [head_xs(), head_xs()] });
+        let f = rec_over_list(json!({ "kind": "app", "op": "add", "args": [two_head, self_tail()] }));
+        let g = rec_over_list(json!({ "kind": "app", "op": "add", "args": [head_plus_head, self_tail()] }));
         assert_eq!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(vec![]));
     }
 
