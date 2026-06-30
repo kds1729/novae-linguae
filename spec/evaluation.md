@@ -395,7 +395,12 @@ structurally/coarsely, but the composite's input/output **types** are computed *
 type variables through the pipeline (fresh-instantiate each stage, unify each result with the next
 parameter), so `wrap : a → List a ; head : List b → b` composes to the exact `a → a`, not the imprecise
 `a → b`. Worked: `reverse ; length` → `List a → nat`, effects `[]`, terminates `always`; `length ; reverse`
-is **not composable** (a `nat` result can't feed a `List` parameter). Scope: each stage is a unary function.
+is **not composable** (a `nat` result can't feed a `List` parameter). **Stages may be multi-argument**: the
+threaded value feeds each stage's *first* parameter, and a stage's remaining parameters become **auxiliary
+inputs of the composite**, so `f : a → b ; g : (b, c) → d` composes to `(a, c) → d`; the reported composite
+is `(input, aux…) → output`, a unary pipeline being the no-auxiliaries case and a nullary stage having
+nothing to thread (non-composable). Complexity is measured in the size of the primary/threaded input,
+auxiliaries held constant (the single-variable `cost` model).
 
 **Precise complexity (`cost` metadata).** A stage's `signature.cost` declares its `time` class, the
 `measure` it counts (`size` or `value`), and its `output_size` relation to the input (`constant`,
