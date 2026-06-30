@@ -506,11 +506,14 @@ def list_fold_funcs():
 
 def refined_funcs():
     # Functions carrying REFINEMENT predicates — constraints a type alone can't express (principle 1), the
-    # corpus's first records to populate `signature.refinements`. A `pre` refinement is a precondition the
+    # corpus's records that populate `signature.refinements`. A `pre` refinement is a precondition the
     # caller must establish (a nonzero divisor, a non-empty list); a `post` refinement constrains the
-    # result (referenced as `output`). The refinement is a predicate-expression AST over the parameters;
-    # the worked examples all satisfy the precondition, so the record still type-checks and runs.
-    a, b, n, xs = var("a"), var("b"), var("n"), var("xs")
+    # result, referenced through the reserved variable `result` (spec convention). The refinement is a
+    # predicate-expression AST over the parameters (and, for a post, `result`); the worked examples all
+    # satisfy the precondition, so the record still type-checks and runs. The `post`/pre-gated records are
+    # additionally PROVED against the body by `check-refinement` in the build gate (the `nat`-result one
+    # too), so each is a verified conditional contract, not just a declared one.
+    a, b, n, xs, result = var("a"), var("b"), var("n"), var("xs"), var("result")
     return [
         {"name": "divide", "intent": "Integer division, with a nonzero-divisor precondition.",
          "summary": "Returns a / b; requires b != 0.", "tags": ["arithmetic", "partial", "refinement"],
@@ -531,10 +534,34 @@ def refined_funcs():
          "refinements": [{"kind": "pre", "expr": op("not", op("null", xs))}],
          "properties": [], "prove": False},
         {"name": "abs_pos", "intent": "Absolute value, with a non-negative postcondition.",
-         "summary": "Returns |n|; guarantees the result is >= 0.", "tags": ["arithmetic", "refinement"],
+         "summary": "Returns |n|; guarantees result >= 0.", "tags": ["arithmetic", "refinement"],
          "type_ast": fn([INT], INT), "body_ast": lam(["n"], bapp("abs", n)),
          "examples": [{"args": [0], "result": 0}, {"args": [6], "result": 6}, {"args": [-4], "result": 4}],
-         "refinements": [{"kind": "post", "expr": op("ge", var("output"), int_lit(0))}],
+         "refinements": [{"kind": "post", "expr": op("ge", result, int_lit(0))}],
+         "properties": [], "prove": False},
+        # An EXACT postcondition: the result equals a closed-form expression of the inputs (a tighter
+        # contract than a property's algebraic law — it pins the output, not a relation it satisfies).
+        {"name": "inc_spec", "intent": "Increment, specified by an exact postcondition.",
+         "summary": "Returns n + 1; postcondition result = n + 1.", "tags": ["arithmetic", "refinement"],
+         "type_ast": fn([INT], INT), "body_ast": lam(["n"], bapp("add", n, int_lit(1))),
+         "examples": [{"args": [0], "result": 1}, {"args": [5], "result": 6}, {"args": [-3], "result": -2}],
+         "refinements": [{"kind": "post", "expr": op("eq", result, op("add", n, int_lit(1)))}],
+         "properties": [], "prove": False},
+        {"name": "sum2_spec", "intent": "Add two integers, specified by an exact postcondition.",
+         "summary": "Returns a + b; postcondition result = a + b.", "tags": ["arithmetic", "refinement"],
+         "type_ast": fn([INT, INT], INT), "body_ast": lam(["a", "b"], bapp("add", a, b)),
+         "examples": [{"args": [2, 3], "result": 5}, {"args": [0, 0], "result": 0}, {"args": [-1, 4], "result": 3}],
+         "refinements": [{"kind": "post", "expr": op("eq", result, op("add", a, b))}],
+         "properties": [], "prove": False},
+        # A PRE-GATED postcondition: the output guarantee holds only under the precondition. Without
+        # `a >= b` the result could be negative; with it, `a - b >= 0` — exactly what a precondition buys.
+        {"name": "safe_sub", "intent": "Subtract, guaranteeing a non-negative result under a >= b.",
+         "summary": "Returns a - b; requires a >= b, guarantees result >= 0.",
+         "tags": ["arithmetic", "refinement"],
+         "type_ast": fn([INT, INT], INT), "body_ast": lam(["a", "b"], bapp("sub", a, b)),
+         "examples": [{"args": [5, 2], "result": 3}, {"args": [4, 4], "result": 0}, {"args": [9, 1], "result": 8}],
+         "refinements": [{"kind": "pre", "expr": op("ge", a, b)},
+                         {"kind": "post", "expr": op("ge", result, int_lit(0))}],
          "properties": [], "prove": False},
     ]
 
@@ -2647,7 +2674,8 @@ def verdict_tokens(text):
     # Each verdict line is `<name>: VERDICT  <detail>` (prove) or `VERDICT  <name> …` (check-properties),
     # so scan every token of the line for the first recognized verdict.
     toks = {"PROVED", "REFUTED", "UNKNOWN", "UNSUPPORTED", "NO-SOLVER",
-            "CONSISTENT", "CONTRADICTED", "UNVERIFIABLE"}
+            "CONSISTENT", "CONTRADICTED", "UNVERIFIABLE",
+            "SOUND", "VIOLATED", "N/A"}  # check-refinement verdicts
     found = []
     for line in text.splitlines():
         for t in line.replace(":", " ").split():
@@ -2712,6 +2740,14 @@ def build_and_verify(spec, workdir):
     if spec.get("prove") and spec.get("properties"):
         pv = verdict_tokens(cli(["prove", rec_path, "--body", body_path]).stdout)
         proofs = [{"name": p["name"], "verdict": v} for p, v in zip(spec["properties"], pv)]
+    # Refinement check: a record's declared `pre`/`post` refinements — and an implicit `nat` result —
+    # must hold against the body (`check-refinement`, the prove-backed pass). Run it when there's anything
+    # to check; the verdicts (SOUND / N/A / UNVERIFIABLE per refinement) join the verification record, and
+    # a VIOLATED fails the gate (no record that breaks its own declared contract enters the corpus).
+    refinements_checked = []
+    result_t = spec["type_ast"].get("body", spec["type_ast"]).get("result", {})
+    if spec.get("refinements") or result_t.get("name") == "nat":
+        refinements_checked = verdict_tokens(cli(["check-refinement", rec_path, "--body", body_path]).stdout)
 
     example = {
         "id": spec["name"],
@@ -2736,9 +2772,12 @@ def build_and_verify(spec, workdir):
             "examples_passed": f"{len(spec['examples'])}/{len(spec['examples'])}" if examples_passed else "FAILED",
             "bounded_check": bounded,
             "proofs": proofs,
+            **({"refinements": refinements_checked} if refinements_checked else {}),
         },
     }
-    ok = schema_valid and well_typed and examples_passed and all(p["verdict"] in ("PROVED",) for p in proofs)
+    ok = (schema_valid and well_typed and examples_passed
+          and all(p["verdict"] in ("PROVED",) for p in proofs)
+          and "VIOLATED" not in refinements_checked)
     return example, ok
 
 
