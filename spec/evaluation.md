@@ -218,6 +218,15 @@ append(reverse(ys), xs)` — which needs `reverse_append` (catalogued) **and** r
 catalogued) — is **UNKNOWN under the catalog alone but PROVED once exploration discovers the involution
 lemma**; the whole proof tree (the goal plus every discovered and catalog lemma's base/step) re-checks.
 
+Conjectures are ranked smallest-first and **capped** (the caller proves each by induction, so the cap
+bounds cost; raising it globally multiplies that cost on every goal — a measured 4× regression). To reach
+a lemma the cap would truncate, exploration is **relevance-guided**: the smallest-cap base is kept exactly
+(never reordered or dropped — a goal that closes within it is unaffected), and a few conjectures from
+*beyond* the cap are **promoted** because they share a non-trivial operator skeleton
+(`reverse(append(_,_))`, …) with the terms the goal equates, so they can fire there as a rewrite. Promotion
+runs only after the base is exhausted (the caller early-stops), so it costs nothing on common goals;
+soundness is unchanged because a promoted conjecture is still proved before it is assumed.
+
 ### Induction over user-defined recursive bodies
 
 The same machinery proves laws about a **user-defined** recursive function, not just the built-in list
