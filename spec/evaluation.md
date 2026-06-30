@@ -77,6 +77,27 @@ construction types as `Sum` (its payload expression is still inferred, so an err
 and unifies with any declared sum result, and `case` arms over a sum are checked structurally with fresh
 payload types rather than resolved; refinements and effects are separate concerns, not checked here.
 
+## Refinement checking
+
+The type checker erases `nat` to `int`, so the one refinement the type language bakes in — a `nat` is a
+non-negative `int` — goes unchecked: a body declared `… -> nat` that can produce a negative `int`
+type-checks clean. `nl-validator check-refinement <record> --body <body>` closes that hole. For a
+`nat`-result function it proves
+
+```text
+∀ params. (⋀ nat-typed params ≥ 0) ⟹ body(params) ≥ 0
+```
+
+via the [SMT proof](#smt-proof-the-unbounded-rung) backend, with the [inductive](#inductive-proof-unbounded-recursive-structures)
+fallback for a recursive body (a recursive `length : List a -> nat` is proved `≥ 0` by induction: base
+`0 ≥ 0`, step `1 + self(tail) ≥ 0` under the IH). The parameters' `nat`-ness is the **precondition** —
+`double : nat -> nat` is sound because `n ≥ 0 ⟹ n + n ≥ 0`. Verdicts: **SOUND** (proved), **VIOLATED** (a
+solver counterexample — a real input on which the body goes negative, e.g. `\a b -> sub(a, b)` declared
+`nat` at `a = 0, b = 1`; exit 1), **UNVERIFIABLE** (out of the decidable fragment or solver-undecided —
+never a false SOUND), or **NOT-APPLICABLE** (the result type is not `nat`). Conservative by construction:
+only a closed proof yields SOUND, only a counterexample yields VIOLATED. The refinement framing generalizes
+to declared `post`-conditions; v0.1 checks the type-implied `nat` refinement.
+
 ## Run-backed property verification
 
 `check-properties` evaluates a record's `properties[]` against its `examples[]`. Statically it is
