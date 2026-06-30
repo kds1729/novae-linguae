@@ -1004,7 +1004,15 @@ fn cmd_compose(records: &[PathBuf]) -> Result<()> {
     let ty = |t: &Option<serde_json::Value>| t.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "?".into());
     if m.composable {
         println!("COMPOSABLE   {}", m.reason);
-        println!("  type        {} -> {}", ty(&m.input_type), ty(&m.output_type));
+        // The composite is `(primary, aux…) -> output`; show the auxiliary inputs from multi-arg stages.
+        let inputs = if m.extra_input_types.is_empty() {
+            ty(&m.input_type)
+        } else {
+            let mut parts = vec![ty(&m.input_type)];
+            parts.extend(m.extra_input_types.iter().map(|t| t.to_string()));
+            format!("({})", parts.join(", "))
+        };
+        println!("  type        {} -> {}", inputs, ty(&m.output_type));
         println!("  effects     {:?}", m.effects);
         println!("  capabilities {:?}", m.capabilities);
         println!("  terminates  {}", m.terminates);

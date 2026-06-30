@@ -27,8 +27,17 @@
 //!   pipelines) is reported, with `complexity_basis` recording which path was taken.
 //!
 //! So an assembled pipeline becomes as described as a leaf — the precondition for principle 4
-//! ("assemble, don't write") to yield artifacts that are themselves verifiable. Scope (v0.1): each stage
-//! is a unary function (the pipeline threads one value); arity ≠ 1 makes the chain non-composable.
+//! ("assemble, don't write") to yield artifacts that are themselves verifiable.
+//!
+//! **Multi-argument stages.** A pipeline threads one value, but a stage need not be unary: the threaded
+//! value feeds each stage's **first** parameter, and the stage's **remaining** parameters become
+//! additional inputs of the *composite*. So `f : a -> b ; g : (b, c) -> d` composes to `(a, c) -> d` — a
+//! pipeline of multi-argument stages is itself a multi-argument function, with `input_type` the primary
+//! (threaded) input and `extra_input_types` the auxiliaries gathered left to right. A unary pipeline is
+//! the special case with no extras. Composability still requires each stage's result to fit the *next*
+//! stage's first parameter; the auxiliaries are free composite inputs and constrain nothing. (Complexity
+//! is measured in the size of the primary/threaded input, auxiliaries held constant — the single-variable
+//! `cost` model.) A nullary (zero-parameter) stage has nothing to thread and is non-composable.
 
 use serde_json::Value as J;
 use std::collections::{BTreeSet, HashMap};
@@ -38,9 +47,13 @@ use std::collections::{BTreeSet, HashMap};
 pub struct CompositionMetadata {
     pub composable: bool,
     pub reason: String,
-    /// The composite's input type (`f1`'s parameter) and output type (`fn`'s result), as type-exprs.
+    /// The composite's primary (threaded) input type — `f1`'s first parameter — and output type (`fn`'s
+    /// result), as type-exprs.
     pub input_type: Option<J>,
     pub output_type: Option<J>,
+    /// Auxiliary input types: the non-first parameters of multi-argument stages, gathered left to right.
+    /// Empty for a unary pipeline. The composite is `(input_type, extra_input_types…) -> output_type`.
+    pub extra_input_types: Vec<J>,
     pub effects: Vec<String>,
     pub capabilities: Vec<String>,
     pub terminates: String,
@@ -201,9 +214,9 @@ fn apply_subst(t: &J, subst: &HashMap<String, J>) -> J {
     }
 }
 
-/// Rename the free type variables of `(input, output)` to canonical `a, b, c, …` in order of appearance,
-/// so the fresh `_tN` instantiation names don't leak into the reported composite type.
-fn canonicalize_free_vars(input: &J, output: &J) -> (J, J) {
+/// Rename the free type variables of `types` to canonical `a, b, c, …` in order of appearance (across the
+/// whole list), so the fresh `_tN` instantiation names don't leak into the reported composite type.
+fn canonicalize_free_vars(types: &[J]) -> Vec<J> {
     fn collect(t: &J, order: &mut Vec<String>) {
         match t {
             J::Object(m) => {
@@ -223,8 +236,9 @@ fn canonicalize_free_vars(input: &J, output: &J) -> (J, J) {
         }
     }
     let mut order = Vec::new();
-    collect(input, &mut order);
-    collect(output, &mut order);
+    for t in types {
+        collect(t, &mut order);
+    }
     let ren: HashMap<String, String> = order
         .iter()
         .enumerate()
@@ -233,15 +247,18 @@ fn canonicalize_free_vars(input: &J, output: &J) -> (J, J) {
             (v.clone(), if i < 26 { name.to_string() } else { format!("{name}{}", i / 26) })
         })
         .collect();
-    (rename_tyvars(input, &ren), rename_tyvars(output, &ren))
+    types.iter().map(|t| rename_tyvars(t, &ren)).collect()
 }
 
-/// Precise composite `(input, output)` types for a unary pipeline. `None` if a stage isn't a unary
-/// function or the precise unification clashes — the caller then keeps the coarse verbatim types
-/// (composability itself is decided by the coarse structural check, so this never changes the verdict).
-fn propagate_types(records: &[J]) -> Option<(J, J)> {
+/// Precise composite types for a pipeline: the primary (threaded) input, the auxiliary inputs (each
+/// stage's non-first parameters, left to right), and the output — threading polymorphic variables across
+/// the stages (each result unified with the next stage's *first* parameter). `None` if a stage isn't a
+/// function, is nullary, or the precise unification clashes — the caller then keeps the coarse verbatim
+/// types (composability itself is decided by the coarse structural check, so this never changes the verdict).
+fn propagate_types(records: &[J]) -> Option<(J, Vec<J>, J)> {
     let mut counter = 0usize;
-    let mut stages: Vec<(J, J)> = Vec::new();
+    // Per stage: (first/threaded parameter, auxiliary parameters, result).
+    let mut stages: Vec<(J, Vec<J>, J)> = Vec::new();
     for r in records {
         let (vars, fnt) = fn_type_with_vars(r)?;
         let mut ren = HashMap::new();
@@ -249,19 +266,31 @@ fn propagate_types(records: &[J]) -> Option<(J, J)> {
             ren.insert(v.clone(), format!("_t{counter}"));
             counter += 1;
         }
-        let param = fnt.get("params").and_then(|p| p.as_array()).and_then(|p| p.first())?;
-        let result = fnt.get("result")?;
-        stages.push((rename_tyvars(param, &ren), rename_tyvars(result, &ren)));
+        let params = fnt.get("params").and_then(|p| p.as_array())?;
+        let first = rename_tyvars(params.first()?, &ren);
+        let extras: Vec<J> = params[1..].iter().map(|p| rename_tyvars(p, &ren)).collect();
+        let result = rename_tyvars(fnt.get("result")?, &ren);
+        stages.push((first, extras, result));
     }
     let mut subst: HashMap<String, J> = HashMap::new();
     for i in 0..stages.len() - 1 {
-        if !unify(&stages[i].1, &stages[i + 1].0, &mut subst) {
+        if !unify(&stages[i].2, &stages[i + 1].0, &mut subst) {
             return None;
         }
     }
     let input = apply_subst(&stages[0].0, &subst);
-    let output = apply_subst(&stages.last().unwrap().1, &subst);
-    Some(canonicalize_free_vars(&input, &output))
+    let extras: Vec<J> = stages.iter().flat_map(|(_, ex, _)| ex).map(|e| apply_subst(e, &subst)).collect();
+    let output = apply_subst(&stages.last().unwrap().2, &subst);
+    // Canonicalize free variables across input + auxiliaries + output, then split them back out.
+    let mut all = Vec::with_capacity(extras.len() + 2);
+    all.push(input);
+    all.extend(extras);
+    all.push(output);
+    let canon = canonicalize_free_vars(&all);
+    let output = canon.last().cloned()?;
+    let input = canon.first().cloned()?;
+    let extras = canon[1..canon.len() - 1].to_vec();
+    Some((input, extras, output))
 }
 
 fn str_array(v: Option<&J>) -> Vec<String> {
@@ -389,6 +418,7 @@ pub fn compose(records: &[J]) -> CompositionMetadata {
         reason,
         input_type: None,
         output_type: None,
+        extra_input_types: vec![],
         effects: vec![],
         capabilities: vec![],
         terminates: "unknown".to_string(),
@@ -398,22 +428,23 @@ pub fn compose(records: &[J]) -> CompositionMetadata {
     if records.is_empty() {
         return unknown("empty pipeline".to_string());
     }
-    // Every stage must be a unary function so the pipeline threads a single value.
+    // Every stage must be a function with at least one parameter — the first is the threaded value; any
+    // remaining parameters become auxiliary inputs of the composite. A nullary stage has nothing to thread.
     let mut fts = Vec::new();
     for (i, r) in records.iter().enumerate() {
         match fn_type(r) {
-            Some(ft) if ft.get("params").and_then(|p| p.as_array()).map_or(0, |a| a.len()) == 1 => fts.push(ft),
-            Some(_) => return unknown(format!("stage {i} is not unary (a pipeline threads one value)")),
+            Some(ft) if ft.get("params").and_then(|p| p.as_array()).map_or(0, |a| a.len()) >= 1 => fts.push(ft),
+            Some(_) => return unknown(format!("stage {i} is nullary (a pipeline needs a value to thread)")),
             None => return unknown(format!("stage {i} is not a function")),
         }
     }
-    // Each stage's result type must fit the next stage's parameter type.
+    // Each stage's result type must fit the next stage's FIRST (threaded) parameter type.
     for i in 0..fts.len() - 1 {
         let result = fts[i].get("result").unwrap();
         let next_param = &fts[i + 1].get("params").unwrap().as_array().unwrap()[0];
         if !compatible(&coarse(result), &coarse(next_param)) {
             return unknown(format!(
-                "stage {i}'s output type does not fit stage {}'s input type",
+                "stage {i}'s output type does not fit stage {}'s threaded input type",
                 i + 1
             ));
         }
@@ -434,14 +465,21 @@ pub fn compose(records: &[J]) -> CompositionMetadata {
         }
     }
 
-    // Precise composite type via type-variable propagation; fall back to the verbatim endpoint types if
-    // the precise unification can't run (it never changes the composability verdict above).
-    let (input_type, output_type) = match propagate_types(records) {
-        Some((i, o)) => (Some(i), Some(o)),
-        None => (
-            fts[0].get("params").unwrap().as_array().unwrap().first().cloned(),
-            fts.last().unwrap().get("result").cloned(),
-        ),
+    // Precise composite type (primary input, auxiliary inputs, output) via type-variable propagation; fall
+    // back to the verbatim types if the precise unification can't run (never changes the verdict above).
+    let (input_type, extra_input_types, output_type) = match propagate_types(records) {
+        Some((i, ex, o)) => (Some(i), ex, Some(o)),
+        None => {
+            let extras: Vec<J> = fts
+                .iter()
+                .flat_map(|ft| ft.get("params").and_then(|p| p.as_array()).map(|a| a[1..].to_vec()).unwrap_or_default())
+                .collect();
+            (
+                fts[0].get("params").unwrap().as_array().unwrap().first().cloned(),
+                extras,
+                fts.last().unwrap().get("result").cloned(),
+            )
+        }
     };
 
     // Precise complexity when every stage carries size-measured `cost` metadata; otherwise the coarse
@@ -456,6 +494,7 @@ pub fn compose(records: &[J]) -> CompositionMetadata {
         reason: format!("a {}-stage pipeline composes end to end", records.len()),
         input_type,
         output_type,
+        extra_input_types,
         effects: effects.into_iter().collect(),
         capabilities: capabilities.into_iter().collect(),
         terminates: if terms_all_always { "always" } else { "unknown" }.to_string(),
@@ -518,9 +557,70 @@ mod tests {
     }
 
     #[test]
-    fn non_unary_stage_is_not_composable() {
+    fn binary_stage_output_must_fit_next_threaded_input() {
+        // add : (int,int) -> int is now an allowed (binary) stage, but its int output cannot feed
+        // length's `List` parameter — so [add, length] is still non-composable, for a TYPE reason now,
+        // not an arity one.
         let m = compose(&[load("add.json"), load("length.json")]);
-        assert!(!m.composable, "add is binary — not a pipeline stage");
+        assert!(!m.composable, "int output must not fit a List parameter");
+    }
+
+    #[test]
+    fn binary_stage_threads_first_param_and_adds_an_auxiliary_input() {
+        // f : int -> int ; g : (int, bool) -> int. The threaded int feeds g's first parameter; g's `bool`
+        // second parameter becomes an auxiliary input of the composite — so the composite is (int, bool) -> int.
+        let intt = json!({ "kind": "builtin", "name": "int" });
+        let boolt = json!({ "kind": "builtin", "name": "bool" });
+        let f = json!({ "signature": { "type": { "kind": "fn", "params": [intt.clone()], "result": intt.clone() },
+            "effects": [], "capabilities": [], "terminates": "always", "complexity": "O(1)" } });
+        let g = json!({ "signature": { "type": { "kind": "fn", "params": [intt.clone(), boolt.clone()], "result": intt.clone() },
+            "effects": [], "capabilities": [], "terminates": "always", "complexity": "O(n)" } });
+        let m = compose(&[f, g]);
+        assert!(m.composable, "{}", m.reason);
+        assert_eq!(coarse(m.input_type.as_ref().unwrap()), CTy::Int);
+        assert_eq!(coarse(m.output_type.as_ref().unwrap()), CTy::Int);
+        assert_eq!(m.extra_input_types.len(), 1, "one auxiliary input from g's second parameter");
+        assert_eq!(coarse(&m.extra_input_types[0]), CTy::Bool);
+    }
+
+    #[test]
+    fn lone_binary_stage_composes_to_its_own_signature() {
+        // A single binary stage is a one-stage pipeline: both parameters are composite inputs (the first
+        // is the primary, the second auxiliary). add : (int,int) -> int composes to (int, int) -> int.
+        let m = compose(&[load("add.json")]);
+        assert!(m.composable, "{}", m.reason);
+        assert_eq!(coarse(m.input_type.as_ref().unwrap()), CTy::Int);
+        assert_eq!(m.extra_input_types.len(), 1);
+        assert_eq!(coarse(m.output_type.as_ref().unwrap()), CTy::Int);
+    }
+
+    #[test]
+    fn nullary_stage_is_not_composable() {
+        // A zero-parameter stage has no value to thread.
+        let nilfn = json!({ "signature": { "type": { "kind": "fn", "params": [], "result": { "kind": "builtin", "name": "int" } },
+            "effects": [], "capabilities": [], "terminates": "always", "complexity": "O(1)" } });
+        let m = compose(&[nilfn]);
+        assert!(!m.composable, "a nullary stage has nothing to thread");
+    }
+
+    #[test]
+    fn auxiliary_input_threads_type_variables() {
+        // f : a -> List a ; g : (List a, b) -> b  → composite (a, b) -> b: the threaded `List a` ties to
+        // g's first param, and g's polymorphic `b` second param surfaces as an auxiliary input equal to the
+        // output. Fresh instantiation keeps the two records' `a`/`b` from aliasing.
+        let f = json!({ "signature": { "type": { "kind": "forall", "vars": ["a"], "body": { "kind": "fn",
+            "params": [{ "kind": "var", "name": "a" }],
+            "result": { "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "var", "name": "a" }] } } } } });
+        let g = json!({ "signature": { "type": { "kind": "forall", "vars": ["a", "b"], "body": { "kind": "fn",
+            "params": [{ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "var", "name": "a" }] },
+                       { "kind": "var", "name": "b" }],
+            "result": { "kind": "var", "name": "b" } } } } });
+        let m = compose(&[f, g]);
+        assert!(m.composable, "{}", m.reason);
+        assert_eq!(m.extra_input_types.len(), 1);
+        // The auxiliary input and the output are the same variable (g's `b`).
+        assert_eq!(m.extra_input_types[0].get("kind").and_then(|k| k.as_str()), Some("var"));
+        assert_eq!(m.extra_input_types[0].get("name"), m.output_type.as_ref().unwrap().get("name"));
     }
 
     // A synthetic costed stage `param -> result` carrying both the coarse `complexity` and the v0.3 `cost`.
