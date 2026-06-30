@@ -67,7 +67,7 @@ pub enum EquivVerdict {
 }
 
 /// The lambda parameter names of a body, or `None` if it isn't a lambda.
-fn params(body: &J) -> Option<Vec<String>> {
+pub(crate) fn params(body: &J) -> Option<Vec<String>> {
     if body.get("kind").and_then(|k| k.as_str()) != Some("lambda") {
         return None;
     }
@@ -85,7 +85,7 @@ fn inner(body: &J) -> Option<&J> {
 
 /// Does the expression refer to `self` (i.e. recurse)? Checks the `self` var and the `self`/apply-of-self
 /// call forms, descending the AST.
-fn references_self(node: &J) -> bool {
+pub(crate) fn references_self(node: &J) -> bool {
     if node.get("kind").and_then(|k| k.as_str()) == Some("var")
         && node.get("name").and_then(|n| n.as_str()) == Some("self")
     {
@@ -115,7 +115,7 @@ fn references_self(node: &J) -> bool {
 /// shadowing analysis — used only on the non-recursive inlined body, a plain expression over its
 /// parameters). One traversal, and a replacement node is never re-traversed, so the substitutions are
 /// independent: renaming `a -> x0` can't be clobbered by a later `x0 -> x1`.
-fn subst_many(node: &J, map: &BTreeMap<String, J>) -> J {
+pub(crate) fn subst_many(node: &J, map: &BTreeMap<String, J>) -> J {
     match node {
         J::Object(m) => {
             if m.get("kind").and_then(|k| k.as_str()) == Some("var") {
@@ -132,7 +132,7 @@ fn subst_many(node: &J, map: &BTreeMap<String, J>) -> J {
 
 /// `n` fresh variable names (`x0`, `x1`, …) avoiding any name in `avoid`, so a synthesized quantified
 /// variable can't collide with a parameter (or, transitively, a function head referenced as a `var`).
-fn fresh_vars(n: usize, avoid: &BTreeSet<String>) -> Vec<String> {
+pub(crate) fn fresh_vars(n: usize, avoid: &BTreeSet<String>) -> Vec<String> {
     let mut out: Vec<String> = Vec::with_capacity(n);
     let mut i = 0;
     while out.len() < n {
@@ -147,7 +147,7 @@ fn fresh_vars(n: usize, avoid: &BTreeSet<String>) -> Vec<String> {
 
 /// A left-nested `apply` spine `apply(apply(self, x0), x1) …` over `args`, the form `flatten_call`
 /// (in prove.rs / induct.rs) recovers back into `(self, [x0, x1, …])`.
-fn apply_self_spine(args: &[J]) -> J {
+pub(crate) fn apply_self_spine(args: &[J]) -> J {
     let mut node = json!({ "kind": "var", "name": "self" });
     for a in args {
         node = json!({ "kind": "app", "op": "apply", "args": [node, a.clone()] });

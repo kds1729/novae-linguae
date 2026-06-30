@@ -224,6 +224,22 @@ enum Commands {
         #[arg(long)]
         body: PathBuf,
     },
+    /// Verify a body satisfies the **refinement implied by its declared type** — currently the `nat`
+    /// refinement. A `nat` is a non-negative `int`, which the typechecker erases to `int` and does not
+    /// check, so a body declared `… -> nat` that can go negative type-checks clean today. This proves
+    /// `∀ params. (∧ nat params ≥ 0) ⟹ body ≥ 0` via the SMT/induction backend. Prints SOUND / VIOLATED
+    /// (exit 1 — a counterexample input on which the body goes negative) / UNVERIFIABLE / NOT-APPLICABLE
+    /// (the result type is not `nat`). The body AST is supplied with `--body`.
+    CheckRefinement {
+        /// Path to the function record (provides signature.type).
+        record: PathBuf,
+        /// Path to the body-expression JSON AST.
+        #[arg(long)]
+        body: PathBuf,
+        /// SMT solver binary to invoke.
+        #[arg(long, default_value = "z3")]
+        solver: String,
+    },
     /// Prove a record's `forall` `properties[]` over the UNBOUNDED domain with an SMT solver — the rung
     /// above bounded `check-properties`. Each property + the function body is translated to SMT-LIB 2
     /// (the Int/Bool fragment); the solver checks the negation of the law. Reports PROVED (unsat — holds
@@ -536,6 +552,7 @@ fn main() -> ExitCode {
             (cmd_check_effects(&record, &body, records.as_ref()), false)
         }
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
+        Commands::CheckRefinement { record, body, solver } => (cmd_check_refinement(&record, &body, &solver), false),
         Commands::Respond { request, records, seed, timestamp } => {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
         }
@@ -733,6 +750,34 @@ fn cmd_typecheck(record: &PathBuf, body: &PathBuf) -> Result<()> {
     let body = nl_validator::read_json(body)?;
     println!("{}", nl_validator::typecheck_record(&record, &body)?);
     Ok(())
+}
+
+fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str) -> Result<()> {
+    use nl_validator::RefinementOutcome;
+    let record = nl_validator::read_json(record)?;
+    let body = nl_validator::read_json(body)?;
+    let sig_type = record
+        .pointer("/signature/type")
+        .ok_or_else(|| anyhow::anyhow!("record has no `signature.type`"))?;
+    match nl_validator::check_nat_refinement(sig_type, &body, solver) {
+        RefinementOutcome::Sound => {
+            println!("SOUND        the `nat` result is provably ≥ 0 for all (precondition-satisfying) inputs");
+            Ok(())
+        }
+        RefinementOutcome::Violated(model) => Err(anyhow::anyhow!(
+            "VIOLATED     the body can produce a negative value: {}",
+            if model.is_empty() { "(counterexample)".into() } else { model }
+        )),
+        RefinementOutcome::Unverifiable(why) => {
+            println!("UNVERIFIABLE {why}");
+            Ok(())
+        }
+        RefinementOutcome::NotApplicable => {
+            println!("N/A          result type is not `nat` — no type-implied refinement to check");
+            Ok(())
+        }
+        RefinementOutcome::NoSolver => Err(anyhow::anyhow!("NO-SOLVER    `{solver}` not found")),
+    }
 }
 
 fn cmd_respond(

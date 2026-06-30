@@ -9,8 +9,10 @@
 //! **skolemized** to rigid constants, so the body must be genuinely polymorphic — a body that only
 //! works at one instance is correctly rejected.
 //!
-//! Scope / honesty: `nat` is normalized to `int` (a `nat` is a non-negative `int`; v0.1 has no
-//! refinement-aware checking here). Sum/`variant` types and `ref` (named-type-by-address) are treated
+//! Scope / honesty: `nat` is normalized to `int` here (a `nat` is a non-negative `int`); the HM core does
+//! not check the non-negativity refinement — that is the separate `check-refinement` pass
+//! ([`crate::refine`]), which proves a `nat`-result body stays `≥ 0` via the SMT backend. Sum/`variant`
+//! types and `ref` (named-type-by-address) are treated
 //! opaquely — `case` arms over them are checked structurally but their payload types are inferred as
 //! fresh variables rather than resolved. Effects/refinements are out of scope (separate concerns).
 
