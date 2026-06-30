@@ -98,6 +98,24 @@ never a false SOUND), or **NOT-APPLICABLE** (the result type is not `nat`). Cons
 only a closed proof yields SOUND, only a counterexample yields VIOLATED. The refinement framing generalizes
 to declared `post`-conditions; v0.1 checks the type-implied `nat` refinement.
 
+## Termination checking
+
+Every record declares `signature.terminates` (`always` / `conditional` / `never` / `unknown`), but it was
+only *propagated* (a composite is `always` only if every stage is), never *checked* — a record could claim
+`always` for a body that loops. `nl-validator check-termination <record> --body <body>` verifies a declared
+`always` **structurally**, with no solver. Over the first-order fragment (the arithmetic/boolean/comparison
+builtins plus `head`/`tail`/`cons`/`null`/`length`/`append`/`reverse`) a body provably halts when it is
+**non-recursive**, or **structurally recursive**: every `self`-call's recursion argument is `tail^k(p)`
+(`k ≥ 1`) of one fixed parameter `p` — a list is a finite inductive structure and `tail` strictly shrinks
+it, so the recursion is well-founded and halts (normally, or with an error at `nil`). The analysis is
+**sound and conservative**: a recursion whose argument is not a strict structural descent, `self`-calls
+descending on different parameters, or any **higher-order / opaque** application (`map`/`filter`/`fold`,
+applying a parameter or an `fn_ref`, whose callee's termination is unseen) is `Unknown` — never a false
+`always`, the same honesty stance `check-effects` takes for opaque callees. Verdicts: **SOUND** (declared
+`always`, verified), **VERIFIED** (provably always but declared weaker, so the declaration could be
+strengthened), or **UNVERIFIABLE** (declared `always`, not provable by this structural analysis). There is
+no refutation path — structural analysis cannot disprove termination, only fail to prove it.
+
 ## Run-backed property verification
 
 `check-properties` evaluates a record's `properties[]` against its `examples[]`. Statically it is
