@@ -9,8 +9,12 @@
 //! and within a bucket a union-find runs `prove_equivalent` pairwise (skipping pairs already merged).
 //! The canonical representative is the lexicographically smallest content-address in a class.
 //!
-//! Scope follows [`crate::equiv`]: functions of any arity ≥ 1, at least one side of a pair
-//! non-recursive — so two mutually-recursive same-shape functions stay separate classes unless they
+//! Scope follows [`crate::equiv`]: it decides functions of any arity ≥ 1 with at least one side
+//! non-recursive, AND **both-recursive** same-shape pairs of arity ≤ 2 (by structural induction over the
+//! leading list parameter, drawing on the list-algebra lemma catalog when a step needs one) — so
+//! behaviorally-equal recursive functions cluster even when they are not normalization-reconcilable
+//! copies (e.g. a list-sum that doubles each element via `2·x` clusters with one that doubles via `x+x`).
+//! Pairs beyond that (arity > 2, or recursions misaligned past stride 6) stay separate classes unless they
 //! share a normal form (renamed/commuted/folded copies of the same recursive term, which `equiv`
 //! recognizes structurally via [`crate::normalize`]), and only functions whose body this node holds
 //! participate. Cost within a shape bucket of size k is up to O(k²) solver calls; the shape bucketing is
@@ -230,6 +234,39 @@ mod tests {
         ];
         let classes = cluster(&items, "z3");
         assert_eq!(classes.len(), 1, "renamed recursive duplicates collapse into one class: {classes:?}");
+    }
+
+    #[test]
+    fn both_recursive_equivalent_functions_cluster_via_induction() {
+        let Some(s) = solver() else { return };
+        // Three same-shape (List→num) recursive functions. `a` and `b` both compute 2·Σ but write the
+        // doubled element as `2*head` vs `head+head` — NOT normalization-reconcilable (no distributivity
+        // rewrite), so they cluster only via the two-recursive structural induction (the step discharges
+        // `2*head = head+head`). `c` is the plain length, genuinely distinct. Proves the new both-recursive
+        // capability is reachable through `cluster`, not just `equiv`.
+        let sum_with = |elem: J| json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "op": "null", "args": [v("xs")] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": int(0) },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": {
+                    "kind": "app", "op": "add", "args": [ elem,
+                        { "kind": "app", "op": "apply", "args": [ v("self"),
+                            { "kind": "app", "op": "tail", "args": [v("xs")] }] }] } }] } });
+        let head = json!({ "kind": "app", "op": "head", "args": [v("xs")] });
+        let two_x = json!({ "kind": "app", "op": "mul", "args": [int(2), head.clone()] });
+        let x_plus_x = json!({ "kind": "app", "op": "add", "args": [head.clone(), head] });
+        let h = |c: char| format!("fn_{}", c.to_string().repeat(64));
+        let items = [
+            item(&h('a'), list_to_num(), sum_with(two_x)),     // 2·Σ via 2*head
+            item(&h('b'), list_to_num(), sum_with(x_plus_x)),  // 2·Σ via head+head
+            item(&h('c'), list_to_num(), sum_with(int(1))),    // length (distinct)
+        ];
+        let classes = cluster(&items, s);
+        let class_of = |x: &str| classes.iter().find(|c| c.contains(&x.to_string())).unwrap().clone();
+        assert_eq!(class_of(&h('a')), class_of(&h('b')), "both-recursive 2·Σ written two ways — same class");
+        assert_ne!(class_of(&h('a')), class_of(&h('c')), "length is a distinct class");
+        assert_eq!(classes.len(), 2, "{classes:?}");
     }
 
     #[test]
