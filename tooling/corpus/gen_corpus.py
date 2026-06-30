@@ -2527,6 +2527,97 @@ def combinatorial_specs(exclude_names=()):
                [{"args": [[]], "result": []}, {"args": [[1, -2, 3]], "result": [11, 8, 13]},
                 {"args": [[0, 90]], "result": [10, 100]}]))
 
+    # 35. MIN/MAX BOUNDS & CLAMP — the scalar min/max-with-a-constant and the [lo,hi] clamp had only
+    # SINGLE curated examples (max_self / max_min_absorb / clamp), so the model saw the shape ~once. The
+    # Coder-3B write residuals cluster here; add combinatorial mass on the NATURALLY-parameterizable forms.
+    # (in_range is already family 8; the 2-var absorption laws have no constant to vary, so they stay
+    # curated — adding confusable near-duplicates is the boolean-mass mistake.) Monomorphic INT.
+    _BND = [-5, -3, -1, 0, 1, 2, 3, 5, 8, 10]
+    # 35a. bound below:  \n -> max n k   (clamp up to at least k)
+    for k in _BND:
+        add(_cspec(f"bound_below_{k}".replace("-", "m"),
+                   f"Clamp a number up so it is at least {k}.", f"max n {k}",
+                   ["arithmetic", "min-max", "clamp", "bound"], fn([INT], INT),
+                   lam(["n"], bapp("max", n, int_lit(k))),
+                   [{"args": [v], "result": max(v, k)} for v in _INT_IN]))
+    # 35b. bound above:  \n -> min n k   (clamp down to at most k)
+    for k in _BND:
+        add(_cspec(f"bound_above_{k}".replace("-", "m"),
+                   f"Clamp a number down so it is at most {k}.", f"min n {k}",
+                   ["arithmetic", "min-max", "clamp", "bound"], fn([INT], INT),
+                   lam(["n"], bapp("min", n, int_lit(k))),
+                   [{"args": [v], "result": min(v, k)} for v in _INT_IN]))
+    # 35c. clamp to [lo, hi]:  \x -> max lo (min hi x)   (the residual `clamp` shape, parameterized over ranges)
+    for lo, hi in [(0, 5), (1, 10), (-5, 5), (2, 8), (0, 9), (-3, 3), (1, 4), (-2, 6)]:
+        add(_cspec(f"clamp_{lo}_{hi}".replace("-", "m"),
+                   f"Clamp a number to the range {lo} to {hi} inclusive.", f"max {lo} (min {hi} x)",
+                   ["arithmetic", "min-max", "clamp", "range"], fn([INT], INT),
+                   lam(["x"], bapp("max", int_lit(lo), bapp("min", int_lit(hi), x))),
+                   [{"args": [v], "result": max(lo, min(hi, v))} for v in _INT_IN]))
+    # 35d. min/max then arithmetic:  \n -> op (bnd n k1) k2   (min/max used INSIDE a composition)
+    for bnd in ("min", "max"):
+        bf = (min if bnd == "min" else max)
+        for k1 in (0, 3, 5):
+            for op in ("add", "mul"):
+                pf, k2 = _AOP[op], (2 if op == "mul" else 10)
+                add(_cspec(f"{bnd}{k1}_{op}{k2}",
+                           f"Take the {bnd} of a number and {k1}, then {_OPWORD[op]} {k2}.",
+                           f"{op} ({bnd} n {k1}) {k2}", ["arithmetic", "min-max", "composition"], fn([INT], INT),
+                           lam(["n"], bapp(op, bapp(bnd, n, int_lit(k1)), int_lit(k2))),
+                           [{"args": [v], "result": pf(bf(v, k1), k2)} for v in _INT_IN]))
+
+    # 36. POWERS & DIGIT ARITHMETIC via the dialect's OWN primitives — Coder-3B invented `**`/`^` for powers
+    # and `show`/`digitToInt` for digit-sums (square_diff/pow2/sum_digits all failed both seeds) because NO
+    # family taught the in-dialect forms: powers are repeated multiplication or `k * self (n-1)` recursion;
+    # digits are `n % b + self (n / b)` div/mod recursion. The eval's exact instances (square/cube/pow2/pow/
+    # sum_digits) stay leakage-dropped; these teach the SHAPE with non-eval bases/constants. Non-negative
+    # inputs where div/mod are involved (mod/div on negatives differ Python vs. the evaluator).
+    def _dsum(v, b):
+        s = 0
+        while v > 0:
+            s += v % b; v //= b
+        return s
+    def _ndig(v, b):
+        c = 0
+        while v > 0:
+            c += 1; v //= b
+        return c
+    _NN36 = [0, 1, 2, 5, 9, 12, 23]
+    # (Fixed-base power-by-recursion `k * self (n-1)` is ALREADY covered by the rec_pow_* family — and the
+    # model still wrote `2 ** n` for pow2, so more of that shape won't help. The real gaps are below:
+    # teaching that a square is `mul n n` (not `n^2`/`n**2`) and that digit-sums are div/mod recursion.)
+    # 36b. square (n*n) in composition:  \n -> op (mul n n) k   — teaches "square = n*n", not n^2/n**2
+    for op in ("add", "sub", "mul"):
+        pf = _AOP[op]
+        for k in (2, 3, 5, 10):
+            add(_cspec(f"square_{op}_{k}", f"Square a number, then {_OPWORD[op]} {k}.",
+                       f"{op} (mul n n) {k}", ["arithmetic", "square", "composition"], fn([INT], INT),
+                       lam(["n"], bapp(op, bapp("mul", n, n), int_lit(k))),
+                       [{"args": [v], "result": pf(v * v, k)} for v in _INT_IN]))
+    # 36c. two-arg squared combinations:  \a b -> op (mul a a) (mul b b)   (square_diff a*a-b*b is held out)
+    for op in ("add", "mul"):
+        pf = _AOP[op]
+        add(_cspec(f"sqcomb_{op}", f"Combine the squares of two numbers with {op}.",
+                   f"{op} (mul a a) (mul b b)", ["arithmetic", "square", "two-arg"], fn([INT, INT], INT),
+                   lam(["a", "b"], bapp(op, bapp("mul", var("a"), var("a")), bapp("mul", var("b"), var("b")))),
+                   [{"args": [u, w], "result": pf(u * u, w * w)} for u, w in [(2, 3), (5, -1), (0, 4), (-2, -3), (7, 1)]]))
+    # 36d. digit/bit sum by div/mod recursion:  \n -> case n==0 {0; n%b + self (n/b)}   (base 10 = sum_digits, held out)
+    for b in (2, 3, 10):
+        add(_cspec(f"digitsum_base_{b}", f"Sum the base-{b} digits of a non-negative number.",
+                   f"0 when n is 0; else (n % {b}) + self (n / {b})", ["arithmetic", "recursion", "digits", "divmod"],
+                   fn([INT], INT),
+                   lam(["n"], case_bool(bapp("eq", n, int_lit(0)), int_lit(0),
+                        bapp("add", bapp("mod", n, int_lit(b)), bself(bapp("div", n, int_lit(b)))))),
+                   [{"args": [v], "result": _dsum(v, b)} for v in _NN36], terminates="unknown"))
+    # 36e. digit count by div/mod recursion:  \n -> case n==0 {0; 1 + self (n/b)}
+    for b in (2, 10):
+        add(_cspec(f"numdigits_base_{b}", f"Count the base-{b} digits of a non-negative number.",
+                   f"0 when n is 0; else 1 + self (n / {b})", ["arithmetic", "recursion", "digits", "divmod", "count"],
+                   fn([INT], INT),
+                   lam(["n"], case_bool(bapp("eq", n, int_lit(0)), int_lit(0),
+                        bapp("add", int_lit(1), bself(bapp("div", n, int_lit(b)))))),
+                   [{"args": [v], "result": _ndig(v, b)} for v in _NN36], terminates="unknown"))
+
     return out
 
 

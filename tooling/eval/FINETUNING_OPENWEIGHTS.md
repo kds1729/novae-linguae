@@ -240,3 +240,26 @@ Held-out `write` (of 150, conventions-off/shots-0, 2 epochs on the broadened cor
   +12 (3B), ~−1 (7B). Below ~7B, use Coder; at 7B the base barely matters.
 - **Best config: Coder-3B** (write 129/150 = 86%, half the size of 7B). The CPU path here remains the $0
   fallback for the small end; any rented GPU box runs the same `train_lora_cpu.py` + eval (they auto-use CUDA).
+- **Corpus6 update (2026-06-29, RTX 5090):** adding **family #35 (min/max bounds & clamp)** to the generator
+  and retraining Coder-3B (2 seeds, 2 epochs) lifts write to **137/151 = 91%** (seed 0; seed 1 = 132) — the
+  new family **closed the whole min/max/clamp write-residual cluster on both seeds** (clamp, in_range,
+  max_self, min_of_list, max_list_rec, max/min_*_absorb), confirming broaden→retrain→measure at this
+  capacity.
+- **Corpus7 update (2026-06-29, RTX 4090) — the plateau:** **family #36 (powers & digit arithmetic via
+  primitives)** robustly fixed its two targets — `square_diff` and `sum_digits` now pass **both** seeds (the
+  model writes `mul a a` / div-mod recursion instead of the invented `a^2` / `show`/`digitToInt`). Best
+  checkpoint write **138/151 = 91%** (seed 1; **the pinned reference**, see
+  [`REFERENCE_CHECKPOINT.md`](REFERENCE_CHECKPOINT.md)). BUT seed 0 = 130, so the 2-seed mean (~134) is
+  **statistically flat vs corpus6** — the corpus-breadth lever has hit diminishing returns: each family
+  reliably fixes its 1–2 named tasks, but the ±10/seed noise now swamps the aggregate. (A negative result
+  worth recording: fixed-base power-by-recursion was *already* covered by `rec_pow_*`, and the model still
+  wrote `2 ** n` — a generalization limit, not a coverage gap, so that sub-family was dropped.)
+- **Corpus7 + Coder-7B (2026-06-29, RTX 4090) — the capacity lever, confirmed.** Same `corpus7`/`ftdata7`,
+  2 epochs × 2 seeds, base = Qwen2.5-Coder-7B-Instruct (7.66B params, LoRA 0.53% trainable, ~15 GB bf16,
+  fits the 24 GB 4090). Result: **write 141/151 = 93.4% on BOTH seeds** (total 280/304 = 92.1% sem) — beats
+  the 3B plateau (138 best / ~134 mean) and is **seed-stable** (3B swung 130↔138; 7B is 141,141). It
+  **cracked `nand`** on both seeds — the residual that survived every corpus round *and* 3B — plus
+  `reverse_concat`, confirming those were capacity-bound, not corpus gaps. Still failing at 7B (small, mostly
+  heavily-covered noise): `nth` (still invents `error`), `member`, `reverse`, `max_list_rec`, `pow2`. **Two
+  reference tiers now: Coder-3B (efficient, ~91%) and Coder-7B (best, 93.4%, stable).** Adapter
+  `adapter-coder7b-c7-s1`.
