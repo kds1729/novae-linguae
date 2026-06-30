@@ -29,14 +29,16 @@
 //!   - **negation-normal form** — `not` is pushed toward the leaves: De Morgan (`not(and(a,b)) →
 //!     or(not a, not b)`, and dually) and comparison negation (`not(lt(a,b)) → ge(a,b)`, `not(eq(a,b)) →
 //!     neq(a,b)`, …, over the Int/Bool total order). Sound — each retains every subterm.
-//!   - **linear like-term combining** — an `add` is read as a linear combination `Σ cᵢ·atomᵢ + c₀` over
-//!     its atoms (a `mul(c, t)` factor contributes coefficient `c`, a `neg(t)` contributes `−1`), the
-//!     coefficients are summed per atom, and it is re-emitted — so `x + x` and `2·x` coincide, as do
-//!     `2·x + 3·x` and `5·x`. This decides the *linear* integer fragment (distributivity of `·` by a
-//!     constant over `+`), which plain AC ordering cannot. Sound by construction: it **never drops an
-//!     atom** — a net-zero coefficient (`x + (−x)`, which the value-only property test would *not* flag as
-//!     a divergence hazard) aborts the rewrite, leaving the plain form with both copies, exactly as
-//!     `mul(x,0)`/`xor(x,x)` are left.
+//!   - **polynomial normalization** — `add` and `mul` (the integer ring operators) are read as a
+//!     polynomial `Σ cᵢ·monomialᵢ + c₀` over their atoms (the maximal non-`+`/`−`/`·` subterms), products
+//!     of sums are **expanded**, and like monomials are combined. So `x + x` and `2·x` coincide, as do
+//!     `(a+1)·(a−1)` and `a·a − 1` (difference of squares) and `2·(a+b)` and `2·a + 2·b` — deciding the
+//!     integer *polynomial* fragment, which plain AC ordering cannot. Sound by construction: it **never
+//!     drops an atom** — emission is refused (the plain AC path runs, keeping every operand) whenever an
+//!     atom would survive in no monomial (`x + (−x)`, `mul(x,0)`). A cross term may cancel *within one
+//!     monomial* and still be sound when its atom lives on in another (`(a+1)(a−1)`'s `−a + a` cancels
+//!     because `a` remains in `a²`), so the check is per-atom, not per-monomial — a divergence hazard the
+//!     value-only property test would not catch on its own.
 //!
 //! For the recognized arithmetic/boolean builtins the rebuilt node uses the compact `op` form, so a body
 //! that wrote `{fn: {var: add}}` and one that wrote `{op: add}` normalize alike. Operators outside that
@@ -184,94 +186,162 @@ fn fold_ac_literals(op: &str, lits: &[J]) -> Option<J> {
     }
 }
 
-// --- linear-arithmetic normal form ----------------------------------------------------------------
+// --- polynomial normal form (decides the integer polynomial fragment) -----------------------------
 
-/// Interpret an additive operand as `coeff · atom`: `neg(t) → (−1, t)`, `mul(c, t…)` with exactly one
-/// literal factor `c` → `(c, product-of-the-rest)`, and any other term → `(1, term)`. Never called on a
-/// bare literal (those are summed into the constant). The atom is returned as-is (already normalized,
-/// since children are rewritten bottom-up before their parent `add`), so equal atoms share a sort key.
-fn as_coeff_atom(operand: &J) -> (i128, J) {
-    if head_op(operand).as_deref() == Some("neg") {
-        if let Some(t) = operand.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()) {
-            return (-1, t.clone());
+use std::collections::{BTreeMap, BTreeSet};
+
+/// A polynomial over **atoms** (the maximal subterms that are not built from `+`/`−`/`·` — variables,
+/// `head(xs)`, `div(a,b)`, a recursive call, …). A **monomial** is the sorted multiset of its atoms' sort
+/// keys (the empty key is the constant term); the map sends each monomial to its integer coefficient plus
+/// the atom nodes (kept for rebuilding). `seen` records every atom key that appeared *anywhere* in the
+/// source, so the emitter can refuse to silently drop one (the divergence-soundness invariant).
+#[derive(Default)]
+struct Poly {
+    monos: BTreeMap<Vec<Vec<u8>>, (i128, Vec<J>)>,
+    seen: BTreeSet<Vec<u8>>,
+}
+
+impl Poly {
+    fn constant(c: i128) -> Poly {
+        let mut p = Poly::default();
+        if c != 0 {
+            p.monos.insert(Vec::new(), (c, Vec::new()));
         }
+        p
     }
-    if head_op(operand).as_deref() == Some("mul") {
-        if let Some(args) = operand.get("args").and_then(|a| a.as_array()) {
-            let lits: Vec<i128> = args.iter().filter_map(as_int).collect();
-            let nonlits: Vec<J> = args.iter().filter(|a| as_int(a).is_none()).cloned().collect();
-            // Exactly one literal factor: it's the coefficient; the remaining factors form the atom.
-            if lits.len() == 1 && !nonlits.is_empty() {
-                let atom = if nonlits.len() == 1 {
-                    nonlits.into_iter().next().unwrap()
-                } else {
-                    simplify_app(&app("mul", nonlits))
-                };
-                return (lits[0], atom);
+    /// A single opaque atom (coefficient 1).
+    fn atom(node: &J) -> Poly {
+        let k = sort_key(node);
+        let mut p = Poly::default();
+        p.monos.insert(vec![k.clone()], (1, vec![node.clone()]));
+        p.seen.insert(k);
+        p
+    }
+    fn add_assign(&mut self, other: Poly) {
+        for (k, (c, atoms)) in other.monos {
+            let e = self.monos.entry(k).or_insert((0, atoms.clone()));
+            e.0 += c;
+            if e.1.is_empty() {
+                e.1 = atoms;
+            }
+        }
+        self.seen.extend(other.seen);
+    }
+}
+
+fn poly_add(mut a: Poly, b: Poly) -> Poly {
+    a.add_assign(b);
+    a
+}
+fn poly_neg(mut a: Poly) -> Poly {
+    for v in a.monos.values_mut() {
+        v.0 = -v.0;
+    }
+    a
+}
+/// Product of two polynomials: distribute (every monomial of `a` against every monomial of `b`). Both
+/// factors' atoms `seen` are unioned in — a product mentions every atom of each side, so none is "lost"
+/// even if a cross term cancels.
+fn poly_mul(a: Poly, b: Poly) -> Poly {
+    let mut out = Poly::default();
+    out.seen.extend(a.seen.iter().cloned());
+    out.seen.extend(b.seen.iter().cloned());
+    for (ka, (ca, aa)) in &a.monos {
+        for (kb, (cb, ab)) in &b.monos {
+            let mut key: Vec<Vec<u8>> = ka.iter().chain(kb).cloned().collect();
+            key.sort();
+            let mut atoms: Vec<J> = aa.iter().chain(ab).cloned().collect();
+            atoms.sort_by(|x, y| sort_key(x).cmp(&sort_key(y)));
+            let e = out.monos.entry(key).or_insert((0, atoms.clone()));
+            e.0 += ca * cb;
+            if e.1.is_empty() {
+                e.1 = atoms;
             }
         }
     }
-    (1, operand.clone())
+    out
 }
 
-/// Emit a `coeff · atom` term in canonical form: `1 → atom`, `−1 → neg(atom)`, else `mul(coeff, atom)`
-/// (run through `simplify_app` so it matches the form an AC-`mul` produces — keeping the result a fixpoint).
-fn coeff_term(coeff: i128, atom: J) -> J {
-    match coeff {
-        1 => atom,
-        -1 => simplify_app(&app("neg", vec![atom])),
-        c => simplify_app(&app("mul", vec![int_lit(c), atom])),
+/// Read a node as a polynomial: descend `add`/`mul`/`neg`/`sub` (the integer ring operations), fold
+/// literals into the constant, and treat anything else (a variable, or an application whose head is not a
+/// ring op — `head`, `length`, `div`, a recursive call, …) as an opaque atom. Total: every node maps to
+/// *some* polynomial (a lone atom in the worst case).
+fn to_poly(node: &J) -> Poly {
+    if let Some(c) = as_int(node) {
+        return Poly::constant(c);
+    }
+    let args = node.get("args").and_then(|a| a.as_array());
+    match (head_op(node).as_deref(), args) {
+        (Some("add"), Some(a)) => a.iter().map(to_poly).fold(Poly::default(), poly_add),
+        (Some("mul"), Some(a)) => a.iter().map(to_poly).fold(Poly::constant(1), poly_mul),
+        (Some("neg"), Some(a)) if a.len() == 1 => poly_neg(to_poly(&a[0])),
+        (Some("sub"), Some(a)) if a.len() == 2 => poly_add(to_poly(&a[0]), poly_neg(to_poly(&a[1]))),
+        _ => Poly::atom(node),
     }
 }
 
-/// Canonicalize an `add` by **combining like terms**: collect every operand as `coeff · atom`, sum the
-/// coefficients per atom (and the literal operands into a constant), and re-emit. This is the linear
-/// fragment's decision step — it reconciles `x + x` with `2·x`, `2·x + 3·x` with `5·x`, etc., which the
-/// plain AC ordering cannot.
-///
-/// Returns `None` (leaving the plain AC path to run) in two cases:
-///   - **nothing repeats** — no atom occurs in ≥ 2 operands, so there is nothing to combine and the plain
-///     path already produces the canonical form (avoids needlessly reshaping every `add`);
-///   - **an atom cancels to coefficient 0** — emitting the combination would *drop* that atom, which is
-///     unsound if it could diverge (the same stance as `mul(x,0)`/`xor(x,x)`). Aborting keeps every
-///     occurrence, so the linear form NEVER drops an atom — divergence-soundness holds by construction,
-///     not by the (value-only) reference property test.
-fn try_linear_add(add_args: &[J]) -> Option<J> {
-    let flat: Vec<J> = add_args.iter().flat_map(|a| flatten_ac("add", a)).collect();
-    let mut const_sum: i128 = 0;
-    // atom sort-key → (summed coefficient, a representative atom node, occurrence count).
-    let mut groups: std::collections::BTreeMap<Vec<u8>, (i128, J, usize)> = std::collections::BTreeMap::new();
-    for operand in &flat {
-        if let Some(c) = as_int(operand) {
-            const_sum += c;
+/// Build a `coeff · (product of atoms)` term in canonical form (matching what an AC-`mul` would emit, so
+/// the result is a fixpoint): coefficient `1 → the product`, `−1 → neg(product)`, else `mul(coeff, atoms…)`.
+fn mono_term(coeff: i128, atoms: Vec<J>) -> J {
+    let product = |atoms: Vec<J>| match atoms.len() {
+        1 => atoms.into_iter().next().unwrap(),
+        _ => rebuild_ac("mul", atoms),
+    };
+    match coeff {
+        1 => product(atoms),
+        -1 => app("neg", vec![product(atoms)]),
+        c => {
+            let mut ops = atoms;
+            ops.push(int_lit(c));
+            rebuild_ac("mul", ops)
+        }
+    }
+}
+
+/// Sort operands by the naming-invariant key and rebuild a right-nested AC spine — exactly the shape the
+/// AC path produces, so a re-normalization of the result is a no-op (a fixpoint).
+fn rebuild_ac(op: &str, mut operands: Vec<J>) -> J {
+    operands.sort_by(|a, b| sort_key(a).cmp(&sort_key(b)));
+    match operands.len() {
+        0 => ac_identity(op).unwrap_or_else(|| int_lit(0)),
+        1 => operands.into_iter().next().unwrap(),
+        _ => operands.into_iter().rev().reduce(|acc, x| app(op, vec![x, acc])).unwrap(),
+    }
+}
+
+/// Emit a polynomial as a canonical `add` of `coeff·monomial` terms plus a constant — **iff** doing so
+/// drops no atom. `None` (deferring to the plain AC path, which keeps every operand) when some `seen` atom
+/// survives in no nonzero monomial: dropping it would be unsound under a diverging atom (the same stance
+/// as `mul(x,0)`/`xor(x,x)`). Note an atom may legitimately *cancel out of one monomial* and still survive
+/// in another — e.g. the middle `−a + a` of `(a+1)(a−1)` cancels while `a` lives on in `a²` — so the check
+/// is per-atom (survives somewhere), not per-monomial. This is what keeps the polynomial form sound
+/// independently of the value-only reference property test.
+fn emit_poly(poly: Poly) -> Option<J> {
+    let mut survivors: BTreeSet<Vec<u8>> = BTreeSet::new();
+    for (key, (coeff, _)) in &poly.monos {
+        if *coeff != 0 {
+            survivors.extend(key.iter().cloned());
+        }
+    }
+    if !poly.seen.is_subset(&survivors) {
+        return None;
+    }
+    let mut terms: Vec<J> = Vec::new();
+    let mut constant = 0i128;
+    for (key, (coeff, atoms)) in poly.monos {
+        if coeff == 0 {
             continue;
         }
-        let (coeff, atom) = as_coeff_atom(operand);
-        let key = sort_key(&atom);
-        let entry = groups.entry(key).or_insert((0, atom, 0));
-        entry.0 += coeff;
-        entry.2 += 1;
+        if key.is_empty() {
+            constant += coeff;
+        } else {
+            terms.push(mono_term(coeff, atoms));
+        }
     }
-    // Only reshape when combining actually merges something; otherwise defer to the plain AC path.
-    if !groups.values().any(|(_, _, count)| *count >= 2) {
-        return None;
+    if constant != 0 {
+        terms.push(int_lit(constant));
     }
-    // Soundness gate: a net-zero atom would be dropped — abort instead (the plain path keeps both copies).
-    if groups.values().any(|(coeff, _, _)| *coeff == 0) {
-        return None;
-    }
-    let mut terms: Vec<J> = groups.into_values().map(|(coeff, atom, _)| coeff_term(coeff, atom)).collect();
-    if const_sum != 0 {
-        terms.push(int_lit(const_sum));
-    }
-    // Canonical ordering + right-nested association (mirrors the AC rebuild). The emitted operands have
-    // distinct atoms, so re-running `try_linear_add` on this returns `None` — it is a fixpoint.
-    terms.sort_by(|a, b| sort_key(a).cmp(&sort_key(b)));
-    Some(match terms.len() {
-        0 => int_lit(0),
-        1 => terms.into_iter().next().unwrap(),
-        _ => terms.into_iter().rev().reduce(|acc, x| app("add", vec![x, acc])).unwrap(),
-    })
+    Some(rebuild_ac("add", terms))
 }
 
 // --- the rewrite ----------------------------------------------------------------------------------
@@ -381,11 +451,13 @@ fn simplify_app(node: &J) -> J {
 
     // Associative + commutative operators: flatten, fold literals, drop identity, sort, rebuild.
     if AC_OPS.contains(&op.as_str()) {
-        // `add` first attempts linear like-term combining (`x + x → 2·x`); it returns `None` when there is
-        // nothing to combine or an atom would cancel to zero, in which case the plain AC path below runs.
-        if op == "add" {
-            if let Some(linear) = try_linear_add(&args) {
-                return linear;
+        // The integer ring operators (`add`, `mul`) first attempt full **polynomial** normalization:
+        // like-term combining (`x + x → 2·x`) AND product expansion (`(a+1)(a−1) → a² − 1`). It returns
+        // `None` — deferring to the plain AC path below — only when emitting would drop an atom (a
+        // cancellation like `x + (−x)` or `mul(x, 0)`), which keeps every operand for soundness.
+        if op == "add" || op == "mul" {
+            if let Some(poly) = emit_poly(to_poly(node)) {
+                return poly;
             }
         }
         let flat: Vec<J> = args.iter().flat_map(|a| flatten_ac(&op, a)).collect();
@@ -619,6 +691,62 @@ mod tests {
     }
 
     #[test]
+    fn polynomial_products_expand_and_decide() {
+        // Difference of squares: (a+1)·(a−1) ≡ a·a − 1. The middle `−a + a` cancels, but `a` survives in
+        // `a·a`, so it is sound to combine — decided solver-free.
+        let a_plus_1 = app("add", vec![v("a"), int_lit(1)]);
+        let a_minus_1 = app("sub", vec![v("a"), int_lit(1)]);
+        let lhs = app("mul", vec![a_plus_1, a_minus_1]);
+        let rhs = app("sub", vec![app("mul", vec![v("a"), v("a")]), int_lit(1)]);
+        assert!(normal_equivalent(&lhs, &rhs));
+        // Constant-factor distribution: 2·(a+b) ≡ 2·a + 2·b.
+        assert!(normal_equivalent(
+            &app("mul", vec![int_lit(2), app("add", vec![v("a"), v("b")])]),
+            &app("add", vec![app("mul", vec![int_lit(2), v("a")]), app("mul", vec![int_lit(2), v("b")])])));
+        // FOIL: (a+b)·(a+b) ≡ a·a + 2·a·b + b·b.
+        let ab = || app("add", vec![v("a"), v("b")]);
+        let square = app("mul", vec![ab(), ab()]);
+        let expanded = app("add", vec![
+            app("mul", vec![v("a"), v("a")]),
+            app("mul", vec![int_lit(2), app("mul", vec![v("a"), v("b")])]),
+            app("mul", vec![v("b"), v("b")]),
+        ]);
+        assert!(normal_equivalent(&square, &expanded));
+        // A genuinely different polynomial does NOT collapse: (a+1)² ≢ a²+1.
+        assert!(!normal_equivalent(
+            &app("mul", vec![app("add", vec![v("a"), int_lit(1)]), app("add", vec![v("a"), int_lit(1)])]),
+            &app("add", vec![app("mul", vec![v("a"), v("a")]), int_lit(1)])));
+    }
+
+    #[test]
+    fn normalize_is_idempotent_on_polynomials() {
+        // The emitted polynomial form must be a fixpoint: normalizing it again changes nothing.
+        let exprs = vec![
+            app("mul", vec![app("add", vec![v("a"), int_lit(1)]), app("sub", vec![v("a"), int_lit(1)])]),
+            app("mul", vec![app("add", vec![v("a"), v("b")]), app("add", vec![v("a"), v("b")])]),
+            app("add", vec![app("mul", vec![int_lit(2), v("a")]), v("a"), app("mul", vec![int_lit(3), v("b")])]),
+            app("mul", vec![int_lit(2), app("add", vec![v("a"), app("mul", vec![v("b"), v("c")])])]),
+        ];
+        for e in exprs {
+            let n = normalize(&e);
+            assert_eq!(normalize(&n), n, "normalize not idempotent on {e} -> {n}");
+        }
+    }
+
+    #[test]
+    fn polynomial_cancellation_is_not_applied() {
+        // a·b − a·b is 0 by value, but collapsing to 0 drops BOTH a and b — unsound under divergence. The
+        // whole-monomial cancellation must abort (no atom survives anywhere), so it is NOT equal to 0.
+        let ab = app("mul", vec![v("a"), v("b")]);
+        assert_ne!(normalize(&app("sub", vec![ab.clone(), ab])), int_lit(0));
+        // a·(b − b): the atom `b` only ever appears in the cancelling product, so this must not collapse
+        // (to 0 or to anything dropping `b`).
+        let e = app("mul", vec![v("a"), app("sub", vec![v("b"), v("b")])]);
+        assert_ne!(normalize(&e), int_lit(0));
+        assert!(!normal_equivalent(&e, &v("a")));
+    }
+
+    #[test]
     fn cancellation_is_not_applied() {
         // x + (−x) is 0 by value, but combining would DROP x — unsound under a diverging x. So it must NOT
         // collapse to 0 (the same stance as mul-by-0 / xor(x,x)); the linear path aborts, leaving the plain
@@ -738,6 +866,12 @@ mod tests {
             app("add", vec![a(), a(), app("neg", vec![b()])]),
             app("add", vec![a(), app("neg", vec![a()]), b()]),
             app("add", vec![app("mul", vec![int_lit(3), a()]), app("neg", vec![a()]), int_lit(1)]),
+            // polynomial expansion (products of sums) and a whole-monomial cancellation:
+            app("mul", vec![app("add", vec![a(), int_lit(1)]), app("sub", vec![a(), int_lit(1)])]),
+            app("mul", vec![app("add", vec![a(), b()]), app("add", vec![a(), b()])]),
+            app("mul", vec![int_lit(2), app("add", vec![a(), app("mul", vec![b(), c()])])]),
+            app("sub", vec![app("mul", vec![a(), b()]), app("mul", vec![b(), a()])]),
+            app("mul", vec![a(), app("sub", vec![b(), b()])]),
         ];
         let bool_exprs: Vec<J> = vec![
             app("and", vec![p(), p()]),

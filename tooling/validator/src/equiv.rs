@@ -737,9 +737,6 @@ mod tests {
     fn ap(o: &str, args: Vec<J>) -> J {
         json!({ "kind": "app", "op": o, "args": args })
     }
-    fn li(n: i64) -> J {
-        json!({ "kind": "lit", "value": { "kind": "int", "value": n } })
-    }
     // `\xs ys -> case null xs of true -> base | false -> step`.
     fn rec2(base: J, step: J) -> J {
         json!({ "kind": "lambda", "params": [{ "name": "xs" }, { "name": "ys" }], "body": {
