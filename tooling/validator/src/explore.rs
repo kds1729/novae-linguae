@@ -28,6 +28,15 @@
 //! Conjectures are ranked smallest-first and capped, so over a rich operation set the larger
 //! distribution laws can be truncated — but those (`reverse_append`, `length_append`, …) are exactly
 //! what the Layer A catalog already provides, so exploration's job is the *un-catalogued* remainder.
+//!
+//! **Relevance-guided selection.** Raising the cap to reach a truncated lemma multiplies proof cost on
+//! *every* goal (each conjecture is discharged by induction — a measured 4× regression). Instead, when
+//! the goal is supplied, a few conjectures from *beyond* the size cap are **promoted** because they are
+//! relevant to it: they share a non-trivial operator skeleton (`reverse(append(_,_))`, …) with the terms
+//! the goal equates, so they can actually fire there as a rewrite. The smallest-`MAX_CONJECTURES` base is
+//! never reordered or dropped (no regression — the reverted nil-ranking experiment demoted the essential
+//! `append_nil`), so promotion only *adds* reach for a goal the cap would otherwise starve, bounded at
+//! `RELEVANCE_PROMOTE`. Soundness is unchanged: a promoted conjecture is still proved before it is used.
 
 use serde_json::{json, Value as J};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -39,6 +48,17 @@ const MAX_TERM_SIZE: usize = 5;
 /// Large enough to retain the standard distribution laws (`reverse_append`, `length_append` are ~size
 /// 10) while the caller's early-stop keeps the common case from paying for the whole list.
 const MAX_CONJECTURES: usize = 32;
+/// How many extra conjectures, drawn from *beyond* the size cap, may be **promoted** because they are
+/// relevant to the goal (share a non-trivial operator shape with it). This is the "beyond the conjecture
+/// cap" lever: rather than raise `MAX_CONJECTURES` globally (which multiplies proof cost on *every* goal —
+/// a measured 4× regression), reach past the cap only for the few lemmas the goal actually needs. The
+/// smallest-`MAX_CONJECTURES` base is never reordered or dropped, so goals that close within it are
+/// unaffected; promotion only adds reach for goals the cap would otherwise starve.
+const RELEVANCE_PROMOTE: usize = 8;
+/// Smallest subterm (node count) whose operator-skeleton counts toward relevance. A bare `reverse(_)`
+/// (size 2) is too generic to signal that a lemma is *about* the goal; a two-operator nest like
+/// `reverse(reverse(_))` or `reverse(append(_,_))` (size ≥ 3) is.
+const MIN_RELEVANT_SHAPE: usize = 3;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Sort {
@@ -259,13 +279,84 @@ fn free_vars(t: &J, out: &mut Vec<String>) {
     }
 }
 
+// --- goal relevance -------------------------------------------------------------------------------
+
+/// The operator-skeleton of a term: every leaf (variable, `nil`, literal) abstracted to `_`, operator
+/// nesting preserved — `reverse(append(xs, ys))` → `reverse(append(_,_))`. Two terms with the same
+/// skeleton have the same operator structure regardless of which variables fill the leaves, so a skeleton
+/// is a cheap "same shape" key for matching a lemma against the goal.
+fn skeleton(t: &J) -> String {
+    match t.get("kind").and_then(|k| k.as_str()) {
+        Some("app") => {
+            let op = t.get("op").and_then(|o| o.as_str()).unwrap_or("?");
+            let args: Vec<String> =
+                t.get("args").and_then(|a| a.as_array()).map(|a| a.iter().map(skeleton).collect()).unwrap_or_default();
+            format!("{op}({})", args.join(","))
+        }
+        _ => "_".to_string(),
+    }
+}
+
+/// Collect `skeleton → size` for every subterm of `t` rooted at an application whose size is ≥
+/// `MIN_RELEVANT_SHAPE` (smaller nests are too generic to signal relevance). Keeps the largest size seen
+/// for a repeated skeleton.
+fn collect_skeletons(t: &J, out: &mut BTreeMap<String, usize>) {
+    if t.get("kind").and_then(|k| k.as_str()) == Some("app") && size(t) >= MIN_RELEVANT_SHAPE {
+        let sz = size(t);
+        out.entry(skeleton(t)).and_modify(|e| *e = (*e).max(sz)).or_insert(sz);
+    }
+    if let Some(args) = t.get("args").and_then(|a| a.as_array()) {
+        for a in args {
+            collect_skeletons(a, out);
+        }
+    }
+}
+
+/// The two terms an equation relates: the operands of the `eq` predicate of a `forall eq(L, R)` goal or a
+/// bare `eq(L, R)`. Relevance is judged on these *terms* — not the `eq`/`forall` wrapper, which every
+/// goal and conjecture share and which would otherwise create spurious matches.
+fn equation_operands(node: &J) -> Vec<J> {
+    let pred = if node.get("kind").and_then(|k| k.as_str()) == Some("forall") {
+        node.get("body")
+    } else {
+        Some(node)
+    };
+    pred.filter(|p| p.get("op").and_then(|o| o.as_str()) == Some("eq"))
+        .and_then(|p| p.get("args").and_then(|a| a.as_array()).cloned())
+        .unwrap_or_default()
+}
+
+/// The goal's relevant operator-skeletons (`skeleton → size`), taken from the terms it equates.
+fn goal_skeletons(goal: &J) -> BTreeMap<String, usize> {
+    let mut out = BTreeMap::new();
+    for operand in equation_operands(goal) {
+        collect_skeletons(&operand, &mut out);
+    }
+    out
+}
+
+/// Relevance of a conjecture to the goal: the size of the largest non-trivial operator-skeleton its
+/// equated terms share with the goal's (0 if none). A conjecture that manipulates a structure the goal
+/// actually contains can fire there as a rewrite; one sharing nothing only bloats the SMT context.
+fn relevance(conj: &J, goal_skels: &BTreeMap<String, usize>) -> usize {
+    let mut cs = BTreeMap::new();
+    for operand in equation_operands(conj) {
+        collect_skeletons(&operand, &mut cs);
+    }
+    cs.keys().filter_map(|k| goal_skels.get(k)).copied().max().unwrap_or(0)
+}
+
 // --- public API -----------------------------------------------------------------------------------
 
 /// Conjecture candidate lemmas for a goal whose prelude closure is `closure`. Returns named
-/// `forall`-quantified equations (`name`, AST), ranked smallest-first and capped at [`MAX_CONJECTURES`].
-/// Each is *tested-valid* (holds on the whole battery) but not yet *proved* — the caller must discharge
-/// it by induction before assuming it.
-pub fn explore_lemmas(closure: &BTreeSet<String>) -> Vec<(String, J)> {
+/// `forall`-quantified equations (`name`, AST). The smallest [`MAX_CONJECTURES`] always come first
+/// (ranked smallest-first — the original behavior, never reordered or dropped). When `goal` is supplied,
+/// up to [`RELEVANCE_PROMOTE`] further conjectures from *beyond* that cap are appended **because they are
+/// relevant to the goal** (they share a non-trivial operator shape with the terms it equates) — the
+/// relevance-guided way to reach a lemma the cap would otherwise starve, without globally raising it.
+/// Each conjecture is *tested-valid* (holds on the whole battery) but not yet *proved* — the caller must
+/// discharge it by induction before assuming it, so promotion can only add reach, never unsoundness.
+pub fn explore_lemmas(closure: &BTreeSet<String>, goal: Option<&J>) -> Vec<(String, J)> {
     // Enumerate over exactly the goal's closure operations (so conjectures stay admissible), within the
     // first-order fragment this module supports.
     let ops: Vec<&OpSig> = ALL_OPS.iter().filter(|o| closure.contains(o.name)).collect();
@@ -311,11 +402,35 @@ pub fn explore_lemmas(closure: &BTreeSet<String>) -> Vec<(String, J)> {
         }
     }
 
-    // Rank smallest-first (cheapest, most general first), dedup, cap.
+    // Rank smallest-first (cheapest, most general first), dedup.
     conjectures.sort_by_key(|c| (size(c), c.to_string()));
     conjectures.dedup_by_key(|c| c.to_string());
-    conjectures.truncate(MAX_CONJECTURES);
-    conjectures.into_iter().enumerate().map(|(i, c)| (format!("discovered_{i}"), c)).collect()
+
+    // Base: the smallest `MAX_CONJECTURES` — exactly the original output. Never reordered or dropped, so a
+    // goal that already closed within the cap is byte-for-byte unaffected (no regression, the lesson from
+    // the reverted nil-ranking experiment that demoted the essential `append_nil`).
+    let mut selected: Vec<J> = conjectures.iter().take(MAX_CONJECTURES).cloned().collect();
+
+    // Relevance promotion: append up to `RELEVANCE_PROMOTE` conjectures from BEYOND the cap that are
+    // relevant to the goal — most relevant first, smallest to break ties. These run only after the base is
+    // exhausted (the caller tries conjectures in order and early-stops), so they cost nothing on goals that
+    // close within the cap, and reach the few extra lemmas a starved goal needs.
+    if let (Some(goal), true) = (goal, conjectures.len() > MAX_CONJECTURES) {
+        let goal_skels = goal_skeletons(goal);
+        if !goal_skels.is_empty() {
+            let mut promoted: Vec<(usize, usize, String, J)> = conjectures[MAX_CONJECTURES..]
+                .iter()
+                .filter_map(|c| {
+                    let r = relevance(c, &goal_skels);
+                    (r > 0).then(|| (r, size(c), c.to_string(), c.clone()))
+                })
+                .collect();
+            promoted.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then_with(|| a.2.cmp(&b.2)));
+            promoted.truncate(RELEVANCE_PROMOTE);
+            selected.extend(promoted.into_iter().map(|(_, _, _, c)| c));
+        }
+    }
+    selected.into_iter().enumerate().map(|(i, c)| (format!("discovered_{i}"), c)).collect()
 }
 
 #[cfg(test)]
@@ -338,7 +453,7 @@ mod tests {
     fn rediscovers_reverse_involution_and_reverse_append() {
         // Over {reverse, append}, exploration must conjecture both reverse∘reverse = id and the
         // reverse/append distribution law — the lemmas Layer A hand-codes, here derived from scratch.
-        let found = explore_lemmas(&closure(&["reverse", "append"]));
+        let found = explore_lemmas(&closure(&["reverse", "append"]), None);
         // reverse-involution: a conjecture equating reverse(reverse(v)) with a bare variable.
         assert!(
             found.iter().any(|(_, c)| {
@@ -366,7 +481,7 @@ mod tests {
 
     #[test]
     fn conjectures_are_universally_quantified_equations() {
-        let found = explore_lemmas(&closure(&["reverse", "append"]));
+        let found = explore_lemmas(&closure(&["reverse", "append"]), None);
         assert!(!found.is_empty());
         for (name, c) in &found {
             assert!(name.starts_with("discovered_"));
@@ -379,7 +494,52 @@ mod tests {
 
     #[test]
     fn empty_closure_yields_nothing() {
-        assert!(explore_lemmas(&closure(&[])).is_empty());
+        assert!(explore_lemmas(&closure(&[]), None).is_empty());
+    }
+
+    #[test]
+    fn relevance_promotes_beyond_the_cap_without_demoting_the_base() {
+        // A rich closure yields more conjectures than the size cap, so the goal-agnostic output is exactly
+        // `MAX_CONJECTURES` smallest-first. A goal that mentions a distinctive nested shape
+        // (`reverse(append(_,_))` / `append(reverse(_),_)`) must (a) leave that base byte-for-byte intact —
+        // never demote it (the nil-ranking lesson) — and (b) APPEND relevant conjectures from beyond the
+        // cap, each genuinely sharing a non-trivial skeleton with the goal.
+        let cl = closure(&["reverse", "append", "length", "add"]);
+        let base = explore_lemmas(&cl, None);
+        assert_eq!(base.len(), MAX_CONJECTURES, "rich closure should fill the cap (got {})", base.len());
+
+        // `reverse(append(xs, ys)) = append(reverse(ys), reverse(xs))` — the reverse/append distribution
+        // shape, whose conjectures are large (~size 10) and land beyond the smallest-cap base.
+        let goal = json!({ "kind": "forall", "vars": ["xs", "ys"], "body": app("eq", vec![
+            app("reverse", vec![app("append", vec![var("xs"), var("ys")])]),
+            app("append", vec![app("reverse", vec![var("ys")]), app("reverse", vec![var("xs")])]),
+        ]) });
+        let promoted = explore_lemmas(&cl, Some(&goal));
+
+        // (a) Base preserved exactly: the first MAX_CONJECTURES conjecture ASTs are identical (only the
+        // `discovered_i` names, assigned by position, are the same too).
+        let base_asts: Vec<&J> = base.iter().map(|(_, c)| c).collect();
+        let promoted_base: Vec<&J> = promoted.iter().take(MAX_CONJECTURES).map(|(_, c)| c).collect();
+        assert_eq!(base_asts, promoted_base, "the smallest-cap base must be untouched");
+
+        // (b) Promotion happened, and every promoted conjecture is genuinely goal-relevant.
+        assert!(promoted.len() > base.len(), "expected goal-relevant conjectures to be promoted beyond the cap");
+        assert!(promoted.len() <= MAX_CONJECTURES + RELEVANCE_PROMOTE);
+        let goal_skels = goal_skeletons(&goal);
+        for (_, c) in promoted.iter().skip(MAX_CONJECTURES) {
+            assert!(relevance(c, &goal_skels) > 0, "a promoted conjecture must share a shape with the goal: {c}");
+        }
+    }
+
+    #[test]
+    fn no_goal_is_identical_to_before() {
+        // Without a goal, output is exactly the smallest-first cap — the original behavior, so existing
+        // callers/paths are unchanged.
+        let cl = closure(&["reverse", "append", "length", "add"]);
+        let a = explore_lemmas(&cl, None);
+        let b = explore_lemmas(&cl, None);
+        assert_eq!(a, b);
+        assert!(a.len() <= MAX_CONJECTURES);
     }
 
     #[test]
@@ -387,7 +547,7 @@ mod tests {
         // Soundness of the *filter*: every returned conjecture must actually agree on all test envs
         // (it's only a conjecture — proof happens later — but it must at least pass the tests).
         let envs = test_envs();
-        for (_, c) in explore_lemmas(&closure(&["reverse", "append"])) {
+        for (_, c) in explore_lemmas(&closure(&["reverse", "append"]), None) {
             let body = c.get("body").unwrap();
             let (a, b) = (&body.get("args").unwrap()[0], &body.get("args").unwrap()[1]);
             for e in &envs {

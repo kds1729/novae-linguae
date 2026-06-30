@@ -1503,7 +1503,9 @@ fn prove_rec_inner(
     // works) and avoids axiom bloat: piling every discovered lemma into one query overwhelms z3's
     // quantifier instantiation and times out, even when a two-lemma subset closes instantly.
     if explore {
-        let conjectures = crate::explore::explore_lemmas(&closure);
+        // Pass the goal's equated terms so exploration can relevance-promote lemmas from beyond its size
+        // cap that share an operator shape with the goal (the smallest-cap base is unchanged regardless).
+        let conjectures = crate::explore::explore_lemmas(&closure, prop_expr.get("body"));
         let mut extras: Vec<ProvedLemma> = Vec::new();
         for (name, stmt) in &conjectures {
             if base_assumed.iter().any(|a| a == stmt) {
