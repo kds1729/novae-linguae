@@ -22,19 +22,21 @@
 //! preserving. That needs no solver and decides many cases where *both* functions recurse — two renamed
 //! (or commuted, or folded) copies of the same function are recognized as equivalent.
 //!
-//! When normalization does not reconcile two **both-recursive** single-list-parameter functions, a
-//! **two-recursive structural induction** is attempted ([`crate::induct::prove_equiv_by_induction`]):
-//! both bodies are emitted as `define-fun-rec`s and `∀xs. f(xs) = g(xs)` is discharged by induction over
-//! `xs`. This decides genuinely-different recursions that align step-for-step and differ in their element
-//! arithmetic (e.g. a list-sum written two ways) — which normalization can't see. Recursions that don't
-//! align (needing a stronger induction or a cross-function lemma) leave the step satisfiable and are
-//! reported UNKNOWN, never a false verdict.
+//! When normalization does not reconcile two **both-recursive** functions, a **two-recursive structural
+//! induction** is attempted ([`crate::induct::prove_equiv_by_induction`]): both bodies are emitted as
+//! `define-fun-rec`s and `∀p0 ps…. f(p0, ps…) = g(p0, ps…)` is discharged by induction over the leading
+//! list parameter `p0`. A single spectator parameter (`ps…`, so arity ≤ 2) is threaded through both
+//! functions — declared free in the goal and universally quantified in the induction hypothesis, so both
+//! a carried spectator (append's second list) and a descending one (zipWith's, tailed each step) close.
+//! This decides genuinely-different recursions that align step-for-step and differ in their element
+//! arithmetic (e.g. a list-sum written two ways), and — via the curated list-algebra catalog, each lemma
+//! proved by its own induction before being assumed — recursions whose step needs a cross-function lemma
+//! (e.g. `append_nil`). Recursions that still don't align are reported UNKNOWN, never a false verdict.
 //!
-//! Out of scope (reported UNSUPPORTED): nullary constants, mismatched arity, and two mutually-recursive
-//! functions of arity > 1; a multi-argument *recursive list* function also exceeds the inductive fragment
-//! (a single list parameter) and degrades to UNKNOWN. A clean DISTINCT comes only from a solver
-//! counterexample (the first-order path); a non-closing induction is reported UNKNOWN, not DISTINCT,
-//! since it is not a refutation.
+//! Out of scope (reported UNSUPPORTED): nullary constants, mismatched arity, a non-list leading parameter,
+//! a higher-order parameter, and recursive functions of arity > 2. A clean DISTINCT comes only from a
+//! solver counterexample (the first-order path, or a satisfiable base case of the induction); a
+//! non-closing induction is reported UNKNOWN, not DISTINCT, since it is not a refutation.
 
 use serde_json::{json, Value as J};
 use std::collections::{BTreeMap, BTreeSet};
@@ -335,21 +337,20 @@ pub fn prove_equivalent(body_f: &J, body_g: &J, solver: &str) -> EquivVerdict {
         (eq(apply_self, subst_many(if_, &f_map)), Some(body_g))
     } else {
         // Both sides recurse and normalization (the fast path above) did not reconcile them. Attempt a
-        // two-recursive structural induction (single list parameter): it decides lockstep recursions that
-        // differ in their element arithmetic, and reports UNKNOWN (never a false verdict) when the
-        // recursions don't align. Multi-argument recursive pairs remain out of scope.
-        if pf.len() == 1 {
-            return match prove_equiv_by_induction(body_f, body_g, solver) {
-                InductionOutcome::Proved => EquivVerdict::Equivalent(vec![]),
-                InductionOutcome::ProvedWithLemmas(ls) => EquivVerdict::Equivalent(ls),
-                // A base case refuted: a concrete short list where the two differ — a real counterexample.
-                InductionOutcome::Failed(model) => EquivVerdict::Distinct(model),
-                InductionOutcome::NoSolver => EquivVerdict::NoSolver,
-                InductionOutcome::Unknown => EquivVerdict::Unknown,
-                InductionOutcome::Unsupported(why) => EquivVerdict::Unsupported(why),
-            };
-        }
-        return EquivVerdict::Unsupported("both functions are recursive with arity > 1 (out of scope)".into());
+        // two-recursive structural induction over the leading list parameter. Any spectator parameter is
+        // threaded through both functions and generalized in the induction hypothesis, and the step draws
+        // on proved list-algebra lemmas. Arity ≤ 2 (one list + one spectator); arity > 2 reports
+        // UNSUPPORTED from the prover. It reports UNKNOWN (never a false verdict) when the recursions don't
+        // align and no lemma closes it.
+        return match prove_equiv_by_induction(body_f, body_g, solver) {
+            InductionOutcome::Proved => EquivVerdict::Equivalent(vec![]),
+            InductionOutcome::ProvedWithLemmas(ls) => EquivVerdict::Equivalent(ls),
+            // A base case refuted: a concrete short list where the two differ — a real counterexample.
+            InductionOutcome::Failed(model) => EquivVerdict::Distinct(model),
+            InductionOutcome::NoSolver => EquivVerdict::NoSolver,
+            InductionOutcome::Unknown => EquivVerdict::Unknown,
+            InductionOutcome::Unsupported(why) => EquivVerdict::Unsupported(why),
+        };
     };
 
     // First-order SMT first; fall back to induction + lemma discovery (mirrors `prove`).
@@ -711,5 +712,125 @@ mod tests {
                 { "kind": "app", "op": "filter", "args": [{ "kind": "var", "name": "p" }, { "kind": "var", "name": "xs" }] },
                 { "kind": "app", "op": "filter", "args": [{ "kind": "var", "name": "p" }, { "kind": "var", "name": "ys" }] }] } });
         assert!(matches!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(_)));
+    }
+
+    // --- two-recursive equivalence, arity > 1 and step-lemma discovery -----------------------------
+
+    fn vr(n: &str) -> J {
+        json!({ "kind": "var", "name": n })
+    }
+    fn ap(o: &str, args: Vec<J>) -> J {
+        json!({ "kind": "app", "op": o, "args": args })
+    }
+    fn li(n: i64) -> J {
+        json!({ "kind": "lit", "value": { "kind": "int", "value": n } })
+    }
+    // `\xs ys -> case null xs of true -> base | false -> step`.
+    fn rec2(base: J, step: J) -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "xs" }, { "name": "ys" }], "body": {
+            "kind": "case",
+            "scrutinee": ap("null", vec![vr("xs")]),
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": base },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": step }] } })
+    }
+    // `\xs -> case null xs of true -> nil | false -> step`.
+    fn rec1(step: J) -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+            "kind": "case",
+            "scrutinee": ap("null", vec![vr("xs")]),
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": vr("nil") },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": step }] } })
+    }
+    // `self(a, b)` as the curried apply spine `apply(apply(self, a), b)`.
+    fn self2(a: J, b: J) -> J {
+        ap("apply", vec![ap("apply", vec![vr("self"), a]), b])
+    }
+    // `self(a)`.
+    fn self1(a: J) -> J {
+        ap("apply", vec![vr("self"), a])
+    }
+
+    #[test]
+    fn both_recursive_arity2_equivalent_carried_spectator() {
+        let Some(s) = solver() else { return };
+        // Two recursive "double-each-of-xs, then append ys": the element is `2*head` one way and
+        // `head+head` the other, the second list `ys` carried unchanged through the recursion. Both equal
+        // `map(2·) xs ++ ys`. normalization can't bridge `2x` vs `x+x`, so this is decided by the arity-2
+        // two-recursive induction — `ys` declared free in the goal and ∀-quantified in the IH.
+        let two_head = ap("mul", vec![li(2), ap("head", vec![vr("xs")])]);
+        let head_plus = ap("add", vec![ap("head", vec![vr("xs")]), ap("head", vec![vr("xs")])]);
+        let f = rec2(vr("ys"), ap("cons", vec![two_head, self2(ap("tail", vec![vr("xs")]), vr("ys"))]));
+        let g = rec2(vr("ys"), ap("cons", vec![head_plus, self2(ap("tail", vec![vr("xs")]), vr("ys"))]));
+        assert_eq!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(vec![]));
+    }
+
+    #[test]
+    fn both_recursive_arity2_equivalent_descending_spectator() {
+        let Some(s) = solver() else { return };
+        // zipWith-style: the second list `ys` ALSO descends (`tail ys`) each step, so the proof needs the
+        // *generalized* (∀-quantified) IH — a fixed-constant IH at `ys` would not match the recursive call
+        // at `tail ys`. Element is `2*head xs + head ys` vs `(head xs + head xs) + head ys`; equal, and
+        // normalization can't bridge `2x` vs `x+x`. Locks in the descending-spectator IH.
+        let hx = ap("head", vec![vr("xs")]);
+        let hy = ap("head", vec![vr("ys")]);
+        let elem_f = ap("add", vec![ap("mul", vec![li(2), hx.clone()]), hy.clone()]);
+        let elem_g = ap("add", vec![ap("add", vec![hx.clone(), hx.clone()]), hy.clone()]);
+        let rec = |elem: J| {
+            rec2(vr("nil"), ap("cons", vec![elem, self2(ap("tail", vec![vr("xs")]), ap("tail", vec![vr("ys")]))]))
+        };
+        assert_eq!(prove_equivalent(&rec(elem_f), &rec(elem_g), s), EquivVerdict::Equivalent(vec![]));
+    }
+
+    #[test]
+    fn both_recursive_arity2_unequal_is_refuted() {
+        let Some(s) = solver() else { return };
+        // `f xs ys = xs ++ ys` vs `g xs ys = xs` (drops ys at the base). They differ whenever ys ≠ nil:
+        // the length-0 base case `f(nil, ys) = ys` vs `g(nil, ys) = nil` is satisfiable (ys non-nil), a
+        // concrete counterexample — so a clean DISTINCT, never a false EQUIVALENT.
+        let f = rec2(vr("ys"), ap("cons", vec![ap("head", vec![vr("xs")]), self2(ap("tail", vec![vr("xs")]), vr("ys"))]));
+        let g = rec2(vr("nil"), ap("cons", vec![ap("head", vec![vr("xs")]), self2(ap("tail", vec![vr("xs")]), vr("ys"))]));
+        match prove_equivalent(&f, &g, s) {
+            EquivVerdict::Distinct(_) => {}
+            other => panic!("expected DISTINCT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn both_recursive_arity2_spectator_mismatch_is_refuted() {
+        let Some(s) = solver() else { return };
+        // Adversarial soundness guard for the spectator handling: `f` carries `ys` unchanged (so it
+        // prepends `head ys` at EVERY position) while `g` descends it (`tail ys`, prepending `ys[i]`).
+        // They agree at lengths 0 and 1 but differ at length 2 when `ys[0] ≠ ys[1]` — a buggy ∀-IH that
+        // ignored how the spectator is threaded could wrongly close this. It must come back DISTINCT
+        // (the length-2 base case is satisfiable), never EQUIVALENT.
+        let f = rec2(vr("nil"), ap("cons", vec![ap("head", vec![vr("ys")]), self2(ap("tail", vec![vr("xs")]), vr("ys"))]));
+        let g = rec2(vr("nil"), ap("cons", vec![ap("head", vec![vr("ys")]), self2(ap("tail", vec![vr("xs")]), ap("tail", vec![vr("ys")]))]));
+        match prove_equivalent(&f, &g, s) {
+            EquivVerdict::Distinct(_) => {}
+            EquivVerdict::Equivalent(_) | EquivVerdict::EquivalentByNormalization => {
+                panic!("UNSOUND: genuinely-distinct arity-2 pair reported EQUIVALENT")
+            }
+            // Unknown is acceptable (not a false verdict); Distinct is the expected refutation.
+            other => panic!("expected DISTINCT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn both_recursive_step_closes_with_append_nil_lemma() {
+        let Some(s) = solver() else { return };
+        // Two recursive naive-reverses: `f xs = reverse(tail xs) ++ [head xs]` (written with `self`), and
+        // `g` the same with a redundant trailing `++ nil`. Both compute reverse, but the step needs
+        // `append(W, nil) = W` (`append_nil`) — an inductive fact normalization can't fold and the bare
+        // step can't discharge. The two-recursive lemma machinery proves `append_nil` by its own induction
+        // and closes the step, so the verdict is EQUIVALENT *with* a non-empty lemma list.
+        let single = ap("cons", vec![ap("head", vec![vr("xs")]), vr("nil")]);
+        let f = rec1(ap("append", vec![self1(ap("tail", vec![vr("xs")])), single.clone()]));
+        let g = rec1(ap("append", vec![ap("append", vec![self1(ap("tail", vec![vr("xs")])), single]), vr("nil")]));
+        match prove_equivalent(&f, &g, s) {
+            EquivVerdict::Equivalent(ls) => assert!(!ls.is_empty(), "expected a lemma to be used, got none"),
+            other => panic!("expected EQUIVALENT (with a lemma), got {other:?}"),
+        }
     }
 }

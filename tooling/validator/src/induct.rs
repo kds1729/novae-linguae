@@ -596,6 +596,13 @@ fn sort_kw(s: Sort3) -> Result<&'static str> {
 }
 
 fn lower_rec_def(body: &J, smt_name: &str) -> Result<String> {
+    Ok(lower_rec_def_with_sorts(body, smt_name)?.0)
+}
+
+/// Like [`lower_rec_def`] but also returns the parameter sorts in positional order. The first is always
+/// `Lst` (the induction parameter); any spectator's sort is inferred. The two-recursive equiv prover reads
+/// these to declare and thread the spectator argument(s) through both functions.
+fn lower_rec_def_with_sorts(body: &J, smt_name: &str) -> Result<(String, Vec<Sort3>)> {
     if body.get("kind").and_then(|k| k.as_str()) != Some("lambda") {
         bail!("recursive body is not a lambda");
     }
@@ -617,13 +624,15 @@ fn lower_rec_def(body: &J, smt_name: &str) -> Result<String> {
     // wrong guess can't yield a false proof — the SMT def would fail to sort-check and report UNSUPPORTED.
     let mut psorts: BTreeMap<String, Option<Sort3>> = pnames.iter().map(|p| (p.clone(), None)).collect();
     walk_sorts(inner, &pnames, &mut psorts)?;
+    let mut sorts = Vec::with_capacity(pnames.len());
     let mut decls = String::new();
     for (i, p) in pnames.iter().enumerate() {
         let s = if i == 0 { Sort3::Lst } else { psorts.get(p).copied().flatten().unwrap_or(ret_sort) };
+        sorts.push(s);
         decls.push_str(&format!("({p} {})", sort_kw(s)?));
     }
     let lowered = lower(inner, &BTreeMap::new())?; // params lower to themselves, scoped by the define-fun-rec
-    Ok(format!("(define-fun-rec {smt_name} ({decls}) {ret} {lowered})\n"))
+    Ok((format!("(define-fun-rec {smt_name} ({decls}) {ret} {lowered})\n"), sorts))
 }
 
 /// Rename every `self` recursion marker (the `self` *var* and the `self` *op*) to `new_name` throughout
@@ -715,6 +724,12 @@ fn self_call_arg<'a>(m: &'a serde_json::Map<String, J>, self_name: &str) -> Opti
     if m.get("fn").and_then(|f| f.get("name")).and_then(|n| n.as_str()) == Some(self_name) {
         return args.first();
     }
+    // Direct op-form self-call (`{op: "self", args: [arg0, …]}`, how a recursive body often writes
+    // recursion) — the recursion descends on the first argument. Stride-detection only, so this can change
+    // which `k` is tried, never a verdict.
+    if m.get("op").and_then(|o| o.as_str()) == Some(self_name) {
+        return args.first();
+    }
     None
 }
 
@@ -734,8 +749,15 @@ fn tail_depth(node: &J) -> usize {
     0
 }
 
-/// Decide `∀xs. f(xs) = g(xs)` for **two recursive** single-list-parameter functions by structural
-/// induction over `xs`. Both bodies are emitted as `define-fun-rec`s (`self` and the reserved `self__g`).
+/// Decide `∀p0 ps…. f(p0, ps…) = g(p0, ps…)` for **two recursive** functions by structural induction
+/// over the leading list parameter `p0`. Both bodies are emitted as `define-fun-rec`s (`self` and the
+/// reserved `self__g`). Any remaining **spectator** parameters (`ps…`, arity ≤ 2 so at most one) are
+/// threaded through both functions: declared as free constants in the goal and **universally quantified in
+/// the induction hypothesis**, which is the proper generalized IH. That single choice makes both a
+/// carried spectator (append's second list, unchanged across the recursion) and a descending one
+/// (zipWith's second list, tailed each step) close — the IH instantiates at whatever spectator the
+/// recursive call uses. A spectator IH can only *fail* to fire, never prove a false equality, so it is
+/// sound.
 ///
 /// It searches over the induction **stride** `k = 1..=MAX_STRIDE`. A `k`-step induction has base cases
 /// for every list length `0..k-1` and a step `P(t) ⟹ P(cons^k(t))` — a valid induction principle for any
@@ -745,30 +767,58 @@ fn tail_depth(node: &J) -> usize {
 /// length-by-1 and a length-by-2 function close at `k = 2`. The first stride whose base **and** step all
 /// discharge ⇒ PROVED.
 ///
-/// Refutation falls out of the same base cases: if any base case is **satisfiable**, that is a concrete
-/// short list on which the two functions differ — a genuine counterexample, so the verdict is a clean
-/// DISTINCT (carried as `Failed(model)`), not UNKNOWN. (A *step* that stays satisfiable only means this
-/// stride's induction doesn't close — not a refutation — so the search moves to the next stride.) When no
-/// stride closes and no base case refutes, the verdict is UNKNOWN (a recursion misaligned beyond
-/// `MAX_STRIDE`, or one needing a cross-function lemma the solver won't invent) — never a false verdict.
-/// No lemma discovery on this path (that machinery is keyed to the single-self list laws).
+/// When the bare step does not discharge, the prover draws on **cross-function lemmas**: the curated
+/// list-algebra catalog ([`close_equiv_step_with_lemmas`]), each lemma proved by its own induction before
+/// being assumed, exactly the single-self soundness discipline. So a both-recursive pair whose step needs
+/// e.g. `append_nil` or `append_assoc` now closes, as PROVED-with-lemmas.
+///
+/// Refutation falls out of the base cases: if any base case is **satisfiable**, that is a concrete short
+/// list (with concrete spectators) on which the two functions differ — a genuine counterexample, so the
+/// verdict is a clean DISTINCT (carried as `Failed(model)`), not UNKNOWN. (A *step* that stays satisfiable
+/// only means this stride's induction doesn't close — not a refutation.) When no stride closes (even with
+/// lemmas) and no base case refutes, the verdict is UNKNOWN — never a false verdict.
 pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> InductionOutcome {
     use crate::prove::{run_smt, SatAnswer};
 
-    let def_f = match lower_self_def(body_f) {
-        Ok(s) => s,
+    // Lower both functions and read the (shared, positional) parameter sorts off `f`. Both functions are
+    // applied to the same argument tuple, so a sort disagreement makes the SMT sort-check fail and report
+    // UNSUPPORTED — never a false proof.
+    let (def_f, sorts_f) = match lower_rec_def_with_sorts(body_f, "self") {
+        Ok(x) => x,
         Err(e) => return InductionOutcome::Unsupported(format!("{e:#}")),
     };
     let def_g = match lower_rec_def(&rename_self(body_g, "self__g"), "self__g") {
         Ok(s) => s,
         Err(e) => return InductionOutcome::Unsupported(format!("{e:#}")),
     };
+    // Induction is on the leading parameter, which must be a list. Spectator parameters (positions 1..)
+    // are threaded through — declared free in the goal, ∀-quantified in the IH.
+    if sorts_f.first() != Some(&Sort3::Lst) {
+        return InductionOutcome::Unsupported("two-recursive equiv inducts on a leading list parameter".into());
+    }
+    let spectators: Vec<Sort3> = sorts_f[1..].to_vec();
+    // A higher-order spectator (function/predicate parameter) has no SMT constant sort — out of fragment.
+    let spec_kw: Vec<&'static str> = match spectators.iter().map(|s| sort_kw(*s)).collect::<Result<Vec<_>>>() {
+        Ok(v) => v,
+        Err(_) => {
+            return InductionOutcome::Unsupported("two-recursive equiv with a higher-order parameter (out of fragment)".into())
+        }
+    };
+
     // Prelude defines the list operations either body uses (element ops / `self` are not list ops, so
     // `collect_ops` ignores them); map/filter, if present, are modelled by the shared global `mapfn`.
     let mut used = BTreeSet::new();
     collect_ops(body_f, &mut used);
     collect_ops(body_g, &mut used);
     let preamble = format!("{}{def_f}{def_g}", build_prelude(&used, &FnModel::None, &FnModel::None));
+
+    // Spectator goal constants (`s0`, `s1`, …) and the call-argument suffixes for the goal (free consts)
+    // and the IH (separate bound vars `y0`, `y1`, …). Distinct names avoid any shadowing in the IH forall.
+    let spec_decls: String = spec_kw.iter().enumerate().map(|(i, kw)| format!("(declare-const s{i} {kw})\n")).collect();
+    let goal_args: String = (0..spectators.len()).map(|i| format!(" s{i}")).collect();
+    let ih_binders: String =
+        spec_kw.iter().enumerate().map(|(i, kw)| format!("(y{i} {kw})")).collect::<Vec<_>>().join(" ");
+    let ih_args: String = (0..spectators.len()).map(|i| format!(" y{i}")).collect();
 
     // The list `cons(p0, cons(p1, …, cons(p_{n-1}, tail)))` with the given declarations.
     let spine = |prefix: &str, n: usize, tail: &str| -> (String, String) {
@@ -781,12 +831,12 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
     };
 
     // Phase 1 — refutation. Check base cases for every list length `0..MAX_STRIDE` (these are exactly the
-    // base obligations any stride `k ≤ MAX_STRIDE` needs). A satisfiable one is a concrete short list on
-    // which `f ≠ g` — a genuine counterexample, so a clean DISTINCT.
+    // base obligations any stride `k ≤ MAX_STRIDE` needs). A satisfiable one is a concrete short list (with
+    // concrete spectators) on which `f ≠ g` — a genuine counterexample, so a clean DISTINCT.
     for j in 0..MAX_STRIDE {
         let (decls, lst) = spine("a", j, "nil");
         let script = format!(
-            "{preamble}{decls}; base case: list of length {j}\n(assert (not (= (self {lst}) (self__g {lst}))))\n(check-sat)\n(get-model)\n"
+            "{preamble}{decls}{spec_decls}; base case: list of length {j}\n(assert (not (= (self {lst}{goal_args}) (self__g {lst}{goal_args}))))\n(check-sat)\n(get-model)\n"
         );
         match run_smt(&script, solver) {
             Ok(SatAnswer::Unsat) => {}
@@ -796,6 +846,23 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
             Err(e) => return InductionOutcome::Unsupported(format!("solver error (base len {j}): {e:#}")),
         }
     }
+
+    // The induction hypothesis: `∀ spectators. self(t, s…) = self__g(t, s…)` (the bare equality when there
+    // are no spectators). The generalized (∀-quantified) form is the correct IH for the spectator-quantified
+    // goal and is sound for both carried and descending spectators.
+    let ih = if spectators.is_empty() {
+        "(assert (= (self t) (self__g t)))\n".to_string()
+    } else {
+        format!("(assert (forall ({ih_binders}) (= (self t{ih_args}) (self__g t{ih_args}))))\n")
+    };
+
+    // Build the step script at stride `k`, with `axioms` (proved lemmas, possibly empty) asserted first.
+    let mk_step = |k: usize, axioms: &str| -> String {
+        let (decls, lst) = spine("h", k, "t");
+        format!(
+            "{preamble}{axioms}{decls}(declare-const t Lst)\n{spec_decls}; step (stride {k}): assume f(t)=g(t), prove for cons^{k}(t)\n{ih}(assert (not (= (self {lst}{goal_args}) (self__g {lst}{goal_args}))))\n(check-sat)\n"
+        )
+    };
 
     // Phase 2 — proof. All base cases up to `MAX_STRIDE` are unsat, so a stride `k` proves the law as soon
     // as its step `P(t) ⟹ P(cons^k(t))` discharges. When both recursion strides are readable off the AST,
@@ -814,19 +881,87 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
         }
         _ => (1..=MAX_STRIDE).collect(),
     };
-    for k in strides {
-        let (decls, lst) = spine("h", k, "t");
-        let script = format!(
-            "{preamble}{decls}(declare-const t Lst)\n; step (stride {k}): assume f(t)=g(t), prove for cons^{k}(t)\n(assert (= (self t) (self__g t)))\n(assert (not (= (self {lst}) (self__g {lst}))))\n(check-sat)\n"
-        );
-        match run_smt(&script, solver) {
+    for &k in &strides {
+        match run_smt(&mk_step(k, ""), solver) {
             Ok(SatAnswer::Unsat) => return InductionOutcome::Proved,
             Ok(SatAnswer::Sat(_)) | Ok(SatAnswer::Unknown) => {} // this stride doesn't close — try a larger one
             Ok(SatAnswer::NoSolver) => return InductionOutcome::NoSolver,
             Err(e) => return InductionOutcome::Unsupported(format!("solver error (step k={k}): {e:#}")),
         }
     }
+
+    // Phase 3 — lemma discovery. Only when the stride is determinate (the common case); the doubly-exotic
+    // "unreadable stride AND needs a lemma" combination is left UNKNOWN to bound solver time. Every lemma
+    // is proved by its own induction before being assumed, so this is as sound as the single-self path: a
+    // bug can only fail to close (UNKNOWN), never assert an unproved law and mint a false EQUIVALENT.
+    if strides.len() == 1 {
+        if let Some(names) = close_equiv_step_with_lemmas(&mk_step, strides[0], &used, solver) {
+            return InductionOutcome::ProvedWithLemmas(names);
+        }
+    }
     InductionOutcome::Unknown
+}
+
+/// Try to close the two-recursive induction **step** at stride `k` using auxiliary list-algebra lemmas.
+/// Mirrors the single-self machinery's catalog phase ([`prove_rec_inner`] Phase A): every admissible
+/// catalog lemma is proved by its own induction (via [`prove_one`]) before being assumed, then the step is
+/// retried with the full set and, if that stalls, with minimal subsets — piling every lemma into one query
+/// can overwhelm z3's quantifier instantiation. Soundness matches the single-self path: a lemma is asserted
+/// only after it is discharged, so this can only fail to close (UNKNOWN), never assert an unproved law.
+/// `mk_step(k, axioms)` builds the step script with `axioms` (lemma assertions) prepended. Returns the
+/// names of the lemmas in the first closing set, or `None`.
+fn close_equiv_step_with_lemmas<F: Fn(usize, &str) -> String>(
+    mk_step: &F,
+    k: usize,
+    used: &BTreeSet<String>,
+    solver: &str,
+) -> Option<Vec<String>> {
+    use crate::prove::{run_smt_secs, SatAnswer};
+    let closure = prelude_closure(used);
+    let mut in_progress = Vec::new();
+    let mut memo = Memo::new();
+
+    // Prove every admissible catalog lemma up front — each by its own induction, the soundness gate.
+    let mut proved: Vec<(String, ProvedLemma)> = Vec::new();
+    for lemma in crate::lemmas::catalog() {
+        if let Some(p) =
+            prove_one(lemma.name, &lemma.stmt, solver, DEFAULT_LEMMA_DEPTH, &closure, &mut in_progress, &mut memo)
+        {
+            proved.push((lemma.name.to_string(), p));
+        }
+    }
+    if proved.is_empty() {
+        return None;
+    }
+
+    // Does the step discharge with this subset of proved lemmas asserted as ∀-quantified axioms?
+    let try_close = |sub: &[&(String, ProvedLemma)]| -> Option<Vec<String>> {
+        let axioms: String = sub.iter().map(|(_, p)| lemma_axiom(&p.stmt)).collect::<Result<Vec<_>>>().ok()?.join("");
+        match run_smt_secs(&mk_step(k, &axioms), solver, SEARCH_SECS) {
+            Ok(SatAnswer::Unsat) => Some(sub.iter().map(|(n, _)| n.clone()).collect()),
+            _ => None,
+        }
+    };
+
+    // Full set first; then minimal proper subsets, smallest first (bounded), in case the full set overwhelms
+    // the solver (a goal needing just `append_nil` can be derailed by the extra associativity axioms).
+    let all: Vec<&(String, ProvedLemma)> = proved.iter().collect();
+    if let Some(names) = try_close(&all) {
+        return Some(names);
+    }
+    let n = proved.len();
+    if (2..=16).contains(&n) {
+        const MAX_SUBSET_ATTEMPTS: usize = 16;
+        let mut masks: Vec<u32> = (1u32..(1 << n)).filter(|m| m.count_ones() < n as u32).collect();
+        masks.sort_by_key(|m| m.count_ones());
+        for mask in masks.into_iter().take(MAX_SUBSET_ATTEMPTS) {
+            let sub: Vec<&(String, ProvedLemma)> = (0..n).filter(|i| mask & (1 << i) != 0).map(|i| &proved[i]).collect();
+            if let Some(names) = try_close(&sub) {
+                return Some(names);
+            }
+        }
+    }
+    None
 }
 
 // --- prelude (datatype + recursive definitions) ---------------------------------------------------
