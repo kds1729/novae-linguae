@@ -317,15 +317,18 @@ rewrite); **identity elimination** (`add(x,0) → x`, `mul(x,1) → x`, …) but
 (`mul(x,0) → 0` is unsound under a non-terminating `x`); **idempotence** for `and`/`or`/`min`/`max`;
 **subtraction-as-addition** (`a-b → a+(-b)`, negation distributed over sums); **negation-normal form**
 (De Morgan + comparison negation); **involution** (`neg∘neg`, `not∘not`), `id(x) → x`, literal `nat → int`;
-and **linear like-term combining** — an `add` is read as `Σ cᵢ·atomᵢ + c₀` and its coefficients summed, so
-`x+x ≡ 2·x` and `2·x+3·x ≡ 5·x` share a normal form. Each rewrite preserves meaning, so equal normal forms
-imply equivalence; the linear combining additionally **never drops an atom** (a net-zero coefficient like
-`x+(-x)` aborts rather than drop a possibly-diverging `x`), so it is sound by construction, not only by the
-value-level property test. With the like-term combining, `normalize` is a **decision procedure for the
-linear integer fragment** — for the non-linear and list fragments it remains a normalizer (*unequal* normal
-forms say nothing). This backs `equiv`'s solver-free fast path — `double-via-add ≡ double-via-mul` and a
-both-recursive `2*head` vs `head+head` sum now close with no solver — and is deterministic (principle 5),
-so a body has exactly one normal form.
+and **polynomial normalization** — `add`/`mul` are read as a polynomial `Σ cᵢ·monomialᵢ + c₀` over their
+atoms, products of sums are **expanded**, and like monomials combined, so `x+x ≡ 2·x`, `(a+1)·(a−1) ≡
+a·a−1` (difference of squares), and `2·(a+b) ≡ 2·a+2·b` share a normal form. Each rewrite preserves
+meaning, so equal normal forms imply equivalence; the polynomial form additionally **never drops an atom**
+— a monomial that cancels is dropped only when its atoms survive in other monomials (the `−a+a` of
+`(a+1)(a−1)` cancels because `a` lives on in `a²`); when an atom would survive nowhere (`x+(−x)`, `a·b−a·b`)
+the rewrite aborts, keeping every operand — so it is sound by construction, not only by the value-level
+property test. With this, `normalize` is a **decision procedure for the integer polynomial fragment**; for
+the list fragment it remains a normalizer (*unequal* normal forms say nothing). This backs `equiv`'s
+solver-free fast path — `double-via-add ≡ double-via-mul`, `(a+1)(a−1) ≡ a·a−1`, and a both-recursive
+`2*head` vs `head+head` sum now close with no solver — and is deterministic (principle 5), so a body has
+exactly one normal form.
 
 ## Composition metadata
 
