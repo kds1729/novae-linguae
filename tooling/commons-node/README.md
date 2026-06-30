@@ -145,8 +145,9 @@ Decides whether two functions are **semantically equivalent** — `∀x. f(x) = 
 domain — via the validator's `equiv` (reusing the prove engine). The operable form of "semantic
 equivalence vs hash equivalence": two records can be hash-different yet behaviorally identical. Takes two
 **inline** body-expression ASTs (bodies aren't stored, so there's no by-hash form); returns
-`{verdict: equivalent|distinct|unknown|unsupported, detail, solver}`. v0.1: unary functions with at
-least one side non-recursive.
+`{verdict: equivalent|distinct|unknown|unsupported, detail, solver}`. Scope follows the validator's
+`equiv`: any arity ≥ 1 with one side non-recursive, plus both-recursive pairs of arity ≤ 2 (induction over
+the leading list parameter, drawing on the list-algebra lemma catalog when a step needs it).
 
 ```bash
 # \n -> add(n,n)  ≡  \m -> mul(2,m)   → {"verdict": "equivalent", ...}

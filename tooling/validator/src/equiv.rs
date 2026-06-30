@@ -59,7 +59,8 @@ pub enum EquivVerdict {
     Distinct(String),
     /// Could not decide (solver gave up, or induction did not close).
     Unknown,
-    /// Outside the supported fragment (arity ≠ 1, both recursive, malformed).
+    /// Outside the supported fragment (nullary, mismatched arity, both-recursive arity > 2, a non-list
+    /// leading recursion parameter, a higher-order parameter, or malformed).
     Unsupported(String),
     /// No SMT solver was available.
     NoSolver,

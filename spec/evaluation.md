@@ -263,15 +263,22 @@ structurally with **no solver**. This also settles many cases where *both* sides
 Otherwise it reuses the property prover by **inlining**, introducing no new encoding for the common cases:
 with both sides non-recursive it builds `eq(f(x…), g(x…))` (operations stay visible to lemma discovery);
 when one side recurses it becomes `self` (a `define-fun-rec`) and the other is inlined; and when **both**
-recurse, both bodies are emitted as `define-fun-rec`s and `∀xs. f(xs) = g(xs)` is discharged by **structural
-induction over the list**, with the induction **stride searched** (`k = 1..3`) so recursions that misalign by
-a small constant stride (a length-by-1 vs a length-by-2) still close. The base cases double as refutation:
-a *satisfiable* base case is a concrete short list on which the two functions differ — a clean **DISTINCT**.
+recurse, both bodies are emitted as `define-fun-rec`s and `∀p0 ps…. f(p0, ps…) = g(p0, ps…)` is discharged by
+**structural induction over the leading list parameter**, with one **spectator** parameter (arity ≤ 2)
+threaded through both functions — declared free in the goal and **∀-quantified in the induction hypothesis**,
+so both a *carried* spectator (append's second list, unchanged) and a *descending* one (zipWith's, tailed
+each step) close. The induction **stride is searched** (`k = 1..6`, targeted at `lcm(stride_f, stride_g)`) so
+recursions that misalign by a small constant stride (length-by-1 vs length-by-2, or 2-vs-3) still close, and
+when the bare step stalls the prover draws on the curated **list-algebra lemma catalog** (`append_nil`,
+`append_assoc`, … — each proved by its own induction before being assumed), so a both-recursive step that
+needs such a lemma closes too. The base cases double as refutation: a *satisfiable* base case is a concrete
+short list (with concrete spectators) on which the two functions differ — a clean **DISTINCT**.
 
 Verdicts: **EQUIVALENT** (the law is proved, or the normal forms are equal), **DISTINCT** (a counterexample —
 from the first-order solver or a refuting base case), **UNKNOWN** (a non-closing induction is *not* a
-refutation, so it is never reported as DISTINCT), or **UNSUPPORTED** (nullary, mismatched arity, or two
-mutually-recursive functions that neither normalize alike nor align within the stride bound). Proved live:
+refutation, so it is never reported as DISTINCT — e.g. two both-recursive functions that neither normalize
+alike, align within stride 6, nor close via a catalog lemma), or **UNSUPPORTED** (nullary, mismatched arity,
+a non-list leading parameter, a higher-order parameter, or recursive functions of arity > 2). Proved live:
 `\xs. reverse(reverse xs) ≡ \xs. xs` and `\a b. add(a,b) ≡ \a b. add(b,a)` (the latter without a solver), two
 list-sums written `add(head, self(tail))` vs `sub(self(tail), neg(head))`; `double ≢ \n. n+1` is DISTINCT,
 `sum ≢ length` is DISTINCT at `[2]`. The node exposes this as `POST /v0/equiv`.
@@ -283,7 +290,8 @@ compared, then runs a union-find proving equivalence pairwise within each bucket
 merged). The canonical representative is the lexicographically smallest content-address. This is the
 deduplication-beyond-byte-identity that principle 2 calls for. Worked: a set with `\n. add(n,n)`,
 `\n. mul(2,n)`, `\n. mul(3,n)` clusters the first two together and leaves the tripling distinct. Scope
-follows equivalence (any arity ≥ 1, at least one side of a pair non-recursive), and cost within a shape
+follows equivalence (any arity ≥ 1 with one side non-recursive, **plus both-recursive pairs of arity ≤ 2**),
+and cost within a shape
 bucket of size *k* is up to O(*k*²) solver calls — the bucketing keeps that from being O(*n*²) over the
 whole set.
 

@@ -245,9 +245,10 @@ enum Commands {
     },
     /// Prove two functions **semantically equivalent** — `∀x. f(x) = g(x)` over the unbounded domain
     /// (the rung above hash equality: behaviorally-identical functions with different content-addresses).
-    /// Reuses the property prover by inlining the non-recursive side into a property of the other.
-    /// EQUIVALENT / DISTINCT (with a counterexample, exit 1) / UNKNOWN / UNSUPPORTED. Any arity ≥ 1
-    /// (matching), with at least one side non-recursive.
+    /// Reuses the property prover: inlines a non-recursive side, or — when both sides recurse — inducts
+    /// over the leading list parameter (arity ≤ 2, one spectator threaded through, drawing on the
+    /// list-algebra lemma catalog when a step needs it). EQUIVALENT / DISTINCT (with a counterexample,
+    /// exit 1) / UNKNOWN / UNSUPPORTED. Any arity ≥ 1 with one side non-recursive, or both-recursive arity ≤ 2.
     Equiv {
         /// Body-expression AST of the first function (a `lambda`).
         #[arg(long = "body-f")]
@@ -273,7 +274,7 @@ enum Commands {
     /// **Cluster** a directory of function records into behavioral-equivalence classes (the rung above
     /// hash equality), proving `∀x. f(x) = g(x)` pairwise within each signature-shape bucket. Prints each
     /// class of ≥ 2 members with its canonical representative (smallest content-address). Follows
-    /// `equiv`: any arity ≥ 1, at least one side of a pair non-recursive.
+    /// `equiv`: any arity ≥ 1 with one side non-recursive, plus both-recursive pairs of arity ≤ 2.
     Cluster {
         /// Directory of records (and their bodies) — the commons view to cluster.
         #[arg(long)]
