@@ -324,8 +324,12 @@ meaning, so equal normal forms imply equivalence; the polynomial form additional
 — a monomial that cancels is dropped only when its atoms survive in other monomials (the `−a+a` of
 `(a+1)(a−1)` cancels because `a` lives on in `a²`); when an atom would survive nowhere (`x+(−x)`, `a·b−a·b`)
 the rewrite aborts, keeping every operand — so it is sound by construction, not only by the value-level
-property test. With this, `normalize` is a **decision procedure for the integer polynomial fragment**; for
-the list fragment it remains a normalizer (*unequal* normal forms say nothing). This backs `equiv`'s
+property test. A few **sound list rewrites** also apply — `reverse(reverse x) → x`, `reverse(nil) → nil`,
+`append(x, nil) → x` / `append(nil, x) → x` (each retains every subterm; a *selector* like
+`head(cons h t) → h` is excluded, as it drops a field). With this, `normalize` is a **decision procedure
+for the integer polynomial fragment**; for the list fragment it decides the sound-local equalities (so
+`reverse(reverse xs) ≡ xs` is solver-free) but the induction-requiring list laws remain a normalizer
+(*unequal* normal forms say nothing). This backs `equiv`'s
 solver-free fast path — `double-via-add ≡ double-via-mul`, `(a+1)(a−1) ≡ a·a−1`, and a both-recursive
 `2*head` vs `head+head` sum now close with no solver — and is deterministic (principle 5), so a body has
 exactly one normal form.
