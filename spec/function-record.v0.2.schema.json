@@ -158,6 +158,7 @@
     },
     "refinement": {
       "type": "object",
+      "description": "A contract on the function. `expr` is a predicate over the function's parameters (by name); a `post` predicate additionally refers to the function's output through the reserved variable `result`. Conventionally `pre` is a precondition on the inputs (assumed when discharging the posts), `post` a postcondition on `result` given the pres, and `inv` an invariant. The reference validator's `check-refinement` proves each `post` as `forall params. (and pre) => post[result := body(params)]` (folding in the non-negativity of `nat`-typed params); `inv` is reserved (not yet checked).",
       "required": ["kind", "expr"],
       "additionalProperties": false,
       "properties": {

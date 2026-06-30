@@ -53,7 +53,7 @@ pub mod cluster;
 pub use cluster::{cluster, cluster_dir};
 
 pub mod refine;
-pub use refine::{check_nat_refinement, RefinementOutcome};
+pub use refine::{check_nat_refinement, check_refinements, RefinementOutcome, RefinementReport};
 
 pub mod terminate;
 pub use terminate::{analyze_termination, TerminationOutcome};

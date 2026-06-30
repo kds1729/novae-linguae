@@ -1,46 +1,63 @@
-//! Refinement checking — verify a function body actually satisfies the refinement implied by its
-//! declared type. The HM typechecker ([`crate::typecheck`]) erases `nat` to `int` and never checks the
-//! body stays non-negative, so a body declared `… -> nat` that can produce a *negative* `int` type-checks
-//! clean today. This closes that hole — the third pillar of "verified by default" (principle 3) for the
-//! one refinement the type language bakes in.
+//! Refinement checking — verify a function body actually satisfies its declared **refinements** and the
+//! refinement implied by its type. The third pillar of "verified by default" (principle 3) for the
+//! contracts the metadata declares but the type checker doesn't see.
 //!
-//! A `nat` is a non-negative `int`. For a `nat`-result function this proves
+//! Two sources of refinement are checked, both via the [`crate::prove`] backend (first-order SMT, with a
+//! structural-induction fallback for a recursive body):
+//!
+//! 1. **The type-implied `nat` refinement.** A `nat` is a non-negative `int`, which the HM checker erases
+//!    to `int` — so a body declared `… -> nat` that can produce a negative `int` type-checks clean. For a
+//!    `nat`-result function this proves `body(params) ≥ 0`.
+//! 2. **Declared `signature.refinements[]`** — `pre`/`post` predicates. A **`post`** predicate is a
+//!    contract on the function's output; it refers to that output through the **reserved variable
+//!    `result`** (the convention this module defines), and may also mention the parameters by name. A
+//!    **`pre`** predicate is a precondition on the parameters, *assumed* when discharging the posts. So a
+//!    record declaring `pre: ge(a, b)` and `post: ge(result, 0)` for `\a b -> sub(a, b)` is sound because
+//!    `a ≥ b ⟹ a − b ≥ 0`. (`inv` refinements are not checked in v0.1 — their semantics for a pure
+//!    function are reserved.)
+//!
+//! For each postcondition the obligation discharged is
 //!
 //! ```text
-//!   ∀ params. (⋀ nat-typed params ≥ 0) ⟹ body(params) ≥ 0
+//!   ∀ params. (⋀ pre  ∧  ⋀ nat-typed params ≥ 0) ⟹ post[result := body(params)]
 //! ```
 //!
-//! via the [`crate::prove`] backend (first-order SMT, with a structural-induction fallback for a
-//! recursive body — e.g. a recursive `length : List a -> nat` is proved ≥ 0 by induction). The `nat`-ness
-//! of the parameters is the *precondition*: `double : nat -> nat` is sound because `n ≥ 0 ⟹ n + n ≥ 0`,
-//! while `\a b -> sub(a, b) : (int, int) -> nat` is **violated** (`a = 0, b = 1 ⟹ −1 < 0`).
-//!
-//! Outcomes: SOUND (proved), VIOLATED (a solver counterexample — a real input on which the body breaks
-//! its declared `nat`), UNVERIFIABLE (out of the decidable fragment / solver undecided — never a false
-//! SOUND), NOT-APPLICABLE (the result type is not `nat`, so there is nothing to refine), or NO-SOLVER.
-//! This is intentionally conservative: only a solver counterexample yields VIOLATED, and only a closed
-//! proof yields SOUND.
+//! — the `nat`-ness of parameters is folded into the preconditions (a `nat` param *is* `≥ 0`). Outcomes:
+//! SOUND (proved), VIOLATED (a solver counterexample — a real input on which the body breaks the
+//! contract), UNVERIFIABLE (out of the decidable fragment / undecided — never a false SOUND), or
+//! NOT-APPLICABLE (nothing to check). Conservative by construction: only a closed proof is SOUND, only a
+//! counterexample is VIOLATED.
 
 use serde_json::{json, Value as J};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use crate::equiv::{apply_self_spine, fresh_vars, params, references_self, subst_many};
+use crate::equiv::{apply_self_spine, params, references_self, subst_many};
 use crate::{
     prove_by_induction_with_exploration, prove_property, InductionOutcome, ProofOutcome, DEFAULT_LEMMA_DEPTH,
 };
 
+/// The reserved variable a `post` predicate uses to denote the function's output.
+const RESULT_VAR: &str = "result";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefinementOutcome {
-    /// The body provably satisfies its declared `nat` result on every (precondition-satisfying) input.
+    /// The body provably satisfies the refinement on every (precondition-satisfying) input.
     Sound,
-    /// A solver counterexample: a concrete input on which the body produces a negative value.
+    /// A solver counterexample: a concrete input on which the body breaks the refinement.
     Violated(String),
     /// Outside the decidable fragment, or the solver could not decide — never a false SOUND.
     Unverifiable(String),
-    /// The result type is not `nat`, so the type bakes in no refinement to check here.
+    /// There is nothing to check (no declared refinements and a non-`nat` result).
     NotApplicable,
     /// No SMT solver was available.
     NoSolver,
+}
+
+/// One refinement's verdict, with a human label naming what was checked.
+#[derive(Debug, Clone)]
+pub struct RefinementReport {
+    pub label: String,
+    pub outcome: RefinementOutcome,
 }
 
 /// Unwrap a `forall`-quantified (polymorphic) type to its inner `fn`, or return the type as-is.
@@ -58,7 +75,6 @@ fn is_nat(ty: &J) -> bool {
         && ty.get("name").and_then(|n| n.as_str()) == Some("nat")
 }
 
-/// `ge(a, b)` / `and`/`or`/`not` predicate-AST builders.
 fn app(op: &str, args: Vec<J>) -> J {
     json!({ "kind": "app", "op": op, "args": args })
 }
@@ -69,89 +85,148 @@ fn int_lit(n: i64) -> J {
     json!({ "kind": "lit", "value": { "kind": "int", "value": n } })
 }
 
-/// Check that `body` honors the `nat` refinement implied by `sig_type` (the record's `signature.type`).
-pub fn check_nat_refinement(sig_type: &J, body: &J, solver: &str) -> RefinementOutcome {
-    let fn_ty = unwrap_forall(sig_type);
-    if fn_ty.get("kind").and_then(|k| k.as_str()) != Some("fn") {
-        return RefinementOutcome::Unverifiable("signature type is not a function".into());
-    }
-    let result_ty = match fn_ty.get("result") {
-        Some(r) => r,
-        None => return RefinementOutcome::Unverifiable("function type has no result".into()),
-    };
-    // Only a `nat` result carries a refinement to check here.
-    if !is_nat(result_ty) {
-        return RefinementOutcome::NotApplicable;
-    }
-    let param_tys: Vec<J> = fn_ty.get("params").and_then(|p| p.as_array()).cloned().unwrap_or_default();
-
-    let Some(pnames) = params(body) else {
-        return RefinementOutcome::Unverifiable("body is not a `lambda`".into());
-    };
-    if pnames.len() != param_tys.len() {
-        return RefinementOutcome::Unverifiable(format!(
-            "arity mismatch: type has {} params, body has {}",
-            param_tys.len(),
-            pnames.len()
-        ));
-    }
-    if pnames.is_empty() {
-        // A nullary `nat` constant: prove `body ≥ 0` with no quantifier.
-        let inner = match body.get("body") {
-            Some(b) => b,
-            None => return RefinementOutcome::Unverifiable("lambda has no body".into()),
-        };
-        let goal = json!({ "kind": "forall", "vars": ["__dummy"], "body": ge_zero(inner.clone()) });
-        return decide(&goal, None, solver);
-    }
-
-    // One fresh quantified variable per parameter, so the goal never collides with a parameter or builtin.
-    let avoid: BTreeSet<String> = pnames.iter().cloned().collect();
-    let var_names = fresh_vars(pnames.len(), &avoid);
-    let xs: Vec<J> = var_names.iter().map(|n| var(n)).collect();
-
-    // Precondition: every `nat`-typed parameter is ≥ 0 (the rest are unconstrained `int`s).
-    let pre: Vec<J> = param_tys
-        .iter()
-        .zip(&xs)
-        .filter(|(ty, _)| is_nat(ty))
-        .map(|(_, x)| app("ge", vec![x.clone(), int_lit(0)]))
-        .collect();
-
-    // The function's result, as a term over the fresh variables: inline a non-recursive body; for a
-    // recursive one apply `self` and hand the body to the prover as the `define-fun-rec`.
-    let inner = match body.get("body") {
-        Some(b) => b,
-        None => return RefinementOutcome::Unverifiable("lambda has no body".into()),
-    };
-    let (result_expr, body_opt) = if references_self(inner) {
-        (apply_self_spine(&xs), Some(body))
+/// The function's result, as a term over its parameters: a non-recursive body is inlined (its inner
+/// expression already ranges over the parameter names); a recursive one applies `self`, which the prover
+/// encodes as a `define-fun-rec`. Returns `(param_names, result_expr, body_for_self)`.
+fn result_term<'a>(body: &'a J, pnames: &[String]) -> Option<(J, Option<&'a J>)> {
+    let inner = body.get("body")?;
+    if references_self(inner) {
+        let xs: Vec<J> = pnames.iter().map(|n| var(n)).collect();
+        Some((apply_self_spine(&xs), Some(body)))
     } else {
-        let map: BTreeMap<String, J> = pnames.iter().cloned().zip(xs.iter().cloned()).collect();
-        (subst_many(inner, &map), None)
-    };
+        Some((inner.clone(), None))
+    }
+}
 
-    // Goal: ∀ vars. pre ⟹ result ≥ 0, i.e. ∀ vars. ¬(⋀ pre) ∨ result ≥ 0.
-    let post = ge_zero(result_expr);
-    let body_pred = match pre.len() {
-        0 => post,
-        _ => {
-            let conj = if pre.len() == 1 { pre.into_iter().next().unwrap() } else { app("and", pre) };
-            app("or", vec![app("not", vec![conj]), post])
-        }
+/// Discharge one postcondition: `∀ params. (⋀ pre) ⟹ post[result := result_expr]`.
+fn check_post(
+    pnames: &[String],
+    pre: &[J],
+    post: &J,
+    result_expr: &J,
+    body_opt: Option<&J>,
+    solver: &str,
+) -> RefinementOutcome {
+    // Substitute the reserved `result` variable with the body's actual result term.
+    let subst: BTreeMap<String, J> = [(RESULT_VAR.to_string(), result_expr.clone())].into_iter().collect();
+    let post_sub = subst_many(post, &subst);
+
+    // (⋀ pre) ⟹ post  ≡  ¬(⋀ pre) ∨ post.
+    let body_pred = if pre.is_empty() {
+        post_sub
+    } else {
+        let conj = if pre.len() == 1 { pre[0].clone() } else { app("and", pre.to_vec()) };
+        app("or", vec![app("not", vec![conj]), post_sub])
     };
-    let goal = json!({ "kind": "forall", "vars": var_names, "body": body_pred });
+    // A nullary contract has no parameter to range over — a lone dummy makes it a well-formed `forall`.
+    let vars: Vec<String> = if pnames.is_empty() { vec!["__dummy".into()] } else { pnames.to_vec() };
+    let goal = json!({ "kind": "forall", "vars": vars, "body": body_pred });
     decide(&goal, body_opt, solver)
 }
 
-/// `expr ≥ 0`.
-fn ge_zero(expr: J) -> J {
-    app("ge", vec![expr, int_lit(0)])
+/// Check every refinement of a record — the declared `pre`/`post` plus the type-implied `nat`. Returns one
+/// report per checked refinement (empty-ish: a single NOT-APPLICABLE report when there is nothing to check).
+pub fn check_refinements(sig_type: &J, refinements: &[J], body: &J, solver: &str) -> Vec<RefinementReport> {
+    let one = |label: String, outcome: RefinementOutcome| vec![RefinementReport { label, outcome }];
+
+    let fn_ty = unwrap_forall(sig_type);
+    if fn_ty.get("kind").and_then(|k| k.as_str()) != Some("fn") {
+        return one("signature".into(), RefinementOutcome::Unverifiable("signature type is not a function".into()));
+    }
+    let result_ty = match fn_ty.get("result") {
+        Some(r) => r,
+        None => return one("signature".into(), RefinementOutcome::Unverifiable("function type has no result".into())),
+    };
+    let param_tys: Vec<J> = fn_ty.get("params").and_then(|p| p.as_array()).cloned().unwrap_or_default();
+
+    let Some(pnames) = params(body) else {
+        return one("signature".into(), RefinementOutcome::Unverifiable("body is not a `lambda`".into()));
+    };
+    if pnames.iter().any(|p| p == RESULT_VAR) {
+        return one(
+            "signature".into(),
+            RefinementOutcome::Unverifiable(format!("a parameter is named `{RESULT_VAR}`, the reserved output variable")),
+        );
+    }
+    if pnames.len() != param_tys.len() {
+        return one(
+            "signature".into(),
+            RefinementOutcome::Unverifiable(format!(
+                "arity mismatch: type has {} params, body has {}",
+                param_tys.len(),
+                pnames.len()
+            )),
+        );
+    }
+    let Some((result_expr, body_opt)) = result_term(body, &pnames) else {
+        return one("signature".into(), RefinementOutcome::Unverifiable("lambda has no body".into()));
+    };
+
+    // Preconditions assumed for *every* postcondition: the declared `pre` predicates plus the implicit
+    // non-negativity of every `nat`-typed parameter.
+    let mut pre: Vec<J> = refinements
+        .iter()
+        .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("pre"))
+        .filter_map(|r| r.get("expr").cloned())
+        .collect();
+    for (ty, name) in param_tys.iter().zip(&pnames) {
+        if is_nat(ty) {
+            pre.push(app("ge", vec![var(name), int_lit(0)]));
+        }
+    }
+
+    let mut reports: Vec<RefinementReport> = Vec::new();
+    // Declared postconditions.
+    for (i, post) in refinements
+        .iter()
+        .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("post"))
+        .filter_map(|r| r.get("expr"))
+        .enumerate()
+    {
+        reports.push(RefinementReport {
+            label: format!("post[{i}]"),
+            outcome: check_post(&pnames, &pre, post, &result_expr, body_opt, solver),
+        });
+    }
+    // The type-implied `nat` refinement: result ≥ 0.
+    if is_nat(result_ty) {
+        let post = app("ge", vec![var(RESULT_VAR), int_lit(0)]);
+        reports.push(RefinementReport {
+            label: "nat-result (≥ 0)".into(),
+            outcome: check_post(&pnames, &pre, &post, &result_expr, body_opt, solver),
+        });
+    }
+    // `inv` refinements are declared but not yet checked — surface that honestly rather than ignore them.
+    for _ in refinements.iter().filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("inv")) {
+        reports.push(RefinementReport {
+            label: "inv".into(),
+            outcome: RefinementOutcome::Unverifiable("`inv` refinements are not checked in v0.1".into()),
+        });
+    }
+
+    if reports.is_empty() {
+        return one("refinements".into(), RefinementOutcome::NotApplicable);
+    }
+    reports
+}
+
+/// Convenience: the type-implied `nat` refinement only (no declared `pre`/`post`). Returns the single
+/// outcome — `NotApplicable` when the result type is not `nat`.
+pub fn check_nat_refinement(sig_type: &J, body: &J, solver: &str) -> RefinementOutcome {
+    let fn_ty = unwrap_forall(sig_type);
+    let not_nat = fn_ty.get("result").map(|r| !is_nat(r)).unwrap_or(true);
+    if not_nat {
+        return RefinementOutcome::NotApplicable;
+    }
+    check_refinements(sig_type, &[], body, solver)
+        .into_iter()
+        .find(|r| r.label == "nat-result (≥ 0)")
+        .map(|r| r.outcome)
+        .unwrap_or_else(|| RefinementOutcome::Unverifiable("could not build the nat obligation".into()))
 }
 
 /// Discharge the obligation: first-order SMT, then a structural-induction fallback for recursive bodies
-/// (mirrors `prove`). Maps the prover's verdicts onto the refinement outcomes — a non-closing induction is
-/// UNVERIFIABLE, never a false SOUND.
+/// (mirrors `prove`). A non-closing induction is UNVERIFIABLE, never a false SOUND.
 fn decide(goal: &J, body: Option<&J>, solver: &str) -> RefinementOutcome {
     match prove_property(goal, body, solver).0 {
         ProofOutcome::Proved => RefinementOutcome::Sound,
@@ -161,7 +236,7 @@ fn decide(goal: &J, body: Option<&J>, solver: &str) -> RefinementOutcome {
         ProofOutcome::Unsupported(_) => {
             match prove_by_induction_with_exploration(goal, body, solver, DEFAULT_LEMMA_DEPTH).0 {
                 InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_) => RefinementOutcome::Sound,
-                // A satisfiable induction base is a concrete short input on which the body goes negative.
+                // A satisfiable induction base is a concrete short input on which the body breaks the contract.
                 InductionOutcome::Failed(model) => RefinementOutcome::Violated(model),
                 InductionOutcome::NoSolver => RefinementOutcome::NoSolver,
                 InductionOutcome::Unknown => RefinementOutcome::Unverifiable("induction did not close".into()),
@@ -197,23 +272,29 @@ mod tests {
         let params: Vec<J> = ps.iter().map(|p| json!({ "name": p })).collect();
         json!({ "kind": "lambda", "params": params, "body": inner })
     }
+    fn refinement(kind: &str, expr: J) -> J {
+        json!({ "kind": kind, "expr": expr })
+    }
+    fn nat_outcome(ty: &J, body: &J, s: &str) -> RefinementOutcome {
+        check_nat_refinement(ty, body, s)
+    }
+
+    // ---- the type-implied nat refinement (unchanged behavior) ----
 
     #[test]
     fn nat_result_with_nat_param_is_sound() {
         let Some(s) = solver() else { return };
-        // double : nat -> nat, body \n -> add(n, n). n ≥ 0 ⟹ n + n ≥ 0.
         let ty = fn_ty(vec![nat()], nat());
         let body = lambda(&["n"], app("add", vec![var("n"), var("n")]));
-        assert_eq!(check_nat_refinement(&ty, &body, s), RefinementOutcome::Sound);
+        assert_eq!(nat_outcome(&ty, &body, s), RefinementOutcome::Sound);
     }
 
     #[test]
     fn negatable_body_declared_nat_is_violated() {
         let Some(s) = solver() else { return };
-        // \a b -> sub(a, b) : (int, int) -> nat — can be negative (a=0, b=1). VIOLATED with a counterexample.
         let ty = fn_ty(vec![int(), int()], nat());
         let body = lambda(&["a", "b"], app("sub", vec![var("a"), var("b")]));
-        match check_nat_refinement(&ty, &body, s) {
+        match nat_outcome(&ty, &body, s) {
             RefinementOutcome::Violated(_) => {}
             other => panic!("expected VIOLATED, got {other:?}"),
         }
@@ -222,25 +303,21 @@ mod tests {
     #[test]
     fn abs_is_sound_nat() {
         let Some(s) = solver() else { return };
-        // \n -> abs(n) : int -> nat — always ≥ 0 (no precondition needed).
         let ty = fn_ty(vec![int()], nat());
         let body = lambda(&["n"], app("abs", vec![var("n")]));
-        assert_eq!(check_nat_refinement(&ty, &body, s), RefinementOutcome::Sound);
+        assert_eq!(nat_outcome(&ty, &body, s), RefinementOutcome::Sound);
     }
 
     #[test]
     fn non_nat_result_is_not_applicable() {
-        // add : (int, int) -> int — no nat refinement to check.
         let ty = fn_ty(vec![int(), int()], int());
         let body = lambda(&["a", "b"], app("add", vec![var("a"), var("b")]));
-        assert_eq!(check_nat_refinement(&ty, &body, "z3"), RefinementOutcome::NotApplicable);
+        assert_eq!(nat_outcome(&ty, &body, "z3"), RefinementOutcome::NotApplicable);
     }
 
     #[test]
     fn recursive_length_is_sound_nat_by_induction() {
         let Some(s) = solver() else { return };
-        // length : List a -> nat, recursive: \xs -> case null xs of true -> 0 | false -> add(1, self(tail xs)).
-        // Proved ≥ 0 by structural induction (base 0 ≥ 0; step 1 + self(tail) ≥ 0 given the IH).
         let ty = fn_ty(
             vec![json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "var", "name": "a" }] })],
             nat(),
@@ -257,18 +334,73 @@ mod tests {
                 ]
             }),
         );
-        assert_eq!(check_nat_refinement(&ty, &body, s), RefinementOutcome::Sound);
+        assert_eq!(nat_outcome(&ty, &body, s), RefinementOutcome::Sound);
     }
 
     #[test]
     fn recursive_countdown_can_go_negative_is_violated() {
         let Some(s) = solver() else { return };
-        // \n -> sub(n, 1) : nat -> nat — n ≥ 0 does NOT give n − 1 ≥ 0 (fails at n = 0). VIOLATED.
         let ty = fn_ty(vec![nat()], nat());
         let body = lambda(&["n"], app("sub", vec![var("n"), int_lit(1)]));
-        match check_nat_refinement(&ty, &body, s) {
+        match nat_outcome(&ty, &body, s) {
             RefinementOutcome::Violated(_) => {}
             other => panic!("expected VIOLATED, got {other:?}"),
         }
+    }
+
+    // ---- declared pre/post refinements (the `result` convention) ----
+
+    #[test]
+    fn declared_post_matches_body_is_sound() {
+        let Some(s) = solver() else { return };
+        // add : (int,int) -> int, post: result = a + b. The body IS add(a,b), so sound.
+        let ty = fn_ty(vec![int(), int()], int());
+        let body = lambda(&["a", "b"], app("add", vec![var("a"), var("b")]));
+        let post = refinement("post", app("eq", vec![var("result"), app("add", vec![var("a"), var("b")])]));
+        let reports = check_refinements(&ty, &[post], &body, s);
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].outcome, RefinementOutcome::Sound);
+    }
+
+    #[test]
+    fn declared_post_contradicted_by_body_is_violated() {
+        let Some(s) = solver() else { return };
+        // post: result = a + b, but the body is mul(a,b) — violated (e.g. a=1,b=2: 2 ≠ 3).
+        let ty = fn_ty(vec![int(), int()], int());
+        let body = lambda(&["a", "b"], app("mul", vec![var("a"), var("b")]));
+        let post = refinement("post", app("eq", vec![var("result"), app("add", vec![var("a"), var("b")])]));
+        let reports = check_refinements(&ty, &[post], &body, s);
+        match &reports[0].outcome {
+            RefinementOutcome::Violated(_) => {}
+            other => panic!("expected VIOLATED, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn precondition_gates_the_postcondition() {
+        let Some(s) = solver() else { return };
+        // \a b -> sub(a,b), post: result >= 0. Without a pre it's VIOLATED (a<b); with pre a>=b it's SOUND.
+        let ty = fn_ty(vec![int(), int()], int());
+        let body = lambda(&["a", "b"], app("sub", vec![var("a"), var("b")]));
+        let post = refinement("post", app("ge", vec![var("result"), int_lit(0)]));
+        // No precondition → violated.
+        let bare = check_refinements(&ty, std::slice::from_ref(&post), &body, s);
+        assert!(matches!(bare[0].outcome, RefinementOutcome::Violated(_)));
+        // With `pre: a >= b` → sound.
+        let pre = refinement("pre", app("ge", vec![var("a"), var("b")]));
+        let guarded = check_refinements(&ty, &[pre, post], &body, s);
+        assert_eq!(guarded[0].outcome, RefinementOutcome::Sound);
+    }
+
+    #[test]
+    fn post_and_implicit_nat_both_reported() {
+        let Some(s) = solver() else { return };
+        // double : nat -> nat, post: result = n + n. Two reports: the post (sound) and the nat (sound).
+        let ty = fn_ty(vec![nat()], nat());
+        let body = lambda(&["n"], app("add", vec![var("n"), var("n")]));
+        let post = refinement("post", app("eq", vec![var("result"), app("add", vec![var("n"), var("n")])]));
+        let reports = check_refinements(&ty, &[post], &body, s);
+        assert_eq!(reports.len(), 2, "{reports:?}");
+        assert!(reports.iter().all(|r| r.outcome == RefinementOutcome::Sound));
     }
 }

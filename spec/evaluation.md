@@ -95,8 +95,16 @@ fallback for a recursive body (a recursive `length : List a -> nat` is proved `�
 solver counterexample — a real input on which the body goes negative, e.g. `\a b -> sub(a, b)` declared
 `nat` at `a = 0, b = 1`; exit 1), **UNVERIFIABLE** (out of the decidable fragment or solver-undecided —
 never a false SOUND), or **NOT-APPLICABLE** (the result type is not `nat`). Conservative by construction:
-only a closed proof yields SOUND, only a counterexample yields VIOLATED. The refinement framing generalizes
-to declared `post`-conditions; v0.1 checks the type-implied `nat` refinement.
+only a closed proof yields SOUND, only a counterexample yields VIOLATED.
+
+It also checks **declared `signature.refinements[]`** — `pre`/`post` predicates. A `post` predicate is a
+contract on the output, which it names through the **reserved variable `result`** (and may also mention the
+parameters); a `pre` predicate is a precondition on the parameters, *assumed* when discharging the posts.
+Each postcondition discharges `∀ params. (⋀ pre ∧ ⋀ nat-typed params ≥ 0) ⟹ post[result := body(params)]`
+— the type-implied `nat` refinement is just the implicit post `result ≥ 0`. So a record declaring
+`pre: a ≥ b` and `post: result ≥ 0` for `\a b -> sub(a, b)` is **SOUND** (the precondition gates it — without
+it the post is **VIOLATED** at `a < b`), and a `post: result = a + b` is sound for an `add` body but
+**VIOLATED** for a `mul` body. (`inv` refinements are reserved — not checked in v0.1.)
 
 ## Termination checking
 

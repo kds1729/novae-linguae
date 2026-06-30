@@ -773,25 +773,41 @@ fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str) -> Resul
     let sig_type = record
         .pointer("/signature/type")
         .ok_or_else(|| anyhow::anyhow!("record has no `signature.type`"))?;
-    match nl_validator::check_nat_refinement(sig_type, &body, solver) {
-        RefinementOutcome::Sound => {
-            println!("SOUND        the `nat` result is provably ≥ 0 for all (precondition-satisfying) inputs");
-            Ok(())
-        }
-        RefinementOutcome::Violated(model) => Err(anyhow::anyhow!(
-            "VIOLATED     the body can produce a negative value: {}",
-            if model.is_empty() { "(counterexample)".into() } else { model }
-        )),
-        RefinementOutcome::Unverifiable(why) => {
-            println!("UNVERIFIABLE {why}");
-            Ok(())
-        }
-        RefinementOutcome::NotApplicable => {
-            println!("N/A          result type is not `nat` — no type-implied refinement to check");
-            Ok(())
-        }
-        RefinementOutcome::NoSolver => Err(anyhow::anyhow!("NO-SOLVER    `{solver}` not found")),
+    let refinements: Vec<serde_json::Value> =
+        record.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+
+    let reports = nl_validator::check_refinements(sig_type, &refinements, &body, solver);
+    let mut violated = false;
+    let mut no_solver = false;
+    for r in &reports {
+        let line = match &r.outcome {
+            RefinementOutcome::Sound => format!("SOUND        {}", r.label),
+            RefinementOutcome::Violated(model) => {
+                violated = true;
+                format!(
+                    "VIOLATED     {} — counterexample: {}",
+                    r.label,
+                    if model.is_empty() { "(model)".into() } else { model.clone() }
+                )
+            }
+            RefinementOutcome::Unverifiable(why) => format!("UNVERIFIABLE {} — {why}", r.label),
+            RefinementOutcome::NotApplicable => {
+                format!("N/A          {} (no type-implied or declared refinements to check)", r.label)
+            }
+            RefinementOutcome::NoSolver => {
+                no_solver = true;
+                format!("NO-SOLVER    `{solver}` not found")
+            }
+        };
+        println!("{line}");
     }
+    if no_solver {
+        return Err(anyhow::anyhow!("no SMT solver available"));
+    }
+    if violated {
+        return Err(anyhow::anyhow!("a refinement is VIOLATED"));
+    }
+    Ok(())
 }
 
 fn cmd_check_termination(record: &PathBuf, body: &PathBuf) -> Result<()> {
