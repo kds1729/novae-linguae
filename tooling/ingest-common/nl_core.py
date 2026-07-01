@@ -374,7 +374,7 @@ def build_record(name: str, type_str: str, arity: int, body_text: str,
 def build_v2_record(name: str, type_ast: dict, examples: list, body_text: str,
                     module_name: str | None = None, extra_hints=(),
                     effects=None, terminates=None, refinements=None,
-                    properties=None, intent_tags=None) -> dict:
+                    properties=None, intent_tags=None, complexity=None) -> dict:
     """Assemble a Nova Lingua v0.2 function record: a structured ``signature.type`` AST and real
     value-AST ``examples`` (must be non-empty — v0.2 requires >=1). Same name_hints / body_hash as
     build_record. Callers (the string-based adapters) build the type AST and examples per language.
@@ -403,6 +403,11 @@ def build_v2_record(name: str, type_ast: dict, examples: list, body_text: str,
                       if isinstance(body_text, dict)
                       else format_hash("expr", blake3_256(body_text.encode("utf-8")))),
     }
+    # `complexity` (an `O(…)` running-time bound) is OPTIONAL; set it only when a caller declares one, so a
+    # record without it hashes exactly as before. When set it is VERIFIED against the body by
+    # `nl-validator check-complexity` in the corpus gate.
+    if complexity is not None:
+        record["signature"]["complexity"] = complexity
     # `properties` (algebraic laws) is OPTIONAL in v0.2; include it only when present, so a record
     # with no laws hashes exactly as before (JCS sorts keys, so position is irrelevant).
     if properties:

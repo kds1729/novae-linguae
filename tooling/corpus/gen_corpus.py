@@ -566,6 +566,40 @@ def refined_funcs():
     ]
 
 
+def costed_funcs():
+    # Functions carrying a declared `signature.complexity` (an `O(…)` running-time bound) that is VERIFIED
+    # against the body by `nl-validator check-complexity` in the build gate — the running-time counterpart to
+    # the refinement / termination contracts (principle 3). The checker infers a sound upper bound by
+    # structural cost analysis (no solver): a non-recursive first-order body is O(1)/O(n); a structural
+    # recursion is solved as a recurrence T(n) = a·T(n−k) + w — one self-call with O(1) per-step work is
+    # O(n), one with O(n) work (an `append` of the recursive result) is O(n²). Each declaration here is TIGHT
+    # (the checker returns SOUND, not merely VERIFIED-could-be-tighter), so the corpus teaches complexity
+    # annotations that are exactly right for their bodies, not just safe over-estimates.
+    n, xs = var("n"), var("xs")
+    nil = var("nil")
+    return [
+        {"name": "sum2_cost", "intent": "Add two integers, in constant time.",
+         "summary": "Returns a + b; O(1) — a single primitive addition.", "tags": ["arithmetic", "complexity"],
+         "type_ast": fn([INT, INT], INT), "body_ast": lam(["a", "b"], bapp("add", var("a"), var("b"))),
+         "examples": [{"args": [2, 3], "result": 5}, {"args": [0, 0], "result": 0}, {"args": [-1, 4], "result": 3}],
+         "complexity": "O(1)", "properties": [], "prove": False, "terminates": "always"},
+        {"name": "length_cost", "intent": "Count the elements of a list, in linear time.",
+         "summary": "0 for the empty list; otherwise 1 + the length of the tail — O(n).",
+         "tags": ["list", "recursion", "complexity"], "type_ast": fn([list_of(INT)], INT),
+         "body_ast": lam(["xs"], case_null("xs", int_lit(0), bapp("add", int_lit(1), bself(bapp("tail", xs))))),
+         "examples": [{"args": [[]], "result": 0}, {"args": [[1, 2, 3]], "result": 3}, {"args": [[9]], "result": 1}],
+         "complexity": "O(n)", "properties": [], "prove": False, "terminates": "always"},
+        {"name": "reverse_naive_cost", "intent": "Reverse a list the naive way, in quadratic time.",
+         "summary": "nil for the empty list; otherwise reverse(tail) ++ [head] — O(n^2), one append per step.",
+         "tags": ["list", "recursion", "complexity"], "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], case_null("xs", nil,
+                                           bapp("append", bself(bapp("tail", xs)),
+                                                bapp("cons", bapp("head", xs), nil)))),
+         "examples": [{"args": [[]], "result": []}, {"args": [[1, 2, 3]], "result": [3, 2, 1]}, {"args": [[7]], "result": [7]}],
+         "complexity": "O(n^2)", "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
 def float_funcs():
     x = var("x")
     return [
@@ -2650,7 +2684,7 @@ def combinatorial_specs(exclude_names=()):
 
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
-            + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + float_funcs()
+            + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + costed_funcs() + float_funcs()
             + maybe_funcs() + result_funcs() + recursive_funcs() + recursive_list_funcs()
             + arith_laws() + bool_laws() + order_laws()
             + more_arith() + more_laws() + bool_more() + recursive_more()
@@ -2675,7 +2709,8 @@ def verdict_tokens(text):
     # so scan every token of the line for the first recognized verdict.
     toks = {"PROVED", "REFUTED", "UNKNOWN", "UNSUPPORTED", "NO-SOLVER",
             "CONSISTENT", "CONTRADICTED", "UNVERIFIABLE",
-            "SOUND", "VIOLATED", "N/A"}  # check-refinement verdicts
+            "SOUND", "VIOLATED", "N/A",  # check-refinement verdicts
+            "VERIFIED"}  # check-complexity: a declared bound the checker proves is actually tighter
     found = []
     for line in text.splitlines():
         for t in line.replace(":", " ").split():
@@ -2712,7 +2747,8 @@ def build_and_verify(spec, workdir):
     terminates = spec.get("terminates", "unknown" if spec["name"] == "sum" else "always")
     record = build_v2_record(spec["name"], spec["type_ast"], examples, spec["body_ast"],
                              properties=spec.get("properties") or None, intent_tags=spec["tags"],
-                             terminates=terminates, refinements=spec.get("refinements"))
+                             terminates=terminates, refinements=spec.get("refinements"),
+                             complexity=spec.get("complexity"))
     # Derivation history (principle 1): stamp derived_from / supersedes with a parent's content-address
     # (the parent is declared as an fn_dep so its hash is known), then re-hash since the content changed.
     # `derived_from` is a LIST of addresses (a function may derive from several); `supersedes` is a single.
@@ -2748,6 +2784,14 @@ def build_and_verify(spec, workdir):
     result_t = spec["type_ast"].get("body", spec["type_ast"]).get("result", {})
     if spec.get("refinements") or result_t.get("name") == "nat":
         refinements_checked = verdict_tokens(cli(["check-refinement", rec_path, "--body", body_path]).stdout)
+    # Complexity check: when a record DECLARES a `signature.complexity`, `check-complexity` infers a sound
+    # upper bound by structural cost analysis (no solver) and confirms the declaration holds. There is no
+    # refutation (an upper-bound claim can be verified but never disproved), so the acceptable verdicts are
+    # SOUND (bound matches) and VERIFIED (declared bound is provably tighter-satisfiable); anything else
+    # (UNVERIFIABLE — the sound bound is worse, or the body is opaque) fails the gate for a costed record.
+    complexity_checked = []
+    if spec.get("complexity"):
+        complexity_checked = verdict_tokens(cli(["check-complexity", rec_path, "--body", body_path]).stdout)
 
     example = {
         "id": spec["name"],
@@ -2773,11 +2817,13 @@ def build_and_verify(spec, workdir):
             "bounded_check": bounded,
             "proofs": proofs,
             **({"refinements": refinements_checked} if refinements_checked else {}),
+            **({"complexity": complexity_checked} if complexity_checked else {}),
         },
     }
     ok = (schema_valid and well_typed and examples_passed
           and all(p["verdict"] in ("PROVED",) for p in proofs)
-          and "VIOLATED" not in refinements_checked)
+          and "VIOLATED" not in refinements_checked
+          and all(v in ("SOUND", "VERIFIED") for v in complexity_checked))
     return example, ok
 
 
@@ -3507,7 +3553,8 @@ def main():
                 "boolean_funcs": len(boolean_funcs()), "list_funcs": len(list_funcs()),
                 "list_transform_funcs": len(list_transform_funcs()),
                 "composition_funcs": len(composition_funcs()), "list_fold_funcs": len(list_fold_funcs()),
-                "refined_funcs": len(refined_funcs()), "float_funcs": len(float_funcs()),
+                "refined_funcs": len(refined_funcs()), "costed_funcs": len(costed_funcs()),
+                "float_funcs": len(float_funcs()),
                 "maybe_funcs": len(maybe_funcs()), "result_funcs": len(result_funcs()),
                 "recursive_funcs": len(recursive_funcs()),
                 "recursive_list_funcs": len(recursive_list_funcs()),

@@ -253,6 +253,23 @@ enum Commands {
         #[arg(long)]
         body: PathBuf,
     },
+    /// Verify a record's declared `signature.complexity` (an `O(…)` upper bound) by **structural** cost
+    /// analysis (no solver): it infers a sound upper-bound class from the body — non-recursive first-order
+    /// bodies are `O(1)`/`O(n)`, and a structural recursion is solved as a recurrence `T(n) = a·T(n−k) + w`
+    /// (one self-call with `O(1)`/`O(n)` per-step work → `O(n)`/`O(n²)`, two+ constant-descent calls →
+    /// exponential, a halving descent → `O(log n)`/`O(n log n)`) — then compares it to the declared class.
+    /// Prints SOUND (the body is within its declared bound), VERIFIED (provably tighter — the declared bound
+    /// could be strengthened), UNVERIFIABLE (declared, but the sound structural bound is worse or the body is
+    /// opaque/higher-order), N/A (no complexity declared — the inferred bound is reported), or UNKNOWN.
+    /// Sound and conservative: a bound can be verified but never refuted. The body AST is supplied with
+    /// `--body`.
+    CheckComplexity {
+        /// Path to the function record (provides signature.complexity).
+        record: PathBuf,
+        /// Path to the body-expression JSON AST.
+        #[arg(long)]
+        body: PathBuf,
+    },
     /// Prove a record's `forall` `properties[]` over the UNBOUNDED domain with an SMT solver — the rung
     /// above bounded `check-properties`. Each property + the function body is translated to SMT-LIB 2
     /// (the Int/Bool fragment); the solver checks the negation of the law. Reports PROVED (unsat — holds
@@ -567,6 +584,7 @@ fn main() -> ExitCode {
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
         Commands::CheckRefinement { record, body, solver } => (cmd_check_refinement(&record, &body, &solver), false),
         Commands::CheckTermination { record, body } => (cmd_check_termination(&record, &body), false),
+        Commands::CheckComplexity { record, body } => (cmd_check_complexity(&record, &body), false),
         Commands::Respond { request, records, seed, timestamp } => {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
         }
@@ -826,6 +844,42 @@ fn cmd_check_termination(record: &PathBuf, body: &PathBuf) -> Result<()> {
             "always" => println!("UNVERIFIABLE declared `always`, but structural analysis can't prove it: {why}"),
             other => println!("UNKNOWN      not provably terminating ({why}); consistent with declared `{other}`"),
         },
+    }
+    Ok(())
+}
+
+fn cmd_check_complexity(record: &PathBuf, body: &PathBuf) -> Result<()> {
+    use nl_validator::ComplexityOutcome;
+    let record = nl_validator::read_json(record)?;
+    let body = nl_validator::read_json(body)?;
+    let declared = record.pointer("/signature/complexity").and_then(|v| v.as_str());
+    match nl_validator::analyze_complexity(&body) {
+        ComplexityOutcome::Opaque(why) => match declared {
+            Some(d) => {
+                println!("UNVERIFIABLE declared `{d}`, but structural analysis can't establish a bound: {why}")
+            }
+            None => println!("UNKNOWN      no complexity declared; structural analysis can't infer one: {why}"),
+        },
+        ComplexityOutcome::Bound(inferred) => {
+            let inf = inferred.display();
+            match declared {
+                None => println!("N/A          no `signature.complexity` declared; a sound structural bound is {inf}"),
+                Some(d) => match nl_validator::parse_class(d) {
+                    None => println!(
+                        "UNVERIFIABLE declared `{d}` is not a recognized complexity class; inferred bound is {inf}"
+                    ),
+                    Some(dc) if inferred == dc => {
+                        println!("SOUND        the body is within its declared `{d}` (inferred bound {inf})")
+                    }
+                    Some(dc) if inferred < dc => println!(
+                        "VERIFIED     provably {inf}, tighter than declared `{d}` — the bound could be strengthened"
+                    ),
+                    Some(_) => println!(
+                        "UNVERIFIABLE declared `{d}`, but the sound structural bound is {inf} (worse) — not established"
+                    ),
+                },
+            }
+        }
     }
     Ok(())
 }

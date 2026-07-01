@@ -1,6 +1,6 @@
 {
   "schema_version": "0.2.0",
-  "hash": "fn_049a710eccfe87af08eee873bbd81b000d502dd7ccebb2e86bacfff92c7d8a4d",
+  "hash": "fn_655ca32850276e568858fbbf02092fdb443124c71be44ac18a5aff7564c240da",
   "name_hints": [
     "reverse",
     "rev",
@@ -47,7 +47,7 @@
     "refinements": [],
     "effects": [],
     "capabilities": [],
-    "complexity": "O(n)",
+    "complexity": "O(n^2)",
     "terminates": "always"
   },
   "examples": [

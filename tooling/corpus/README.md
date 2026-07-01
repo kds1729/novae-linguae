@@ -144,9 +144,9 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
 
 ## Scope and where it grows
 
-201 examples today (187 positive, 14 negative), in four `category`s:
+204 examples today (190 positive, 14 negative), in four `category`s:
 
-- **function** (164) — Nova Lingua function records across **twenty-nine families**: unary integer (8, incl.
+- **function** (167) — Nova Lingua function records across **thirty families**: unary integer (8, incl.
   `double` / `quadruple` / `decrement` / `abs_val`), binary integer (6, incl. `maximum` / `minimum` /
   `abs_diff`), boolean/predicate (8, incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` /
   `is_even`), list builtins (3: `sum` / `reverse` / `length`), list-transform (6: `map`/`filter`/`append`
@@ -156,7 +156,11 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   `any_negative` / `contains_zero` / `all_even` / `sum_foldr`), **refinement-carrying** (7: `divide` /
   `modulo` / `head_of` preconditions, and `post`conditions on `abs_pos` / `inc_spec` / `sum2_spec` plus a
   pre-gated `safe_sub` — all populating `signature.refinements` and **proved against their bodies by
-  `check-refinement`** in the gate; the reserved variable `result` names the output), float (4), Maybe (3) / Result (2), scalar `self`-recursion (5: `length_rec` /
+  `check-refinement`** in the gate; the reserved variable `result` names the output), **complexity-carrying**
+  (3: `sum2_cost` `O(1)` / `length_cost` `O(n)` / `reverse_naive_cost` `O(n^2)` — each declaring a
+  `signature.complexity` bound that is **verified against its body by `check-complexity`** in the gate, a
+  structural no-solver cost analysis; the declared class is exactly the inferred one, so each reads SOUND),
+  float (4), Maybe (3) / Result (2), scalar `self`-recursion (5: `length_rec` /
   `sum_rec` / `product_rec` / `factorial` / `triangular`), list-building recursion (6: `double_all_rec` …
   `countdown_rec`), integer algebraic laws (7: associativity / distributivity over `+` *and* `−` / identity
   / annihilation / involution / idempotence), boolean laws (7: associativity, De Morgan for AND and OR,

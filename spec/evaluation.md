@@ -124,6 +124,30 @@ applying a parameter or an `fn_ref`, whose callee's termination is unseen) is `U
 strengthened), or **UNVERIFIABLE** (declared `always`, not provable by this structural analysis). There is
 no refutation path — structural analysis cannot disprove termination, only fail to prove it.
 
+## Complexity checking
+
+Every record may declare `signature.complexity` (an `O(…)` running-time bound), but — like `terminates` — it
+was only *propagated* through pipelines (the `compose` path derives a composite bound), never *checked*
+against the body: a record could claim `O(n)` for an `O(n²)` implementation. `nl-validator check-complexity
+<record> --body <body>` verifies it **structurally**, with no solver. It infers a **sound upper bound** on the
+body's running time as a class in the input size and compares it to the declaration. Over the same first-order
+fragment, the classification is by op cost (the scalar ops and `head`/`tail`/`cons`/`null` are `O(1)`;
+`length`/`append`/`reverse` are `O(n)`): a **non-recursive** body is `O(1)` or `O(n)` (a finite AST over data
+that stays `O(n)`); a **structural recursion** is solved as a recurrence `T(n) = a·T(n−k) + w`, where `a` is
+the branching factor (the number of `self`-calls on the worst-case execution path — `case` arms are mutually
+exclusive, so `filter` stays `O(n)` rather than reading as exponential), `k` the descent, and `w` the per-step
+non-recursive work: one self-call with `O(1)` work → `O(n)`, one with `O(n)` work (an `append` of the
+recursive result — naive `reverse`) → `O(n²)`, two-or-more constant-descent calls → **exponential** (a sound
+upper bound: naive `fib`), and a **halving** descent (`div(p, c)`) → `O(log n)` / `O(n log n)`. Because a
+declared `O(f)` is an *upper-bound* claim, the check compares the inferred sound bound `O(g)` to it: `g ≤ f`
+→ **SOUND** (or **VERIFIED** when `g` is provably tighter, so the declaration could be strengthened); `g > f`
+or a **higher-order / opaque** body (`map`/`filter`/`fold`, applying a parameter or `fn_ref`) → **UNVERIFIABLE**;
+no declaration → **N/A** with the inferred bound reported. Like termination there is **no refutation path**
+(an inferred `g > f` only means our bound is looser than the claim, not that the claim is false — proving a
+*lower* bound is a different analysis), so a bound can be verified but never disproved. This closes the last
+declared-but-unverified metadata field, alongside `typecheck` (type), `check-effects` (effects),
+`check-refinement` (the `nat`/pre/post contracts), and `check-termination` (termination).
+
 ## Run-backed property verification
 
 `check-properties` evaluates a record's `properties[]` against its `examples[]`. Statically it is

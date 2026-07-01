@@ -58,6 +58,9 @@ pub use refine::{check_nat_refinement, check_refinements, RefinementOutcome, Ref
 pub mod terminate;
 pub use terminate::{analyze_termination, TerminationOutcome};
 
+pub mod complexity;
+pub use complexity::{analyze_complexity, parse_class, Class, ComplexityOutcome};
+
 pub mod effects;
 pub use effects::{check_effects, infer_effects};
 
