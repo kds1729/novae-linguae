@@ -359,12 +359,15 @@ pub fn orchestrate_verified(
         return Ok(VerifiedRun { steps, trusted: None, certified: None, property: None, confirmed: false });
     }
 
+    // The attestation graph over the supplied attestations — including any signed CERTIFICATION records,
+    // which contribute `certifies` edges. Shared by the trust gate and the certify step below.
+    let graph = AttestationGraph::from_messages(attestations, timestamp);
+
     // TRUST GATE + DISAMBIGUATION: among the signature-compatible candidates, rank by the local policy
     // and use the most-trusted one (no central authority — principle 7). Without a policy there is no
     // trust signal, so fall back to the first compatible match.
     let (target, trusted) = match policy {
         Some(p) => {
-            let graph = AttestationGraph::from_messages(attestations, timestamp);
             let (verdicts, best) = best_trusted(&compatible, p, &graph, timestamp);
             let candidates: Vec<J> = compatible
                 .iter()
@@ -396,6 +399,9 @@ pub fn orchestrate_verified(
     // refinements, termination, complexity/cost) against its body. "Assemble, don't write" only yields
     // verifiable artifacts if the pieces are themselves verified (principle 3); with `require_certified`,
     // a function that isn't certified aborts the run rather than being applied.
+    // A signed certification from a certifier this policy trusts (trust-delegation — the receiver can rely
+    // on a trusted third party's certification instead of, or alongside, re-running the checks itself).
+    let commons_cert = policy.map(|p| p.certification_verdict(&graph, &target, None, timestamp));
     let certified = match (records.get(&target), link.get(&target)) {
         (Some(rec), Some(body)) => {
             let cert = certify_record(rec, body, &records, solver);
@@ -404,7 +410,9 @@ pub fn orchestrate_verified(
                 label: "certify".into(),
                 message: json!({ "function": target, "certified": cert.certified,
                     "checks": cert.checks.iter().map(|c| json!({ "check": c.check, "verdict": c.verdict })).collect::<Vec<_>>(),
-                    "failed": failed }),
+                    "failed": failed,
+                    "commons_certified": commons_cert.as_ref().map(|c| c.certified),
+                    "trusted_certifiers": commons_cert.as_ref().map(|c| c.trusted_certifiers.clone()).unwrap_or_default() }),
             });
             Some(cert.certified)
         }

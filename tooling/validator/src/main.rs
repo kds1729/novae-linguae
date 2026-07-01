@@ -497,6 +497,29 @@ enum Commands {
         #[arg(long)]
         at: Option<String>,
     },
+    /// Check whether a **function** (its `fn_…` content-address) is **certified by a certifier the policy
+    /// trusts**. Ingests signed certification records (`certify --sign`) — which contribute `certifies`
+    /// edges — together with vouch attestations from `--attestations`, builds the trust graph, and reports
+    /// whether any of the function's certifiers is itself trusted under `--policy` (a certificate is only as
+    /// good as its certifier). The trust-delegation counterpart to running `certify` locally. Exit 0 if
+    /// CERTIFIED.
+    Certified {
+        /// Path to the local policy JSON (`trusted_roots`, …).
+        #[arg(long)]
+        policy: PathBuf,
+        /// Directory/file of certification records + vouch/retract attestations. Repeatable.
+        #[arg(long = "attestations")]
+        attestations: Vec<PathBuf>,
+        /// The function's `fn_…` content-address to check certification for.
+        #[arg(long)]
+        subject: String,
+        /// Optional domain to scope the certifier-trust query to.
+        #[arg(long)]
+        domain: Option<String>,
+        /// Optional verification instant (RFC 3339 UTC).
+        #[arg(long)]
+        at: Option<String>,
+    },
     /// Authorize a capability under a local policy: verify a signed delegation chain back to one of the
     /// policy's `trusted_roots`, then enforce that every condition the chain carries is one the policy
     /// declares it can satisfy (`satisfied_conditions`). Exit 0 if AUTHORIZED. The policy-aware
@@ -638,6 +661,9 @@ fn main() -> ExitCode {
         Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
             (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
+        }
+        Commands::Certified { policy, attestations, subject, domain, at } => {
+            (cmd_certified(&policy, &attestations, &subject, domain.as_deref(), at.as_deref()), false)
         }
         Commands::EvaluateTrust { policy, attestations, subject, domain, at } => {
             (cmd_evaluate_trust(&policy, &attestations, &subject, domain.as_deref(), at.as_deref()), false)
@@ -1320,6 +1346,28 @@ fn cmd_evaluate_trust(
         Ok(())
     } else {
         Err(anyhow::anyhow!("UNTRUSTED    `{subject}`{scope}: {}", verdict.reason))
+    }
+}
+
+fn cmd_certified(
+    policy: &PathBuf,
+    attestations: &[PathBuf],
+    subject: &str,
+    domain: Option<&str>,
+    at: Option<&str>,
+) -> Result<()> {
+    let policy = nl_validator::Policy::from_json(&nl_validator::read_json(policy)?)?;
+    let messages = load_json_messages(attestations, None)?; // certifications + attestations + retracts
+    let graph = nl_validator::AttestationGraph::from_messages(&messages, at);
+    let verdict = policy.certification_verdict(&graph, subject, domain, at);
+    if verdict.certified {
+        println!("CERTIFIED    `{subject}`: {}", verdict.reason);
+        for c in &verdict.trusted_certifiers {
+            println!("  certifier: {c}");
+        }
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("UNCERTIFIED  `{subject}`: {}", verdict.reason))
     }
 }
 

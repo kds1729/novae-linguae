@@ -88,7 +88,7 @@ pub mod attestation;
 pub use attestation::{Attestation, AttestationGraph};
 
 pub mod policy;
-pub use policy::{CapabilityVerdict, Policy, TrustVerdict};
+pub use policy::{CapabilityVerdict, CertificationVerdict, Policy, TrustVerdict};
 
 pub mod respond;
 pub use respond::{

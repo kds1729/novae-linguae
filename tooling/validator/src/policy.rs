@@ -412,6 +412,44 @@ impl Policy {
         }
         CapabilityVerdict { authorized: true, reason: chain.reason }
     }
+
+    /// Whether a **function** (`subject`, a `fn_…` content-address) is certified *by a certifier this policy
+    /// trusts*, given the attestation graph (which ingests signed certification records as `certifies`
+    /// edges). A certification is only as good as its certifier: this intersects the function's certifiers
+    /// with the agents the policy derives as trusted (via `evaluate_trust`), so a certificate signed by an
+    /// unknown key counts for nothing. Lets the agent loop rely on a trusted third party's certification
+    /// (trust-delegation) instead of re-running every check itself.
+    pub fn certification_verdict(
+        &self,
+        graph: &AttestationGraph,
+        subject: &str,
+        domain: Option<&str>,
+        at: Option<&str>,
+    ) -> CertificationVerdict {
+        let trusted_certifiers: Vec<String> = graph
+            .certifiers(subject)
+            .into_iter()
+            .filter(|c| self.evaluate_trust(graph, c, domain, at).trusted)
+            .collect();
+        let certified = !trusted_certifiers.is_empty();
+        let reason = if certified {
+            format!("certified by {} trusted certifier(s)", trusted_certifiers.len())
+        } else if graph.certifiers(subject).is_empty() {
+            "no certification found for this function".to_string()
+        } else {
+            "certified, but no certifier is trusted under this policy".to_string()
+        };
+        CertificationVerdict { certified, trusted_certifiers, reason }
+    }
+}
+
+/// The result of a certification query: is a function certified by a certifier the policy trusts?
+#[derive(Debug, Clone)]
+pub struct CertificationVerdict {
+    pub certified: bool,
+    /// The trusted certifiers whose signed certification backs this function.
+    pub trusted_certifiers: Vec<String>,
+    pub reason: String,
 }
 
 #[cfg(test)]
@@ -445,6 +483,43 @@ mod tests {
             min_disjoint_paths: 0,
             satisfied_conditions: BTreeSet::new(),
         }
+    }
+
+    fn certification(certifier_seed: &str, subject: &str) -> J {
+        use crate::{sign_artifact, ArtifactKind};
+        let mut c = json!({
+            "schema_version": "0.2.0", "kind": "certification", "subject": subject,
+            "body_hash": "expr_0000000000000000000000000000000000000000000000000000000000000000",
+            "checks": [{ "check": "typecheck", "verdict": "WELL-TYPED", "detail": "" }],
+            "certified": true,
+        });
+        sign_artifact(&mut c, &signing_key_from_seed(certifier_seed), ArtifactKind::Certification).unwrap();
+        c
+    }
+
+    #[test]
+    fn certification_by_a_trusted_certifier_counts() {
+        // root vouches for `carol`; carol certifies function F. Under the policy, F is certified because a
+        // TRUSTED certifier signed its certification.
+        let (root, carol) = (did("root"), did("carol"));
+        let f = format!("fn_{}", "a".repeat(64));
+        let g = AttestationGraph::from_messages(
+            &[attest("root", &carol, "vouches-for", None), certification("carol", &f)],
+            None,
+        );
+        let v = policy(&[&root], 1).certification_verdict(&g, &f, None, None);
+        assert!(v.certified, "{}", v.reason);
+        assert!(v.trusted_certifiers.contains(&carol));
+    }
+
+    #[test]
+    fn certification_by_an_untrusted_certifier_does_not_count() {
+        // `mallory` certifies F but no trusted root vouches for mallory → the certificate carries no weight.
+        let root = did("root");
+        let f = format!("fn_{}", "b".repeat(64));
+        let g = AttestationGraph::from_messages(&[certification("mallory", &f)], None);
+        let v = policy(&[&root], 1).certification_verdict(&g, &f, None, None);
+        assert!(!v.certified, "an untrusted certifier's certification must not count");
     }
 
     #[test]

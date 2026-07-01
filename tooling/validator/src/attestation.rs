@@ -86,44 +86,81 @@ impl AttestationGraph {
 
         let mut edges = Vec::new();
         for m in messages {
-            if m.get("kind").and_then(|k| k.as_str()) != Some("assert") {
-                continue;
+            match m.get("kind").and_then(|k| k.as_str()) {
+                // A signed attestation `assert`: `<attester> <verb> <subject>`.
+                Some("assert") => {
+                    if m.pointer("/body/claim/kind").and_then(|k| k.as_str()) != Some("attestation") {
+                        continue;
+                    }
+                    let hash = match m.get("hash").and_then(|h| h.as_str()) {
+                        Some(h) if !retracted.contains(h) => h.to_string(),
+                        _ => continue, // missing hash, or retracted
+                    };
+                    if crate::verify_signature(m).is_err() {
+                        continue;
+                    }
+                    let claim = match m.pointer("/body/claim") {
+                        Some(c) => c,
+                        None => continue,
+                    };
+                    let expires_at = claim.get("expires_at").and_then(|e| e.as_str()).map(String::from);
+                    if is_expired(expires_at.as_deref(), at) {
+                        continue;
+                    }
+                    let (Some(attester), Some(subject), Some(verb)) = (
+                        m.get("from").and_then(|f| f.as_str()),
+                        claim.get("subject").and_then(|s| s.as_str()),
+                        claim.get("verb").and_then(|v| v.as_str()),
+                    ) else {
+                        continue;
+                    };
+                    edges.push(Attestation {
+                        attester: attester.to_string(),
+                        subject: subject.to_string(),
+                        verb: verb.to_string(),
+                        domain: claim.get("domain").and_then(|d| d.as_str()).map(String::from),
+                        confidence: claim.get("confidence").and_then(|c| c.as_f64()),
+                        issued_at: claim.get("issued_at").and_then(|t| t.as_str()).map(String::from),
+                        expires_at,
+                        hash,
+                    });
+                }
+                // A signed **certification** record (`certify --sign`): `<certifier> certifies <function>`.
+                // It is an *objective, re-checkable* attestation — the certifier ran every verified-by-default
+                // check and signed the result — so a positive one contributes a `certifies` edge (a distinct
+                // axis from vouches-for: it does not make the *certifier* trusted, only records that this
+                // function passed verification under that certifier). A `certified: false` record is not an
+                // endorsement, so it adds no edge.
+                Some("certification") => {
+                    if m.get("certified").and_then(|c| c.as_bool()) != Some(true) {
+                        continue;
+                    }
+                    let hash = match m.get("hash").and_then(|h| h.as_str()) {
+                        Some(h) if !retracted.contains(h) => h.to_string(),
+                        _ => continue,
+                    };
+                    if crate::verify_signature(m).is_err() {
+                        continue;
+                    }
+                    let (Some(attester), Some(subject)) = (
+                        m.get("from").and_then(|f| f.as_str()),
+                        m.get("subject").and_then(|s| s.as_str()),
+                    ) else {
+                        continue;
+                    };
+                    edges.push(Attestation {
+                        attester: attester.to_string(),
+                        subject: subject.to_string(),
+                        verb: "certifies".to_string(),
+                        domain: None,
+                        confidence: None,
+                        issued_at: m.get("timestamp").and_then(|t| t.as_str()).map(String::from),
+                        expires_at: None,
+                        hash,
+                    });
+                }
+                _ => continue,
             }
-            if m.pointer("/body/claim/kind").and_then(|k| k.as_str()) != Some("attestation") {
-                continue;
-            }
-            let hash = match m.get("hash").and_then(|h| h.as_str()) {
-                Some(h) if !retracted.contains(h) => h.to_string(),
-                _ => continue, // missing hash, or retracted
-            };
-            if crate::verify_signature(m).is_err() {
-                continue;
-            }
-            let claim = match m.pointer("/body/claim") {
-                Some(c) => c,
-                None => continue,
-            };
-            let expires_at = claim.get("expires_at").and_then(|e| e.as_str()).map(String::from);
-            if is_expired(expires_at.as_deref(), at) {
-                continue;
-            }
-            let (Some(attester), Some(subject), Some(verb)) = (
-                m.get("from").and_then(|f| f.as_str()),
-                claim.get("subject").and_then(|s| s.as_str()),
-                claim.get("verb").and_then(|v| v.as_str()),
-            ) else {
-                continue;
-            };
-            edges.push(Attestation {
-                attester: attester.to_string(),
-                subject: subject.to_string(),
-                verb: verb.to_string(),
-                domain: claim.get("domain").and_then(|d| d.as_str()).map(String::from),
-                confidence: claim.get("confidence").and_then(|c| c.as_f64()),
-                issued_at: claim.get("issued_at").and_then(|t| t.as_str()).map(String::from),
-                expires_at,
-                hash,
-            });
         }
         AttestationGraph { edges }
     }
@@ -150,6 +187,17 @@ impl AttestationGraph {
         self.edges
             .iter()
             .filter(|e| e.subject == subject && e.is_positive() && e.applies_to_domain(domain))
+            .map(|e| e.attester.clone())
+            .collect()
+    }
+
+    /// Distinct certifiers who have signed a positive `certifies` edge for `subject` (a function's
+    /// content-address). These are the agents whose certification the policy can weigh (a certification is
+    /// meaningful only when the certifier is itself trusted).
+    pub fn certifiers(&self, subject: &str) -> BTreeSet<String> {
+        self.edges
+            .iter()
+            .filter(|e| e.subject == subject && e.verb == "certifies")
             .map(|e| e.attester.clone())
             .collect()
     }
@@ -259,5 +307,54 @@ mod tests {
         );
         assert!(g.positive_attesters(&bob, Some("rust_ingestion")).contains(&did("alice")));
         assert!(g.positive_attesters(&bob, Some("crypto")).is_empty(), "domain-scoped trust does not apply to another domain");
+    }
+
+    // ---- certifications as `certifies` edges ----
+
+    /// A signed certification record (`certify --sign`): `certifier` certifies function `subject`.
+    fn certification(certifier_seed: &str, subject: &str, certified: bool) -> J {
+        use crate::{sign_artifact, ArtifactKind};
+        let mut c = json!({
+            "schema_version": "0.2.0", "kind": "certification", "subject": subject,
+            "body_hash": "expr_0000000000000000000000000000000000000000000000000000000000000000",
+            "checks": [{ "check": "typecheck", "verdict": "WELL-TYPED", "detail": "" }],
+            "certified": certified,
+        });
+        sign_artifact(&mut c, &signing_key_from_seed(certifier_seed), ArtifactKind::Certification).unwrap();
+        c
+    }
+
+    #[test]
+    fn certification_builds_a_certifies_edge() {
+        let f = format!("fn_{}", "1".repeat(64));
+        let g = AttestationGraph::from_messages(&[certification("carol", &f, true)], None);
+        assert!(g.certifiers(&f).contains(&did("carol")), "a positive certification names its certifier");
+        // A certifies edge is a SEPARATE axis — it does not make the function a `vouches-for` subject.
+        assert!(g.positive_attesters(&f, None).is_empty(), "certifies is not vouches-for");
+    }
+
+    #[test]
+    fn uncertified_record_adds_no_edge() {
+        let f = format!("fn_{}", "2".repeat(64));
+        let g = AttestationGraph::from_messages(&[certification("carol", &f, false)], None);
+        assert!(g.certifiers(&f).is_empty(), "a `certified: false` record is not an endorsement");
+    }
+
+    #[test]
+    fn tampered_certification_is_skipped() {
+        let f = format!("fn_{}", "3".repeat(64));
+        let mut c = certification("carol", &f, true);
+        c["subject"] = json!(format!("fn_{}", "9".repeat(64))); // repoint after signing
+        let g = AttestationGraph::from_messages(&[c], None);
+        assert!(g.is_empty(), "a tampered certification fails signature verification and is skipped");
+    }
+
+    #[test]
+    fn retracted_certification_drops_the_edge() {
+        let f = format!("fn_{}", "4".repeat(64));
+        let c = certification("carol", &f, true);
+        let h = c["hash"].as_str().unwrap().to_string();
+        let g = AttestationGraph::from_messages(&[c, retract("carol", &h)], None);
+        assert!(g.certifiers(&f).is_empty(), "a retracted certification is dropped");
     }
 }
