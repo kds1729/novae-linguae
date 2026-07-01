@@ -186,6 +186,30 @@ trusted third party's certification instead of re-running every check itself. No
 gates *admission*: a function is stored on its own merits, and a `certified: false` record is served too
 (transparency), with the trust decision left entirely to the consumer.
 
+### Seeding a node with certifications
+
+A certifier runs where the **bodies are** (the commons doesn't store them), certifies each record+body pair,
+and publishes the signed certifications to the node. [`seed_certifications.py`](seed_certifications.py) does
+exactly this over the public API — for every record in a directory whose `body-*.json` is present, it
+`certify --sign`s and `POST`s the certification (and, with `--publish-records`, the record too), then reads
+`…/certifications` back to confirm:
+
+```bash
+python3 seed_certifications.py --node https://nl.1105software.com \
+    --seed "$CERTIFIER_SEED" --records ../../spec/examples --publish-records
+# -> cert cert_… subject=fn_… certified=True (stored) …
+#    seeded=9 published_records=9 …
+#    verified: GET /v0/records/fn_…/certifications -> 1 certification(s)
+```
+
+**Wiring the live Arca node** ([`nl.1105software.com`](https://nl.1105software.com)) is two steps: (1)
+redeploy so the node runs certification-aware code — `docker compose -f docker-compose.prod.yml up -d --build`
+on the host (the `certification` schema mapping, the `subject`/`certified` columns via **migration 0005**
+which runs automatically on web start, and the new route; no Caddy change — the edge already proxies all
+`/v0/` paths); confirm with `curl -s https://nl.1105software.com/v0/info` showing `"certification"` in
+`kinds`. (2) run `seed_certifications.py` against it. The whole flow is exercised end to end by the test
+suite and was verified against a live local node over HTTP.
+
 ## Seed bundles (`.nlb`)
 
 A portable, self-verifying archive of records for out-of-band distribution — cold-start, disaster
