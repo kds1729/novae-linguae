@@ -436,6 +436,181 @@ pub fn analyze_complexity(body: &J) -> ComplexityOutcome {
     }
 }
 
+// --- output-size analysis (for verifying the structured `cost` metadata) ---------------------------
+//
+// `signature.cost` carries a `time` class (verified against `analyze_complexity` just like the flat
+// `complexity` field) and an `output_size` relation — how the result's size grows with the input's. The
+// `compose` precise-complexity path threads `output_size` through a pipeline to re-express each downstream
+// stage's cost in the pipeline's input size, and it **trusts it blindly**: a stage declared `preserving`
+// that actually expands would make the composite's time bound unsound. This analysis infers a sound upper
+// bound on the output size so a declared `output_size` can be *verified*, closing that gap.
+
+/// A sound upper bound on how a function's RESULT size grows with its input size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputSize {
+    /// O(1) — a scalar result, or a fixed-size list (schema `constant`).
+    Const,
+    /// ≤ Θ(n) — the result is at most linear in the input (schema `preserving` / `bounded`).
+    Linear,
+    /// Θ(n²) — an expanding result (schema `quadratic`).
+    Quadratic,
+    /// Θ(n³) (schema `cubic`).
+    Cubic,
+    /// Not determinable here (a higher-order/opaque build, a polymorphic result, or an exotic recursion).
+    Unknown,
+}
+
+impl OutputSize {
+    /// The polynomial degree in the input size, or `None` for `Unknown`.
+    pub fn degree(self) -> Option<u32> {
+        Some(match self {
+            OutputSize::Const => 0,
+            OutputSize::Linear => 1,
+            OutputSize::Quadratic => 2,
+            OutputSize::Cubic => 3,
+            OutputSize::Unknown => return None,
+        })
+    }
+    fn from_degree(d: u32) -> OutputSize {
+        match d {
+            0 => OutputSize::Const,
+            1 => OutputSize::Linear,
+            2 => OutputSize::Quadratic,
+            _ => OutputSize::Cubic,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            OutputSize::Const => "constant",
+            OutputSize::Linear => "linear (preserving/bounded)",
+            OutputSize::Quadratic => "quadratic",
+            OutputSize::Cubic => "cubic",
+            OutputSize::Unknown => "unknown",
+        }
+    }
+}
+
+/// Map the schema's `cost.output_size` enum to an [`OutputSize`] degree bucket (`preserving`/`bounded`
+/// both cap the result at Θ(n), so both are `Linear`).
+pub fn parse_output_size(s: &str) -> OutputSize {
+    match s {
+        "constant" => OutputSize::Const,
+        "preserving" | "bounded" => OutputSize::Linear,
+        "quadratic" => OutputSize::Quadratic,
+        "cubic" => OutputSize::Cubic,
+        _ => OutputSize::Unknown,
+    }
+}
+
+/// Whether a type-expr denotes a `List` (builtin `List`, or `apply(List, …)`).
+fn is_list_type(ty: &J) -> bool {
+    match ty.get("kind").and_then(|k| k.as_str()) {
+        Some("builtin") => ty.get("name").and_then(|n| n.as_str()) == Some("List"),
+        Some("apply") => ty.pointer("/ctor/name").and_then(|n| n.as_str()) == Some("List"),
+        _ => false,
+    }
+}
+/// Whether a type-expr denotes a scalar builtin (a value of fixed, input-independent size).
+fn is_scalar_type(ty: &J) -> bool {
+    ty.get("kind").and_then(|k| k.as_str()) == Some("builtin")
+        && matches!(
+            ty.get("name").and_then(|n| n.as_str()),
+            Some("int") | Some("nat") | Some("bool") | Some("float") | Some("unit") | Some("string")
+        )
+}
+
+/// A sound upper bound on the size-degree (in the input size) of the LIST value `node` evaluates to. A
+/// `self`-call contributes degree 0 (it is the recurrence's carried term, accounted for separately by the
+/// `+1` in [`list_output_size`]); every non-recursive list expression is at most Θ(n) (degree 1), since no
+/// first-order builtin expands a list super-linearly. `cons` adds one element (the tail's degree carries);
+/// `append`/`reverse` take the max/same; `case` arms are mutually exclusive (max).
+fn list_size_degree(node: &J) -> u32 {
+    if self_call_args(node).is_some() {
+        return 0; // the carried recursion term
+    }
+    match node.get("kind").and_then(|k| k.as_str()) {
+        Some("var") => {
+            // `nil` is the empty-list constant (degree 0); any other list-typed variable is a Θ(n) list.
+            if node.get("name").and_then(|n| n.as_str()) == Some("nil") { 0 } else { 1 }
+        }
+        Some("lit") | Some("list") => 0, // a literal / fixed-size list
+        Some("case") => node
+            .get("arms")
+            .and_then(|a| a.as_array())
+            .map(|a| a.iter().map(|arm| arm.get("body").map(list_size_degree).unwrap_or(0)).max().unwrap_or(0))
+            .unwrap_or(0),
+        Some("app") => match head_op(node) {
+            Some("cons") => node.get("args").and_then(|a| a.as_array()).and_then(|a| a.get(1)).map(list_size_degree).unwrap_or(0),
+            Some("append") => node
+                .get("args")
+                .and_then(|a| a.as_array())
+                .map(|a| a.iter().map(list_size_degree).max().unwrap_or(0))
+                .unwrap_or(0),
+            Some("reverse") => node.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()).map(list_size_degree).unwrap_or(0),
+            // A first-order builtin returning a scalar (head/length/…) can't appear in list position other
+            // than as an already-handled sub-part; conservatively bound any other list-producing op at Θ(n).
+            _ => 1,
+        },
+        _ => 1,
+    }
+}
+
+/// Whether every `self`-call in `inner` descends `tail^k`/`sub(p,c)` (a **constant** step) on ONE fixed
+/// parameter — the shape for which the output-size recurrence `S(n) = S(n−1) + chunk(n)` holds. A halving
+/// descent or a mixed/non-descending recursion returns `false` (the caller then reports `Unknown`).
+fn single_param_constant_recursion(descents: &[Option<(String, Descent)>], params: &[String]) -> bool {
+    let mut on: Option<&str> = None;
+    for d in descents {
+        match d {
+            Some((p, Descent::Constant)) if params.contains(p) => match on {
+                None => on = Some(p),
+                Some(prev) if prev == p => {}
+                Some(_) => return false,
+            },
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// Infer a sound upper bound on the size of a **list-returning** body's result.
+fn list_output_size(params: &[String], inner: &J) -> OutputSize {
+    if find_opaque(inner).is_some() {
+        return OutputSize::Unknown; // a map/filter/fold/opaque build — can't see the result's size
+    }
+    let mut descents: Vec<Option<(String, Descent)>> = Vec::new();
+    collect_self_descents(inner, &mut descents);
+    if descents.is_empty() {
+        // Non-recursive list expression: at most Θ(n) (Const for nil/literal).
+        return OutputSize::from_degree(list_size_degree(inner));
+    }
+    if !single_param_constant_recursion(&descents, params) {
+        return OutputSize::Unknown; // halving / mixed / non-structural — outside the S(n)=S(n−1)+chunk shape
+    }
+    if path_self_count(inner) >= 2 {
+        return OutputSize::Unknown; // two builds appended per step could expand super-polynomially
+    }
+    // S(n) = S(n−1) + chunk(n): the per-step non-recursive list material has degree `list_size_degree`
+    // (self-calls count 0), and summing it over the n levels adds one to the degree.
+    OutputSize::from_degree(list_size_degree(inner).saturating_add(1))
+}
+
+/// Infer a sound upper bound on how a function's result size grows with its input, given its declared
+/// result type and body. A scalar result is `Const`; a concrete `List` result is analyzed structurally; a
+/// polymorphic (type-variable) or otherwise-unrecognized result is `Unknown` (its size could be as large
+/// as the input — never claimed smaller).
+pub fn analyze_output_size(result_ty: &J, body: &J) -> OutputSize {
+    let Some(params) = lambda_params(body) else { return OutputSize::Unknown };
+    let Some(inner) = body.get("body") else { return OutputSize::Unknown };
+    if is_scalar_type(result_ty) {
+        OutputSize::Const
+    } else if is_list_type(result_ty) {
+        list_output_size(&params, inner)
+    } else {
+        OutputSize::Unknown
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -609,5 +784,78 @@ mod tests {
         let step = app("add", vec![lit_i(1), self_call(vec![v("xs")])]);
         let body = lambda(&["xs"], case2(app("null", vec![v("xs")]), lit_i(0), step));
         assert!(matches!(analyze_complexity(&body), ComplexityOutcome::Opaque(_)));
+    }
+
+    // ---- output-size analysis (for `cost.output_size`) ----
+
+    fn int_t() -> J {
+        json!({ "kind": "builtin", "name": "int" })
+    }
+    fn list_int_t() -> J {
+        json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "builtin", "name": "int" }] })
+    }
+    fn nil() -> J {
+        json!({ "kind": "var", "name": "nil" })
+    }
+
+    #[test]
+    fn output_size_parse_and_degree() {
+        assert_eq!(parse_output_size("constant"), OutputSize::Const);
+        assert_eq!(parse_output_size("preserving"), OutputSize::Linear);
+        assert_eq!(parse_output_size("bounded"), OutputSize::Linear);
+        assert_eq!(parse_output_size("quadratic"), OutputSize::Quadratic);
+        assert_eq!(parse_output_size("cubic"), OutputSize::Cubic);
+        assert_eq!(parse_output_size("unknown"), OutputSize::Unknown);
+        assert_eq!(OutputSize::Const.degree(), Some(0));
+        assert_eq!(OutputSize::Quadratic.degree(), Some(2));
+        assert_eq!(OutputSize::Unknown.degree(), None);
+    }
+
+    #[test]
+    fn scalar_result_is_constant_output() {
+        // A recursive `length : List int -> int` returns a scalar → constant output size.
+        let step = app("add", vec![lit_i(1), self_call(vec![app("tail", vec![v("xs")])])]);
+        let body = lambda(&["xs"], case2(app("null", vec![v("xs")]), lit_i(0), step));
+        assert_eq!(analyze_output_size(&int_t(), &body), OutputSize::Const);
+    }
+
+    #[test]
+    fn map_build_is_size_preserving() {
+        // \xs -> case null xs of true -> nil | false -> cons(mul(2,head xs), self(tail xs)) — Θ(n) output.
+        let step = app("cons", vec![app("mul", vec![lit_i(2), app("head", vec![v("xs")])]), self_call(vec![app("tail", vec![v("xs")])])]);
+        let body = lambda(&["xs"], case2(app("null", vec![v("xs")]), nil(), step));
+        assert_eq!(analyze_output_size(&list_int_t(), &body), OutputSize::Linear);
+    }
+
+    #[test]
+    fn naive_reverse_is_size_preserving_not_quadratic() {
+        // append(self(tail), cons(head, nil)): O(n^2) TIME but Θ(n) OUTPUT SIZE — the two are independent.
+        let step = app("append", vec![self_call(vec![app("tail", vec![v("xs")])]), app("cons", vec![app("head", vec![v("xs")]), nil()])]);
+        let body = lambda(&["xs"], case2(app("null", vec![v("xs")]), nil(), step));
+        assert_eq!(analyze_output_size(&list_int_t(), &body), OutputSize::Linear);
+        // (and its TIME is quadratic, confirming the two analyses are distinct)
+        assert_eq!(bound(&body), Class::poly(2));
+    }
+
+    #[test]
+    fn appending_a_whole_param_each_step_is_quadratic_output() {
+        // \xs -> case null xs of true -> nil | false -> append(xs, self(tail xs)) — adds |xs|=Θ(n) per step.
+        let step = app("append", vec![v("xs"), self_call(vec![app("tail", vec![v("xs")])])]);
+        let body = lambda(&["xs"], case2(app("null", vec![v("xs")]), nil(), step));
+        assert_eq!(analyze_output_size(&list_int_t(), &body), OutputSize::Quadratic);
+    }
+
+    #[test]
+    fn nonrecursive_append_is_linear_output() {
+        // \xs ys -> append(xs, ys) — Θ(n) output, no recursion.
+        let body = lambda(&["xs", "ys"], app("append", vec![v("xs"), v("ys")]));
+        assert_eq!(analyze_output_size(&list_int_t(), &body), OutputSize::Linear);
+    }
+
+    #[test]
+    fn opaque_list_build_is_unknown_output() {
+        // \f xs -> map(f, xs): the result's size is unseen through the opaque map.
+        let body = lambda(&["f", "xs"], app("map", vec![v("f"), v("xs")]));
+        assert_eq!(analyze_output_size(&list_int_t(), &body), OutputSize::Unknown);
     }
 }

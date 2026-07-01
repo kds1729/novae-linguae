@@ -575,6 +575,11 @@ def costed_funcs():
     # O(n), one with O(n) work (an `append` of the recursive result) is O(n²). Each declaration here is TIGHT
     # (the checker returns SOUND, not merely VERIFIED-could-be-tighter), so the corpus teaches complexity
     # annotations that are exactly right for their bodies, not just safe over-estimates.
+    # Each also carries the structured v0.3 `cost` (`time` + `output_size`), which `check-complexity`
+    # verifies too: `time` against the inferred running-time class, and `output_size` against the inferred
+    # result-size growth. `reverse_naive_cost` is the showcase that the two are INDEPENDENT — O(n^2) time
+    # but a size-*preserving* (Θ(n)) output — which is exactly what the `compose` precise-complexity path
+    # threads through a pipeline and, until now, trusted without proof.
     n, xs = var("n"), var("xs")
     nil = var("nil")
     return [
@@ -582,21 +587,24 @@ def costed_funcs():
          "summary": "Returns a + b; O(1) — a single primitive addition.", "tags": ["arithmetic", "complexity"],
          "type_ast": fn([INT, INT], INT), "body_ast": lam(["a", "b"], bapp("add", var("a"), var("b"))),
          "examples": [{"args": [2, 3], "result": 5}, {"args": [0, 0], "result": 0}, {"args": [-1, 4], "result": 3}],
-         "complexity": "O(1)", "properties": [], "prove": False, "terminates": "always"},
+         "complexity": "O(1)", "cost": {"time": "O(1)", "output_size": "constant", "measure": "size"},
+         "properties": [], "prove": False, "terminates": "always"},
         {"name": "length_cost", "intent": "Count the elements of a list, in linear time.",
          "summary": "0 for the empty list; otherwise 1 + the length of the tail — O(n).",
          "tags": ["list", "recursion", "complexity"], "type_ast": fn([list_of(INT)], INT),
          "body_ast": lam(["xs"], case_null("xs", int_lit(0), bapp("add", int_lit(1), bself(bapp("tail", xs))))),
          "examples": [{"args": [[]], "result": 0}, {"args": [[1, 2, 3]], "result": 3}, {"args": [[9]], "result": 1}],
-         "complexity": "O(n)", "properties": [], "prove": False, "terminates": "always"},
+         "complexity": "O(n)", "cost": {"time": "O(n)", "output_size": "constant", "measure": "size"},
+         "properties": [], "prove": False, "terminates": "always"},
         {"name": "reverse_naive_cost", "intent": "Reverse a list the naive way, in quadratic time.",
-         "summary": "nil for the empty list; otherwise reverse(tail) ++ [head] — O(n^2), one append per step.",
+         "summary": "nil for the empty list; otherwise reverse(tail) ++ [head] — O(n^2) time, Θ(n) output.",
          "tags": ["list", "recursion", "complexity"], "type_ast": fn([list_of(INT)], list_of(INT)),
          "body_ast": lam(["xs"], case_null("xs", nil,
                                            bapp("append", bself(bapp("tail", xs)),
                                                 bapp("cons", bapp("head", xs), nil)))),
          "examples": [{"args": [[]], "result": []}, {"args": [[1, 2, 3]], "result": [3, 2, 1]}, {"args": [[7]], "result": [7]}],
-         "complexity": "O(n^2)", "properties": [], "prove": False, "terminates": "always"},
+         "complexity": "O(n^2)", "cost": {"time": "O(n^2)", "output_size": "preserving", "measure": "size"},
+         "properties": [], "prove": False, "terminates": "always"},
     ]
 
 
@@ -2748,7 +2756,7 @@ def build_and_verify(spec, workdir):
     record = build_v2_record(spec["name"], spec["type_ast"], examples, spec["body_ast"],
                              properties=spec.get("properties") or None, intent_tags=spec["tags"],
                              terminates=terminates, refinements=spec.get("refinements"),
-                             complexity=spec.get("complexity"))
+                             complexity=spec.get("complexity"), cost=spec.get("cost"))
     # Derivation history (principle 1): stamp derived_from / supersedes with a parent's content-address
     # (the parent is declared as an fn_dep so its hash is known), then re-hash since the content changed.
     # `derived_from` is a LIST of addresses (a function may derive from several); `supersedes` is a single.
@@ -2790,7 +2798,7 @@ def build_and_verify(spec, workdir):
     # SOUND (bound matches) and VERIFIED (declared bound is provably tighter-satisfiable); anything else
     # (UNVERIFIABLE — the sound bound is worse, or the body is opaque) fails the gate for a costed record.
     complexity_checked = []
-    if spec.get("complexity"):
+    if spec.get("complexity") or spec.get("cost"):
         complexity_checked = verdict_tokens(cli(["check-complexity", rec_path, "--body", body_path]).stdout)
 
     example = {
@@ -2823,7 +2831,7 @@ def build_and_verify(spec, workdir):
     ok = (schema_valid and well_typed and examples_passed
           and all(p["verdict"] in ("PROVED",) for p in proofs)
           and "VIOLATED" not in refinements_checked
-          and all(v in ("SOUND", "VERIFIED") for v in complexity_checked))
+          and all(v in ("SOUND", "VERIFIED", "N/A") for v in complexity_checked))
     return example, ok
 
 

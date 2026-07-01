@@ -158,8 +158,10 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   pre-gated `safe_sub` — all populating `signature.refinements` and **proved against their bodies by
   `check-refinement`** in the gate; the reserved variable `result` names the output), **complexity-carrying**
   (3: `sum2_cost` `O(1)` / `length_cost` `O(n)` / `reverse_naive_cost` `O(n^2)` — each declaring a
-  `signature.complexity` bound that is **verified against its body by `check-complexity`** in the gate, a
-  structural no-solver cost analysis; the declared class is exactly the inferred one, so each reads SOUND),
+  `signature.complexity` bound **and structured `cost`** (`time` + `output_size`) that are **verified
+  against its body by `check-complexity`** in the gate, a structural no-solver cost analysis; `reverse_naive`
+  is the showcase that time and output size are independent — `O(n^2)` time yet size-*preserving* output —
+  which is what `compose` threads through a pipeline and, until now, trusted without proof),
   float (4), Maybe (3) / Result (2), scalar `self`-recursion (5: `length_rec` /
   `sum_rec` / `product_rec` / `factorial` / `triangular`), list-building recursion (6: `double_all_rec` …
   `countdown_rec`), integer algebraic laws (7: associativity / distributivity over `+` *and* `−` / identity

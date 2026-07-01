@@ -76,10 +76,13 @@ fn walk(node: &J, records: &HashMap<String, J>, bound: &[String], inf: &mut Effe
         "app" => {
             if let Some(f) = node.get("fn") {
                 // A var callee that is neither a builtin nor a name in scope is an external opaque
-                // function; a bound name is effect-polymorphic (the caller supplies it).
+                // function; a bound name is effect-polymorphic (the caller supplies it). `self` is the
+                // function itself — its effects are the record's own declared set (the recursion's
+                // fixpoint), so a self-call can never introduce an effect the body doesn't already perform,
+                // and must not read as an opaque callee (else every recursive record is UNVERIFIABLE).
                 if f.get("kind").and_then(|k| k.as_str()) == Some("var") {
                     let n = f.get("name").and_then(|n| n.as_str()).unwrap_or_default();
-                    if !is_builtin(n) && !bound.iter().any(|b| b == n) {
+                    if !is_builtin(n) && n != "self" && !bound.iter().any(|b| b == n) {
                         inf.opaque = true;
                     }
                 }
@@ -206,6 +209,17 @@ mod tests {
         let body = json!({ "kind": "lambda", "params": [{ "name": "f" }, { "name": "x" }],
             "body": { "kind": "app", "fn": { "kind": "var", "name": "f" }, "args": [{ "kind": "var", "name": "x" }] } });
         assert!(!infer_effects(&body, &no_records()).opaque);
+    }
+
+    #[test]
+    fn self_call_is_not_opaque() {
+        // \xs -> self(tail xs): a recursive self-call is the function itself (its effects are the record's
+        // own declared set — the fixpoint), so it must not read as an opaque external callee.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "xs" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "self" },
+                      "args": [{ "kind": "app", "fn": { "kind": "var", "name": "tail" }, "args": [{ "kind": "var", "name": "xs" }] }] } });
+        let inf = infer_effects(&body, &no_records());
+        assert!(!inf.opaque && inf.effects.is_empty(), "a pure recursive body is SOUND, not UNVERIFIABLE");
     }
 
     #[test]

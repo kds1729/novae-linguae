@@ -270,6 +270,30 @@ enum Commands {
         #[arg(long)]
         body: PathBuf,
     },
+    /// **Certify** a function record end to end: run every "verified by default" check against the body in
+    /// one pass — `typecheck` (type), `check-effects` (effects ⊆ declared), `check-refinement` (the type
+    /// `nat` + declared `pre`/`post`), `check-termination` (a declared `terminates: always`), and
+    /// `check-complexity` (a declared `complexity` / structured `cost`) — and emit a single verification
+    /// verdict. Prints a per-check table; `--json` emits a machine-readable certificate. A record is
+    /// **CERTIFIED** unless a check actively *fails* its declaration (ILL-TYPED, an UNDER-DECLARED effect, or
+    /// a VIOLATED refinement); conservative UNVERIFIABLE verdicts (a bound/termination the structural
+    /// analysis can't confirm) are noted but don't revoke certification. Exit 1 if not certified.
+    Certify {
+        /// Path to the function record.
+        record: PathBuf,
+        /// Path to the body-expression JSON AST.
+        #[arg(long)]
+        body: PathBuf,
+        /// Directory of records to resolve `fn_ref` callees against (folds in their declared effects).
+        #[arg(long)]
+        records: Option<PathBuf>,
+        /// SMT solver binary for the refinement check.
+        #[arg(long, default_value = "z3")]
+        solver: String,
+        /// Emit the verification certificate as JSON instead of the human table.
+        #[arg(long)]
+        json: bool,
+    },
     /// Prove a record's `forall` `properties[]` over the UNBOUNDED domain with an SMT solver — the rung
     /// above bounded `check-properties`. Each property + the function body is translated to SMT-LIB 2
     /// (the Int/Bool fragment); the solver checks the negation of the law. Reports PROVED (unsat — holds
@@ -585,6 +609,9 @@ fn main() -> ExitCode {
         Commands::CheckRefinement { record, body, solver } => (cmd_check_refinement(&record, &body, &solver), false),
         Commands::CheckTermination { record, body } => (cmd_check_termination(&record, &body), false),
         Commands::CheckComplexity { record, body } => (cmd_check_complexity(&record, &body), false),
+        Commands::Certify { record, body, records, solver, json } => {
+            (cmd_certify(&record, &body, records.as_ref(), &solver, json), false)
+        }
         Commands::Respond { request, records, seed, timestamp } => {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
         }
@@ -849,37 +876,257 @@ fn cmd_check_termination(record: &PathBuf, body: &PathBuf) -> Result<()> {
 }
 
 fn cmd_check_complexity(record: &PathBuf, body: &PathBuf) -> Result<()> {
-    use nl_validator::ComplexityOutcome;
     let record = nl_validator::read_json(record)?;
     let body = nl_validator::read_json(body)?;
+    let inferred = nl_validator::analyze_complexity(&body);
+
+    // (1) The flat `signature.complexity` bound.
     let declared = record.pointer("/signature/complexity").and_then(|v| v.as_str());
-    match nl_validator::analyze_complexity(&body) {
+    println!("{}", time_verdict("complexity", declared, &inferred));
+
+    // (2) The structured `signature.cost`: verify `cost.time` (a time class in the given measure) and
+    //     `cost.output_size` (how the result size grows) — the fields `compose` threads through a pipeline.
+    if let Some(cost) = record.pointer("/signature/cost") {
+        if let Some(t) = cost.get("time").and_then(|t| t.as_str()) {
+            let measure = cost.get("measure").and_then(|m| m.as_str()).unwrap_or("size");
+            println!("{}", time_verdict(&format!("cost.time ({measure})"), Some(t), &inferred));
+        }
+        if let Some(os) = cost.get("output_size").and_then(|o| o.as_str()) {
+            println!("{}", output_size_verdict(&record, &body, os));
+        }
+    }
+    Ok(())
+}
+
+/// Format a time-class verdict line: compare an inferred sound upper bound to a declared `O(…)` class.
+fn time_verdict(label: &str, declared: Option<&str>, inferred: &nl_validator::ComplexityOutcome) -> String {
+    use nl_validator::ComplexityOutcome;
+    match inferred {
         ComplexityOutcome::Opaque(why) => match declared {
-            Some(d) => {
-                println!("UNVERIFIABLE declared `{d}`, but structural analysis can't establish a bound: {why}")
-            }
-            None => println!("UNKNOWN      no complexity declared; structural analysis can't infer one: {why}"),
+            Some(d) => format!("UNVERIFIABLE {label}: declared `{d}`, but structural analysis can't establish a bound: {why}"),
+            None => format!("UNKNOWN      {label}: none declared; structural analysis can't infer one: {why}"),
         },
         ComplexityOutcome::Bound(inferred) => {
             let inf = inferred.display();
             match declared {
-                None => println!("N/A          no `signature.complexity` declared; a sound structural bound is {inf}"),
+                None => format!("N/A          {label}: none declared; a sound structural bound is {inf}"),
                 Some(d) => match nl_validator::parse_class(d) {
-                    None => println!(
-                        "UNVERIFIABLE declared `{d}` is not a recognized complexity class; inferred bound is {inf}"
-                    ),
-                    Some(dc) if inferred == dc => {
-                        println!("SOUND        the body is within its declared `{d}` (inferred bound {inf})")
-                    }
-                    Some(dc) if inferred < dc => println!(
-                        "VERIFIED     provably {inf}, tighter than declared `{d}` — the bound could be strengthened"
-                    ),
-                    Some(_) => println!(
-                        "UNVERIFIABLE declared `{d}`, but the sound structural bound is {inf} (worse) — not established"
-                    ),
+                    None => format!("UNVERIFIABLE {label}: declared `{d}` is not a recognized class; inferred bound is {inf}"),
+                    Some(dc) if *inferred == dc => format!("SOUND        {label}: the body is within its declared `{d}` (inferred bound {inf})"),
+                    Some(dc) if *inferred < dc => format!("VERIFIED     {label}: provably {inf}, tighter than declared `{d}` — could be strengthened"),
+                    Some(_) => format!("UNVERIFIABLE {label}: declared `{d}`, but the sound structural bound is {inf} (worse) — not established"),
                 },
             }
         }
+    }
+}
+
+/// Format an output-size verdict line: compare the inferred result-size growth to a declared `output_size`.
+fn output_size_verdict(record: &serde_json::Value, body: &serde_json::Value, declared: &str) -> String {
+    use nl_validator::OutputSize;
+    let label = "cost.output_size";
+    let result_ty = record.pointer("/signature/type").and_then(unwrap_result_type);
+    let inferred = match result_ty {
+        Some(rt) => nl_validator::analyze_output_size(&rt, body),
+        None => OutputSize::Unknown,
+    };
+    let dec = nl_validator::parse_output_size(declared);
+    match (inferred.degree(), dec.degree()) {
+        (None, _) => format!("UNVERIFIABLE {label}: declared `{declared}`, but the result-size growth can't be inferred ({})", inferred.label()),
+        (_, None) => format!("N/A          {label}: declared `{declared}` (nothing to verify); inferred {}", inferred.label()),
+        (Some(i), Some(d)) if i == d => format!("SOUND        {label}: the result is {declared} (inferred {})", inferred.label()),
+        (Some(i), Some(d)) if i < d => format!("VERIFIED     {label}: provably {}, tighter than declared `{declared}` — could be strengthened", inferred.label()),
+        (Some(_), Some(_)) => format!("UNVERIFIABLE {label}: declared `{declared}`, but the result grows faster ({}) — not established", inferred.label()),
+    }
+}
+
+/// The result type of a record's `signature.type` (unwrapping a `forall`), for output-size analysis.
+fn unwrap_result_type(ty: &serde_json::Value) -> Option<serde_json::Value> {
+    let t = if ty.get("kind").and_then(|k| k.as_str()) == Some("forall") { ty.get("body")? } else { ty };
+    t.get("result").cloned()
+}
+
+/// One check's result inside a certificate.
+struct CheckResult {
+    check: String,
+    verdict: &'static str,
+    detail: String,
+    /// True only when the check *actively failed* its declaration (ILL-TYPED / UNDER-DECLARED / VIOLATED) —
+    /// these revoke certification. A conservative UNVERIFIABLE is not a hard failure.
+    hard_fail: bool,
+}
+
+impl CheckResult {
+    fn new(check: impl Into<String>, verdict: &'static str, detail: impl Into<String>, hard_fail: bool) -> Self {
+        CheckResult { check: check.into(), verdict, detail: detail.into(), hard_fail }
+    }
+}
+
+/// The complexity/cost verdict token + detail for a declared `O(…)` class vs an inferred bound.
+fn time_verdict_parts(declared: &str, inferred: &nl_validator::ComplexityOutcome) -> (&'static str, String) {
+    use nl_validator::ComplexityOutcome;
+    match inferred {
+        ComplexityOutcome::Opaque(why) => ("UNVERIFIABLE", format!("declared `{declared}`, not established: {why}")),
+        ComplexityOutcome::Bound(b) => {
+            let inf = b.display();
+            match nl_validator::parse_class(declared) {
+                None => ("UNVERIFIABLE", format!("declared `{declared}` is not a recognized class (inferred {inf})")),
+                Some(dc) if *b == dc => ("SOUND", format!("within declared `{declared}` (inferred {inf})")),
+                Some(dc) if *b < dc => ("VERIFIED", format!("provably {inf}, tighter than declared `{declared}`")),
+                Some(_) => ("UNVERIFIABLE", format!("declared `{declared}`, but sound bound is {inf} (worse)")),
+            }
+        }
+    }
+}
+
+fn cmd_certify(
+    record: &PathBuf,
+    body: &PathBuf,
+    records: Option<&PathBuf>,
+    solver: &str,
+    json: bool,
+) -> Result<()> {
+    use nl_validator::{ComplexityOutcome, OutputSize, RefinementOutcome, TerminationOutcome};
+    let record = nl_validator::read_json(record)?;
+    let body = nl_validator::read_json(body)?;
+    let sig = record.pointer("/signature");
+    let mut results: Vec<CheckResult> = Vec::new();
+
+    // 1. Type.
+    match nl_validator::typecheck_record(&record, &body) {
+        // `typecheck_record` returns a "WELL-TYPED  <type>" line; keep just the type as the detail.
+        Ok(ty) => {
+            let t = ty.trim().trim_start_matches("WELL-TYPED").trim();
+            results.push(CheckResult::new("typecheck", "WELL-TYPED", t, false));
+        }
+        Err(e) => results.push(CheckResult::new("typecheck", "ILL-TYPED", format!("{e}"), true)),
+    }
+
+    // 2. Effects.
+    let record_map = match records {
+        Some(dir) => nl_validator::build_record_map(dir)?,
+        None => std::collections::HashMap::new(),
+    };
+    let inf = nl_validator::infer_effects(&body, &record_map);
+    let declared_eff: std::collections::BTreeSet<String> = sig
+        .and_then(|s| s.get("effects"))
+        .and_then(|e| e.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let under: Vec<String> = inf.effects.difference(&declared_eff).cloned().collect();
+    let eff_show = inf.effects.iter().cloned().collect::<Vec<_>>().join(", ");
+    if !under.is_empty() {
+        results.push(CheckResult::new("effects", "UNDER-DECLARED", format!("body performs [{}] not declared", under.join(", ")), true));
+    } else if inf.opaque || inf.unresolved {
+        let why = if inf.unresolved { "an unresolved fn_ref callee (pass --records)" } else { "an opaque call may perform more" };
+        results.push(CheckResult::new("effects", "UNVERIFIABLE", format!("inferred [{eff_show}] ⊆ declared, but {why}"), false));
+    } else {
+        results.push(CheckResult::new("effects", "SOUND", format!("effects [{eff_show}] ⊆ declared"), false));
+    }
+
+    // 3. Refinements (type-implied `nat` + declared pre/post).
+    if let Some(sig_type) = record.pointer("/signature/type") {
+        let refinements: Vec<serde_json::Value> =
+            record.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+        for r in nl_validator::check_refinements(sig_type, &refinements, &body, solver) {
+            let (v, hard): (&'static str, bool) = match &r.outcome {
+                RefinementOutcome::Sound => ("SOUND", false),
+                RefinementOutcome::Violated(_) => ("VIOLATED", true),
+                RefinementOutcome::Unverifiable(_) => ("UNVERIFIABLE", false),
+                RefinementOutcome::NotApplicable => ("N/A", false),
+                RefinementOutcome::NoSolver => ("NO-SOLVER", false),
+            };
+            let detail = match &r.outcome {
+                RefinementOutcome::Violated(m) => format!("counterexample: {m}"),
+                RefinementOutcome::Unverifiable(w) => w.clone(),
+                _ => String::new(),
+            };
+            results.push(CheckResult::new(format!("refinement:{}", r.label), v, detail, hard));
+        }
+    }
+
+    // 4. Termination.
+    let declared_term = sig.and_then(|s| s.get("terminates")).and_then(|t| t.as_str()).unwrap_or("unknown");
+    match nl_validator::analyze_termination(&body) {
+        TerminationOutcome::Always if declared_term == "always" => {
+            results.push(CheckResult::new("termination", "SOUND", "provably always-terminates", false))
+        }
+        TerminationOutcome::Always => {
+            results.push(CheckResult::new("termination", "VERIFIED", format!("provably always — declared `{declared_term}` could be strengthened"), false))
+        }
+        TerminationOutcome::Unknown(why) if declared_term == "always" => {
+            results.push(CheckResult::new("termination", "UNVERIFIABLE", format!("declared `always`, not proven: {why}"), false))
+        }
+        TerminationOutcome::Unknown(_) => {
+            results.push(CheckResult::new("termination", "N/A", format!("declared `{declared_term}` (no `always` to verify)"), false))
+        }
+    }
+
+    // 5. Complexity + structured cost.
+    let complexity = nl_validator::analyze_complexity(&body);
+    match sig.and_then(|s| s.get("complexity")).and_then(|c| c.as_str()) {
+        Some(d) => {
+            let (v, detail) = time_verdict_parts(d, &complexity);
+            results.push(CheckResult::new("complexity", v, detail, false));
+        }
+        None => {
+            if let ComplexityOutcome::Bound(b) = &complexity {
+                results.push(CheckResult::new("complexity", "N/A", format!("none declared; inferred {}", b.display()), false));
+            }
+        }
+    }
+    if let Some(cost) = record.pointer("/signature/cost") {
+        if let Some(t) = cost.get("time").and_then(|t| t.as_str()) {
+            let (v, detail) = time_verdict_parts(t, &complexity);
+            results.push(CheckResult::new("cost.time", v, detail, false));
+        }
+        if let Some(os) = cost.get("output_size").and_then(|o| o.as_str()) {
+            let inferred = record
+                .pointer("/signature/type")
+                .and_then(unwrap_result_type)
+                .map(|rt| nl_validator::analyze_output_size(&rt, &body))
+                .unwrap_or(OutputSize::Unknown);
+            let dec = nl_validator::parse_output_size(os);
+            let (v, detail): (&'static str, String) = match (inferred.degree(), dec.degree()) {
+                (None, _) => ("UNVERIFIABLE", format!("declared `{os}`, result-size growth can't be inferred")),
+                (_, None) => ("N/A", format!("declared `{os}` (nothing to verify)")),
+                (Some(i), Some(d)) if i == d => ("SOUND", format!("result is {os} (inferred {})", inferred.label())),
+                (Some(i), Some(d)) if i < d => ("VERIFIED", format!("provably {}, tighter than `{os}`", inferred.label())),
+                (Some(_), Some(_)) => ("UNVERIFIABLE", format!("declared `{os}`, but result grows faster ({})", inferred.label())),
+            };
+            results.push(CheckResult::new("cost.output_size", v, detail, false));
+        }
+    }
+
+    let certified = !results.iter().any(|r| r.hard_fail);
+    let hash = record.get("hash").and_then(|h| h.as_str()).unwrap_or("<unknown>");
+    let body_hash = record.get("body_hash").and_then(|h| h.as_str()).unwrap_or("<unknown>");
+
+    if json {
+        use std::io::Write;
+        let checks: Vec<serde_json::Value> = results
+            .iter()
+            .map(|r| serde_json::json!({ "check": r.check, "verdict": r.verdict, "detail": r.detail }))
+            .collect();
+        let cert = serde_json::json!({
+            "record": hash,
+            "body_hash": body_hash,
+            "checks": checks,
+            "certified": certified,
+        });
+        let pretty = serde_json::to_string_pretty(&cert).map_err(|e| anyhow::anyhow!("{e}"))?;
+        std::io::stdout().write_all(pretty.as_bytes())?;
+        std::io::stdout().write_all(b"\n")?;
+    } else {
+        println!("certify {hash}");
+        for r in &results {
+            println!("  {:<22} {:<14} {}", r.check, r.verdict, r.detail);
+        }
+        println!("  => {}", if certified { "CERTIFIED" } else { "NOT CERTIFIED" });
+    }
+
+    if !certified {
+        return Err(anyhow::anyhow!("record is NOT certified (a check failed its declaration)"));
     }
     Ok(())
 }

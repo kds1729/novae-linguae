@@ -148,6 +148,31 @@ no declaration → **N/A** with the inferred bound reported. Like termination th
 declared-but-unverified metadata field, alongside `typecheck` (type), `check-effects` (effects),
 `check-refinement` (the `nat`/pre/post contracts), and `check-termination` (termination).
 
+`check-complexity` also verifies the **structured `signature.cost`** (v0.3) — the richer form the `compose`
+precise-complexity path threads through a pipeline: its **`time`** class is checked exactly like the flat
+`complexity`, and its **`output_size`** (how the result's size grows with the input — `constant` /
+`preserving` / `bounded` / `quadratic` / `cubic`) is verified against a **structurally inferred sound upper
+bound** on the result size. This closes a real gap: `compose` re-expresses each downstream stage's cost in the
+pipeline's input size *using* `output_size`, and until now trusted it blindly — a stage declared `preserving`
+that actually expanded would make the composite's time bound unsound. Time and output size are **independent**:
+naive `reverse` is `O(n²)` **time** but size-**preserving** (`Θ(n)`) output, and `check-complexity` confirms
+both. The inference is sound and conservative — a scalar result is `constant`; a `List` build is analyzed
+structurally (`cons`/`append`/`reverse` recurrences); a higher-order/opaque or polymorphic result is
+`Unknown` (never claimed smaller than it is).
+
+## Certification — every check in one pass
+
+`nl-validator certify <record> --body <body>` runs **all** of the "verified by default" checks against a
+record in a single pass — `typecheck`, `check-effects`, `check-refinement`, `check-termination`, and
+`check-complexity` (+ structured `cost`) — and emits one verdict. It prints a per-check table, or a
+machine-readable certificate with `--json` (the record + body content-addresses, every check's verdict, and
+the overall `certified` flag). A record is **CERTIFIED** unless a check *actively fails its declaration* — an
+ILL-TYPED body, an UNDER-DECLARED effect, or a VIOLATED refinement (exit 1); the conservative UNVERIFIABLE
+verdicts (a bound or termination the structural analysis can't confirm — e.g. a body using an I/O builtin
+that may block) are noted but do not revoke certification, since none of those checks can *disprove* a claim,
+only fail to establish it. So `certify` turns "verified by default" from six separate invocations into one
+signed-off, re-checkable certificate.
+
 ## Run-backed property verification
 
 `check-properties` evaluates a record's `properties[]` against its `examples[]`. Statically it is

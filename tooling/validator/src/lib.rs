@@ -59,7 +59,10 @@ pub mod terminate;
 pub use terminate::{analyze_termination, TerminationOutcome};
 
 pub mod complexity;
-pub use complexity::{analyze_complexity, parse_class, Class, ComplexityOutcome};
+pub use complexity::{
+    analyze_complexity, analyze_output_size, parse_class, parse_output_size, Class, ComplexityOutcome,
+    OutputSize,
+};
 
 pub mod effects;
 pub use effects::{check_effects, infer_effects};

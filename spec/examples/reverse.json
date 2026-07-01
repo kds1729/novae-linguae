@@ -1,6 +1,6 @@
 {
   "schema_version": "0.2.0",
-  "hash": "fn_655ca32850276e568858fbbf02092fdb443124c71be44ac18a5aff7564c240da",
+  "hash": "fn_e2f0e10b20d981d1d87637f9d3cecf95b02608099d7821f1d7b6c8824baa2e9a",
   "name_hints": [
     "reverse",
     "rev",
@@ -48,6 +48,11 @@
     "effects": [],
     "capabilities": [],
     "complexity": "O(n^2)",
+    "cost": {
+      "time": "O(n^2)",
+      "output_size": "preserving",
+      "measure": "size"
+    },
     "terminates": "always"
   },
   "examples": [
