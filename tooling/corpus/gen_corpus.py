@@ -2800,6 +2800,18 @@ def build_and_verify(spec, workdir):
     complexity_checked = []
     if spec.get("complexity") or spec.get("cost"):
         complexity_checked = verdict_tokens(cli(["check-complexity", rec_path, "--body", body_path]).stdout)
+    # Certification: the capstone — `certify` runs EVERY verified-by-default check in one pass (typecheck /
+    # effects / refinement / termination / complexity+cost) and returns a single verdict. Each record's
+    # certificate is recorded and its `certified` flag joins the verification view; a record that fails a
+    # HARD check (ill-typed / under-declared effect / violated refinement) is not certified and can't enter
+    # the corpus. So every function example ships with a machine-checkable "verified by default" stamp.
+    certified = False
+    cert_out = cli(["certify", rec_path, "--body", body_path, "--records", d, "--json"]).stdout
+    if cert_out.strip():
+        try:
+            certified = bool(json.loads(cert_out).get("certified", False))
+        except json.JSONDecodeError:
+            certified = False
 
     example = {
         "id": spec["name"],
@@ -2826,12 +2838,14 @@ def build_and_verify(spec, workdir):
             "proofs": proofs,
             **({"refinements": refinements_checked} if refinements_checked else {}),
             **({"complexity": complexity_checked} if complexity_checked else {}),
+            "certified": certified,
         },
     }
     ok = (schema_valid and well_typed and examples_passed
           and all(p["verdict"] in ("PROVED",) for p in proofs)
           and "VIOLATED" not in refinements_checked
-          and all(v in ("SOUND", "VERIFIED", "N/A") for v in complexity_checked))
+          and all(v in ("SOUND", "VERIFIED", "N/A") for v in complexity_checked)
+          and certified)
     return example, ok
 
 

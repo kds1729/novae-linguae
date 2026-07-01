@@ -173,6 +173,15 @@ that may block) are noted but do not revoke certification, since none of those c
 only fail to establish it. So `certify` turns "verified by default" from six separate invocations into one
 signed-off, re-checkable certificate.
 
+`certify --sign <seed>` goes one step further and emits a **signed certification record** — a first-class
+commons artifact (top-level `kind: "certification"`, `certification.schema.json`) hashed and Ed25519-signed
+by the same rules as a message, addressed `cert_<hex>`, with `subject`/`body_hash` naming what was certified.
+It is a certifier's tamper-evident attestation that a record is verified, which other agents can rely on
+without re-running the checks (and re-verify with `nl-validator verify`). This closes the loop with the trust
+model and the agent loop: `orchestrate --verify --require-certified` **certifies a discovered function before
+applying it** and aborts if it isn't certified — "assemble, don't write" (principle 4) refined to *assemble
+only from verified parts* (principle 3).
+
 ## Run-backed property verification
 
 `check-properties` evaluates a record's `properties[]` against its `examples[]`. Statically it is

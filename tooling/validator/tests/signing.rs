@@ -5,8 +5,9 @@ mod common;
 
 use common::example;
 use nl_validator::{
-    did_nova_from_pubkey, format_signature, parse_signature, pubkey_from_did_nova, sign_message,
-    signing_key_from_seed, verify_artifact_hash, verify_signature,
+    did_nova_from_pubkey, format_signature, hash_artifact, parse_signature, pubkey_from_did_nova,
+    sign_artifact, sign_message, signing_key_from_seed, verify_artifact_hash, verify_signature,
+    ArtifactKind,
 };
 use serde_json::json;
 
@@ -93,4 +94,57 @@ fn tampering_with_a_record_fails_hash_check() {
     let mut v = example("map.json");
     v["name_hints"] = json!(["tampered"]);
     assert!(!verify_artifact_hash(&v).unwrap().matches);
+}
+
+// ---- signed certification records (`certify --sign`) ----
+
+fn unsigned_certification() -> serde_json::Value {
+    json!({
+        "schema_version": "0.2.0",
+        "kind": "certification",
+        "subject": "fn_deadbeef",
+        "body_hash": "expr_cafebabe",
+        "checks": [{ "check": "typecheck", "verdict": "WELL-TYPED", "detail": "int -> int" }],
+        "certified": true,
+    })
+}
+
+#[test]
+fn signed_certification_hash_and_signature_verify() {
+    let key = signing_key_from_seed("novae-linguae-example-certifier");
+    let mut cert = unsigned_certification();
+    sign_artifact(&mut cert, &key, ArtifactKind::Certification).unwrap();
+
+    // `certify --sign` produces a certification-kind artifact (its hash carries the `cert_` prefix).
+    assert_eq!(ArtifactKind::detect(&cert).unwrap(), ArtifactKind::Certification);
+    assert!(cert["hash"].as_str().unwrap().starts_with("cert_"));
+    // Both the content-hash and the Ed25519 signature verify.
+    assert!(verify_artifact_hash(&cert).unwrap().matches);
+    assert!(verify_signature(&cert).is_ok());
+    // The `from` DID matches the signing identity.
+    assert_eq!(cert["from"], json!(did_nova_from_pubkey(&key.verifying_key())));
+    // Signing is deterministic (byte-reproducible with no timestamp).
+    let mut again = unsigned_certification();
+    sign_artifact(&mut again, &key, ArtifactKind::Certification).unwrap();
+    assert_eq!(again, cert);
+}
+
+#[test]
+fn tampering_with_a_certification_fails_verification() {
+    let key = signing_key_from_seed("novae-linguae-example-certifier");
+    let mut cert = unsigned_certification();
+    sign_artifact(&mut cert, &key, ArtifactKind::Certification).unwrap();
+    // Flip the verdict a certifier signed — signature must no longer verify.
+    let mut tampered = cert.clone();
+    tampered["certified"] = json!(false);
+    assert!(verify_signature(&tampered).is_err(), "a mutated certification must fail signature verification");
+    // And its recorded `hash` no longer matches the content.
+    assert!(!verify_artifact_hash(&tampered).unwrap().matches);
+}
+
+#[test]
+fn certification_hash_uses_the_cert_prefix() {
+    // The auto-detected hash of an (unsigned) certification is `cert_`-prefixed, distinct from fn_/msg_.
+    let h = hash_artifact(&unsigned_certification()).unwrap();
+    assert!(h.starts_with("cert_"), "got {h}");
 }

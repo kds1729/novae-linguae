@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.2/certification.schema.json",
+  "title": "Novae Linguae Certification (v0.2)",
+  "description": "A signed certification record: a certifier's attestation that a function record passed every 'verified by default' check (typecheck, effects, refinement, termination, complexity/cost). Produced by `nl-validator certify --sign <seed>`. Hashed and signed by exactly the same canonical-serialization rules as a Nova Locutio message (remove 'hash' and 'signature' before hashing; remove only 'signature' before signing; resolve the signer's key from the 'from' DID), differing only in the address prefix: a certification 'hash' is rendered as `cert_<64 hex>`. It is a content-addressed, tamper-evident commons artifact other agents can rely on when assembling.",
+  "type": "object",
+  "required": ["schema_version", "kind", "subject", "body_hash", "checks", "certified", "from", "hash", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.2.0"
+    },
+    "kind": {
+      "type": "string",
+      "const": "certification",
+      "description": "Discriminates this artifact as a certification (vs a function record or a Nova Locutio message)."
+    },
+    "subject": {
+      "type": "string",
+      "pattern": "^fn_[0-9a-f]{64}$",
+      "description": "Content-address of the function record this certification attests to."
+    },
+    "body_hash": {
+      "type": "string",
+      "pattern": "^expr_[0-9a-f]{64}$",
+      "description": "Content-address of the body expression that was checked against the record's declared metadata."
+    },
+    "checks": {
+      "type": "array",
+      "description": "Per-check verdicts. Each entry names the check, its verdict, and a human detail.",
+      "items": {
+        "type": "object",
+        "required": ["check", "verdict", "detail"],
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "type": "string",
+            "description": "The check performed, e.g. `typecheck`, `effects`, `refinement:<label>`, `termination`, `complexity`, `cost.time`, `cost.output_size`."
+          },
+          "verdict": {
+            "type": "string",
+            "enum": ["WELL-TYPED", "ILL-TYPED", "SOUND", "VERIFIED", "UNVERIFIABLE", "UNDER-DECLARED", "VIOLATED", "N/A", "NO-SOLVER"]
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "certified": {
+      "type": "boolean",
+      "description": "True unless a check actively FAILED its declaration (an ILL-TYPED body, an UNDER-DECLARED effect, or a VIOLATED refinement). Conservative UNVERIFIABLE verdicts do not revoke certification."
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "Optional ISO-8601 time the certification was produced. Omitted for a byte-reproducible certificate."
+    },
+    "from": {
+      "type": "string",
+      "pattern": "^did:nova:[0-9a-f]{64}$",
+      "description": "DID of the certifying agent (the Ed25519 public key that signed this certification)."
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^cert_[0-9a-f]{64}$",
+      "description": "BLAKE3-256 of the canonical serialization of this certification with 'hash' and 'signature' removed."
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^ed25519:[A-Za-z0-9+/=]+$",
+      "description": "Ed25519 signature over the canonical serialization with only 'signature' removed (so the signature covers the hash)."
+    }
+  }
+}

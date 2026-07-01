@@ -64,6 +64,9 @@ pub use complexity::{
     OutputSize,
 };
 
+pub mod certify;
+pub use certify::{certify_record, CertCheck, Certification};
+
 pub mod effects;
 pub use effects::{check_effects, infer_effects};
 
@@ -241,6 +244,9 @@ pub enum ArtifactKind {
     FunctionRecord,
     Message,
     BodyExpression,
+    /// A signed **certification** record — a certifier's attestation that a function record passed every
+    /// "verified by default" check (`certify --sign`). Hashed and signed like a message.
+    Certification,
 }
 
 impl ArtifactKind {
@@ -250,7 +256,7 @@ impl ArtifactKind {
     fn strip_fields(self) -> &'static [&'static str] {
         match self {
             ArtifactKind::FunctionRecord => &["hash"],
-            ArtifactKind::Message => &["hash", "signature"],
+            ArtifactKind::Message | ArtifactKind::Certification => &["hash", "signature"],
             ArtifactKind::BodyExpression => &[],
         }
     }
@@ -261,6 +267,7 @@ impl ArtifactKind {
             ArtifactKind::FunctionRecord => "fn",
             ArtifactKind::Message => "msg",
             ArtifactKind::BodyExpression => "expr",
+            ArtifactKind::Certification => "cert",
         }
     }
 
@@ -291,6 +298,9 @@ impl ArtifactKind {
             ];
             if SPEECH_ACTS.contains(&kind_str) {
                 return Ok(ArtifactKind::Message);
+            }
+            if kind_str == "certification" {
+                return Ok(ArtifactKind::Certification);
             }
             const BODY_KINDS: &[&str] = &[
                 "var", "lit", "app", "let", "lambda", "case", "field",
@@ -548,6 +558,14 @@ pub fn parse_signature(s: &str) -> Result<Signature> {
 /// Both transformations operate on the same JSON object; the caller passes a
 /// mutable reference.
 pub fn sign_message(value: &mut Value, signing_key: &SigningKey) -> Result<()> {
+    sign_artifact(value, signing_key, ArtifactKind::Message)
+}
+
+/// Sign a signable artifact (a message or a certification) in place, using the artifact kind's hash
+/// prefix. Same convention as [`sign_message`]: sets `from` to the signer's `did:nova:` DID, `hash` to
+/// `BLAKE3(canonical(v − {hash, signature}))` with the kind's prefix, and `signature` to
+/// `ed25519:<base64(Ed25519(canonical(v − {signature})))>` (so the signature covers the hash).
+pub fn sign_artifact(value: &mut Value, signing_key: &SigningKey, kind: ArtifactKind) -> Result<()> {
     let pubkey = signing_key.verifying_key();
     let did = did_nova_from_pubkey(&pubkey);
 
@@ -557,7 +575,7 @@ pub fn sign_message(value: &mut Value, signing_key: &SigningKey) -> Result<()> {
         .ok_or_else(|| anyhow!("expected JSON object at top level"))?;
     obj.insert("from".to_string(), Value::String(did));
 
-    // Compute and set `hash` = BLAKE3(canonical(msg − {hash, signature})).
+    // Compute and set `hash` = BLAKE3(canonical(v − {hash, signature})), with the kind's prefix.
     let mut for_hash = Value::Object(obj.clone());
     if let Some(map) = for_hash.as_object_mut() {
         map.remove("hash");
@@ -565,7 +583,7 @@ pub fn sign_message(value: &mut Value, signing_key: &SigningKey) -> Result<()> {
     }
     let canonical_h = canonicalize(&for_hash)?;
     let h = blake3_hash(&canonical_h);
-    let hash_str = format_hash("msg", &h);
+    let hash_str = format_hash(kind.prefix(), &h);
     obj.insert("hash".to_string(), Value::String(hash_str));
 
     // Compute and set `signature` = Ed25519(canonical(msg − {signature})).

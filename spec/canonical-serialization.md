@@ -108,6 +108,17 @@ The verification sequence is:
 2. Remove `hash` and `signature`, JCS-canonicalize, BLAKE3-256, compare against the stored `hash`.
 3. Both checks must pass.
 
+### Certification records
+
+A **certification** (top-level `kind: "certification"`, produced by `nl-validator certify --sign`) is a
+certifier's signed attestation that a function record passed every "verified by default" check. It is hashed
+and signed by **exactly the same rules as a message** — remove `hash` and `signature` before hashing; remove
+only `signature` before signing (so the signature covers the hash); resolve the signer's key from the `from`
+DID on verification — the only difference being the address prefix: a certification's `hash` is rendered as
+`cert_` followed by 64 lowercase hex characters. Its `subject` (a `fn_…` address) and `body_hash` (an
+`expr_…` address) name what was certified, so a certification is itself a content-addressed, tamper-evident
+commons artifact that other agents can rely on when assembling.
+
 ## Worked example
 
 Given this minimal function record:

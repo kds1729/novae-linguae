@@ -14,9 +14,9 @@ use serde_json::{json, Value as J};
 use std::path::Path;
 
 use crate::{
-    build_link_map, build_record_map, did_nova_from_pubkey, prove_by_induction_with_exploration,
-    prove_property, respond_to_message, sign_message, verify_claim, AttestationGraph, InductionOutcome,
-    Policy, ProofOutcome, TrustVerdict, DEFAULT_LEMMA_DEPTH,
+    build_link_map, build_record_map, certify_record, did_nova_from_pubkey,
+    prove_by_induction_with_exploration, prove_property, respond_to_message, sign_message, verify_claim,
+    AttestationGraph, InductionOutcome, Policy, ProofOutcome, TrustVerdict, DEFAULT_LEMMA_DEPTH,
 };
 
 /// One message in the orchestrated conversation.
@@ -104,12 +104,15 @@ pub fn orchestrate(
     Ok(Run { steps, confirmed })
 }
 
-/// The transcript of a *verified* orchestration: discover → trust-gate → prove the function's own
-/// declared property → apply → re-verify the result.
+/// The transcript of a *verified* orchestration: discover → trust-gate → **certify** the function → prove
+/// its own declared property → apply → re-verify the result.
 pub struct VerifiedRun {
     pub steps: Vec<Step>,
     /// Whether the discovered function is trusted under the policy (`None` if no policy was supplied).
     pub trusted: Option<bool>,
+    /// Whether the chosen function is **certified** — every "verified by default" check passed (`None` if
+    /// the run aborted before the certify step, or the function's body was unavailable to certify).
+    pub certified: Option<bool>,
     /// `(property name, proved?)` for the discovered function's first `forall` property (`None` if it
     /// has none, or if the run aborted before the proof step).
     pub property: Option<(String, bool)>,
@@ -323,6 +326,7 @@ pub fn orchestrate_verified(
     policy: Option<&Policy>,
     attestations: &[J],
     timestamp: Option<&str>,
+    require_certified: bool,
 ) -> Result<VerifiedRun> {
     let link = build_link_map(records_dir)?;
     let records = build_record_map(records_dir)?;
@@ -352,7 +356,7 @@ pub fn orchestrate_verified(
     let compatible: Vec<String> =
         matches.into_iter().filter(|m| records.get(m).is_some_and(|r| signature_fits(r, &args, &records))).collect();
     if compatible.is_empty() {
-        return Ok(VerifiedRun { steps, trusted: None, property: None, confirmed: false });
+        return Ok(VerifiedRun { steps, trusted: None, certified: None, property: None, confirmed: false });
     }
 
     // TRUST GATE + DISAMBIGUATION: among the signature-compatible candidates, rank by the local policy
@@ -381,12 +385,35 @@ pub fn orchestrate_verified(
                         message: json!({ "chosen": null, "trusted": false,
                             "reason": "no discovered function is trusted under the policy", "candidates": candidates }),
                     });
-                    return Ok(VerifiedRun { steps, trusted: Some(false), property: None, confirmed: false });
+                    return Ok(VerifiedRun { steps, trusted: Some(false), certified: None, property: None, confirmed: false });
                 }
             }
         }
         None => (compatible[0].clone(), None),
     };
+
+    // CERTIFY the chosen function before using it — run every "verified by default" check (type, effects,
+    // refinements, termination, complexity/cost) against its body. "Assemble, don't write" only yields
+    // verifiable artifacts if the pieces are themselves verified (principle 3); with `require_certified`,
+    // a function that isn't certified aborts the run rather than being applied.
+    let certified = match (records.get(&target), link.get(&target)) {
+        (Some(rec), Some(body)) => {
+            let cert = certify_record(rec, body, &records, solver);
+            let failed: Vec<&str> = cert.checks.iter().filter(|c| c.hard_fail).map(|c| c.check.as_str()).collect();
+            steps.push(Step {
+                label: "certify".into(),
+                message: json!({ "function": target, "certified": cert.certified,
+                    "checks": cert.checks.iter().map(|c| json!({ "check": c.check, "verdict": c.verdict })).collect::<Vec<_>>(),
+                    "failed": failed }),
+            });
+            Some(cert.certified)
+        }
+        // No resolvable body to certify — leave `certified` unknown rather than claim a verdict.
+        _ => None,
+    };
+    if require_certified && certified != Some(true) {
+        return Ok(VerifiedRun { steps, trusted, certified, property: None, confirmed: false });
+    }
 
     // PROVE the discovered function's own declared property — verify the *piece*, not just one result.
     let property = records.get(&target).and_then(|r| r.get("properties")).and_then(|p| p.as_array()).and_then(|ps| {
@@ -414,14 +441,14 @@ pub fn orchestrate_verified(
     let kind = commit.get("kind").and_then(|k| k.as_str()).unwrap_or("?").to_string();
     steps.push(Step { label: kind.clone(), message: commit.clone() });
     if kind != "commit" {
-        return Ok(VerifiedRun { steps, trusted, property, confirmed: false });
+        return Ok(VerifiedRun { steps, trusted, certified, property, confirmed: false });
     }
     let assert = respond_to_message(&commit, link.clone(), records.clone(), responder, timestamp)?;
 
     // RE-VERIFY the result by re-running the claim (trust nothing — principle 3).
     let confirmed = verify_claim(&assert, link.clone()).unwrap_or(false);
     steps.push(Step { label: "assert".into(), message: assert });
-    Ok(VerifiedRun { steps, trusted, property, confirmed })
+    Ok(VerifiedRun { steps, trusted, certified, property, confirmed })
 }
 
 #[cfg(test)]
@@ -560,9 +587,10 @@ mod tests {
         let run = orchestrate_verified(
             &examples(), "arithmetic",
             vec![json!({ "kind": "int", "value": 2 }), json!({ "kind": "int", "value": 3 })],
-            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"), s, Some(&pol), &atts, None,
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"), s, Some(&pol), &atts, None, true,
         ).unwrap();
         assert_eq!(run.trusted, Some(true));
+        assert_eq!(run.certified, Some(true), "the chosen function certified (require_certified passed)");
         assert!(run.property.map(|(_, p)| p).unwrap_or(false), "the chosen function's property proved");
         assert!(run.confirmed, "add(2,3) = 5 re-verified");
         let chosen = run.steps.iter().find(|s| s.label == "trust").unwrap().message.get("chosen").unwrap().as_str().unwrap().to_string();
@@ -579,14 +607,15 @@ mod tests {
         let pol = policy(&[&did(root)]);
         let run = orchestrate_verified(
             &examples(), "arithmetic", vec![json!({ "kind": "nat", "value": 21 })],
-            &orch, &resp, s, Some(&pol), &atts, None,
+            &orch, &resp, s, Some(&pol), &atts, None, true,
         ).unwrap();
 
         assert_eq!(run.trusted, Some(true), "the vouched function is trusted");
+        assert_eq!(run.certified, Some(true), "the vouched function is also certified");
         assert_eq!(run.property, Some(("doubles".to_string(), true)), "its declared property is proved");
         assert!(run.confirmed, "the applied result re-verifies");
         let labels: Vec<&str> = run.steps.iter().map(|x| x.label.as_str()).collect();
-        assert_eq!(labels, ["query", "ack", "trust", "prove", "propose", "commit", "assert"]);
+        assert_eq!(labels, ["query", "ack", "trust", "certify", "prove", "propose", "commit", "assert"]);
     }
 
     #[test]
@@ -622,7 +651,7 @@ mod tests {
         let pol = policy(&[&did("lonely-root")]);
         let run = orchestrate_verified(
             &examples(), "arithmetic", vec![json!({ "kind": "nat", "value": 21 })],
-            &orch, &resp, "z3", Some(&pol), &[], None,
+            &orch, &resp, "z3", Some(&pol), &[], None, false,
         ).unwrap();
 
         assert_eq!(run.trusted, Some(false));

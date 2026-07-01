@@ -293,6 +293,15 @@ enum Commands {
         /// Emit the verification certificate as JSON instead of the human table.
         #[arg(long)]
         json: bool,
+        /// Sign the certificate with the deterministic Ed25519 key derived from this seed, producing a
+        /// content-addressed, signed **certification** record (a first-class commons artifact). Implies
+        /// JSON output. Verify it later with `nl-validator verify`.
+        #[arg(long)]
+        sign: Option<String>,
+        /// Optional ISO-8601 timestamp to stamp into a signed certification (omitted → no timestamp, so the
+        /// certificate stays byte-reproducible).
+        #[arg(long)]
+        timestamp: Option<String>,
     },
     /// Prove a record's `forall` `properties[]` over the UNBOUNDED domain with an SMT solver — the rung
     /// above bounded `check-properties`. Each property + the function body is translated to SMT-LIB 2
@@ -427,6 +436,10 @@ enum Commands {
         /// SMT solver for the `--verify` proof step.
         #[arg(long, default_value = "z3")]
         solver: String,
+        /// In the `--verify` loop, **certify** the discovered function (every verified-by-default check)
+        /// before applying it, and ABORT if it isn't certified — "assemble only from verified parts".
+        #[arg(long)]
+        require_certified: bool,
     },
     /// Verify a Nova Locutio `assert` by RE-RUNNING its `predicate` claim against the commons:
     /// resolve the claim's content-addressed function(s) from `--records` and evaluate it. The
@@ -609,8 +622,8 @@ fn main() -> ExitCode {
         Commands::CheckRefinement { record, body, solver } => (cmd_check_refinement(&record, &body, &solver), false),
         Commands::CheckTermination { record, body } => (cmd_check_termination(&record, &body), false),
         Commands::CheckComplexity { record, body } => (cmd_check_complexity(&record, &body), false),
-        Commands::Certify { record, body, records, solver, json } => {
-            (cmd_certify(&record, &body, records.as_ref(), &solver, json), false)
+        Commands::Certify { record, body, records, solver, json, sign, timestamp } => {
+            (cmd_certify(&record, &body, records.as_ref(), &solver, json, sign.as_deref(), timestamp.as_deref()), false)
         }
         Commands::Respond { request, records, seed, timestamp } => {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
@@ -632,9 +645,9 @@ fn main() -> ExitCode {
         Commands::Authorize { policy, capability, grantee, delegations, at } => {
             (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
-        Commands::Orchestrate { records, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver } => {
+        Commands::Orchestrate { records, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified } => {
             if verify {
-                (cmd_orchestrate_verified(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver), false)
+                (cmd_orchestrate_verified(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified), false)
             } else {
                 (cmd_orchestrate(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
             }
@@ -742,7 +755,7 @@ fn cmd_verify(record: &PathBuf, kind_override: Option<nl_validator::ArtifactKind
             println!("signature N/A   function records have no signature");
             true
         }
-        nl_validator::ArtifactKind::Message => match nl_validator::verify_signature(&value) {
+        nl_validator::ArtifactKind::Message | nl_validator::ArtifactKind::Certification => match nl_validator::verify_signature(&value) {
             Ok(()) => {
                 println!("signature PASS");
                 true
@@ -946,181 +959,59 @@ fn unwrap_result_type(ty: &serde_json::Value) -> Option<serde_json::Value> {
     t.get("result").cloned()
 }
 
-/// One check's result inside a certificate.
-struct CheckResult {
-    check: String,
-    verdict: &'static str,
-    detail: String,
-    /// True only when the check *actively failed* its declaration (ILL-TYPED / UNDER-DECLARED / VIOLATED) —
-    /// these revoke certification. A conservative UNVERIFIABLE is not a hard failure.
-    hard_fail: bool,
-}
-
-impl CheckResult {
-    fn new(check: impl Into<String>, verdict: &'static str, detail: impl Into<String>, hard_fail: bool) -> Self {
-        CheckResult { check: check.into(), verdict, detail: detail.into(), hard_fail }
-    }
-}
-
-/// The complexity/cost verdict token + detail for a declared `O(…)` class vs an inferred bound.
-fn time_verdict_parts(declared: &str, inferred: &nl_validator::ComplexityOutcome) -> (&'static str, String) {
-    use nl_validator::ComplexityOutcome;
-    match inferred {
-        ComplexityOutcome::Opaque(why) => ("UNVERIFIABLE", format!("declared `{declared}`, not established: {why}")),
-        ComplexityOutcome::Bound(b) => {
-            let inf = b.display();
-            match nl_validator::parse_class(declared) {
-                None => ("UNVERIFIABLE", format!("declared `{declared}` is not a recognized class (inferred {inf})")),
-                Some(dc) if *b == dc => ("SOUND", format!("within declared `{declared}` (inferred {inf})")),
-                Some(dc) if *b < dc => ("VERIFIED", format!("provably {inf}, tighter than declared `{declared}`")),
-                Some(_) => ("UNVERIFIABLE", format!("declared `{declared}`, but sound bound is {inf} (worse)")),
-            }
-        }
-    }
-}
-
 fn cmd_certify(
     record: &PathBuf,
     body: &PathBuf,
     records: Option<&PathBuf>,
     solver: &str,
     json: bool,
+    sign: Option<&str>,
+    timestamp: Option<&str>,
 ) -> Result<()> {
-    use nl_validator::{ComplexityOutcome, OutputSize, RefinementOutcome, TerminationOutcome};
     let record = nl_validator::read_json(record)?;
     let body = nl_validator::read_json(body)?;
-    let sig = record.pointer("/signature");
-    let mut results: Vec<CheckResult> = Vec::new();
-
-    // 1. Type.
-    match nl_validator::typecheck_record(&record, &body) {
-        // `typecheck_record` returns a "WELL-TYPED  <type>" line; keep just the type as the detail.
-        Ok(ty) => {
-            let t = ty.trim().trim_start_matches("WELL-TYPED").trim();
-            results.push(CheckResult::new("typecheck", "WELL-TYPED", t, false));
-        }
-        Err(e) => results.push(CheckResult::new("typecheck", "ILL-TYPED", format!("{e}"), true)),
-    }
-
-    // 2. Effects.
     let record_map = match records {
         Some(dir) => nl_validator::build_record_map(dir)?,
         None => std::collections::HashMap::new(),
     };
-    let inf = nl_validator::infer_effects(&body, &record_map);
-    let declared_eff: std::collections::BTreeSet<String> = sig
-        .and_then(|s| s.get("effects"))
-        .and_then(|e| e.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-        .unwrap_or_default();
-    let under: Vec<String> = inf.effects.difference(&declared_eff).cloned().collect();
-    let eff_show = inf.effects.iter().cloned().collect::<Vec<_>>().join(", ");
-    if !under.is_empty() {
-        results.push(CheckResult::new("effects", "UNDER-DECLARED", format!("body performs [{}] not declared", under.join(", ")), true));
-    } else if inf.opaque || inf.unresolved {
-        let why = if inf.unresolved { "an unresolved fn_ref callee (pass --records)" } else { "an opaque call may perform more" };
-        results.push(CheckResult::new("effects", "UNVERIFIABLE", format!("inferred [{eff_show}] ⊆ declared, but {why}"), false));
-    } else {
-        results.push(CheckResult::new("effects", "SOUND", format!("effects [{eff_show}] ⊆ declared"), false));
+    let cert = nl_validator::certify_record(&record, &body, &record_map, solver);
+    let certified = cert.certified;
+
+    // The certification artifact — the same object whether printed as JSON or signed into a commons record.
+    let checks: Vec<serde_json::Value> = cert
+        .checks
+        .iter()
+        .map(|c| serde_json::json!({ "check": c.check, "verdict": c.verdict, "detail": c.detail }))
+        .collect();
+    let mut cert_json = serde_json::json!({
+        "schema_version": "0.2.0",
+        "kind": "certification",
+        "subject": cert.subject,
+        "body_hash": cert.body_hash,
+        "checks": checks,
+        "certified": certified,
+    });
+    if let Some(ts) = timestamp {
+        cert_json.as_object_mut().unwrap().insert("timestamp".into(), serde_json::Value::String(ts.into()));
     }
 
-    // 3. Refinements (type-implied `nat` + declared pre/post).
-    if let Some(sig_type) = record.pointer("/signature/type") {
-        let refinements: Vec<serde_json::Value> =
-            record.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
-        for r in nl_validator::check_refinements(sig_type, &refinements, &body, solver) {
-            let (v, hard): (&'static str, bool) = match &r.outcome {
-                RefinementOutcome::Sound => ("SOUND", false),
-                RefinementOutcome::Violated(_) => ("VIOLATED", true),
-                RefinementOutcome::Unverifiable(_) => ("UNVERIFIABLE", false),
-                RefinementOutcome::NotApplicable => ("N/A", false),
-                RefinementOutcome::NoSolver => ("NO-SOLVER", false),
-            };
-            let detail = match &r.outcome {
-                RefinementOutcome::Violated(m) => format!("counterexample: {m}"),
-                RefinementOutcome::Unverifiable(w) => w.clone(),
-                _ => String::new(),
-            };
-            results.push(CheckResult::new(format!("refinement:{}", r.label), v, detail, hard));
-        }
-    }
-
-    // 4. Termination.
-    let declared_term = sig.and_then(|s| s.get("terminates")).and_then(|t| t.as_str()).unwrap_or("unknown");
-    match nl_validator::analyze_termination(&body) {
-        TerminationOutcome::Always if declared_term == "always" => {
-            results.push(CheckResult::new("termination", "SOUND", "provably always-terminates", false))
-        }
-        TerminationOutcome::Always => {
-            results.push(CheckResult::new("termination", "VERIFIED", format!("provably always — declared `{declared_term}` could be strengthened"), false))
-        }
-        TerminationOutcome::Unknown(why) if declared_term == "always" => {
-            results.push(CheckResult::new("termination", "UNVERIFIABLE", format!("declared `always`, not proven: {why}"), false))
-        }
-        TerminationOutcome::Unknown(_) => {
-            results.push(CheckResult::new("termination", "N/A", format!("declared `{declared_term}` (no `always` to verify)"), false))
-        }
-    }
-
-    // 5. Complexity + structured cost.
-    let complexity = nl_validator::analyze_complexity(&body);
-    match sig.and_then(|s| s.get("complexity")).and_then(|c| c.as_str()) {
-        Some(d) => {
-            let (v, detail) = time_verdict_parts(d, &complexity);
-            results.push(CheckResult::new("complexity", v, detail, false));
-        }
-        None => {
-            if let ComplexityOutcome::Bound(b) = &complexity {
-                results.push(CheckResult::new("complexity", "N/A", format!("none declared; inferred {}", b.display()), false));
-            }
-        }
-    }
-    if let Some(cost) = record.pointer("/signature/cost") {
-        if let Some(t) = cost.get("time").and_then(|t| t.as_str()) {
-            let (v, detail) = time_verdict_parts(t, &complexity);
-            results.push(CheckResult::new("cost.time", v, detail, false));
-        }
-        if let Some(os) = cost.get("output_size").and_then(|o| o.as_str()) {
-            let inferred = record
-                .pointer("/signature/type")
-                .and_then(unwrap_result_type)
-                .map(|rt| nl_validator::analyze_output_size(&rt, &body))
-                .unwrap_or(OutputSize::Unknown);
-            let dec = nl_validator::parse_output_size(os);
-            let (v, detail): (&'static str, String) = match (inferred.degree(), dec.degree()) {
-                (None, _) => ("UNVERIFIABLE", format!("declared `{os}`, result-size growth can't be inferred")),
-                (_, None) => ("N/A", format!("declared `{os}` (nothing to verify)")),
-                (Some(i), Some(d)) if i == d => ("SOUND", format!("result is {os} (inferred {})", inferred.label())),
-                (Some(i), Some(d)) if i < d => ("VERIFIED", format!("provably {}, tighter than `{os}`", inferred.label())),
-                (Some(_), Some(_)) => ("UNVERIFIABLE", format!("declared `{os}`, but result grows faster ({})", inferred.label())),
-            };
-            results.push(CheckResult::new("cost.output_size", v, detail, false));
-        }
-    }
-
-    let certified = !results.iter().any(|r| r.hard_fail);
-    let hash = record.get("hash").and_then(|h| h.as_str()).unwrap_or("<unknown>");
-    let body_hash = record.get("body_hash").and_then(|h| h.as_str()).unwrap_or("<unknown>");
-
-    if json {
+    if let Some(seed) = sign {
+        // Sign the certification into a content-addressed, verifiable commons artifact.
         use std::io::Write;
-        let checks: Vec<serde_json::Value> = results
-            .iter()
-            .map(|r| serde_json::json!({ "check": r.check, "verdict": r.verdict, "detail": r.detail }))
-            .collect();
-        let cert = serde_json::json!({
-            "record": hash,
-            "body_hash": body_hash,
-            "checks": checks,
-            "certified": certified,
-        });
-        let pretty = serde_json::to_string_pretty(&cert).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let key = nl_validator::signing_key_from_seed(seed);
+        nl_validator::sign_artifact(&mut cert_json, &key, nl_validator::ArtifactKind::Certification)?;
+        let pretty = serde_json::to_string_pretty(&cert_json).map_err(|e| anyhow::anyhow!("{e}"))?;
+        std::io::stdout().write_all(pretty.as_bytes())?;
+        std::io::stdout().write_all(b"\n")?;
+    } else if json {
+        use std::io::Write;
+        let pretty = serde_json::to_string_pretty(&cert_json).map_err(|e| anyhow::anyhow!("{e}"))?;
         std::io::stdout().write_all(pretty.as_bytes())?;
         std::io::stdout().write_all(b"\n")?;
     } else {
-        println!("certify {hash}");
-        for r in &results {
-            println!("  {:<22} {:<14} {}", r.check, r.verdict, r.detail);
+        println!("certify {}", cert.subject);
+        for c in &cert.checks {
+            println!("  {:<22} {:<14} {}", c.check, c.verdict, c.detail);
         }
         println!("  => {}", if certified { "CERTIFIED" } else { "NOT CERTIFIED" });
     }
@@ -1496,6 +1387,7 @@ fn cmd_orchestrate_verified(
     policy: Option<&PathBuf>,
     attestations: &[PathBuf],
     solver: &str,
+    require_certified: bool,
 ) -> Result<()> {
     if intents.len() != 1 {
         anyhow::bail!("--verify supports exactly one --intent (got {})", intents.len());
@@ -1505,7 +1397,7 @@ fn cmd_orchestrate_verified(
     let resp = nl_validator::signing_key_from_seed(responder_seed);
     let pol = policy.map(|p| nl_validator::read_json(p).and_then(|j| nl_validator::Policy::from_json(&j))).transpose()?;
     let atts = attestations.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
-    let run = nl_validator::orchestrate_verified(records, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp)?;
+    let run = nl_validator::orchestrate_verified(records, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified)?;
 
     for step in &run.steps {
         let m = &step.message;
@@ -1513,6 +1405,7 @@ fn cmd_orchestrate_verified(
             "query" => format!("intent {}", m.pointer("/body/pattern/intent_tags").map(|v| v.to_string()).unwrap_or_default()),
             "ack" => format!("matches {}", m.pointer("/body/result/matches").map(|v| v.to_string()).unwrap_or_default()),
             "trust" => format!("trusted={} — {}", m.get("trusted").map(|v| v.to_string()).unwrap_or_default(), m.get("reason").and_then(|r| r.as_str()).unwrap_or("")),
+            "certify" => format!("certified={} {}", m.get("certified").map(|v| v.to_string()).unwrap_or_default(), m.get("failed").map(|v| v.to_string()).unwrap_or_default()),
             "prove" => format!("property `{}` proved={}", m.get("property").and_then(|p| p.as_str()).unwrap_or(""), m.get("proved").map(|v| v.to_string()).unwrap_or_default()),
             "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
             "assert" => format!("result {}", m.pointer("/body/claim/expr/args/1/value").map(|v| v.to_string()).unwrap_or_default()),
@@ -1523,11 +1416,15 @@ fn cmd_orchestrate_verified(
 
     let property_ok = run.property.as_ref().map(|(_, p)| *p).unwrap_or(true);
     let trust_ok = run.trusted != Some(false);
-    if run.confirmed && property_ok && trust_ok {
-        println!("CONFIRMED  trusted, its property proved, applied, and re-verified");
+    let certify_ok = !require_certified || run.certified == Some(true);
+    if run.confirmed && property_ok && trust_ok && certify_ok {
+        let cert_note = match run.certified { Some(true) => ", certified", Some(false) => ", NOT certified", None => "" };
+        println!("CONFIRMED  trusted, its property proved{cert_note}, applied, and re-verified");
         Ok(())
     } else if run.trusted == Some(false) {
         Err(anyhow::anyhow!("ABORTED    the discovered function is not trusted under the policy"))
+    } else if require_certified && run.certified != Some(true) {
+        Err(anyhow::anyhow!("ABORTED    the discovered function is not certified (--require-certified)"))
     } else if !property_ok {
         Err(anyhow::anyhow!("NOT-PROVEN the discovered function's own property did not prove"))
     } else {
@@ -1758,6 +1655,11 @@ fn cmd_sign(record: &PathBuf, seed: &str, in_place: bool) -> Result<()> {
         nl_validator::ArtifactKind::BodyExpression => {
             return Err(anyhow::anyhow!(
                 "`sign` only applies to Nova Locutio messages; got a body expression"
+            ));
+        }
+        nl_validator::ArtifactKind::Certification => {
+            return Err(anyhow::anyhow!(
+                "a certification is signed by `certify --sign <seed>`, not `sign`"
             ));
         }
     }

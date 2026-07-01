@@ -10,6 +10,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 | `function-record.v0.2.schema.json` | v0.2 draft | The function-record schema, v0.2 — same shape as v0.1 but with structured type / predicate / value ASTs (sub-schemas inlined under `$defs` for self-containment). Carries an optional v0.3 `signature.cost` (`time` / `measure` / `output_size`) enabling **precise** complexity composition through pipelines |
 | `message.schema.json` | v0.1 draft | The structured speech-act envelope for *Nova Locutio* messages |
 | `message.v0.2.schema.json` | v0.2 draft | *Nova Locutio* message envelope v0.2 — only breaking change: `assert_body.claim` and `commit_body.commitment` are now required structured ASTs (`claim-expression.schema.json` / `commitment-expression.schema.json`) instead of free-form strings |
+| `certification.schema.json` | v0.2 draft | Signed **certification** record — a certifier's attestation (`certify --sign`) that a function record passed every verified-by-default check. Content-addressed (`cert_<hex>`) and Ed25519-signed by the same canonical rules as a message; `subject`/`body_hash` name what was certified. A first-class commons artifact the agent loop can require before assembling |
 | `type-expression.schema.json` | v0.1 draft | Structured AST for *Nova Lingua* type expressions (used inline by `function-record.v0.2.schema.json`) |
 | `predicate-expression.schema.json` | v0.1 draft | Structured AST for refinement predicates and property tests (used inline by `function-record.v0.2.schema.json`) |
 | `value-expression.schema.json` | v0.1 draft | Structured AST for values in `examples.args` / `examples.result` (used inline by `function-record.v0.2.schema.json`) |
@@ -200,6 +201,9 @@ The reference validator at [`tooling/validator/`](../tooling/validator/) provide
 ./tooling/validator/target/release/nl-validator check-complexity  spec/examples/reverse.json --body spec/examples/body-reverse.json
 # Certify a record end to end: every "verified by default" check in one pass, one certificate (--json).
 ./tooling/validator/target/release/nl-validator certify spec/examples/reverse.json --body spec/examples/body-reverse.json
+# Sign the certificate into a content-addressed commons artifact (cert_… hash + Ed25519), then verify it.
+./tooling/validator/target/release/nl-validator certify spec/examples/reverse.json --body spec/examples/body-reverse.json --sign novae-linguae-example-certifier > cert.json
+./tooling/validator/target/release/nl-validator verify cert.json
 
 # Effect enforcement (spec/evaluation.md): `run` grants exactly the record's declared effects;
 # a standalone body needs --grant for any effect its builtins perform (io.console / random / time /
