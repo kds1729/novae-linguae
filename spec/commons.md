@@ -129,6 +129,20 @@ Returns the record JSON. The client re-hashes and verifies (§"verify-on-read").
 
 `200` if present, `404` if absent. No body.
 
+### `GET /v0/records/{hash}/certifications` — certifications about a function
+
+Returns the signed **certification** records (`spec/certification.schema.json`, from `certify --sign`) whose
+`subject` is this function's address — the network face of trust-delegation. Certifications are published
+through the ordinary `POST /v0/records` verify-then-store gate (their `cert_` hash and Ed25519 signature are
+checked like any signed artifact) and are content-addressed like any record. The node **stores and serves,
+but does not judge** (principle 7): the client verifies each certification and decides, under its *own* local
+policy, whether any certifier is trusted (`nl-validator certified`). `?certified=true` returns only positive
+certifications; by default all are returned (a `certified: false` record is served too — transparency).
+
+```
+200 OK   { "subject": "fn_…", "certifications": [ <signed cert>, … ], "count": 1 }
+```
+
 ### `POST /v0/query` — typed discovery (exact, portable)
 
 Body: a structured filter. All fields are optional and combine with AND.

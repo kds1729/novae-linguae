@@ -10,6 +10,7 @@ _ADDR = r"(?P<address>[a-z]+_[0-9a-f]{64})"
 urlpatterns = [
     path("v0/records", views.records),                 # POST publish
     re_path(rf"^v0/records/{_ADDR}$", views.record),    # GET resolve / HEAD exists
+    re_path(rf"^v0/records/{_ADDR}/certifications$", views.certifications),  # GET certs about a function
     path("v0/query", views.query),                      # POST typed discovery
     path("v0/search", views.search),                    # POST semantic discovery
     path("v0/prove", views.prove),                      # POST prove a record's properties (best-effort)

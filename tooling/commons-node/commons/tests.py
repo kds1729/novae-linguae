@@ -10,6 +10,7 @@ nl-validator; the whole suite skips if that binary is absent.
 import base64
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -71,6 +72,57 @@ class CommonsProtocolTests(TestCase):
         got = self.client.get("/v0/records/fn_" + "0" * 64)
         self.assertEqual(got.status_code, 404)
         self.assertEqual(got.json()["error"], "absent")
+
+    # --- certifications (signed certification records + serve-by-subject) ----------------------
+
+    def _make_certification(self, record="reverse.json", body="body-reverse.json",
+                            seed="novae-linguae-example-certifier"):
+        """Produce a signed certification for an example record via `nl-validator certify --sign`."""
+        out = subprocess.run(
+            [str(VALIDATOR), "certify", str(EXAMPLES / record), "--body", str(EXAMPLES / body),
+             "--sign", seed],
+            capture_output=True, text=True,
+        )
+        return json.loads(out.stdout)
+
+    def test_certification_publishes_and_resolves(self):
+        # A signed certification is a first-class artifact: it verifies on ingest (cert_ hash + Ed25519)
+        # and resolves back byte-for-byte, exactly like a record or a message.
+        cert = self._make_certification()
+        self.assertTrue(cert["hash"].startswith("cert_"))
+        resp = self._publish(cert)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        got = self.client.get(f"/v0/records/{cert['hash']}")
+        self.assertEqual(got.status_code, 200)
+        self.assertEqual(got.json(), cert)
+
+    def test_certifications_served_by_subject(self):
+        # The trust-delegation face: certifications about a function are fetchable by its `fn_…` address.
+        cert = self._make_certification()
+        self._publish(cert)
+        subject = cert["subject"]
+        resp = self.client.get(f"/v0/records/{subject}/certifications")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["subject"], subject)
+        self.assertEqual(body["count"], 1)
+        self.assertEqual(body["certifications"][0]["hash"], cert["hash"])
+        # `?certified=true` returns only positive certifications (this one is certified).
+        only = self.client.get(f"/v0/records/{subject}/certifications?certified=true").json()
+        self.assertEqual(only["count"], 1)
+
+    def test_certifications_absent_subject_is_empty(self):
+        resp = self.client.get("/v0/records/fn_" + "0" * 64 + "/certifications")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["count"], 0)
+
+    def test_tampered_certification_rejected(self):
+        # Flip the signed verdict — the Ed25519 signature no longer verifies, so ingest refuses it (422).
+        cert = self._make_certification()
+        cert["certified"] = not cert["certified"]
+        resp = self._publish(cert)
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn(resp.json()["error"], {"signature_invalid", "hash_mismatch"})
 
     def test_message_publishes_and_verifies(self):
         # request.json is a signed message; verify-on-ingest must check hash AND signature.

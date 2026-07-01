@@ -15,9 +15,14 @@ from django.db import models
 class Record(models.Model):
     # Content-address, e.g. "fn_3a9b…". Unique; the protocol's identity. (id is the sync sequence.)
     hash = models.CharField(max_length=128, unique=True, db_index=True)
-    kind = models.CharField(max_length=32)            # function-record | message | body | type
+    kind = models.CharField(max_length=32)            # function-record | message | body | type | certification
     schema_version = models.CharField(max_length=16)
     raw = models.JSONField()                          # the exact record bytes (as parsed JSON)
+
+    # Certification records (null for other kinds): `subject` is the `fn_…` this certification attests to
+    # (indexed, so "certifications about this function" is a keyed lookup), and `certified` its verdict.
+    subject = models.CharField(max_length=128, null=True, blank=True, db_index=True)
+    certified = models.BooleanField(null=True, blank=True)
 
     # Extracted, queryable fields (function records; null/empty for other kinds).
     effects = models.JSONField(default=list)

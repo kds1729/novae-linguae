@@ -14,8 +14,9 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 
 | Endpoint | Status |
 |----------|--------|
-| `POST /v0/records` — publish (verify-then-store, idempotent) | ✅ |
+| `POST /v0/records` — publish (verify-then-store, idempotent) — records, messages, **and signed certifications** | ✅ |
 | `GET /v0/records/{hash}` — resolve · `HEAD` — exists | ✅ |
+| `GET /v0/records/{hash}/certifications` — the signed certifications about a function | ✅ |
 | `POST /v0/query` — typed (exact) discovery | ✅ |
 | `GET /v0/sync` — replication feed (cursor) | ✅ |
 | `GET /v0/info` — node metadata | ✅ |
@@ -156,6 +157,35 @@ curl -X POST http://127.0.0.1:8000/v0/equiv -H 'content-type: application/json' 
   "g": {"kind":"lambda","params":[{"name":"m"}],"body":{"kind":"app","fn":{"kind":"var","name":"mul"},"args":[{"kind":"lit","value":{"kind":"int","value":2}},{"kind":"var","name":"m"}]}}}'
 ```
 
+## Certifications (`POST /v0/records`, `GET /v0/records/{hash}/certifications`)
+
+A **certification** ([`spec/certification.schema.json`](../../spec/certification.schema.json), produced by
+`nl-validator certify --sign`) is a signed, content-addressed record (`cert_…`) attesting that a function
+passed every "verified by default" check. The node treats it as a first-class artifact: it ingests through
+the **same verify-then-store gate** as everything else (`nl-validator verify` checks the `cert_` hash and the
+Ed25519 signature; `nl-validator validate` checks the schema), resolves back byte-for-byte, and — the point —
+serves the certifications **about a function** by its address:
+
+```bash
+# a certifier publishes a signed certification (same endpoint as any record)
+nl-validator certify spec/examples/reverse.json --body spec/examples/body-reverse.json \
+    --sign "$CERTIFIER_SEED" > cert.json
+curl -X POST http://127.0.0.1:8000/v0/records -H 'content-type: application/json' --data @cert.json
+
+# a consumer that resolved a function fetches its certifications, then decides under ITS OWN policy
+curl http://127.0.0.1:8000/v0/records/<fn-hash>/certifications          # all
+curl http://127.0.0.1:8000/v0/records/<fn-hash>/certifications?certified=true
+# -> {"subject":"fn_…","certifications":[ <signed cert>, … ],"count":1}
+```
+
+This is the network face of **trust-delegation**: the node stores and serves signed certifications but
+**does not judge** them (principle 7 — mechanical, not editorial). A client verifies each returned
+certification (hash + signature) and decides whether any certifier is trusted under its *local* policy —
+`nl-validator certified --policy … --attestations cert.json --subject <fn-hash>` — so it can rely on a
+trusted third party's certification instead of re-running every check itself. Nothing about certification
+gates *admission*: a function is stored on its own merits, and a `certified: false` record is served too
+(transparency), with the trust decision left entirely to the consumer.
+
 ## Seed bundles (`.nlb`)
 
 A portable, self-verifying archive of records for out-of-band distribution — cold-start, disaster
@@ -238,11 +268,12 @@ signature and bundle hash are the real checks.
 ## Tests
 
 ```bash
-python3 manage.py test commons      # 38 tests (37 on SQLite + 1 Postgres-only, auto-skipped)
+python3 manage.py test commons      # 95 tests (94 on SQLite + 1 Postgres-only, auto-skipped)
 ```
 
 Covers publish/idempotency, resolve, `HEAD` exists, `404` for absent, message
-signature verification, tamper and malformed-input rejection, typed query (intent tags, effects,
+signature verification, **signed certifications** (publish/resolve, serve-by-subject, `?certified=true`,
+tamper rejection), tamper and malformed-input rejection, typed query (intent tags, effects,
 name-hint prefix, non-match exclusion, `include=record`), the `sync` feed, `info`, and the
 `loadrecords` pipeline. The verify-gated tests skip if `nl-validator` isn't built; the **semantic
 search** tests run regardless — embedding determinism / L2-normalization / relevance ordering,

@@ -18,7 +18,7 @@ from .query import QueryError, run_query
 from .search import run_search, SearchError
 
 _SCHEMA_VERSIONS = ["0.1.0", "0.2.0"]
-_KINDS = ["function-record", "message", "body", "type"]
+_KINDS = ["function-record", "message", "body", "type", "certification"]
 
 # Verification failures that mean "the record is not valid" (422) vs. node-side problems.
 _UNPROCESSABLE = {"schema_invalid", "hash_mismatch", "signature_invalid", "unsupported_kind"}
@@ -71,6 +71,29 @@ def record(request, address):
     # Content-addressed records are immutable, so this is safe to cache forever. Lets a CDN/edge front
     # `resolve` at ~100% hit rate and absorb traffic spikes off the origin's metered egress.
     resp["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
+
+
+@csrf_exempt
+def certifications(request, address):
+    """GET /v0/records/{fn-hash}/certifications — the signed certification records about a function.
+
+    The network face of trust-delegation: a client that resolved a function fetches its certifications
+    here, then verifies each (hash + signature) and decides — under *its own* local policy — whether any
+    certifier is trusted (`nl-validator certified`, `Policy.certification_verdict`). The node does not
+    judge; it stores and serves signed attestations (principle 7). `?certified=true` returns only positive
+    certifications (the common case); by default all stored certifications about the subject are returned.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    rows = Record.objects.filter(kind="certification", subject=address)
+    if request.GET.get("certified") == "true":
+        rows = rows.filter(certified=True)
+    certs = [r.raw for r in rows.order_by("id")]
+    resp = JsonResponse({"subject": address, "certifications": certs, "count": len(certs)})
+    # Certifications are content-addressed and immutable, but the SET about a subject grows as new ones
+    # are published, so cache only briefly (unlike an individual immutable `resolve`).
+    resp["Cache-Control"] = "public, max-age=10"
     return resp
 
 
