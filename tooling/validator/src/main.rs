@@ -1189,10 +1189,6 @@ fn cmd_equiv(body_f: &PathBuf, body_g: &PathBuf, solver: &str) -> Result<()> {
             println!("EQUIVALENT   f ≡ g (identical canonical normal form; no solver needed)");
             Ok(())
         }
-        EquivVerdict::EquivalentByCvc5 => {
-            println!("EQUIVALENT   f ≡ g by cvc5 induction (arity>2 fragment beyond the in-house prover)");
-            Ok(())
-        }
         EquivVerdict::Distinct(model) => {
             Err(anyhow::anyhow!("DISTINCT     counterexample: {}", if model.is_empty() { "(model)".into() } else { model }))
         }

@@ -41,7 +41,6 @@
 use serde_json::{json, Value as J};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::induct::{prove_equiv_via_cvc5, Cvc5Equiv};
 use crate::{
     prove_by_induction_with_exploration, prove_equiv_by_induction, prove_property, InductionOutcome,
     ProofOutcome, DEFAULT_LEMMA_DEPTH,
@@ -56,16 +55,13 @@ pub enum EquivVerdict {
     /// meaning-preserving. Established structurally without the solver, so it also covers the both-recursive
     /// case the solver path can only report UNSUPPORTED.
     EquivalentByNormalization,
-    /// Proved `∀ p…. f(p…) = g(p…)` by the **optional cvc5 induction fallback** ([`crate::induct::
-    /// prove_equiv_via_cvc5`]) — reached only for goals beyond the in-house prover's fragment (uniform
-    /// recursion with arity > 2). Sound: cvc5 returns `unknown`, never a false `unsat`.
-    EquivalentByCvc5,
     /// A solver counterexample shows the functions differ; carries the model.
     Distinct(String),
     /// Could not decide (solver gave up, or induction did not close).
     Unknown,
-    /// Outside the supported fragment (nullary, mismatched arity, both-recursive arity > 2, a non-list
-    /// leading recursion parameter, a higher-order parameter, or malformed).
+    /// Outside the supported fragment (nullary, mismatched arity, a non-list leading recursion parameter,
+    /// a higher-order parameter, or malformed). Note: both-recursive arity > 2 is now *supported* (the
+    /// generalized spectator IH is arity-uncapped), reported UNKNOWN — not UNSUPPORTED — when it can't close.
     Unsupported(String),
     /// No SMT solver was available.
     NoSolver,
@@ -343,11 +339,12 @@ pub fn prove_equivalent(body_f: &J, body_g: &J, solver: &str) -> EquivVerdict {
         (eq(apply_self, subst_many(if_, &f_map)), Some(body_g))
     } else {
         // Both sides recurse and normalization (the fast path above) did not reconcile them. Attempt a
-        // two-recursive structural induction over the leading list parameter. Any spectator parameter is
-        // threaded through both functions and generalized in the induction hypothesis, and the step draws
-        // on proved list-algebra lemmas. Arity ≤ 2 (one list + one spectator); arity > 2 reports
-        // UNSUPPORTED from the prover. It reports UNKNOWN (never a false verdict) when the recursions don't
-        // align and no lemma closes it.
+        // two-recursive structural induction over the leading list parameter. Every remaining parameter is
+        // threaded through both functions as a spectator and ∀-generalized in the induction hypothesis, and
+        // the step draws on proved list-algebra lemmas. ANY arity ≥ 1 is supported (arity > 2 included — the
+        // generalized IH closes carried/descending/concrete-unfold spectators uniformly). It reports UNKNOWN
+        // (never a false verdict) when the recursions don't align and no lemma closes it, and UNSUPPORTED
+        // only when the goal is out of the first-order list fragment (non-list leading param, higher-order).
         return match prove_equiv_by_induction(body_f, body_g, solver) {
             InductionOutcome::Proved => EquivVerdict::Equivalent(vec![]),
             InductionOutcome::ProvedWithLemmas(ls) => EquivVerdict::Equivalent(ls),
@@ -355,15 +352,7 @@ pub fn prove_equivalent(body_f: &J, body_g: &J, solver: &str) -> EquivVerdict {
             InductionOutcome::Failed(model) => EquivVerdict::Distinct(model),
             InductionOutcome::NoSolver => EquivVerdict::NoSolver,
             InductionOutcome::Unknown => EquivVerdict::Unknown,
-            // The in-house prover is out of fragment (chiefly arity > 2). Try the OPTIONAL cvc5 induction
-            // fallback: its `--quant-ind` is arity-agnostic and closes uniform-recursion arity>2 goals.
-            // Reached only on this already-give-up path, so it adds no latency to a successful proof; a
-            // graceful no-op (Undecided) when cvc5 isn't installed. Sound — cvc5 never false-`unsat`s.
-            InductionOutcome::Unsupported(why) => match prove_equiv_via_cvc5(body_f, body_g) {
-                Cvc5Equiv::Equivalent => EquivVerdict::EquivalentByCvc5,
-                Cvc5Equiv::Distinct(model) => EquivVerdict::Distinct(model),
-                Cvc5Equiv::Undecided => EquivVerdict::Unsupported(why),
-            },
+            InductionOutcome::Unsupported(why) => EquivVerdict::Unsupported(why),
         };
     };
 
