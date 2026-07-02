@@ -402,11 +402,14 @@ non-leading parameter is threaded through both functions and ∀-quantified in t
 the generalized IH closes carried, descending, and concrete-unfold spectators at any arity. E.g. an arity-3
 `interleave3` (and arity-4 `interleave4`) built with nested `cons` vs one built with `append` of a concrete
 prefix — equal only by unfolding `append` each step — is PROVED in-house; a distinct arity-3 pair is
-refuted by a base case. What stays UNKNOWN at higher arity is a step needing a lemma the generalized IH
-doesn't supply — e.g. two tail-accumulators threading the head element into *different* accumulators (both
-`= a + b + sum(xs)`), which needs an accumulator-invariance lemma. (A cvc5 `--quant-ind` fallback was
-investigated for the arity > 2 gap and reverted: with the in-house arity cap lifted, cvc5 proved nothing
-the in-house prover + normalization don't already, and failed the same residuals.)
+refuted by a base case. Two tail-accumulators that thread the head element into *different* accumulators
+(both `= a + b + sum(xs)`) also PROVE, via **accumulator-collapse lemma discovery**: for a function with
+≥ 2 Int accumulators the prover conjectures and proves (by its own induction) `g(xs, a, b) = g(xs, 0, a+b)`,
+which canonicalizes the interchangeable accumulators; asserting it for both sides lets the two-recursive IH
+bridge the rest. The lemma's e-matching trigger must be the *plain* application `g(x, a, b)` — a trigger
+carrying an interpreted `+` is silently dropped by z3, so the phrasing matters. (A cvc5 `--quant-ind`
+fallback was investigated for the arity > 2 gap and reverted: with the in-house arity cap lifted, cvc5
+proved nothing the in-house prover + normalization don't already.)
 
 `nl-validator cluster <dir>` lifts this to a whole record set — behavioral-equivalence **classes** with a
 canonical representative. To stay tractable it buckets functions by a coarse **signature shape** (arity +

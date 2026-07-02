@@ -901,6 +901,41 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
         if let Some(names) = close_equiv_step_with_lemmas(&mk_step, strides[0], &used, solver) {
             return InductionOutcome::ProvedWithLemmas(names);
         }
+        // Accumulator transfer-invariance. When a function threads elements into ≥ 2 Int accumulators,
+        // moving an amount between two of them can leave the result unchanged. That lemma bridges two
+        // recursions that thread the head into DIFFERENT accumulators — e.g. `\xs a b -> …(a+head)…b` vs
+        // `\xs a b -> …a…(b+head)`, both computing `a + b + sum(xs)` — which the bare spectator IH can't
+        // close (the step needs `g(t, a+h, b) = g(t, a, b+h)`). Prove each such lemma by its own induction,
+        // assert the proved ones (each LHS-triggered), and retry the step. Prove-before-assume ⇒ sound: a
+        // lemma that doesn't hold is never asserted, so this can only close a real equivalence, never mint
+        // a false one.
+        let kws: Vec<&str> = std::iter::once("Lst").chain(spec_kw.iter().copied()).collect();
+        let int_pos: Vec<usize> = (1..kws.len()).filter(|&m| kws[m] == "Int").collect();
+        if int_pos.len() >= 2 {
+            // Canonicalize each function's Int accumulators by collapsing every one into the LAST Int
+            // position (`… p_i … p_last …  →  … 0 … p_i + p_last …`). Prove each collapse by its own
+            // induction, assert the proved ones, retry the step. Both sides then share the canonical
+            // (0, …, 0, Σ) accumulator shape, which the two-recursive IH bridges.
+            let to = *int_pos.last().unwrap();
+            let mut axioms = String::new();
+            let mut names = Vec::new();
+            for func in ["self", "self__g"] {
+                for &from in &int_pos {
+                    if from == to {
+                        continue;
+                    }
+                    if let Some(ax) = prove_accumulator_collapse(&preamble, func, &kws, from, to, solver) {
+                        axioms.push_str(&ax);
+                        names.push(format!("{func}#collapse[{from}->{to}]"));
+                    }
+                }
+            }
+            if !axioms.is_empty() {
+                if let Ok(SatAnswer::Unsat) = run_smt(&mk_step(strides[0], &axioms), solver) {
+                    return InductionOutcome::ProvedWithLemmas(names);
+                }
+            }
+        }
     }
     InductionOutcome::Unknown
 }
@@ -965,6 +1000,79 @@ fn close_equiv_step_with_lemmas<F: Fn(usize, &str) -> String>(
         }
     }
     None
+}
+
+/// Try to prove the **accumulator-collapse** lemma for one recursive function `func` (already defined in
+/// `preamble` as a `define-fun-rec`): zeroing Int parameter position `from` and folding its value into
+/// position `to` leaves the result unchanged —
+///   `∀ xs p1…pn. func(xs, …, p_from, …, p_to, …) = func(xs, …, 0, …, p_from + p_to, …)`.
+/// This canonicalizes a pair of interchangeable accumulators; asserting it for both sides of a
+/// two-recursive equivalence bridges recursions that thread the head into *different* accumulators (e.g.
+/// `\xs a b -> …(a+head)…b` vs `…a…(b+head)`, both `= a + b + sum(xs)`).
+///
+/// Proved by structural induction on the leading list parameter `xs`, the other parameters
+/// **∀-generalized in the induction hypothesis** (the standard accumulator generalization). Crucially the
+/// e-matching **trigger is the plain application `func(x, p1, …, pn)`** — NOT a term containing `+`: z3
+/// silently drops triggers built over interpreted arithmetic, so a `+`-in-the-trigger phrasing never
+/// instantiates and the step stalls at UNKNOWN. The rewrite is idempotent (`0 + X` simplifies to `X`), so
+/// the liberal trigger cannot loop. Returns the lemma as an `(assert (forall … :pattern …))` axiom on
+/// success — else `None`.
+///
+/// **Sound:** returned only when BOTH the base (`xs = nil`) and the step (`xs = cons(hh, t)`) are `unsat`.
+/// A function whose accumulators are *not* interchangeable fails the base check and yields `None`, so a
+/// caller may safely assume whatever this hands back.
+fn prove_accumulator_collapse(preamble: &str, func: &str, kws: &[&str], from: usize, to: usize, solver: &str) -> Option<String> {
+    use crate::prove::{run_smt_secs, SatAnswer};
+    let n = kws.len();
+    // Argument spine for `func`: leading list `xs`, then the non-list params `{prefix}m`. `collapse=true`
+    // zeroes position `from` and replaces position `to` with `(+ p_from p_to)`.
+    let spine = |xs: &str, prefix: &str, collapse: bool| -> String {
+        let mut s = format!(" {xs}");
+        for m in 1..n {
+            if collapse && m == from {
+                s.push_str(" 0");
+            } else if collapse && m == to {
+                s.push_str(&format!(" (+ {prefix}{from} {prefix}{to})"));
+            } else {
+                s.push_str(&format!(" {prefix}{m}"));
+            }
+        }
+        s
+    };
+    let free_decls: String = (1..n).map(|m| format!("(declare-const c{m} {})\n", kws[m])).collect();
+
+    // Base: xs = nil.
+    let base = format!(
+        "{preamble}{free_decls}(assert (not (= ({func}{}) ({func}{}))))\n(check-sat)\n",
+        spine("nil", "c", false),
+        spine("nil", "c", true),
+    );
+    if !matches!(run_smt_secs(&base, solver, SEARCH_SECS), Ok(SatAnswer::Unsat)) {
+        return None;
+    }
+
+    // Step: xs = cons(hh, t); IH ∀-generalized over the non-list params, triggered on the PLAIN application.
+    let ih_binders: String = (1..n).map(|m| format!("(b{m} {})", kws[m])).collect();
+    let ih_lhs = format!("({func}{})", spine("t", "b", false));
+    let ih = format!(
+        "(assert (forall ({ih_binders}) (! (= {ih_lhs} ({func}{})) :pattern ({ih_lhs}))))\n",
+        spine("t", "b", true),
+    );
+    let step = format!(
+        "{preamble}(declare-const hh Int)\n(declare-const t Lst)\n{free_decls}{ih}(assert (not (= ({func}{}) ({func}{}))))\n(check-sat)\n",
+        spine("(cons hh t)", "c", false),
+        spine("(cons hh t)", "c", true),
+    );
+    if !matches!(run_smt_secs(&step, solver, DISCHARGE_SECS), Ok(SatAnswer::Unsat)) {
+        return None;
+    }
+
+    // Proved. Emit the axiom over `∀ x p…`, triggered on the plain LHS `func(x, p1, …, pn)`.
+    let axiom_binders: String =
+        "(x Lst)".to_string() + &(1..n).map(|m| format!("(b{m} {})", kws[m])).collect::<String>();
+    let lhs = format!("({func}{})", spine("x", "b", false));
+    let rhs = format!("({func}{})", spine("x", "b", true));
+    Some(format!("(assert (forall ({axiom_binders}) (! (= {lhs} {rhs}) :pattern ({lhs}))))\n"))
 }
 
 // --- prelude (datatype + recursive definitions) ---------------------------------------------------
@@ -1995,14 +2103,30 @@ mod tests {
     }
 
     #[test]
-    fn inhouse_arity3_reordered_accumulator_stays_unknown() {
-        // The honest residual: two tail-accumulators that move `head` into different accumulators (both =
-        // a+b+sum xs) are equal only via an accumulator-invariance lemma the single-step IH doesn't supply.
-        // The prover must report UNKNOWN — never a false Proved, and never a false DISTINCT.
+    fn inhouse_reordered_accumulator_proves_via_collapse_lemma() {
+        // Two tail-accumulators that move `head` into DIFFERENT accumulators (both = a+b+sum xs). The bare
+        // spectator IH can't close the step; accumulator-collapse discovery proves `g(xs,a,b) = g(xs,0,a+b)`
+        // for each side by its own induction, asserts them, and the two-recursive IH bridges the rest.
         let Some(solver) = solver() else { return };
         let acc_a = accum3_body(app("add", vec![var("a"), head_of("xs")]), var("b"));
         let acc_b = accum3_body(var("a"), app("add", vec![var("b"), head_of("xs")]));
-        assert_eq!(prove_equiv_by_induction(&acc_a, &acc_b, solver), InductionOutcome::Unknown);
+        assert!(
+            matches!(prove_equiv_by_induction(&acc_a, &acc_b, solver), InductionOutcome::ProvedWithLemmas(_)),
+            "reordered accumulators should prove via the transfer-invariance lemma",
+        );
+        assert!(matches!(crate::prove_equivalent(&acc_a, &acc_b, solver), crate::EquivVerdict::Equivalent(_)));
+    }
+
+    #[test]
+    fn inhouse_distinct_accumulator_is_not_equated() {
+        // SOUNDNESS: two accumulators that genuinely differ — one threads `head` into `b`, the other threads
+        // `2*head` — compute a+b+sum vs a+b+2·sum. The transfer machinery must NOT equate them; a base case
+        // refutes with a counterexample (never a false Proved/ProvedWithLemmas).
+        let Some(solver) = solver() else { return };
+        let acc_a = accum3_body(var("a"), app("add", vec![var("b"), head_of("xs")]));
+        let acc_b = accum3_body(var("a"), app("add", vec![var("b"), app("mul", vec![lit_int(2), head_of("xs")])]));
+        assert!(matches!(prove_equiv_by_induction(&acc_a, &acc_b, solver), InductionOutcome::Failed(_)));
+        assert!(matches!(crate::prove_equivalent(&acc_a, &acc_b, solver), crate::EquivVerdict::Distinct(_)));
     }
     fn four_prefix(tail: J) -> J {
         app("cons", vec![head_of("xs"), app("cons", vec![head_of("ys"),
