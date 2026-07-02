@@ -108,7 +108,7 @@ def query(request):
         return JsonResponse({"error": "malformed_json", "detail": str(exc)}, status=400)
 
     try:
-        hashes, cursor, complete = run_query(flt)
+        hashes, cursor, complete = run_query(flt, rank=request.GET.get("rank") == "relevance")
     except QueryError as exc:
         return JsonResponse({"error": "malformed_filter", "detail": str(exc)}, status=400)
     include = request.GET.get("include")

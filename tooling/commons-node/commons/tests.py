@@ -214,6 +214,48 @@ class CommonsProtocolTests(TestCase):
         for heavy in ("examples", "properties", "signature", "refinements", "raw"):
             self.assertNotIn(heavy, summ)
 
+    def test_query_rank_by_intent_fit(self):
+        # Both records satisfy the filter; the one carrying MORE of the requested intent tags ranks first.
+        one, two = "fn_" + "1" * 64, "fn_" + "2" * 64
+        Record.objects.create(hash=one, kind="function-record", schema_version="0.2.0", raw={},
+                              intent_tags=["transform"])
+        Record.objects.create(hash=two, kind="function-record", schema_version="0.2.0", raw={},
+                              intent_tags=["transform", "elementwise"])
+        resp = self.client.post("/v0/query?rank=relevance",
+                                data=json.dumps({"intent_tags": {"any": ["transform", "elementwise"]}}),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        results = resp.json()["results"]
+        self.assertEqual(results[0], two)                       # two matched tags -> ranked first
+        self.assertLess(results.index(two), results.index(one))
+
+    def test_query_rank_certified_boost(self):
+        # Equal intent fit; the certified record is surfaced first (verified-quality boost).
+        plain, cert = "fn_" + "3" * 64, "fn_" + "4" * 64
+        Record.objects.create(hash=plain, kind="function-record", schema_version="0.2.0", raw={},
+                              intent_tags=["transform"])
+        Record.objects.create(hash=cert, kind="function-record", schema_version="0.2.0", raw={},
+                              intent_tags=["transform"], certified=True)
+        resp = self.client.post("/v0/query?rank=relevance",
+                                data=json.dumps({"intent_tags": {"any": ["transform"]}}),
+                                content_type="application/json")
+        results = resp.json()["results"]
+        self.assertEqual(results[0], cert)
+        self.assertLess(results.index(cert), results.index(plain))
+
+    def test_query_default_order_is_unranked(self):
+        # Without ?rank, order stays insertion (id) — ranking is strictly opt-in, pagination unaffected.
+        first, second = "fn_" + "5" * 64, "fn_" + "6" * 64
+        Record.objects.create(hash=first, kind="function-record", schema_version="0.2.0", raw={},
+                              intent_tags=["transform"])
+        Record.objects.create(hash=second, kind="function-record", schema_version="0.2.0", raw={},
+                              intent_tags=["transform", "elementwise"])
+        resp = self.client.post("/v0/query",
+                                data=json.dumps({"intent_tags": {"any": ["transform", "elementwise"]}}),
+                                content_type="application/json")
+        # second would outrank first if ranked, but default order is by insertion id
+        self.assertEqual(resp.json()["results"], [first, second])
+
     def test_query_malformed_array_predicate_is_400(self):
         # A bare list where an object predicate is required is a clean 400 (not an AttributeError 500).
         resp = self.client.post("/v0/query", data=json.dumps({"effects": ["io.console"]}),

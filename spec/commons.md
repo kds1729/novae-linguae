@@ -188,6 +188,15 @@ the finalists. The summary is derived from record fields (not heuristic), and ea
   "cursor": "…", "complete": false }
 ```
 
+**Relevance ranking.** Every hit satisfies the filter equally, so the default `id` order discards a real
+signal: how well each hit fits the filter's *soft* preferences. `?rank=relevance` orders the matched set
+by a node-local score — the count of requested `intent_tags.any` a record carries (an on-target match
+dominates), the primacy of a `name_hint_prefix` match (a record's primary name outranks an alias), and a
+small boost for a `certified` record — so the best candidates surface first. Ranking re-orders the exact
+set (it never changes membership), and because it re-orders it returns the single best-`limit` page rather
+than an `id`-cursor feed; it is heuristic and node-local (like `search`), not part of the portable
+guarantee. Combine with `?include=summary` to rank *and* project in one round-trip.
+
 ### `POST /v0/search` — semantic discovery (best-effort, node-local)
 
 Body: a free-text query or a "more like this" target, an optional typed `filter`, and `k`.

@@ -181,19 +181,56 @@ def record_summary(record):
     return out
 
 
-def run_query(flt):
-    """Return (hashes, cursor, complete) for a query filter. Raises QueryError on a malformed filter."""
+def _relevance(record, flt):
+    """A node-local relevance score for a typed-query hit. Every hit *satisfies* the filter equally
+    (typed query is exact), so pure boolean matching discards a real signal: how well each hit fits the
+    filter's SOFT preferences. This scores that —
+      • **intent fit**: the count of requested `intent_tags.any` the record actually carries (a record
+        matching two of the requested tags outranks one matching a single tag; the dominant term);
+      • **name primacy**: a `name_hint_prefix` that matches the record's *primary* name (hint 0) outranks
+        one that matches a later alias (`1/(i+1)`, ≤ 1);
+      • **certification**: a small boost for a verified record (agents assembling prefer certified).
+    Higher is better; the caller breaks ties by `id` (stable, insertion order). Heuristic and node-local
+    like `search` — it re-orders the exact set, it does not change it."""
+    score = 0.0
+    tags = flt.get("intent_tags")
+    if isinstance(tags, dict) and isinstance(tags.get("any"), list):
+        score += len(set(tags["any"]) & set(record.intent_tags))
+    prefix = flt.get("name_hint_prefix")
+    if prefix:
+        for i, hint in enumerate(record.name_hints):
+            if hint.startswith(prefix):
+                score += 1.0 / (i + 1)
+                break
+    if record.certified:
+        score += 0.5
+    return score
+
+
+def run_query(flt, rank=False):
+    """Return (hashes, cursor, complete) for a query filter. Raises QueryError on a malformed filter.
+
+    With ``rank=True`` the matched candidate set (bounded scan) is ordered by [`_relevance`] instead of by
+    `id`, and the single best-`limit` page is returned (`cursor` is `None`): relevance re-orders the set,
+    so id-cursor pagination doesn't apply — ranking is a "surface the best few" view, not a paged feed."""
     validate_filter(flt)
     qs = _scalar_qs(flt)
-
-    cursor = flt.get("cursor")
-    if cursor is not None:
-        qs = qs.filter(id__gt=int(cursor))
 
     try:
         limit = max(1, min(int(flt.get("limit", 100)), 1000))
     except (TypeError, ValueError):
         limit = 100
+
+    if rank:
+        scanned = list(qs[:_DB_SCAN_CAP])
+        matched = [r for r in scanned if _array_ok(r, flt)]
+        matched.sort(key=lambda r: (-_relevance(r, flt), r.id))
+        page = matched[:limit]
+        return [r.hash for r in page], None, len(scanned) < _DB_SCAN_CAP
+
+    cursor = flt.get("cursor")
+    if cursor is not None:
+        qs = qs.filter(id__gt=int(cursor))
 
     scanned = list(qs[:_DB_SCAN_CAP])
     matched = [r for r in scanned if _array_ok(r, flt)]
