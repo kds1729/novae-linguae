@@ -397,6 +397,17 @@ a non-list leading parameter, a higher-order parameter, or recursive functions o
 list-sums written `add(head, self(tail))` vs `sub(self(tail), neg(head))`; `double ≢ \n. n+1` is DISTINCT,
 `sum ≢ length` is DISTINCT at `[2]`. The node exposes this as `POST /v0/equiv`.
 
+**Optional cvc5 fallback (arity > 2).** When the in-house two-recursive prover reports UNSUPPORTED, an
+optional cvc5 pass (`--quant-ind`, whose datatype induction is arity-agnostic) is tried — *only* on that
+already-give-up path, so it adds no latency to the common path, and is a graceful no-op when cvc5 is absent
+(resolved via `$NL_CVC5` or `PATH`). It closes some **arity > 2** self-recursive equivalences that need
+induction beyond normalization — e.g. an arity-3 `interleave3` built with nested `cons` vs one built with
+`append` of a three-element chunk, equal only by unfolding `append` each step. Sound by construction: cvc5
+returns `unknown` (never a false `unsat`), so it can only add reach; a `sat` is a genuine counterexample.
+It does **not** help lcm > 6 or arity > 2 cases needing a ∀-generalized induction hypothesis (accumulators,
+reordered spectators), and the trivial per-element-algebra arity > 2 laws are already decided by
+normalization. The verdict surfaces as `EquivalentByCvc5` (CLI: "EQUIVALENT … by cvc5 induction").
+
 `nl-validator cluster <dir>` lifts this to a whole record set — behavioral-equivalence **classes** with a
 canonical representative. To stay tractable it buckets functions by a coarse **signature shape** (arity +
 coarse parameter/result types, type variables as wildcards) so only same-shape functions are ever

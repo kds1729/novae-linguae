@@ -603,14 +603,25 @@ fn lower_rec_def(body: &J, smt_name: &str) -> Result<String> {
 /// `Lst` (the induction parameter); any spectator's sort is inferred. The two-recursive equiv prover reads
 /// these to declare and thread the spectator argument(s) through both functions.
 fn lower_rec_def_with_sorts(body: &J, smt_name: &str) -> Result<(String, Vec<Sort3>)> {
+    lower_rec_def_sorts_capped(body, smt_name, 2)
+}
+
+/// Like [`lower_rec_def_with_sorts`] but with NO arity cap. Used only by the optional cvc5 induction
+/// fallback ([`prove_equiv_via_cvc5`]), which is arity-agnostic; the in-house prover keeps its ≤2 cap.
+fn lower_rec_def_anyarity(body: &J, smt_name: &str) -> Result<(String, Vec<Sort3>)> {
+    lower_rec_def_sorts_capped(body, smt_name, usize::MAX)
+}
+
+fn lower_rec_def_sorts_capped(body: &J, smt_name: &str, max_params: usize) -> Result<(String, Vec<Sort3>)> {
     if body.get("kind").and_then(|k| k.as_str()) != Some("lambda") {
         bail!("recursive body is not a lambda");
     }
     let params = body.get("params").and_then(|p| p.as_array()).ok_or_else(|| anyhow!("lambda has no params"))?;
-    // The recursion is on the FIRST list parameter; one extra "spectator" parameter (carried through the
-    // recursion, e.g. the second list of `append`) is supported. More than two is out of fragment.
-    if params.is_empty() || params.len() > 2 {
-        bail!("self-induction supports a one- or two-parameter recursive function (got {} params)", params.len());
+    // The recursion is on the FIRST list parameter; extra "spectator" parameters (carried through the
+    // recursion, e.g. the second list of `append`) follow. The in-house prover caps this at two
+    // (`max_params = 2`); the cvc5 fallback lifts the cap so higher-arity uniform recursions can be tried.
+    if params.is_empty() || params.len() > max_params {
+        bail!("self-induction supports at most {max_params} parameter(s) (got {})", params.len());
     }
     let pnames: Vec<String> = params
         .iter()
@@ -901,6 +912,87 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
     }
     InductionOutcome::Unknown
 }
+
+/// cvc5's verdict on a two-recursive equivalence, from the optional [`prove_equiv_via_cvc5`] fallback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Cvc5Equiv {
+    /// cvc5 discharged `∀ p…. f(p…) = g(p…)` by structural induction (`unsat` of its negation).
+    Equivalent,
+    /// cvc5 found a counterexample (`sat`): the functions genuinely differ. Carries the model.
+    Distinct(String),
+    /// cvc5 couldn't decide within its time budget, or the goal was out of the SMT fragment.
+    Undecided,
+}
+
+/// **Optional cvc5 induction fallback** for two-recursive equivalences the in-house prover cannot set up —
+/// specifically **arity > 2** (its lowering caps spectators at two) and, in principle, any goal where a
+/// stronger auto-induction helps. cvc5's `--quant-ind` inducts on the `Lst` datatype directly, arity- and
+/// stride-agnostically, so it closes *uniform-recursion* arity>2 equivalences (all arguments descend
+/// together — e.g. a `zipWith3` associativity/distributivity law) that the in-house prover reports
+/// `Unsupported` on. It does **not** help the lcm>6 stride wall or arity>2 cases needing a ∀-generalized IH
+/// (spectator-swap, accumulators) — cvc5 returns `Undecided` there.
+///
+/// **Soundness.** cvc5 returns `unknown` on a goal it cannot close, never a false `unsat`, so this can only
+/// ADD reach, never mint a false EQUIVALENT. A `sat` is a genuine counterexample ⇒ a sound DISTINCT. The
+/// emitted goal quantifies over the shared positional parameter sorts (read off `f`); if `f` and `g`
+/// disagree on a sort the goal is ill-typed and we return `Undecided` rather than risk a spurious verdict.
+///
+/// **No hard dependency.** Returns `Undecided` when cvc5 is not installed ([`crate::prove::cvc5_command`]
+/// is `None`), so callers degrade gracefully. Intended to be tried ONLY after the in-house prover gives up
+/// (`Unsupported`), so it adds zero latency to the common path.
+pub fn prove_equiv_via_cvc5(body_f: &J, body_g: &J) -> Cvc5Equiv {
+    use crate::prove::{cvc5_command, run_cvc5_quant_ind, SatAnswer};
+
+    let Some(cvc5) = cvc5_command() else { return Cvc5Equiv::Undecided };
+
+    // Lower both bodies (any arity) and read the shared positional sorts off `f`. `g`'s `self` is renamed
+    // so both `define-fun-rec`s coexist. A lowering failure (out of the first-order list fragment) ⇒ give up.
+    let (def_f, sorts_f) = match lower_rec_def_anyarity(body_f, "self") {
+        Ok(x) => x,
+        Err(_) => return Cvc5Equiv::Undecided,
+    };
+    let (def_g, sorts_g) = match lower_rec_def_anyarity(&rename_self(body_g, "self__g"), "self__g") {
+        Ok(x) => x,
+        Err(_) => return Cvc5Equiv::Undecided,
+    };
+    // Both functions are applied to the same argument tuple; a positional sort disagreement would make the
+    // goal ill-typed. Bail to Undecided rather than emit a goal whose verdict we couldn't trust.
+    if sorts_f != sorts_g || sorts_f.is_empty() {
+        return Cvc5Equiv::Undecided;
+    }
+    // The recursion is on a leading list; a higher-order parameter has no SMT constant sort.
+    if sorts_f.first() != Some(&Sort3::Lst) {
+        return Cvc5Equiv::Undecided;
+    }
+    let kws: Vec<&'static str> = match sorts_f.iter().map(|s| sort_kw(*s)).collect::<Result<Vec<_>>>() {
+        Ok(v) => v,
+        Err(_) => return Cvc5Equiv::Undecided,
+    };
+
+    // Prelude (list ops either body uses) + both definitions, then the negated universal goal over all
+    // positional parameters `p0 p1 …`. build_prelude emits `(set-logic ALL)` + the `Lst` datatype.
+    let mut used = BTreeSet::new();
+    collect_ops(body_f, &mut used);
+    collect_ops(body_g, &mut used);
+    let preamble = format!("{}{def_f}{def_g}", build_prelude(&used, &FnModel::None, &FnModel::None));
+    let binders: String =
+        kws.iter().enumerate().map(|(i, kw)| format!("(p{i} {kw})")).collect::<Vec<_>>().join(" ");
+    let args: String = (0..kws.len()).map(|i| format!(" p{i}")).collect();
+    let script = format!(
+        "{preamble}(assert (not (forall ({binders}) (= (self{args}) (self__g{args})))))\n(check-sat)\n"
+    );
+
+    match run_cvc5_quant_ind(&cvc5, &script, CVC5_EQUIV_TIMEOUT_SECS) {
+        Ok(SatAnswer::Unsat) => Cvc5Equiv::Equivalent,
+        Ok(SatAnswer::Sat(model)) => Cvc5Equiv::Distinct(model),
+        _ => Cvc5Equiv::Undecided,
+    }
+}
+
+/// Wall-clock budget for the cvc5 equivalence fallback. Uniform arity>2 goals close in well under a
+/// second; the rest run to this limit and report `Undecided`. It fires only on the already-give-up path,
+/// so this is latency added to an otherwise-`Unsupported` answer, never to a successful proof.
+const CVC5_EQUIV_TIMEOUT_SECS: u64 = 10;
 
 /// Try to close the two-recursive induction **step** at stride `k` using auxiliary list-algebra lemmas.
 /// Mirrors the single-self machinery's catalog phase ([`prove_rec_inner`] Phase A): every admissible
@@ -1888,6 +1980,120 @@ mod tests {
     /// `self(xs, ys)` written as the curried apply spine `apply(apply(self, xs), ys)`.
     fn call_self2(x: J, y: J) -> J {
         app("apply", vec![app("apply", vec![var("self"), x]), y])
+    }
+
+    /// A `zipWith3` over three lists: `\xs ys zs -> case null(xs) of true -> nil
+    /// | false -> cons(combiner, self(tail xs, tail ys, tail zs))`. ARITY 3 (uniform recursion — all three
+    /// lists descend together), so the in-house prover reports `Unsupported`; the cvc5 fallback handles it.
+    fn zipwith3_body(combiner: J) -> J {
+        json!({
+            "kind": "lambda",
+            "params": [{ "name": "xs" }, { "name": "ys" }, { "name": "zs" }],
+            "body": {
+                "kind": "case",
+                "scrutinee": app("null", vec![var("xs")]),
+                "arms": [
+                    { "pattern": lit_bool(true),  "body": var("nil") },
+                    { "pattern": lit_bool(false), "body": app("cons", vec![
+                        combiner,
+                        json!({ "kind": "app", "op": "self", "args": [
+                            app("tail", vec![var("xs")]),
+                            app("tail", vec![var("ys")]),
+                            app("tail", vec![var("zs")]) ] })]) },
+                ]
+            }
+        })
+    }
+    fn head_of(v: &str) -> J {
+        app("head", vec![var(v)])
+    }
+
+    /// `interleave3` two ways over three lists: one CONSes the three heads, the other APPENDs a
+    /// three-element chunk. Equal, but the proof needs to unfold `append` on the concrete 3-prefix each
+    /// step — an inductive/definitional argument NORMALIZE does not do (it never reassociates/unfolds
+    /// `append(cons(h,t), r)`), so this case reaches the solver path rather than the normalization one.
+    /// `cons(head xs, cons(head ys, cons(head zs, tail)))`.
+    fn three_prefix(tail: J) -> J {
+        app("cons", vec![head_of("xs"), app("cons", vec![head_of("ys"), app("cons", vec![head_of("zs"), tail])])])
+    }
+    fn interleave3_cons() -> J {
+        zipwith3_via(three_prefix(self3_tail()))
+    }
+    fn interleave3_append() -> J {
+        zipwith3_via(app("append", vec![three_prefix(var("nil")), self3_tail()]))
+    }
+    fn self3_tail() -> J {
+        json!({ "kind": "app", "op": "self", "args": [
+            app("tail", vec![var("xs")]), app("tail", vec![var("ys")]), app("tail", vec![var("zs")]) ] })
+    }
+    /// A zipWith3 shell whose non-nil arm is exactly `arm` (already containing the self-call).
+    fn zipwith3_via(arm: J) -> J {
+        json!({
+            "kind": "lambda",
+            "params": [{ "name": "xs" }, { "name": "ys" }, { "name": "zs" }],
+            "body": { "kind": "case", "scrutinee": app("null", vec![var("xs")]),
+                "arms": [ { "pattern": lit_bool(true), "body": var("nil") },
+                          { "pattern": lit_bool(false), "body": arm } ] }
+        })
+    }
+
+    #[test]
+    fn cvc5_fallback_reaches_beyond_normalize_and_inhouse() {
+        // The honest bar for wiring cvc5: an arity>2 self-recursive equivalence that BOTH the normalization
+        // fast-path AND the in-house prover give up on, yet cvc5 closes. `interleave3` via nested `cons` vs
+        // via `append` of a 3-element chunk is equal only by unfolding `append` on the concrete prefix each
+        // step — normalize never unfolds/reassociates `append`, and the in-house two-recursive prover caps
+        // at arity 2. (Note: the trivial per-element-algebra arity>2 cases — zipWith3 assoc/commut/distrib —
+        // do NOT qualify: normalize's polynomial normal form already decides them solver-free.)
+        let f = interleave3_cons();
+        let g = interleave3_append();
+        assert!(
+            matches!(prove_equiv_by_induction(&f, &g, "z3"), InductionOutcome::Unsupported(_)),
+            "the in-house two-recursive prover should be UNSUPPORTED at arity 3",
+        );
+        match crate::prove::cvc5_command() {
+            Some(_) => {
+                assert_eq!(prove_equiv_via_cvc5(&f, &g), Cvc5Equiv::Equivalent);
+                // End to end: normalize + in-house both give up, so the win is genuinely cvc5's.
+                assert_eq!(
+                    crate::prove_equivalent(&f, &g, "z3"),
+                    crate::EquivVerdict::EquivalentByCvc5,
+                    "cvc5 should earn an equivalence normalize + the in-house prover cannot reach",
+                );
+            }
+            None => {
+                // Without cvc5 the whole path can only give up — never a false equivalence.
+                assert!(matches!(
+                    crate::prove_equivalent(&f, &g, "z3"),
+                    crate::EquivVerdict::Unsupported(_)
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn cvc5_fallback_never_equates_distinct_arity3() {
+        // SOUNDNESS GUARD: f = zip3(x+(y+z)) vs g = zip3(x+(y-z)) are genuinely DIFFERENT (whenever z≠0).
+        // The fallback must NEVER report Equivalent — cvc5 returns `unknown` (→ Undecided) or a `sat`
+        // counterexample (→ Distinct), never a false `unsat`. Runs with or without cvc5 (without it the
+        // fallback is Undecided, so the assertion still holds — the whole path can't mint a false verdict).
+        let f = zipwith3_body(app("add", vec![head_of("xs"), app("add", vec![head_of("ys"), head_of("zs")])]));
+        let g = zipwith3_body(app("add", vec![head_of("xs"), app("sub", vec![head_of("ys"), head_of("zs")])]));
+        assert_ne!(
+            prove_equiv_via_cvc5(&f, &g),
+            Cvc5Equiv::Equivalent,
+            "the cvc5 fallback must not equate two genuinely distinct arity-3 functions",
+        );
+        // And the end-to-end verdict must not be ANY flavor of equivalence.
+        assert!(
+            !matches!(
+                crate::prove_equivalent(&f, &g, "z3"),
+                crate::EquivVerdict::Equivalent(_)
+                    | crate::EquivVerdict::EquivalentByNormalization
+                    | crate::EquivVerdict::EquivalentByCvc5
+            ),
+            "distinct arity-3 functions must never report an equivalence verdict",
+        );
     }
 
     #[test]

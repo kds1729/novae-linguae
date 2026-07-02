@@ -89,7 +89,9 @@ pub fn cluster(items: &[(String, J, Option<J>)], solver: &str) -> Vec<Vec<String
                     // folded duplicates, including ones both sides recurse — which the solver can't decide).
                     if matches!(
                         prove_equivalent(bi, bj, solver),
-                        EquivVerdict::Equivalent(_) | EquivVerdict::EquivalentByNormalization
+                        EquivVerdict::Equivalent(_)
+                            | EquivVerdict::EquivalentByNormalization
+                            | EquivVerdict::EquivalentByCvc5
                     ) {
                         let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
                         parent[ri] = rj;

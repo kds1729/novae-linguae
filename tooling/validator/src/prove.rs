@@ -611,6 +611,80 @@ pub fn run_smt_secs(script: &str, solver: &str, secs: u64) -> Result<SatAnswer> 
     }
 }
 
+/// Resolve the cvc5 binary for the optional induction fallback: `$NL_CVC5` if set, else `cvc5` on
+/// `PATH`. Returns `None` when neither is available, so callers degrade to a graceful no-op — cvc5 is
+/// an OPTIONAL accelerator for the arity>2 equivalence fragment, never a hard build/runtime dependency.
+pub fn cvc5_command() -> Option<String> {
+    if let Ok(p) = std::env::var("NL_CVC5") {
+        if !p.is_empty() {
+            return Some(p);
+        }
+    }
+    // Probe `cvc5 --version`; success ⇒ it's on PATH.
+    match std::process::Command::new("cvc5").arg("--version").output() {
+        Ok(o) if o.status.success() => Some("cvc5".to_string()),
+        _ => None,
+    }
+}
+
+/// Run an SMT-LIB 2 script through cvc5 with **structural induction enabled** (`--quant-ind`), bounded
+/// by cvc5's own `--tlimit` (ms) and a process-kill backstop. Unlike [`run_smt`], which drives cvc5 as a
+/// plain solver (no induction), this is the mode that discharges quantified goals over `define-fun-rec`
+/// definitions — used only for the two-recursive equivalence cases beyond the in-house prover's fragment.
+/// Sound as a proof source: cvc5 returns `unknown` on a goal it can't close, never a false `unsat`.
+pub fn run_cvc5_quant_ind(cvc5: &str, script: &str, secs: u64) -> Result<SatAnswer> {
+    use std::io::{Read, Write};
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let mut child = match Command::new(cvc5)
+        .arg("--lang=smt2")
+        .arg("--quant-ind")
+        .arg(format!("--tlimit={}", secs * 1000)) // cvc5 wall-clock limit (ms); reads stdin with no file arg
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(SatAnswer::NoSolver),
+        Err(e) => return Err(anyhow!("spawning cvc5 `{cvc5}`: {e}")),
+    };
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow!("cvc5 stdin unavailable"))?
+        .write_all(script.as_bytes())
+        .map_err(|e| anyhow!("writing to cvc5: {e}"))?;
+
+    let deadline = Instant::now() + Duration::from_secs(secs + 5);
+    loop {
+        match child.try_wait().map_err(|e| anyhow!("waiting on cvc5: {e}"))? {
+            Some(_) => break,
+            None => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Ok(SatAnswer::Unknown);
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+        }
+    }
+    let mut stdout = String::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = out.read_to_string(&mut stdout);
+    }
+    match stdout.split_whitespace().next().unwrap_or("") {
+        "unsat" => Ok(SatAnswer::Unsat),
+        "sat" => {
+            let model = stdout.splitn(2, '\n').nth(1).unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
+            Ok(SatAnswer::Sat(model))
+        }
+        _ => Ok(SatAnswer::Unknown), // unknown / timeout / (error) — never a false unsat
+    }
+}
+
 /// Run a solver on a certificate, mapping the SAT answer to a proof outcome.
 pub fn run_solver(cert: &Certificate, solver: &str) -> Result<ProofOutcome> {
     Ok(match run_smt(&cert.smt, solver)? {

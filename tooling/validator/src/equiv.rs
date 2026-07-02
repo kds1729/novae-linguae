@@ -41,6 +41,7 @@
 use serde_json::{json, Value as J};
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::induct::{prove_equiv_via_cvc5, Cvc5Equiv};
 use crate::{
     prove_by_induction_with_exploration, prove_equiv_by_induction, prove_property, InductionOutcome,
     ProofOutcome, DEFAULT_LEMMA_DEPTH,
@@ -55,6 +56,10 @@ pub enum EquivVerdict {
     /// meaning-preserving. Established structurally without the solver, so it also covers the both-recursive
     /// case the solver path can only report UNSUPPORTED.
     EquivalentByNormalization,
+    /// Proved `∀ p…. f(p…) = g(p…)` by the **optional cvc5 induction fallback** ([`crate::induct::
+    /// prove_equiv_via_cvc5`]) — reached only for goals beyond the in-house prover's fragment (uniform
+    /// recursion with arity > 2). Sound: cvc5 returns `unknown`, never a false `unsat`.
+    EquivalentByCvc5,
     /// A solver counterexample shows the functions differ; carries the model.
     Distinct(String),
     /// Could not decide (solver gave up, or induction did not close).
@@ -350,7 +355,15 @@ pub fn prove_equivalent(body_f: &J, body_g: &J, solver: &str) -> EquivVerdict {
             InductionOutcome::Failed(model) => EquivVerdict::Distinct(model),
             InductionOutcome::NoSolver => EquivVerdict::NoSolver,
             InductionOutcome::Unknown => EquivVerdict::Unknown,
-            InductionOutcome::Unsupported(why) => EquivVerdict::Unsupported(why),
+            // The in-house prover is out of fragment (chiefly arity > 2). Try the OPTIONAL cvc5 induction
+            // fallback: its `--quant-ind` is arity-agnostic and closes uniform-recursion arity>2 goals.
+            // Reached only on this already-give-up path, so it adds no latency to a successful proof; a
+            // graceful no-op (Undecided) when cvc5 isn't installed. Sound — cvc5 never false-`unsat`s.
+            InductionOutcome::Unsupported(why) => match prove_equiv_via_cvc5(body_f, body_g) {
+                Cvc5Equiv::Equivalent => EquivVerdict::EquivalentByCvc5,
+                Cvc5Equiv::Distinct(model) => EquivVerdict::Distinct(model),
+                Cvc5Equiv::Undecided => EquivVerdict::Unsupported(why),
+            },
         };
     };
 
