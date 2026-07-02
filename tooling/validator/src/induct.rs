@@ -661,10 +661,12 @@ fn rename_self(node: &J, new_name: &str) -> J {
 }
 
 /// Largest induction stride the two-recursive prover will use. `k`-step induction aligns recursions whose
-/// strides have a least-common-multiple ≤ this: 1-vs-1, 1-vs-2, 1-vs-3, 2-vs-2 (≤ 3) **and** 2-vs-3
-/// (lcm 6). Pairs whose alignment period exceeds 6 (e.g. 3-vs-4, lcm 12) or that recurse at a
-/// non-constant stride are beyond it and report UNKNOWN — never a false verdict.
-const MAX_STRIDE: usize = 6;
+/// strides have a least-common-multiple ≤ this: 1-vs-2, 2-vs-3 (lcm 6), **3-vs-4** (lcm 12), 2-vs-5
+/// (lcm 10) all close. Pairs whose alignment period exceeds 12 (e.g. 3-vs-5, lcm 15) or that recurse at a
+/// non-constant stride report UNKNOWN — never a false verdict. The cost of a larger cap is confined to the
+/// exotic cases that actually hit it: the base cases checked are `0..k` for the *determined* stride `k`
+/// (not `0..MAX_STRIDE`), so a common lockstep pair still checks a single base case.
+const MAX_STRIDE: usize = 12;
 
 /// Greatest common divisor (Euclid).
 fn gcd(a: usize, b: usize) -> usize {
@@ -833,10 +835,35 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
         (decls, lst)
     };
 
-    // Phase 1 — refutation. Check base cases for every list length `0..MAX_STRIDE` (these are exactly the
-    // base obligations any stride `k ≤ MAX_STRIDE` needs). A satisfiable one is a concrete short list (with
-    // concrete spectators) on which `f ≠ g` — a genuine counterexample, so a clean DISTINCT.
-    for j in 0..MAX_STRIDE {
+    // Determine the induction **stride(s)** first, so Phase 1 checks only the base cases those strides
+    // actually need (`0..max_stride`) rather than the whole `0..MAX_STRIDE` range — a common lockstep pair
+    // (stride 1) then pays for a single base case, not twelve. When both recursion strides are readable off
+    // the AST, the minimal realigning stride is exactly `lcm(stride_f, stride_g)` (1 for lockstep, 2 for
+    // 1-vs-2, 6 for 2-vs-3, 12 for 3-vs-4 …) — target it directly; if that lcm exceeds `MAX_STRIDE`, no
+    // stride we can afford will close it, so report UNKNOWN without burning solver time. Bodies whose stride
+    // can't be read fall back to searching every stride `1..=MAX_STRIDE`.
+    let strides: Vec<usize> = match (recursion_stride(body_f, "self"), recursion_stride(body_g, "self")) {
+        (Some(a), Some(b)) => {
+            let k = lcm(a, b);
+            if (1..=MAX_STRIDE).contains(&k) {
+                vec![k]
+            } else {
+                return InductionOutcome::Unknown;
+            }
+        }
+        _ => (1..=MAX_STRIDE).collect(),
+    };
+    let max_stride = strides.iter().copied().max().unwrap_or(0);
+    // The base-case sweep serves two roles: (1) the induction **obligation** — a stride-`k` induction needs
+    // every length `0..k` established as a base case, so we must reach `max_stride`; and (2) **refutation**
+    // — a concrete short list where `f ≠ g` is a clean DISTINCT, and a distinct pair can agree at length 0
+    // yet differ further along, so we sweep to at least depth 6 regardless of stride (the historical
+    // refutation depth). `max(max_stride, 6)` covers both without over-checking a common lockstep pair.
+    let base_depth = max_stride.max(6);
+
+    // Phase 1 — refutation + induction base obligations. A satisfiable base case is a concrete short list
+    // (with concrete spectators) on which `f ≠ g` — a genuine counterexample, so a clean DISTINCT.
+    for j in 0..base_depth {
         let (decls, lst) = spine("a", j, "nil");
         let script = format!(
             "{preamble}{decls}{spec_decls}; base case: list of length {j}\n(assert (not (= (self {lst}{goal_args}) (self__g {lst}{goal_args}))))\n(check-sat)\n(get-model)\n"
@@ -867,23 +894,8 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
         )
     };
 
-    // Phase 2 — proof. All base cases up to `MAX_STRIDE` are unsat, so a stride `k` proves the law as soon
-    // as its step `P(t) ⟹ P(cons^k(t))` discharges. When both recursion strides are readable off the AST,
-    // the minimal realigning stride is exactly `lcm(stride_f, stride_g)` (1 for lockstep, 2 for 1-vs-2,
-    // 6 for 2-vs-3 …) — target it directly. If that lcm exceeds `MAX_STRIDE`, no stride we can afford will
-    // close it, so report UNKNOWN without burning solver time. Bodies whose stride can't be read fall back
-    // to searching every stride. The first stride whose step discharges wins.
-    let strides: Vec<usize> = match (recursion_stride(body_f, "self"), recursion_stride(body_g, "self")) {
-        (Some(a), Some(b)) => {
-            let k = lcm(a, b);
-            if (1..=MAX_STRIDE).contains(&k) {
-                vec![k]
-            } else {
-                return InductionOutcome::Unknown;
-            }
-        }
-        _ => (1..=MAX_STRIDE).collect(),
-    };
+    // Phase 2 — proof. All base cases up to `max_stride` are unsat, so a stride `k` proves the law as soon
+    // as its step `P(t) ⟹ P(cons^k(t))` discharges. The first stride whose step discharges wins.
     for &k in &strides {
         match run_smt(&mk_step(k, ""), solver) {
             Ok(SatAnswer::Unsat) => return InductionOutcome::Proved,
@@ -2069,6 +2081,49 @@ mod tests {
                         json!({ "kind": "app", "op": "self", "args": [app("tail", vec![var("xs")]), acc_a, acc_b] }) },
                 ] }
         })
+    }
+
+    fn stln(n: usize) -> J {
+        let mut e = var("xs");
+        for _ in 0..n {
+            e = app("tail", vec![e]);
+        }
+        e
+    }
+    fn shdn(n: usize) -> J {
+        app("head", vec![stln(n)])
+    }
+    fn ssum_exact(m: usize) -> J {
+        let mut e = shdn(m - 1);
+        for i in (0..m - 1).rev() {
+            e = app("add", vec![shdn(i), e]);
+        }
+        e
+    }
+    /// A sum that peels `k` elements per recursive step, with base cases for the `0..k-1` remainders.
+    fn sumk_body(k: usize) -> J {
+        let mut rec = json!({ "kind": "app", "op": "self", "args": [stln(k)] });
+        for i in (0..k).rev() {
+            rec = app("add", vec![shdn(i), rec]);
+        }
+        let mut body = rec;
+        for d in (1..k).rev() {
+            body = json!({ "kind": "case", "scrutinee": app("null", vec![stln(d)]),
+                "arms": [ { "pattern": lit_bool(true), "body": ssum_exact(d) },
+                          { "pattern": lit_bool(false), "body": body } ] });
+        }
+        json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body":
+            { "kind": "case", "scrutinee": app("null", vec![var("xs")]),
+              "arms": [ { "pattern": lit_bool(true), "body": lit_int(0) },
+                        { "pattern": lit_bool(false), "body": body } ] } })
+    }
+
+    #[test]
+    fn inhouse_proves_stride_3_vs_4_sum_lcm12() {
+        let Some(solver) = solver() else { return };
+        // Two sums peeling 3 vs 4 elements per step — alignment period lcm(3,4) = 12. Closes now that the
+        // stride cap is 12 (was UNKNOWN at the old cap of 6); z3 discharges the stride-12 step directly.
+        assert_eq!(prove_equiv_by_induction(&sumk_body(3), &sumk_body(4), solver), InductionOutcome::Proved);
     }
 
     #[test]

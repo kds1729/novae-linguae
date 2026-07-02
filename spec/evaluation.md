@@ -381,7 +381,7 @@ recurse, both bodies are emitted as `define-fun-rec`s and `∀p0 ps…. f(p0, ps
 **structural induction over the leading list parameter**, with one **spectator** parameter (arity ≤ 2)
 threaded through both functions — declared free in the goal and **∀-quantified in the induction hypothesis**,
 so both a *carried* spectator (append's second list, unchanged) and a *descending* one (zipWith's, tailed
-each step) close. The induction **stride is searched** (`k = 1..6`, targeted at `lcm(stride_f, stride_g)`) so
+each step) close. The induction **stride is searched** (`k = 1..12`, targeted at `lcm(stride_f, stride_g)`) so
 recursions that misalign by a small constant stride (length-by-1 vs length-by-2, or 2-vs-3) still close, and
 when the bare step stalls the prover draws on the curated **list-algebra lemma catalog** (`append_nil`,
 `append_assoc`, … — each proved by its own induction before being assumed), so a both-recursive step that
