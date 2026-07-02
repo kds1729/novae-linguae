@@ -14,7 +14,7 @@ from .ingest import create_record
 from .equiv import EquivError, run_equiv
 from .models import Record
 from .prove import ProveError, run_prove
-from .query import QueryError, run_query
+from .query import QueryError, record_summary, run_query
 from .search import run_search, SearchError
 
 _SCHEMA_VERSIONS = ["0.1.0", "0.2.0"]
@@ -111,9 +111,16 @@ def query(request):
         hashes, cursor, complete = run_query(flt)
     except QueryError as exc:
         return JsonResponse({"error": "malformed_filter", "detail": str(exc)}, status=400)
-    if request.GET.get("include") == "record":
+    include = request.GET.get("include")
+    if include == "record":
         by_hash = {r.hash: r.raw for r in Record.objects.filter(hash__in=hashes)}
         return JsonResponse({"records": [by_hash[h] for h in hashes if h in by_hash],
+                             "cursor": cursor, "complete": complete})
+    if include == "summary":
+        # Compact projection: the decision fields (type/effects/intent/…), not the full record — the
+        # discovery-cost middle tier between hashes-only and `include=record`.
+        by_hash = {r.hash: record_summary(r) for r in Record.objects.filter(hash__in=hashes)}
+        return JsonResponse({"results": [by_hash[h] for h in hashes if h in by_hash],
                              "cursor": cursor, "complete": complete})
     return JsonResponse({"results": hashes, "cursor": cursor, "complete": complete})
 
@@ -131,6 +138,12 @@ def search(request):
         results, model_id, truncated = run_search(body)
     except SearchError as exc:
         return JsonResponse({"error": exc.code, "detail": exc.detail}, status=exc.status)
+    if request.GET.get("include") == "summary":
+        # Fold the compact projection into each ranked hit, so a client ranks AND judges candidates in a
+        # single round-trip (the discovery-cost lever); the similarity `score` is preserved alongside.
+        by_hash = {r.hash: record_summary(r)
+                   for r in Record.objects.filter(hash__in=[x["hash"] for x in results])}
+        results = [{**by_hash.get(x["hash"], {"hash": x["hash"]}), "score": x["score"]} for x in results]
     payload = {"results": results, "model": model_id}
     if truncated:
         payload["truncated"] = True   # scan cap hit; some records were not ranked (MVP bound)

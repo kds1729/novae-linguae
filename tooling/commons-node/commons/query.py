@@ -149,6 +149,38 @@ def candidate_records(flt, cap=_DB_SCAN_CAP):
     return matched, len(scanned) >= cap
 
 
+def record_summary(record):
+    """A compact projection of a stored record — the fields an agent needs to JUDGE relevance and
+    signature-compatibility (type, effects, capabilities, intent tags, termination, complexity,
+    certification) WITHOUT resolving the full record (body, examples, properties, proof certificates).
+
+    This is the **discovery-cost** lever (spec/commons.md open problem): one `?include=summary` response
+    lets a client rank a whole candidate set in a single round-trip, instead of fetching N full records
+    just to read their signatures. All summary fields are *extracted columns* — computed on ingest — so
+    this reparses nothing. Empty/absent fields are omitted to keep the projection small; `hash` and `kind`
+    are always present."""
+    out = {"hash": record.hash, "kind": record.kind}
+    if record.name_hints:
+        out["name_hints"] = record.name_hints
+    if record.type_str:
+        out["type"] = record.type_str
+    if record.effects:
+        out["effects"] = record.effects
+    if record.capabilities:
+        out["capabilities"] = record.capabilities
+    if record.intent_tags:
+        out["intent_tags"] = record.intent_tags
+    if record.terminates:
+        out["terminates"] = record.terminates
+    if record.complexity:
+        out["complexity"] = record.complexity
+    if record.certified is not None:
+        out["certified"] = record.certified
+    if record.body_hash:
+        out["body_hash"] = record.body_hash
+    return out
+
+
 def run_query(flt):
     """Return (hashes, cursor, complete) for a query filter. Raises QueryError on a malformed filter."""
     validate_filter(flt)

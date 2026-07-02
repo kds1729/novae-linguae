@@ -197,6 +197,23 @@ class CommonsProtocolTests(TestCase):
                                 content_type="application/json")
         self.assertIn(rec, resp.json()["records"])
 
+    def test_query_include_summary(self):
+        # The discovery-cost projection: decision fields present, heavy record contents absent.
+        rec = _load("map.json")
+        self._publish(rec)
+        resp = self.client.post("/v0/query?include=summary",
+                                data=json.dumps({"name_hint_prefix": "map"}),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        summ = next(s for s in resp.json()["results"] if s["hash"] == rec["hash"])
+        # signature-judging fields are there...
+        self.assertIn("List", summ["type"])
+        self.assertIn("elementwise", summ["intent_tags"])
+        self.assertEqual(summ["kind"], "function-record")
+        # ...but not the full record (body/examples/properties/signature object)
+        for heavy in ("examples", "properties", "signature", "refinements", "raw"):
+            self.assertNotIn(heavy, summ)
+
     def test_query_malformed_array_predicate_is_400(self):
         # A bare list where an object predicate is required is a clean 400 (not an AttributeError 500).
         resp = self.client.post("/v0/query", data=json.dumps({"effects": ["io.console"]}),
@@ -330,6 +347,17 @@ class SearchTests(TestCase):
         hashes = [r["hash"] for r in resp.json()["results"]]
         self.assertIn(self.map_hash, hashes)
         self.assertNotIn(self.b64_hash, hashes)
+
+    def test_search_include_summary(self):
+        # `?include=summary` folds the decision-field projection into each ranked hit, score preserved.
+        resp = self.client.post("/v0/search?include=summary",
+                                data=json.dumps({"query": "map a function over each element", "k": 2}),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        top = next(r for r in resp.json()["results"] if r["hash"] == self.map_hash)
+        self.assertIn("score", top)                       # similarity kept
+        self.assertIn("transform", top["intent_tags"])    # projection folded in
+        self.assertNotIn("signature", top)                # not the full record
 
     def test_malformed_filter_is_400(self):
         # The typed filter follows the same contract as /v0/query: a bare list is a clean 400.

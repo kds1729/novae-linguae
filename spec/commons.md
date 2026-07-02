@@ -172,6 +172,22 @@ Typed query is **exact and node-portable**: it is computed from fields that are 
 so any correct node returns the same set for the same corpus (modulo what each node holds). Use
 `?include=record` to inline the records in the response as a fetch optimization (still verify them).
 
+**Discovery cost.** Resolving every candidate to a full record — body, examples, properties, proof
+certificates — just to read its signature is the dominant context cost of "assemble, don't write" at
+scale. `?include=summary` returns a **compact projection** instead: the decision fields only — `type`,
+`effects`, `capabilities`, `intent_tags`, `terminates`, `complexity`, `certified`, `name_hints`,
+`body_hash` — so a client ranks and prunes a whole candidate set in one round-trip, then resolves only
+the finalists. The summary is derived from record fields (not heuristic), and each item carries its
+`hash`, so a client still resolves + verifies before use.
+
+```json
+{ "results": [ { "hash": "fn_3a9b…", "kind": "function-record",
+                 "type": "forall a b. (a -> b) -> List a -> List b",
+                 "effects": [], "intent_tags": ["transform", "elementwise"],
+                 "terminates": "always", "complexity": "O(n)" }, … ],
+  "cursor": "…", "complete": false }
+```
+
 ### `POST /v0/search` — semantic discovery (best-effort, node-local)
 
 Body: a free-text query or a "more like this" target, an optional typed `filter`, and `k`.
@@ -193,6 +209,9 @@ Returns ranked addresses with scores:
 { "results": [ { "hash": "fn_048a…", "score": 0.91 }, … ],
   "model": "<embedding-model-id>" }
 ```
+
+`?include=summary` folds the same compact projection as `query` into each ranked hit (the `score` is
+preserved), so a client ranks *and* judges candidates in a single round-trip.
 
 Unlike `query`, `search` is **heuristic and node-local**: it depends on the node's embedding model
 (reported in `model` and in `/v0/info`). Two nodes MAY rank differently. Semantic search is a
