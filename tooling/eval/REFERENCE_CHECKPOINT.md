@@ -30,7 +30,7 @@ commons, not the source tree.
 | **Corpus** | `corpus7.jsonl` — 3,164 examples / 2,966 combinatorial specs, **36 template families** (incl. #35 min/max & clamp, #36 powers & digit arithmetic) (`gen_corpus.py --combinatorial`) · sha256 `1b158bfd83f9e992…` |
 | **Train split** | `ftdata7/` — 5,568 train / 293 valid, **conventions-off, curated eval held out** (`export_finetune.py --holdout-corpus`) · `train.jsonl` sha256 `dc4fbf16bf961adf…` |
 | **Grading** | [`eval_harness.py`](eval_harness.py) `--conventions off --shots 0`, curated set held out of training |
-| **Adapter weights** | `adapter-coder3b-c7-s1` (regenerable; gitignored, stored in scratch/commons) |
+| **Adapter weights** | `adapter-coder3b-c7-s1` (regenerable; gitignored). Local copy: `/var/tmp/claude/adapter-coder3b-c7-s1/adapter_model.safetensors`, 119,801,528 bytes, **sha256 `a8bf0b841f649c8af22ae07a1cfab2b22c841fa2166f3117c111716bc099f460`** (LoRA r16/α32/dropout0.05, targets = all attn+MLP proj — matches this pin) |
 
 ## Measured result (held out, conventions-off, shots-0)
 
@@ -70,6 +70,52 @@ NL_HF_DTYPE=bfloat16 python3 tooling/eval/eval_harness.py \
 
 The GPU operational details (renting a box, transfer, the pod-side gotchas) are in the local-only
 `RUNPOD.md` one directory up — deliberately kept out of this public repo.
+
+## Using the checkpoint (inference)
+
+The checkpoint is a base model + a LoRA adapter. The project's own `model_client.HFModel` loads the
+pair and generates (greedy, deterministic) — the same class the eval harness uses, so "using" and
+"grading" go through one tested code path. Set `NL_HF_DTYPE=bfloat16` so a 3B/7B base fits in ~15 GB.
+
+```python
+# from tooling/eval/ ; `answer(task)` takes an object with .system and .user (greedy decode)
+from types import SimpleNamespace
+from model_client import HFModel
+m = HFModel("Qwen/Qwen2.5-Coder-3B-Instruct::/var/tmp/claude/adapter-coder3b-c7-s1")  # base::adapter
+task = SimpleNamespace(system="You write Nova Lingua function records.",
+                       user="Write a function record for: double a natural number.")
+print(m.answer(task))
+```
+
+Or drive it straight through the harness (loads the adapter, prompts, and grades every answer with
+`nl-validator` — the trustworthy way to *use it and see it's right* at once):
+
+```bash
+NL_HF_DTYPE=bfloat16 python3 tooling/eval/eval_harness.py \
+    --model hf:Qwen/Qwen2.5-Coder-3B-Instruct::/var/tmp/claude/adapter-coder3b-c7-s1 \
+    --conventions off --shots 0            # add --tasks write --limit N for a quick subset
+```
+
+The `hf:<base>::<adapter>` spec routes to `HFModel`; `mlx:<base>::<adapter>` routes to Apple MLX
+(`MLXModel`). Base model and adapter both download/load from the HF cache or a local path. **base `write`
+is 0%** — the adapter is the entire signal, so it must be present.
+
+## Verify the pinned number (GPU)
+
+The `write 138/151` figure was measured once on the training pod (now terminated). The local weights
+above reproduce it, but a full 304-task CPU eval of a 3B model is multi-hour — run the *verification* on a
+rented GPU instead (see the local-only `RUNPOD.md`), where a full held-out eval of the existing adapter is
+~5 min. On a fresh pod (base cache warmed, repo + `adapter-coder3b-c7-s1` + `ftdata7` uploaded to `/root`):
+
+```bash
+# re-evaluate the EXISTING pinned adapter (no retrain) against the held-out curated set
+NL_HF_DTYPE=bfloat16 python -u repo/tooling/eval/eval_harness.py \
+    --model hf:Qwen/Qwen2.5-Coder-3B-Instruct::/root/adapter-coder3b-c7-s1 \
+    --conventions off --shots 0 --out /root/verify_c7_s1_eval.jsonl
+```
+
+Expect `write` ≈ 138/151 (seed-1 pin). A full retrain-then-eval (confirms the *recipe*, not just the
+weights) is the three-step block above run on the pod; `train_lora_cpu.py` auto-selects CUDA+bf16 there.
 
 ## Residuals & the plateau (2-seed)
 
