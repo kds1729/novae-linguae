@@ -696,6 +696,17 @@ mod tests {
     }
 
     #[test]
+    fn lcm15_strides_proved_by_targeted_kstep() {
+        let Some(s) = solver() else { return };
+        // length peeling THREE per step vs FIVE per step — both equal the list length, realigning only
+        // every lcm(3,5) = 15 elements. Beyond the blind-search cap (12), but the prover reads both strides
+        // off the AST and targets k = 15 directly (a single attempt under MAX_TARGETED_STRIDE), so it proves.
+        let len3 = length_by(3);
+        let len5 = length_by(5);
+        assert_eq!(prove_equivalent(&len3, &len5, s), EquivVerdict::Equivalent(vec![]));
+    }
+
+    #[test]
     fn map_law_beyond_first_order_now_proves() {
         let Some(s) = solver() else { return };
         // `\f xs -> map(f, reverse(xs))` ≡ `\f xs -> reverse(map(f, xs))`. This is a map law over an

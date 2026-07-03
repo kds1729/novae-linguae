@@ -378,11 +378,13 @@ Otherwise it reuses the property prover by **inlining**, introducing no new enco
 with both sides non-recursive it builds `eq(f(x…), g(x…))` (operations stay visible to lemma discovery);
 when one side recurses it becomes `self` (a `define-fun-rec`) and the other is inlined; and when **both**
 recurse, both bodies are emitted as `define-fun-rec`s and `∀p0 ps…. f(p0, ps…) = g(p0, ps…)` is discharged by
-**structural induction over the leading list parameter**, with one **spectator** parameter (arity ≤ 2)
-threaded through both functions — declared free in the goal and **∀-quantified in the induction hypothesis**,
-so both a *carried* spectator (append's second list, unchanged) and a *descending* one (zipWith's, tailed
-each step) close. The induction **stride is searched** (`k = 1..12`, targeted at `lcm(stride_f, stride_g)`) so
-recursions that misalign by a small constant stride (length-by-1 vs length-by-2, or 2-vs-3) still close, and
+**structural induction over the leading list parameter**, with **every remaining** parameter (any count —
+arity is not capped) threaded through both functions as a **spectator** — declared free in the goal and
+**∀-quantified in the induction hypothesis**, so both a *carried* spectator (append's second list, unchanged)
+and a *descending* one (zipWith's, tailed each step) close. The induction **stride** is `lcm(stride_f,
+stride_g)`: when both strides are read off the AST it is targeted directly in a single attempt (`lcm ≤ 24`,
+so 3-vs-5 = 15 closes), and when a stride can't be read the prover *searches* `k = 1..12` — so
+recursions that misalign by a constant stride (length-by-1 vs length-by-2, 2-vs-3, 3-vs-5) still close, and
 when the bare step stalls the prover draws on the curated **list-algebra lemma catalog** (`append_nil`,
 `append_assoc`, … — each proved by its own induction before being assumed), so a both-recursive step that
 needs such a lemma closes too. The base cases double as refutation: a *satisfiable* base case is a concrete

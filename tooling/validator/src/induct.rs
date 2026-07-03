@@ -660,13 +660,21 @@ fn rename_self(node: &J, new_name: &str) -> J {
     }
 }
 
-/// Largest induction stride the two-recursive prover will use. `k`-step induction aligns recursions whose
-/// strides have a least-common-multiple ≤ this: 1-vs-2, 2-vs-3 (lcm 6), **3-vs-4** (lcm 12), 2-vs-5
-/// (lcm 10) all close. Pairs whose alignment period exceeds 12 (e.g. 3-vs-5, lcm 15) or that recurse at a
-/// non-constant stride report UNKNOWN — never a false verdict. The cost of a larger cap is confined to the
-/// exotic cases that actually hit it: the base cases checked are `0..k` for the *determined* stride `k`
-/// (not `0..MAX_STRIDE`), so a common lockstep pair still checks a single base case.
+/// Bound on the **blind stride search** used when a body's recursion stride can't be read off the AST:
+/// the prover then tries every stride `1..=MAX_STRIDE`, so this directly bounds the number of solver
+/// calls that search costs. Kept modest for that reason. When BOTH strides *are* readable the prover does
+/// not search — it targets the exact realigning stride and this cap does not apply (see
+/// `MAX_TARGETED_STRIDE`).
 const MAX_STRIDE: usize = 12;
+
+/// Bound on a **targeted** induction stride — the case where both recursion strides are read off the AST,
+/// so the minimal realigning stride is known to be exactly `lcm(stride_f, stride_g)` and the prover makes a
+/// *single* attempt at it (not a search). Because it is one attempt, this cap can be much larger than the
+/// blind-search `MAX_STRIDE` at no cost to common pairs: raising it only affects a genuinely-submitted
+/// large-lcm pair (e.g. 3-vs-5 = 15, 4-vs-5 = 20), which then checks `0..k` base cases and one step. Pairs
+/// whose alignment period exceeds this (or that recurse at a non-constant stride) report UNKNOWN — never a
+/// false verdict.
+const MAX_TARGETED_STRIDE: usize = 24;
 
 /// Greatest common divisor (Euclid).
 fn gcd(a: usize, b: usize) -> usize {
@@ -764,13 +772,15 @@ fn tail_depth(node: &J) -> usize {
 /// vs with `append` of a concrete prefix, which unfolds). A spectator IH can only *fail* to fire, never prove a false equality, so it is
 /// sound.
 ///
-/// It searches over the induction **stride** `k = 1..=MAX_STRIDE`. A `k`-step induction has base cases
-/// for every list length `0..k-1` and a step `P(t) ⟹ P(cons^k(t))` — a valid induction principle for any
-/// `k` (every list of length `qk + r` reduces by the step to its length-`r` base). `k = 1` is ordinary
-/// structural induction and decides recursions that align step-for-step but differ in their element
-/// arithmetic (e.g. two list-sums written differently). A larger `k` aligns *misaligned* recursions: a
-/// length-by-1 and a length-by-2 function close at `k = 2`. The first stride whose base **and** step all
-/// discharge ⇒ PROVED.
+/// The induction **stride** `k` has base cases for every list length `0..k-1` and a step
+/// `P(t) ⟹ P(cons^k(t))` — a valid induction principle for any `k` (every list of length `qk + r` reduces
+/// by the step to its length-`r` base). When both recursion strides are read off the AST the minimal
+/// realigning stride is exactly `lcm(stride_f, stride_g)` and is targeted directly in a single attempt
+/// (`lcm ≤ MAX_TARGETED_STRIDE`); when a stride is unreadable the prover *searches* `k = 1..=MAX_STRIDE`.
+/// `k = 1` is ordinary structural induction and decides recursions that align step-for-step but differ in
+/// their element arithmetic (e.g. two list-sums written differently); a larger `k` aligns *misaligned*
+/// recursions (length-by-1 vs length-by-2 at `k = 2`, 3-vs-5 at `k = 15`). The first stride whose base
+/// **and** step all discharge ⇒ PROVED.
 ///
 /// When the bare step does not discharge, the prover draws on **cross-function lemmas**: the curated
 /// list-algebra catalog ([`close_equiv_step_with_lemmas`]), each lemma proved by its own induction before
@@ -836,16 +846,18 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
     };
 
     // Determine the induction **stride(s)** first, so Phase 1 checks only the base cases those strides
-    // actually need (`0..max_stride`) rather than the whole `0..MAX_STRIDE` range — a common lockstep pair
-    // (stride 1) then pays for a single base case, not twelve. When both recursion strides are readable off
-    // the AST, the minimal realigning stride is exactly `lcm(stride_f, stride_g)` (1 for lockstep, 2 for
-    // 1-vs-2, 6 for 2-vs-3, 12 for 3-vs-4 …) — target it directly; if that lcm exceeds `MAX_STRIDE`, no
-    // stride we can afford will close it, so report UNKNOWN without burning solver time. Bodies whose stride
-    // can't be read fall back to searching every stride `1..=MAX_STRIDE`.
+    // actually need (`0..max_stride`) rather than the whole range — a common lockstep pair (stride 1) then
+    // pays for a single base case, not twelve. When both recursion strides are readable off the AST, the
+    // minimal realigning stride is exactly `lcm(stride_f, stride_g)` (1 for lockstep, 2 for 1-vs-2, 6 for
+    // 2-vs-3, 12 for 3-vs-4, 15 for 3-vs-5 …) — target it directly with a SINGLE attempt, so its cap is the
+    // larger `MAX_TARGETED_STRIDE` (a bigger lcm costs one submitted pair a longer base sweep, nothing to
+    // common pairs); if that lcm exceeds even that, no stride we can afford will close it, so report UNKNOWN
+    // without burning solver time. Bodies whose stride can't be read fall back to *searching* every stride
+    // `1..=MAX_STRIDE` (the smaller cap, since a search pays per stride tried).
     let strides: Vec<usize> = match (recursion_stride(body_f, "self"), recursion_stride(body_g, "self")) {
         (Some(a), Some(b)) => {
             let k = lcm(a, b);
-            if (1..=MAX_STRIDE).contains(&k) {
+            if (1..=MAX_TARGETED_STRIDE).contains(&k) {
                 vec![k]
             } else {
                 return InductionOutcome::Unknown;
