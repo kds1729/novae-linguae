@@ -158,7 +158,8 @@ Body: a structured filter. All fields are optional and combine with AND.
   "name_hint_prefix": "map",
   "type_contains": "List",
   "limit": 100,
-  "cursor": "…"
+  "cursor": "…",
+  "token_budget": 4000
 }
 ```
 
@@ -187,6 +188,24 @@ the finalists. The summary is derived from record fields (not heuristic), and ea
                  "terminates": "always", "complexity": "O(n)" }, … ],
   "cursor": "…", "complete": false }
 ```
+
+A `"token_budget": N` in the filter caps the summary response by **estimated token cost** rather than by
+count — the honest discovery-cost cap, since a client's constraint is its context window, not a result
+count, and summaries vary in size (a long type string and many intent tags cost more than a bare scalar).
+The node greedily keeps summaries (in `id` or, with `?rank=relevance`, in ranked order) until the next
+would overrun the budget, and reports the spend:
+
+```json
+{ "results": [ … ], "cursor": "…", "complete": false,
+  "budget": { "token_budget": 4000, "tokens_estimated": 3970, "returned": 42, "more": true } }
+```
+
+`more` is true when more results matched than fit, and the `cursor` continues past the last *included*
+record, so the next page resumes exactly where the budget cut off. The top result is always returned even
+if it alone exceeds the budget (so a small budget still yields the best candidate; `tokens_estimated` then
+reports the overrun). The estimate is tokenizer-free (canonical-JSON length over a fixed chars-per-token
+factor) and node-local, so it is a budgeting aid, not an exact count; it applies only to `?include=summary`
+(uniform-size hashes and heavy full records are not what a context window is spent on).
 
 **Relevance ranking.** Every hit satisfies the filter equally, so the default `id` order discards a real
 signal: how well each hit fits the filter's *soft* preferences. `?rank=relevance` orders the matched set

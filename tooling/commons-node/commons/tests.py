@@ -21,7 +21,7 @@ from django.core.management import call_command
 from django.db import connection
 from django.test import Client, TestCase, override_settings
 
-from . import embedding
+from . import embedding, query
 from .embedding import LexicalHashingEmbedder, NeuralEmbedder, cosine, get_embedder
 from .models import Record
 from .vectorindex import get_vector_index, store_vector
@@ -255,6 +255,102 @@ class CommonsProtocolTests(TestCase):
                                 content_type="application/json")
         # second would outrank first if ranked, but default order is by insertion id
         self.assertEqual(resp.json()["results"], [first, second])
+
+    def _make_summary_records(self, n):
+        # n records that all match `{"intent_tags": {"any": ["transform"]}}`, each with a non-trivial
+        # type string so its summary has real token weight (the budget cap operates on summary size).
+        for i in range(n):
+            Record.objects.create(
+                hash="fn_" + str(i) * 64, kind="function-record", schema_version="0.2.0", raw={},
+                intent_tags=["transform"], name_hints=[f"widget_{i}"],
+                type_str="forall a b. (a -> b) -> List a -> List b")
+
+    def test_query_token_budget_trims_summary(self):
+        # A token budget smaller than the full page returns fewer summaries than matched, with a report.
+        self._make_summary_records(6)
+        full = self.client.post("/v0/query?include=summary",
+                                data=json.dumps({"intent_tags": {"any": ["transform"]}}),
+                                content_type="application/json").json()
+        self.assertEqual(len(full["results"]), 6)
+        self.assertNotIn("budget", full)                       # no budget field when none requested
+        per = query.summary_tokens(full["results"][0])         # cost of one summary
+        resp = self.client.post("/v0/query?include=summary",
+                                data=json.dumps({"intent_tags": {"any": ["transform"]},
+                                                 "token_budget": per * 2 + 1}),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(len(body["results"]), 2)              # only two summaries fit
+        self.assertEqual(body["budget"]["returned"], 2)
+        self.assertTrue(body["budget"]["more"])                # more matched than fit
+        self.assertLessEqual(body["budget"]["tokens_estimated"], per * 2 + 1)
+        self.assertFalse(body["complete"])                     # trimmed => not complete
+        # cursor continues past the last INCLUDED record, so the next page picks up where budget cut off
+        nxt = self.client.post("/v0/query?include=summary",
+                               data=json.dumps({"intent_tags": {"any": ["transform"]},
+                                                "cursor": body["cursor"]}),
+                               content_type="application/json").json()
+        returned = {s["hash"] for s in body["results"]} | {s["hash"] for s in nxt["results"]}
+        self.assertEqual(len(returned), 6)                     # no overlap, no gap
+
+    def test_query_token_budget_always_returns_top(self):
+        # A budget too small for even one summary still returns the top result (never an empty page).
+        self._make_summary_records(3)
+        resp = self.client.post("/v0/query?include=summary",
+                                data=json.dumps({"intent_tags": {"any": ["transform"]},
+                                                 "token_budget": 1}),
+                                content_type="application/json")
+        body = resp.json()
+        self.assertEqual(len(body["results"]), 1)
+        self.assertGreater(body["budget"]["tokens_estimated"], 1)   # reports the overrun honestly
+        self.assertTrue(body["budget"]["more"])
+
+    def test_query_token_budget_generous_returns_all(self):
+        self._make_summary_records(4)
+        resp = self.client.post("/v0/query?include=summary",
+                                data=json.dumps({"intent_tags": {"any": ["transform"]},
+                                                 "token_budget": 100000}),
+                                content_type="application/json")
+        body = resp.json()
+        self.assertEqual(len(body["results"]), 4)
+        self.assertFalse(body["budget"]["more"])
+        self.assertTrue(body["complete"])
+
+    def test_query_token_budget_respects_rank(self):
+        # Budget + rank: the trimmed page is the top-ranked ones, not the id-first ones.
+        self._make_summary_records(3)
+        cert = "fn_" + "c" * 64
+        Record.objects.create(hash=cert, kind="function-record", schema_version="0.2.0", raw={},
+                              intent_tags=["transform"], name_hints=["widget_c"],
+                              type_str="forall a b. (a -> b) -> List a -> List b", certified=True)
+        per = query.summary_tokens(query.record_summary(Record.objects.get(hash=cert)))
+        resp = self.client.post("/v0/query?include=summary&rank=relevance",
+                                data=json.dumps({"intent_tags": {"any": ["transform"]},
+                                                 "token_budget": per + 1}),
+                                content_type="application/json")
+        body = resp.json()
+        self.assertEqual(len(body["results"]), 1)
+        self.assertEqual(body["results"][0]["hash"], cert)     # certified boost -> ranked first -> kept
+        self.assertIsNone(body["cursor"])                      # ranking is not a paged feed
+
+    def test_query_token_budget_ignored_without_summary(self):
+        # A budget on the hashes-only tier is inert (uniform-size hashes aren't the context cost).
+        self._make_summary_records(5)
+        resp = self.client.post("/v0/query",
+                                data=json.dumps({"intent_tags": {"any": ["transform"]},
+                                                 "token_budget": 1}),
+                                content_type="application/json")
+        body = resp.json()
+        self.assertEqual(len(body["results"]), 5)              # not trimmed
+        self.assertNotIn("budget", body)
+
+    def test_query_token_budget_invalid_is_400(self):
+        for bad in (0, -5, "lots", 3.5, True):
+            resp = self.client.post("/v0/query?include=summary",
+                                    data=json.dumps({"token_budget": bad}),
+                                    content_type="application/json")
+            self.assertEqual(resp.status_code, 400, f"{bad!r}: {resp.content}")
+            self.assertEqual(resp.json()["error"], "malformed_filter")
 
     def test_query_malformed_array_predicate_is_400(self):
         # A bare list where an object predicate is required is a clean 400 (not an AttributeError 500).

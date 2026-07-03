@@ -107,21 +107,28 @@ def query(request):
     except ValueError as exc:
         return JsonResponse({"error": "malformed_json", "detail": str(exc)}, status=400)
 
+    include = request.GET.get("include")
     try:
-        hashes, cursor, complete = run_query(flt, rank=request.GET.get("rank") == "relevance")
+        # A token budget only shapes the compact-summary tier (uniform-size hashes / heavy full records
+        # aren't what a context window is spent on); ignored for other include modes.
+        hashes, cursor, complete, budget = run_query(
+            flt, rank=request.GET.get("rank") == "relevance", budget=include == "summary")
     except QueryError as exc:
         return JsonResponse({"error": "malformed_filter", "detail": str(exc)}, status=400)
-    include = request.GET.get("include")
     if include == "record":
         by_hash = {r.hash: r.raw for r in Record.objects.filter(hash__in=hashes)}
         return JsonResponse({"records": [by_hash[h] for h in hashes if h in by_hash],
                              "cursor": cursor, "complete": complete})
     if include == "summary":
         # Compact projection: the decision fields (type/effects/intent/…), not the full record — the
-        # discovery-cost middle tier between hashes-only and `include=record`.
+        # discovery-cost middle tier between hashes-only and `include=record`. `budget` (when a
+        # `token_budget` was applied) reports the estimated token spend and whether more matched.
         by_hash = {r.hash: record_summary(r) for r in Record.objects.filter(hash__in=hashes)}
-        return JsonResponse({"results": [by_hash[h] for h in hashes if h in by_hash],
-                             "cursor": cursor, "complete": complete})
+        payload = {"results": [by_hash[h] for h in hashes if h in by_hash],
+                   "cursor": cursor, "complete": complete}
+        if budget is not None:
+            payload["budget"] = budget
+        return JsonResponse(payload)
     return JsonResponse({"results": hashes, "cursor": cursor, "complete": complete})
 
 

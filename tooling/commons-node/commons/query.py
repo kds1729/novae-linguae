@@ -9,6 +9,7 @@ Pagination is by the `id` sequence cursor.
 """
 
 import functools
+import json
 import operator
 
 from django.db import connection
@@ -17,6 +18,7 @@ from django.db.models import Q
 from .models import Record
 
 _DB_SCAN_CAP = 2000  # bound the per-request scan for the MVP
+_CHARS_PER_TOKEN = 4  # rough, tokenizer-free heuristic; the budget is an estimate, documented as such
 
 # Fields whose value must be an object predicate, and the predicate keys they accept.
 _ARRAY_FIELDS = ("effects", "capabilities", "intent_tags")
@@ -52,6 +54,11 @@ def validate_filter(flt):
                     raise QueryError(f"`{field}.none` must be a boolean")
             elif not isinstance(val, list):
                 raise QueryError(f"`{field}.{key}` must be an array")
+    if "token_budget" in flt:
+        tb = flt["token_budget"]
+        # bool is an int subclass; reject it explicitly so `true` isn't read as 1
+        if isinstance(tb, bool) or not isinstance(tb, int) or tb < 1:
+            raise QueryError("`token_budget` must be a positive integer")
     return flt
 
 
@@ -207,12 +214,48 @@ def _relevance(record, flt):
     return score
 
 
-def run_query(flt, rank=False):
-    """Return (hashes, cursor, complete) for a query filter. Raises QueryError on a malformed filter.
+def summary_tokens(summary):
+    """Estimate the token cost of a compact summary — its canonical-JSON byte length divided by a fixed
+    chars-per-token factor. Tokenizer-free (no model dependency) and therefore an ESTIMATE: it is meant
+    to let a client budget a discovery round-trip in the same unit its context window is measured in, not
+    to be exact. Never returns 0, so every included item advances the budget."""
+    return max(1, len(json.dumps(summary, separators=(",", ":"), sort_keys=True)) // _CHARS_PER_TOKEN)
+
+
+def _pack_budget(page, matched_total, token_budget):
+    """Greedily keep summaries from the ranked/ordered `page` until the next would overrun `token_budget`.
+
+    The token budget is the honest discovery-cost cap: `limit` bounds the result COUNT, but summaries vary
+    in size (a record with a long type string and many intent tags costs more than a bare scalar), so a
+    client with a fixed context window wants "as many results as fit in T tokens", not a count. The top
+    (most relevant, when ranked) result is ALWAYS included even if it alone exceeds the budget, so a small
+    budget still yields the best candidate rather than an empty page — `tokens_estimated` then reports the
+    overrun. Returns (included_records, budget_report)."""
+    included, used = [], 0
+    for r in page:
+        cost = summary_tokens(record_summary(r))
+        if included and used + cost > token_budget:
+            break
+        used += cost
+        included.append(r)
+    report = {"token_budget": token_budget, "tokens_estimated": used, "returned": len(included),
+              # more results matched the filter than fit the budget (this scan; see also `complete`)
+              "more": len(included) < matched_total}
+    return included, report
+
+
+def run_query(flt, rank=False, budget=False):
+    """Return (hashes, cursor, complete, budget_report) for a query filter. Raises QueryError on a
+    malformed filter. `budget_report` is None unless a `token_budget` cap was applied.
 
     With ``rank=True`` the matched candidate set (bounded scan) is ordered by [`_relevance`] instead of by
     `id`, and the single best-`limit` page is returned (`cursor` is `None`): relevance re-orders the set,
-    so id-cursor pagination doesn't apply — ranking is a "surface the best few" view, not a paged feed."""
+    so id-cursor pagination doesn't apply — ranking is a "surface the best few" view, not a paged feed.
+
+    With ``budget=True`` and a `token_budget` in the filter, the count-limited page is further trimmed to
+    the summaries that fit the token budget (see [`_pack_budget`]) — the discovery-cost cap for the
+    `?include=summary` tier. The cursor then points past the last INCLUDED record, so pagination resumes
+    where the budget cut off."""
     validate_filter(flt)
     qs = _scalar_qs(flt)
 
@@ -220,13 +263,17 @@ def run_query(flt, rank=False):
         limit = max(1, min(int(flt.get("limit", 100)), 1000))
     except (TypeError, ValueError):
         limit = 100
+    token_budget = flt.get("token_budget") if budget else None
 
     if rank:
         scanned = list(qs[:_DB_SCAN_CAP])
         matched = [r for r in scanned if _array_ok(r, flt)]
         matched.sort(key=lambda r: (-_relevance(r, flt), r.id))
         page = matched[:limit]
-        return [r.hash for r in page], None, len(scanned) < _DB_SCAN_CAP
+        report = None
+        if token_budget is not None:
+            page, report = _pack_budget(page, len(matched), token_budget)
+        return [r.hash for r in page], None, len(scanned) < _DB_SCAN_CAP, report
 
     cursor = flt.get("cursor")
     if cursor is not None:
@@ -235,10 +282,13 @@ def run_query(flt, rank=False):
     scanned = list(qs[:_DB_SCAN_CAP])
     matched = [r for r in scanned if _array_ok(r, flt)]
     page = matched[:limit]
+    report = None
+    if token_budget is not None:
+        page, report = _pack_budget(page, len(matched), token_budget)
 
     hashes = [r.hash for r in page]
     next_cursor = str(page[-1].id) if page else cursor
     # "complete" iff this scan reached the end of the corpus (not truncated by the scan cap) and
-    # we did not fill the page (so there is nothing obvious left to return).
+    # we returned every matched row (so there is nothing obvious left — a budget-trimmed page is not).
     complete = len(scanned) < _DB_SCAN_CAP and len(page) == len(matched)
-    return hashes, next_cursor, complete
+    return hashes, next_cursor, complete, report

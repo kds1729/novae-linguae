@@ -298,7 +298,8 @@ python3 manage.py test commons      # 95 tests (94 on SQLite + 1 Postgres-only, 
 Covers publish/idempotency, resolve, `HEAD` exists, `404` for absent, message
 signature verification, **signed certifications** (publish/resolve, serve-by-subject, `?certified=true`,
 tamper rejection), tamper and malformed-input rejection, typed query (intent tags, effects,
-name-hint prefix, non-match exclusion, `include=record`), the `sync` feed, `info`, and the
+name-hint prefix, non-match exclusion, `include=record`, the `include=summary` compact projection,
+`rank=relevance` ordering, and the `token_budget` context-cost cap), the `sync` feed, `info`, and the
 `loadrecords` pipeline. The verify-gated tests skip if `nl-validator` isn't built; the **semantic
 search** tests run regardless — embedding determinism / L2-normalization / relevance ordering,
 `search` query + `like` + `filter` composition + `k` cap + error cases, `/v0/info` model id, and the
