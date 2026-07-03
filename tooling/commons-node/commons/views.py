@@ -14,7 +14,8 @@ from .ingest import create_record
 from .equiv import EquivError, run_equiv
 from .models import Record
 from .prove import ProveError, run_prove
-from .query import QueryError, record_summary, run_query
+from .query import (QueryError, check_token_budget, greedy_budget, record_summary,
+                    run_query, summary_tokens)
 from .search import run_search, SearchError
 
 _SCHEMA_VERSIONS = ["0.1.0", "0.2.0"]
@@ -141,17 +142,33 @@ def search(request):
         body = _json_body(request)
     except ValueError as exc:
         return JsonResponse({"error": "malformed_json", "detail": str(exc)}, status=400)
+    want_summary = request.GET.get("include") == "summary"
+    # A token budget shapes only the summary tier (see run_query); validate up front for a clean 400.
+    token_budget = body.get("token_budget") if want_summary and isinstance(body, dict) else None
+    if token_budget is not None:
+        try:
+            check_token_budget(token_budget)
+        except QueryError as exc:
+            return JsonResponse({"error": "malformed_filter", "detail": str(exc)}, status=400)
     try:
         results, model_id, truncated = run_search(body)
     except SearchError as exc:
         return JsonResponse({"error": exc.code, "detail": exc.detail}, status=exc.status)
-    if request.GET.get("include") == "summary":
+    budget = None
+    if want_summary:
         # Fold the compact projection into each ranked hit, so a client ranks AND judges candidates in a
         # single round-trip (the discovery-cost lever); the similarity `score` is preserved alongside.
         by_hash = {r.hash: record_summary(r)
                    for r in Record.objects.filter(hash__in=[x["hash"] for x in results])}
         results = [{**by_hash.get(x["hash"], {"hash": x["hash"]}), "score": x["score"]} for x in results]
+        if token_budget is not None:
+            # Cap the ranked, projected hits by estimated token cost (measured on the returned object,
+            # score included), keeping the highest-similarity ones that fit — the /v0/search counterpart
+            # of the /v0/query token budget. No cursor: search is a ranked view, not a paged feed.
+            results, budget = greedy_budget(results, summary_tokens, token_budget, len(results))
     payload = {"results": results, "model": model_id}
+    if budget is not None:
+        payload["budget"] = budget
     if truncated:
         payload["truncated"] = True   # scan cap hit; some records were not ranked (MVP bound)
     return JsonResponse(payload)

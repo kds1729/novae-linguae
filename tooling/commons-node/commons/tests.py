@@ -503,6 +503,40 @@ class SearchTests(TestCase):
         self.assertEqual(resp.status_code, 400, resp.content)
         self.assertEqual(resp.json()["error"], "malformed_filter")
 
+    def test_search_token_budget_trims_ranked_hits(self):
+        # A budget fitting only the top hit trims the ranked+projected summaries to the best one.
+        full = self.client.post("/v0/search?include=summary",
+                                 data=json.dumps({"query": "map a function over each element", "k": 2}),
+                                 content_type="application/json").json()
+        self.assertEqual(len(full["results"]), 2)
+        self.assertNotIn("budget", full)
+        top_cost = query.summary_tokens(full["results"][0])
+        resp = self.client.post(
+            "/v0/search?include=summary",
+            data=json.dumps({"query": "map a function over each element", "k": 2,
+                             "token_budget": top_cost}),
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(len(body["results"]), 1)
+        self.assertEqual(body["results"][0]["hash"], self.map_hash)   # highest similarity kept
+        self.assertTrue(body["budget"]["more"])
+        self.assertLessEqual(body["budget"]["tokens_estimated"], top_cost)
+        self.assertNotIn("cursor", body)                              # search is ranked, not paged
+
+    def test_search_token_budget_ignored_without_summary(self):
+        resp = self._search({"query": "map a function over each element", "k": 2, "token_budget": 1})
+        body = resp.json()
+        self.assertEqual(len(body["results"]), 2)     # hashes+scores only; budget inert
+        self.assertNotIn("budget", body)
+
+    def test_search_token_budget_invalid_is_400(self):
+        resp = self.client.post("/v0/search?include=summary",
+                                data=json.dumps({"query": "map", "token_budget": 0}),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.json()["error"], "malformed_filter")
+
     def test_k_caps_results(self):
         resp = self._search({"query": "list", "k": 1})
         self.assertEqual(len(resp.json()["results"]), 1)

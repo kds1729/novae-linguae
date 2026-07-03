@@ -239,7 +239,10 @@ Returns ranked addresses with scores:
 ```
 
 `?include=summary` folds the same compact projection as `query` into each ranked hit (the `score` is
-preserved), so a client ranks *and* judges candidates in a single round-trip.
+preserved), so a client ranks *and* judges candidates in a single round-trip. A body `"token_budget": N`
+caps those summaries by estimated token cost exactly as on `query` — the highest-similarity hits that fit
+the budget are kept, and the same `budget` report is returned (there is no `cursor`: `search` is a ranked
+view, not a paged feed).
 
 Unlike `query`, `search` is **heuristic and node-local**: it depends on the node's embedding model
 (reported in `model` and in `/v0/info`). Two nodes MAY rank differently. Semantic search is a

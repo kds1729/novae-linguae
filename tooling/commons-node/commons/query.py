@@ -55,11 +55,16 @@ def validate_filter(flt):
             elif not isinstance(val, list):
                 raise QueryError(f"`{field}.{key}` must be an array")
     if "token_budget" in flt:
-        tb = flt["token_budget"]
-        # bool is an int subclass; reject it explicitly so `true` isn't read as 1
-        if isinstance(tb, bool) or not isinstance(tb, int) or tb < 1:
-            raise QueryError("`token_budget` must be a positive integer")
+        check_token_budget(flt["token_budget"])
     return flt
+
+
+def check_token_budget(tb):
+    """Raise QueryError unless `tb` is a positive integer. Shared by `/v0/query` (filter field) and
+    `/v0/search` (body field) so a bad budget is a clean 400 on either endpoint. `bool` is an `int`
+    subclass, so reject it explicitly — a JSON `true` must not be read as the budget `1`."""
+    if isinstance(tb, bool) or not isinstance(tb, int) or tb < 1:
+        raise QueryError("`token_budget` must be a positive integer")
 
 
 def _array_ok(record, flt):
@@ -222,26 +227,31 @@ def summary_tokens(summary):
     return max(1, len(json.dumps(summary, separators=(",", ":"), sort_keys=True)) // _CHARS_PER_TOKEN)
 
 
-def _pack_budget(page, matched_total, token_budget):
-    """Greedily keep summaries from the ranked/ordered `page` until the next would overrun `token_budget`.
+def greedy_budget(items, cost_of, token_budget, total):
+    """Greedily keep `items` (in their given order — id/ranked/similarity) until the next would overrun
+    `token_budget`, using `cost_of(item)` for each item's token cost. Returns (kept, budget_report).
 
-    The token budget is the honest discovery-cost cap: `limit` bounds the result COUNT, but summaries vary
-    in size (a record with a long type string and many intent tags costs more than a bare scalar), so a
-    client with a fixed context window wants "as many results as fit in T tokens", not a count. The top
-    (most relevant, when ranked) result is ALWAYS included even if it alone exceeds the budget, so a small
-    budget still yields the best candidate rather than an empty page — `tokens_estimated` then reports the
-    overrun. Returns (included_records, budget_report)."""
-    included, used = [], 0
-    for r in page:
-        cost = summary_tokens(record_summary(r))
-        if included and used + cost > token_budget:
+    The token budget is the honest discovery-cost cap: a count limit bounds the RESULT COUNT, but summaries
+    vary in size (a long type string and many intent tags cost more than a bare scalar), so a client with a
+    fixed context window wants "as many results as fit in T tokens", not a count. The top (most relevant)
+    item is ALWAYS kept even if it alone exceeds the budget, so a small budget still yields the best
+    candidate rather than an empty page — `tokens_estimated` then reports the overrun. `total` is the size
+    of the full candidate set this page was drawn from, so `more` reflects results dropped by the budget."""
+    kept, used = [], 0
+    for it in items:
+        cost = cost_of(it)
+        if kept and used + cost > token_budget:
             break
         used += cost
-        included.append(r)
-    report = {"token_budget": token_budget, "tokens_estimated": used, "returned": len(included),
-              # more results matched the filter than fit the budget (this scan; see also `complete`)
-              "more": len(included) < matched_total}
-    return included, report
+        kept.append(it)
+    report = {"token_budget": token_budget, "tokens_estimated": used, "returned": len(kept),
+              "more": len(kept) < total}
+    return kept, report
+
+
+def _pack_budget(page, matched_total, token_budget):
+    """Budget-trim a page of matched Record rows for `/v0/query` (measures each row's compact summary)."""
+    return greedy_budget(page, lambda r: summary_tokens(record_summary(r)), token_budget, matched_total)
 
 
 def run_query(flt, rank=False, budget=False):
