@@ -404,7 +404,7 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
         }
         // self/apply-of-self arguments are Int (self params default Int). A var in list-op position is
         // a hard error (out of fragment) — surfaced here so the property reads UNSUPPORTED, not "Int".
-        if matches!(op.as_str(), "length" | "head" | "tail" | "reverse" | "map" | "filter" | "foldl" | "foldr" | "cons" | "append" | "concat" | "null" | "fst" | "snd") {
+        if matches!(op.as_str(), "length" | "head" | "tail" | "last" | "init" | "reverse" | "map" | "filter" | "foldl" | "foldr" | "cons" | "append" | "concat" | "null" | "fst" | "snd") {
             bail!("predicate uses list/structural operator `{op}` (out of fragment)");
         }
         if op == "apply" || op == "self" {

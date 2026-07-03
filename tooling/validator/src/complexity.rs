@@ -152,7 +152,7 @@ const CONST_OPS: &[&str] = &[
     "and", "or", "xor", "not", "id", "head", "tail", "cons", "null",
 ];
 /// First-order list ops whose work is linear in the list size.
-const LINEAR_OPS: &[&str] = &["length", "append", "reverse"];
+const LINEAR_OPS: &[&str] = &["length", "append", "reverse", "last", "init"];
 
 /// How a `self`-call's recursion argument descends its parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

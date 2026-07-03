@@ -326,11 +326,11 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
             let a = inf.fresh();
             Ty::Fun(vec![list(a)], Box::new(con("bool")))
         }
-        "head" => {
+        "head" | "last" => {
             let a = inf.fresh();
             Ty::Fun(vec![list(a.clone())], Box::new(a))
         }
-        "tail" | "reverse" => {
+        "tail" | "init" | "reverse" => {
             let a = inf.fresh();
             Ty::Fun(vec![list(a.clone())], Box::new(list(a)))
         }
@@ -622,6 +622,26 @@ mod tests {
             "body": { "kind": "app", "fn": { "kind": "var", "name": "add" },
                       "args": [{ "kind": "var", "name": "x" }, { "kind": "var", "name": "x" }] } });
         assert!(typecheck(&poly, &dbl).is_err());
+    }
+
+    #[test]
+    fn reverse_via_last_and_init_typechecks() {
+        // The `cons (last xs) (self (init xs))` reverse against `forall a. List a -> List a`: last : List a
+        // -> a, init : List a -> List a, so the body is well-typed now that both are builtins.
+        let list_a = json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "var", "name": "a" }] });
+        let ty = json!({ "kind": "forall", "vars": ["a"],
+            "body": { "kind": "fn", "params": [list_a.clone()], "result": list_a } });
+        let app = |fnj: serde_json::Value, args: serde_json::Value| json!({ "kind": "app", "fn": fnj, "args": args });
+        let v = |n: &str| json!({ "kind": "var", "name": n });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+            "kind": "case",
+            "scrutinee": app(v("null"), json!([v("xs")])),
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": v("nil") },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": app(v("cons"), json!([app(v("last"), json!([v("xs")])),
+                                                app(v("self"), json!([app(v("init"), json!([v("xs")]))]))])) }] } });
+        assert!(typecheck(&ty, &body).is_ok(), "reverse via last/init should type-check as List a -> List a");
     }
 
     #[test]

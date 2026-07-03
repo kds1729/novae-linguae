@@ -32,7 +32,8 @@ pub enum TerminationOutcome {
 /// function whose termination this analysis can't see, so a body using them is `Unknown`.
 const FIRST_ORDER_OPS: &[&str] = &[
     "add", "sub", "mul", "neg", "abs", "min", "max", "mod", "div", "eq", "neq", "lt", "le", "gt", "ge",
-    "and", "or", "xor", "not", "id", "head", "tail", "cons", "null", "length", "append", "reverse",
+    "and", "or", "xor", "not", "id", "head", "tail", "last", "init", "cons", "null", "length",
+    "append", "reverse",
 ];
 
 /// The parameter names of a `lambda` body, or `None` if it isn't one.

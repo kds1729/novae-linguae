@@ -494,8 +494,9 @@ fn as_list(v: &Val) -> Result<Vec<Val>> {
 /// Builtin arity, or `None` if `name` is not a builtin. `nil` is handled separately (a nullary value).
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
-        "neg" | "abs" | "not" | "id" | "head" | "tail" | "length" | "null" | "reverse" | "fst"
-        | "snd" | "print" | "rand" | "now" | "panic" | "read_file" | "http_get" => 1,
+        "neg" | "abs" | "not" | "id" | "head" | "tail" | "last" | "init" | "length" | "null"
+        | "reverse" | "fst" | "snd" | "print" | "rand" | "now" | "panic" | "read_file"
+        | "http_get" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
         | "apply" | "write_file" | "http_post" | "spawn" | "replicate" => 2,
@@ -769,6 +770,14 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
                 bail!("tail of empty list");
             }
             Val::List(xs[1..].to_vec())
+        }
+        "last" => as_list(&a[0])?.into_iter().next_back().ok_or_else(|| anyhow!("last of empty list"))?,
+        "init" => {
+            let xs = as_list(&a[0])?;
+            if xs.is_empty() {
+                bail!("init of empty list");
+            }
+            Val::List(xs[..xs.len() - 1].to_vec())
         }
         "length" => Val::Int(as_list(&a[0])?.len() as i128),
         "null" => Val::Bool(as_list(&a[0])?.is_empty()),
@@ -1127,6 +1136,40 @@ mod tests {
         assert!(runs.iter().all(|r| r.passed), "double should match all its worked examples");
         // double(5) == 10
         assert_eq!(eval_body(&body, &[nat(5)]).unwrap(), encode_value(&Val::Int(10)));
+    }
+
+    #[test]
+    fn last_and_init_builtins() {
+        let lst = json!({ "kind": "list", "elems": [nat(1), nat(2), nat(3)] });
+        // last [1,2,3] == 3
+        let last = json!({ "kind": "lambda", "params": [{ "name": "xs" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "last" }, "args": [{ "kind": "var", "name": "xs" }] } });
+        assert_eq!(eval_body(&last, &[lst.clone()]).unwrap(), encode_value(&Val::Int(3)));
+        // init [1,2,3] == [1,2]
+        let init = json!({ "kind": "lambda", "params": [{ "name": "xs" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "init" }, "args": [{ "kind": "var", "name": "xs" }] } });
+        assert_eq!(eval_body(&init, &[lst]).unwrap(),
+                   encode_value(&Val::List(vec![Val::Int(1), Val::Int(2)])));
+    }
+
+    #[test]
+    fn reverse_via_last_and_init() {
+        // The natural `cons (last xs) (self (init xs))` formulation of reverse — which a model reaches for
+        // and which is algorithmically correct — now runs, because `last`/`init` are builtins.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "null" }, "args": [{ "kind": "var", "name": "xs" }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "var", "name": "nil" } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": {
+                    "kind": "app", "fn": { "kind": "var", "name": "cons" }, "args": [
+                        { "kind": "app", "fn": { "kind": "var", "name": "last" }, "args": [{ "kind": "var", "name": "xs" }] },
+                        { "kind": "app", "fn": { "kind": "var", "name": "self" }, "args": [
+                            { "kind": "app", "fn": { "kind": "var", "name": "init" }, "args": [{ "kind": "var", "name": "xs" }] }] }] } }] } });
+        let input = json!({ "kind": "list", "elems": [nat(1), nat(2), nat(3), nat(4)] });
+        assert_eq!(eval_body(&body, &[input]).unwrap(),
+                   encode_value(&Val::List(vec![Val::Int(4), Val::Int(3), Val::Int(2), Val::Int(1)])));
     }
 
     #[test]
