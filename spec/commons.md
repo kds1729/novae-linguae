@@ -258,6 +258,35 @@ the commons federates without any node being authoritative.
 { "hashes": ["fn_3a9b…", "msg_e7a2…"], "cursor": "…", "complete": false }
 ```
 
+### Seed bundles (`.nlb`) — out-of-band federation
+
+Where `sync` federates node-to-node over HTTP, a **seed bundle** federates over *anything* — an HTTP
+mirror, IPFS, BitTorrent, a git repo, email, physical media — for cold-start, disaster recovery, and
+publishing. A `.nlb` ("Nova Lingua Bundle", format id `nlb/1`) is a **gzipped tar** containing exactly:
+
+```
+manifest.json    { format_version, count, schema_versions[], bundle_digest, source?, producer?, signature? }
+records.jsonl    one content-addressed record per line, sorted by hash
+```
+
+The manifest is specified by [`bundle.schema.json`](bundle.schema.json). A bundle is **deterministic**
+(records sorted by hash, manifest keys sorted, fixed tar/gzip mtime) so the same record set always
+produces identical bytes and bundles dedupe and diff cleanly. `bundle_digest` (BLAKE2b-256 over the
+sorted record-hash set) is a cheap whole-payload integrity pre-check on read.
+
+A bundle is ingested through **exactly the same verify-then-store gate as `POST /v0/records`** — every
+record is re-checked by hash (and messages by signature) — so the **producer is untrusted**: a bundle can
+be *withheld* but never *poisoned*, and a verified export from a Postgres node restores cleanly into a
+fresh zero-dependency SQLite node. The manifest MAY carry an Ed25519 `signature` (with the signer's
+`producer` DID) over the canonical manifest minus the `signature` field; since the manifest carries
+`bundle_digest`, that signature transitively attests to the record set. It is **advisory provenance
+only** ("this bundle came from `github.com/org/lib@v1.2.3`"), never an admission gate (principle 7) —
+`bundle_digest` and the manifest signature are integrity/provenance, and per-record hash verification on
+ingest is the sole security boundary. One format serves two jobs: the publishing/interchange artifact any
+project ships like a wheel or crate, and the seed/disaster-recovery archive. The reference node
+implements export/import (`exportbundle`/`loadbundle`); the full resilience strategy — bundles plus a
+pluggable censorship-resistant bootstrap — is in [`resilience.md`](resilience.md).
+
 ### `GET /v0/info` — node metadata
 
 ```json

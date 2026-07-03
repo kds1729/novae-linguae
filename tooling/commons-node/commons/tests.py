@@ -748,6 +748,32 @@ class BundleSigningTests(TestCase):
         write_bundle(b, [_R2, _R1], sign_seed=self.SEED)
         self.assertEqual(a.getvalue(), b.getvalue())
 
+    def test_manifest_conforms_to_bundle_schema(self):
+        # Keeps spec/bundle.schema.json in sync with what bundle.py actually emits, without a
+        # jsonschema dependency: check required fields, additionalProperties=false, the string
+        # patterns, and the signature->producer dependency for both an unsigned and a signed manifest.
+        import re
+        from .bundle import build_manifest, write_bundle
+        schema = json.loads((Path(settings.COMMONS_SPEC_DIR) / "bundle.schema.json").read_text())
+        req, props = schema["required"], schema["properties"]
+
+        def conforms(m):
+            self.assertFalse(set(req) - set(m), f"missing required: {set(req) - set(m)}")
+            self.assertFalse(set(m) - set(props), f"unknown keys: {set(m) - set(props)}")  # additionalProperties:false
+            for key in ("bundle_digest", "producer", "signature"):
+                if key in m:
+                    self.assertRegex(m[key], props[key]["pattern"], key)
+            self.assertEqual(m["format_version"], "nlb/1")
+            self.assertIsInstance(m["count"], int)
+            self.assertIsInstance(m["schema_versions"], list)
+            for dep, needs in schema.get("dependentRequired", {}).items():
+                if dep in m:
+                    self.assertTrue(set(needs) <= set(m), f"{dep} requires {needs}")
+
+        conforms(build_manifest([_R1, _R2], source={"repo": "https://github.com/org/lib",
+                                                     "release": "v1.2.3"}))
+        conforms(write_bundle(io.BytesIO(), [_R1, _R2], sign_seed=self.SEED))
+
 
 @unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
 class BundleCommandTests(TestCase):

@@ -1,8 +1,12 @@
 # Resilience & availability — Arca, seed bundles, and censorship-resistant bootstrap
 
-**Status: proposed design — not yet implemented.** This records the resilience strategy for the
-public commons service and the distribution formats that make it robust. It is forward-looking design,
-not a normative protocol spec; the normative store/discovery protocol is [`commons.md`](commons.md).
+**Status: the mechanisms are implemented** — the deterministic `.nlb` bundle format with signed
+manifests, node export/import (`exportbundle`/`loadbundle`), and the pluggable multi-channel bootstrap
+resolver (`makebootstrap`/`bootstrap`); the layer-by-layer status is in the table below. This records the
+resilience strategy for the public commons service and the distribution formats that make it robust. It
+is a strategy/design document, not itself a normative protocol spec — the normative store/discovery
+protocol (including the now-normative `.nlb` manifest, [`bundle.schema.json`](bundle.schema.json)) is
+[`commons.md`](commons.md).
 
 ## Why
 
@@ -98,7 +102,8 @@ Properties (all of which fall out of the existing design):
 - **One format, two jobs.** The same artifact is both the publishing/interchange format *and* the
   seed/disaster-recovery bundle — nothing extra to maintain.
 
-A future `bundle.schema.json` + a section in [`commons.md`](commons.md) would make this normative.
+This is now normative: the manifest is specified by [`bundle.schema.json`](bundle.schema.json) and the
+format has a dedicated section in [`commons.md`](commons.md).
 
 ### Pluggable censorship-resistant bootstrap ("dead drops")
 
