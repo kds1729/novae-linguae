@@ -6,8 +6,11 @@ over a code-pretrained Qwen2.5-Coder base. There are **two reference tiers** (bo
 
 | tier | base | write (held-out) | notes |
 |---|---|---|---|
-| **best accuracy** | **Coder-7B** | **141/151 = 93.4%** (both seeds) | seed-stable; **cracks `nand`** (capacity-bound, survived all corpus work + 3B) |
+| **best total / read** | **Coder-14B** | write **147/157 = 93.6%** (both seeds); total **96.2%**, read **98.6%** | capacity fixes *reading* (91→98.6%) + cracks `foldr_with`/`member`; write ceiling = 7B's (design-bound, not capacity) |
+| **best write efficiency** | **Coder-7B** | **141/151 = 93.4%** (both seeds) | seed-stable; **cracks `nand`** (capacity-bound, survived all corpus work + 3B) |
 | **efficient** | Coder-3B | 138/151 = 91% (best seed; ~134 mean) | half the size/VRAM; the deployable sweet spot |
+
+> **The capacity boundary (2026-07-03, Coder-14B 2-seed).** 14B moved the total to **96.2%** but taught the sharpest lesson: **capacity fixes *reading*, not *writing*.** `read` climbed 91→98.6% (the off-by-one / sign / absorption-law arithmetic errors are capacity-bound and mostly gone), and the two genuine reasoning-*write* residuals `foldr_with`/`member` cracked on both seeds — yet the `write` count is **dead-stable at 147/157 across both seeds AND across 7B↔14B**. The remaining write misses are not capacity-bound: they are the dialect's **totality by design** (no `^`, no `!!`, no `error`). Two of them were a missing-*idiom* gap, closed at $0/local: adding **`last`/`init`** list builtins made the model's already-correct `reverse` valid, and **corpus family #38** (index recursion) flipped `nth` `.`→`P` at 14B (`min_of_list` too, via #37). Genuinely stuck: `pow2` (its exact gold is the already-covered `rec_pow` shape → leakage-dropped → a generalization limit, not a coverage gap) and a small arithmetic core (`fib`, sign). Adapters (275 MB each) pulled to `/var/tmp/claude/adapter-coder14b-c{7,8}-s*`.
 
 7B both raised the score (+3–7 write) **and** killed the 3B seed variance (3B swung 130↔138; 7B is 141 on
 both seeds) — the capacity lever, confirmed. Pick 7B when accuracy matters, 3B when size/latency does. The

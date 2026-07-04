@@ -2687,6 +2687,44 @@ def combinatorial_specs(exclude_names=()):
                         bapp("add", int_lit(1), bself(bapp("div", n, int_lit(b)))))),
                    [{"args": [v], "result": _ndig(v, b)} for v in _NN36], terminates="unknown"))
 
+    # 37. SINGLE-ELEMENT-BASE list recursion — reduce a NON-EMPTY list by combining the head with the
+    # recursion on the tail, basing out at the one-element list (`case null (tail xs) -> head xs`). This is
+    # the idiom the eval's max_list_rec/min-of-list/last need; the model instead reached for an `error`
+    # builtin on the empty case (the total dialect has no `error`). The exact max_list_rec body is
+    # leakage-dropped; min/sum/product teach the SHAPE. Tail descent -> terminates=always; inputs non-empty.
+    def _prod37(lst):
+        r = 1
+        for _v in lst:
+            r *= _v
+        return r
+    _RED37 = {"max": max, "min": min, "add": sum, "mul": _prod37}
+    _RLST37 = [[3], [5, 2], [1, 4, 2], [7, 3, 9, 1], [2, 2, 2], [-1, -5, -2]]
+    for opn, rf in _RED37.items():
+        add(_cspec(f"reduce1_{opn}", f"Combine a non-empty list's elements with {opn} (single-element base).",
+                   f"head xs when the tail is empty; else {opn} (head xs) (self (tail xs))",
+                   ["recursion", "list", "reduce", opn], fn([list_of(INT)], INT),
+                   lam(["xs"], case_bool(bapp("null", bapp("tail", xs)), bapp("head", xs),
+                        bapp(opn, bapp("head", xs), bself(bapp("tail", xs))))),
+                   [{"args": [lst], "result": rf(lst)} for lst in _RLST37], terminates="always"))
+    # 38. INDEX RECURSION — walk to the n-th element by decrementing the index AND peeling the tail in
+    # lockstep (`self (n-1) (tail xs)`), basing out at `n == 0`. The eval's `nth` needs exactly this; the
+    # model reached for Haskell `!!` or an `error` builtin. The identity-base body (= nth) is leakage-
+    # dropped; the transformed-head variants teach the index-walk idiom. Valid indices only (0 <= n < len).
+    # Mixed counter+tail descent -> declare terminates=unknown (conservative; never a false `always`).
+    def _nth(base_ast):
+        return lam(["n", "xs"], case_bool(bapp("eq", n, int_lit(0)), base_ast,
+                   bself(bapp("sub", n, int_lit(1)), bapp("tail", xs))))
+    _IDX38 = [(0, [7, 8, 9]), (1, [7, 8, 9]), (2, [7, 8, 9]), (0, [5]), (1, [3, 6]), (2, [4, 1, 2, 9])]
+    for nm, base, rf in (
+        ("nth_at", bapp("head", xs), lambda e: e),
+        ("nth_double", bapp("mul", int_lit(2), bapp("head", xs)), lambda e: 2 * e),
+        ("nth_neg", bapp("neg", bapp("head", xs)), lambda e: -e),
+    ):
+        add(_cspec(nm, f"Return {'the'if nm=='nth_at' else '2x the'if nm=='nth_double' else 'the negation of the'} element at index n of a list (0-based).",
+                   "index-walk: base when n is 0; else self (n-1) (tail xs)", ["recursion", "list", "index"],
+                   fn([INT, list_of(INT)], INT), _nth(base),
+                   [{"args": [i, lst], "result": rf(lst[i])} for i, lst in _IDX38], terminates="unknown"))
+
     return out
 
 
