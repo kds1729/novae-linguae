@@ -490,7 +490,12 @@ meaning, so equal normal forms imply equivalence; the polynomial form additional
 the rewrite aborts, keeping every operand — so it is sound by construction, not only by the value-level
 property test. A few **sound list rewrites** also apply — `reverse(reverse x) → x`, `reverse(nil) → nil`,
 `append(x, nil) → x` / `append(nil, x) → x` (each retains every subterm; a *selector* like
-`head(cons h t) → h` is excluded, as it drops a field). With this, `normalize` is a **decision procedure
+`head(cons h t) → h` is excluded, as it drops a field). And **sound string rewrites**
+(spec/expressiveness.md phase 1): `str_concat` spines are flattened, empty-string literals dropped (the
+identity), adjacent literals folded, and the spine **right-nested** — concatenation is associative but
+NOT commutative, so there is no operand sorting — which makes every association and literal-split of
+one concatenation share a normal form (`("a" ++ s) ++ "b" ≡ "a" ++ (s ++ "b")`, solver-free);
+`str_length`/`str_contains` fold on literals. With this, `normalize` is a **decision procedure
 for the integer polynomial fragment**; for the list fragment it decides the sound-local equalities (so
 `reverse(reverse xs) ≡ xs` is solver-free) but the induction-requiring list laws remain a normalizer
 (*unequal* normal forms say nothing). This backs `equiv`'s

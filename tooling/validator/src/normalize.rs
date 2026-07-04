@@ -39,6 +39,10 @@
 //!     monomial* and still be sound when its atom lives on in another (`(a+1)(a−1)`'s `−a + a` cancels
 //!     because `a` remains in `a²`), so the check is per-atom, not per-monomial — a divergence hazard the
 //!     value-only property test would not catch on its own.
+//!   - **sound string rewrites** — `str_concat` spines are flattened, empty-string literals dropped
+//!     (the identity), adjacent literals folded, and the spine right-nested (associative, NOT
+//!     commutative — no operand sorting), so every association/literal-split of one concatenation
+//!     shares a normal form; `str_length`/`str_contains` fold on literals.
 //!   - **sound list-algebra rewrites** — `reverse(reverse(x)) → x`, `reverse(nil) → nil`, and `append(x,
 //!     nil) → x` / `append(nil, x) → x`. Each retains every subterm, so it is sound even under a diverging
 //!     operand (unlike a *selector* `head(cons h t) → h`, which drops `t` and is therefore NOT applied), and
@@ -144,6 +148,37 @@ fn app(op: &str, args: Vec<J>) -> J {
 fn is_nil(node: &J) -> bool {
     node.get("kind").and_then(|k| k.as_str()) == Some("var")
         && node.get("name").and_then(|n| n.as_str()) == Some("nil")
+}
+
+/// A string-literal node's contents, if it is one.
+fn as_str_lit(node: &J) -> Option<&str> {
+    if node.get("kind").and_then(|k| k.as_str()) != Some("lit") {
+        return None;
+    }
+    let v = node.get("value")?;
+    (v.get("kind").and_then(|k| k.as_str()) == Some("string")).then(|| v.get("value")?.as_str())?
+}
+
+fn as_str_lit_owned(node: &J) -> Option<String> {
+    as_str_lit(node).map(String::from)
+}
+
+fn str_lit(s: &str) -> J {
+    json!({ "kind": "lit", "value": { "kind": "string", "value": s } })
+}
+
+/// Flatten a `str_concat` spine into its operand sequence in order (`(a ++ b) ++ c` → `[a, b, c]`).
+fn flatten_concat(node: &J, out: &mut Vec<J>) {
+    if head_op(node).as_deref() == Some("str_concat") {
+        if let Some(args) = node.get("args").and_then(|a| a.as_array()) {
+            if args.len() == 2 {
+                flatten_concat(&args[0], out);
+                flatten_concat(&args[1], out);
+                return;
+            }
+        }
+    }
+    out.push(node.clone());
 }
 
 /// A naming-invariant sort key: the operand's own α-normal form, canonically serialized. Two operands
@@ -539,6 +574,50 @@ fn simplify_app(node: &J) -> J {
             }
             if is_nil(&args[0]) {
                 return args[1].clone();
+            }
+        }
+        // Sound STRING rewrites (spec/expressiveness.md phase 1). str_concat is associative (not
+        // commutative — no AC sorting): flatten the spine, drop empty-string literals (the identity;
+        // a literal can't diverge), fold ADJACENT literals, and rebuild right-nested — so all
+        // associations and literal splits of the same concatenation share one normal form, making
+        // concat-shape equivalence solver-free. Every non-literal subterm is retained.
+        "str_concat" if args.len() == 2 => {
+            let mut parts = Vec::new();
+            flatten_concat(node, &mut parts);
+            let mut merged: Vec<J> = Vec::new();
+            for p in parts {
+                if as_str_lit(&p).is_some_and(|s| s.is_empty()) {
+                    continue; // "" is the identity of concatenation
+                }
+                if let (Some(prev), Some(cur)) = (merged.last().and_then(as_str_lit_owned), as_str_lit(&p)) {
+                    let mut joined = prev;
+                    joined.push_str(cur);
+                    *merged.last_mut().unwrap() = str_lit(&joined);
+                } else {
+                    merged.push(p);
+                }
+            }
+            return match merged.len() {
+                0 => str_lit(""),
+                1 => merged.pop().unwrap(),
+                _ => {
+                    let mut acc = merged.pop().unwrap();
+                    while let Some(prev) = merged.pop() {
+                        acc = app("str_concat", vec![prev, acc]);
+                    }
+                    acc
+                }
+            };
+        }
+        // Literal folding for the other string ops in the proof fragment (total on literals).
+        "str_length" if args.len() == 1 => {
+            if let Some(s) = as_str_lit(&args[0]) {
+                return int_lit(s.chars().count() as i128);
+            }
+        }
+        "str_contains" if args.len() == 2 => {
+            if let (Some(needle), Some(hay)) = (as_str_lit(&args[0]), as_str_lit(&args[1])) {
+                return bool_lit(hay.contains(needle));
             }
         }
         _ => {}
@@ -955,6 +1034,39 @@ mod tests {
             }
         }
         assert!(checked > 1000, "soundness battery should exercise many envs (got {checked})");
+    }
+
+    // --- sound string rewrites --------------------------------------------------------------------
+
+    #[test]
+    fn string_concat_associations_share_a_normal_form() {
+        // ("a" ++ s) ++ "b"  ≡  "a" ++ (s ++ "b")  ≡  ("a" ++ (s ++ ("" ++ "b"))) — all one form.
+        let s = json!({ "kind": "var", "name": "s" });
+        let lit = |v: &str| json!({ "kind": "lit", "value": { "kind": "string", "value": v } });
+        let cat = |a: J, b: J| app("str_concat", vec![a, b]);
+        let left = cat(cat(lit("a"), s.clone()), lit("b"));
+        let right = cat(lit("a"), cat(s.clone(), lit("b")));
+        let padded = cat(lit("a"), cat(s.clone(), cat(lit(""), lit("b"))));
+        let wrap = |inner: J| json!({ "kind": "lambda", "params": [{ "name": "s" }], "body": inner });
+        assert!(normal_equivalent(&wrap(left.clone()), &wrap(right)));
+        assert!(normal_equivalent(&wrap(left), &wrap(padded)));
+    }
+
+    #[test]
+    fn string_literals_fold() {
+        // Adjacent literals in a concat spine merge around the variable; pure-literal ops fold away.
+        let lit = |v: &str| json!({ "kind": "lit", "value": { "kind": "string", "value": v } });
+        let all_lit = app("str_concat", vec![lit("ab"), app("str_concat", vec![lit("c"), lit("")])]);
+        assert_eq!(normalize(&all_lit), lit("abc"));
+        let len = app("str_length", vec![lit("héllo")]);
+        assert_eq!(normalize(&len), int_lit(5));
+        let has = app("str_contains", vec![lit("é"), lit("héllo")]);
+        assert_eq!(normalize(&has), bool_lit(true));
+        // And identity elimination alone: s ++ "" → s.
+        let s = json!({ "kind": "var", "name": "s" });
+        let wrap = |inner: J| json!({ "kind": "lambda", "params": [{ "name": "s" }], "body": inner });
+        assert!(normal_equivalent(&wrap(app("str_concat", vec![s.clone(), lit("")])),
+                                  &wrap(s)));
     }
 
     // --- sound list-algebra rewrites --------------------------------------------------------------
