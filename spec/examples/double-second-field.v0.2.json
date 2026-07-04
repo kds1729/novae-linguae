@@ -1,0 +1,36 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_1149e65ce2665b70bb569f557e0e37313c5f50d1848b024b20969468e6d499c0",
+  "name_hints": ["double_second_field"],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [{ "kind": "builtin", "name": "string" }],
+      "result": { "kind": "builtin", "name": "int" }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [{ "kind": "string", "value": "id,21,ok" }],
+      "result": { "kind": "int", "value": 42 }
+    },
+    {
+      "args": [{ "kind": "string", "value": "n,-3" }],
+      "result": { "kind": "int", "value": -6 }
+    },
+    {
+      "args": [{ "kind": "string", "value": "id,junk,ok" }],
+      "result": { "kind": "int", "value": 0 }
+    }
+  ],
+  "properties": [],
+  "intent_tags": ["parse", "transform/scalar", "string"],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_074128509c651716a37c0096fbdfd3d3d5fed9a7c218984c8547ba0c6e5857fd"
+}

@@ -1,0 +1,105 @@
+{
+  "body": {
+    "arms": [
+      {
+        "body": {
+          "args": [
+            {
+              "kind": "var",
+              "name": "n"
+            },
+            {
+              "kind": "var",
+              "name": "n"
+            }
+          ],
+          "fn": {
+            "kind": "var",
+            "name": "add"
+          },
+          "kind": "app"
+        },
+        "pattern": {
+          "kind": "variant",
+          "payload": {
+            "kind": "bind",
+            "name": "n"
+          },
+          "tag": "Just"
+        }
+      },
+      {
+        "body": {
+          "kind": "lit",
+          "value": {
+            "kind": "int",
+            "value": 0
+          }
+        },
+        "pattern": {
+          "kind": "variant",
+          "tag": "None"
+        }
+      }
+    ],
+    "kind": "case",
+    "scrutinee": {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "s"
+                    }
+                  ],
+                  "fn": {
+                    "args": [
+                      {
+                        "kind": "lit",
+                        "value": {
+                          "kind": "string",
+                          "value": ","
+                        }
+                      }
+                    ],
+                    "fn": {
+                      "kind": "var",
+                      "name": "str_split"
+                    },
+                    "kind": "app"
+                  },
+                  "kind": "app"
+                }
+              ],
+              "fn": {
+                "kind": "var",
+                "name": "tail"
+              },
+              "kind": "app"
+            }
+          ],
+          "fn": {
+            "kind": "var",
+            "name": "head"
+          },
+          "kind": "app"
+        }
+      ],
+      "fn": {
+        "kind": "var",
+        "name": "parse_int"
+      },
+      "kind": "app"
+    }
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "s"
+    }
+  ]
+}

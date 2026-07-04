@@ -1,0 +1,60 @@
+{
+  "body": {
+    "args": [
+      {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "kind": "var",
+                    "name": "s"
+                  }
+                ],
+                "fn": {
+                  "args": [
+                    {
+                      "kind": "lit",
+                      "value": {
+                        "kind": "string",
+                        "value": ","
+                      }
+                    }
+                  ],
+                  "fn": {
+                    "kind": "var",
+                    "name": "str_split"
+                  },
+                  "kind": "app"
+                },
+                "kind": "app"
+              }
+            ],
+            "fn": {
+              "kind": "var",
+              "name": "tail"
+            },
+            "kind": "app"
+          }
+        ],
+        "fn": {
+          "kind": "var",
+          "name": "head"
+        },
+        "kind": "app"
+      }
+    ],
+    "fn": {
+      "kind": "var",
+      "name": "parse_int"
+    },
+    "kind": "app"
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "s"
+    }
+  ]
+}

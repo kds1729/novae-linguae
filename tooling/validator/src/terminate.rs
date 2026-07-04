@@ -50,15 +50,40 @@ fn lambda_params(body: &J) -> Option<Vec<String>> {
     )
 }
 
+/// The application-spine head name and flattened argument list of an `app` node, walking nested
+/// curried `fn` applications — the form the surface parser emits for juxtaposition, so
+/// `((f a) b)` reads as `("f", [a, b])`. Covers the `{op: f}` spelling too. `None` when the
+/// ultimate head isn't a named variable (e.g. applying a lambda or a projection).
+fn app_spine(node: &J) -> Option<(String, Vec<J>)> {
+    if node.get("kind").and_then(|k| k.as_str()) != Some("app") && node.get("op").is_none() {
+        return None;
+    }
+    let args: Vec<J> = node.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    if let Some(op) = node.get("op").and_then(|o| o.as_str()) {
+        return Some((op.to_string(), args));
+    }
+    let f = node.get("fn")?;
+    match f.get("kind").and_then(|k| k.as_str()) {
+        Some("var") => Some((f.get("name")?.as_str()?.to_string(), args)),
+        Some("app") => {
+            let (head, mut inner) = app_spine(f)?;
+            inner.extend(args);
+            Some((head, inner))
+        }
+        _ => None,
+    }
+}
+
 /// If `node` is the application-spine head `self` (in any of its spellings — `{op:"self"}`,
-/// `{fn:{var:"self"}}`, or a curried `apply(apply(self, …), …)` spine), return its argument list in order.
+/// `{fn:{var:"self"}}`, a curried direct application `((self a0) a1)`, or a curried
+/// `apply(apply(self, …), …)` spine), return its argument list in order.
 fn self_call_args(node: &J) -> Option<Vec<J>> {
     let args = node.get("args").and_then(|a| a.as_array());
-    if node.get("op").and_then(|o| o.as_str()) == Some("self") {
-        return Some(args.cloned().unwrap_or_default());
-    }
-    if node.pointer("/fn/name").and_then(|n| n.as_str()) == Some("self") {
-        return Some(args.cloned().unwrap_or_default());
+    // Direct spellings, incl. the curried direct-application spine.
+    if let Some((head, spine_args)) = app_spine(node) {
+        if head == "self" {
+            return Some(spine_args);
+        }
     }
     // Curried apply spine: apply(apply(self, a0), a1) → [a0, a1].
     if node.get("op").and_then(|o| o.as_str()) == Some("apply") {
@@ -95,12 +120,10 @@ fn tail_descent(arg: &J) -> Option<(String, usize)> {
 
 /// The recognized first-order op at this application's head, or `None` if the node isn't a builtin
 /// first-order application (it may be a `self`-call, a higher-order/opaque call, or a non-application).
+/// Walks the curried spine, so a surface-parsed `str_split "," s` reads as first-order.
 fn first_order_head(node: &J) -> Option<String> {
-    let op = node
-        .get("op")
-        .and_then(|o| o.as_str())
-        .or_else(|| node.pointer("/fn/name").and_then(|n| n.as_str()))?;
-    FIRST_ORDER_OPS.contains(&op).then(|| op.to_string())
+    let (op, _) = app_spine(node)?;
+    FIRST_ORDER_OPS.contains(&op.as_str()).then_some(op)
 }
 
 /// Walk the body collecting each `self`-call's recursion descent (`tail_descent` of its first argument)
@@ -224,6 +247,26 @@ mod tests {
     #[test]
     fn non_recursive_first_order_terminates() {
         let body = lambda(&["a", "b"], app("add", vec![v("a"), v("b")]));
+        assert_eq!(analyze_termination(&body), TerminationOutcome::Always);
+    }
+
+    #[test]
+    fn curried_first_order_application_terminates() {
+        // The surface parser emits juxtaposition `str_split "," s` as a CURRIED spine
+        // ((str_split ",") s); the analysis must read through it to the first-order head
+        // rather than reporting an opaque callee.
+        let curried = json!({ "kind": "app",
+            "fn": { "kind": "app", "fn": v("str_split"),
+                    "args": [{ "kind": "lit", "value": { "kind": "string", "value": "," } }] },
+            "args": [v("s")] });
+        let body = lambda(&["s"], app("head", vec![curried]));
+        assert_eq!(analyze_termination(&body), TerminationOutcome::Always);
+        // And a curried self-call spine still reads as a structural recursion: ((self (tail xs)) n).
+        let curried_self = json!({ "kind": "app",
+            "fn": { "kind": "app", "fn": v("self"), "args": [app("tail", vec![v("xs")])] },
+            "args": [v("n")] });
+        let step = app("add", vec![lit_i(1), curried_self]);
+        let body = lambda(&["xs", "n"], rec_case("xs", lit_i(0), step));
         assert_eq!(analyze_termination(&body), TerminationOutcome::Always);
     }
 

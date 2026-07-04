@@ -1,0 +1,46 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_f24d48bf29472f6b08c097fdc765dcefd81389f012549ee932a6c4fe3b530e8a",
+  "name_hints": ["render_csv"],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "apply",
+          "ctor": { "kind": "builtin", "name": "List" },
+          "args": [{ "kind": "builtin", "name": "int" }]
+        }
+      ],
+      "result": { "kind": "builtin", "name": "string" }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [{ "kind": "list", "elems": [
+        { "kind": "int", "value": 1 },
+        { "kind": "int", "value": 2 },
+        { "kind": "int", "value": 3 }
+      ] }],
+      "result": { "kind": "string", "value": "1,2,3" }
+    },
+    {
+      "args": [{ "kind": "list", "elems": [] }],
+      "result": { "kind": "string", "value": "" }
+    },
+    {
+      "args": [{ "kind": "list", "elems": [{ "kind": "int", "value": -4 }] }],
+      "result": { "kind": "string", "value": "-4" }
+    }
+  ],
+  "properties": [],
+  "intent_tags": ["serialize", "string", "coll"],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_ff51d23c7482dfce277118b731100e399c4121da9e4f4dce132a58a823e44124"
+}

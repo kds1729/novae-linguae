@@ -174,6 +174,30 @@ fn head_op(node: &J) -> Option<&str> {
         .or_else(|| node.pointer("/fn/name").and_then(|n| n.as_str()))
 }
 
+/// The application-spine head name and flattened argument list of an `app` node, walking nested
+/// curried `fn` applications — the form the surface parser emits for juxtaposition, so
+/// `((f a) b)` reads as `("f", [a, b])`. Covers the `{op: f}` spelling too. `None` when the
+/// ultimate head isn't a named variable.
+fn app_spine(node: &J) -> Option<(String, Vec<J>)> {
+    if node.get("kind").and_then(|k| k.as_str()) != Some("app") && node.get("op").is_none() {
+        return None;
+    }
+    let args: Vec<J> = node.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    if let Some(op) = node.get("op").and_then(|o| o.as_str()) {
+        return Some((op.to_string(), args));
+    }
+    let f = node.get("fn")?;
+    match f.get("kind").and_then(|k| k.as_str()) {
+        Some("var") => Some((f.get("name")?.as_str()?.to_string(), args)),
+        Some("app") => {
+            let (head, mut inner) = app_spine(f)?;
+            inner.extend(args);
+            Some((head, inner))
+        }
+        _ => None,
+    }
+}
+
 /// The parameter names of a `lambda` body, or `None` if it isn't one.
 fn lambda_params(body: &J) -> Option<Vec<String>> {
     if body.get("kind").and_then(|k| k.as_str()) != Some("lambda") {
@@ -187,15 +211,15 @@ fn lambda_params(body: &J) -> Option<Vec<String>> {
     )
 }
 
-/// If `node` heads a `self`-call (in any spelling — `{op:"self"}`, `{fn:{name:"self"}}`, or a curried
-/// `apply(apply(self, …), …)` spine), return its argument list in order.
+/// If `node` heads a `self`-call (in any spelling — `{op:"self"}`, `{fn:{name:"self"}}`, a curried
+/// direct application `((self a0) a1)`, or a curried `apply(apply(self, …), …)` spine), return its
+/// argument list in order.
 fn self_call_args(node: &J) -> Option<Vec<J>> {
     let args = node.get("args").and_then(|a| a.as_array());
-    if node.get("op").and_then(|o| o.as_str()) == Some("self") {
-        return Some(args.cloned().unwrap_or_default());
-    }
-    if node.pointer("/fn/name").and_then(|n| n.as_str()) == Some("self") {
-        return Some(args.cloned().unwrap_or_default());
+    if let Some((head, spine_args)) = app_spine(node) {
+        if head == "self" {
+            return Some(spine_args);
+        }
     }
     if node.get("op").and_then(|o| o.as_str()) == Some("apply") {
         let args = args?;
@@ -230,8 +254,8 @@ fn tail_descent(arg: &J) -> Option<(String, Descent)> {
 /// If `arg` is a strict *numeric* descent of a variable — `sub(var, c)` with `c ≥ 1` (constant step) or
 /// `div(var, c)` with `c ≥ 2` (halving) — return `(p, kind)`.
 fn numeric_descent(arg: &J) -> Option<(String, Descent)> {
-    let op = head_op(arg)?;
-    let args = arg.get("args").and_then(|a| a.as_array())?;
+    let (op, args) = app_spine(arg)?;
+    let op = op.as_str();
     let (lhs, rhs) = (args.first()?, args.get(1)?);
     if lhs.get("kind").and_then(|k| k.as_str()) != Some("var") {
         return None;
@@ -256,12 +280,15 @@ fn find_opaque(node: &J) -> Option<String> {
     if self_call_args(node).is_some() {
         // still descend into the call's arguments below
     } else if node.get("kind").and_then(|k| k.as_str()) == Some("app") {
-        let op = head_op(node);
-        let known = op.map(|o| CONST_OPS.contains(&o) || LINEAR_OPS.contains(&o)).unwrap_or(false);
+        let op = app_spine(node).map(|(h, _)| h);
+        let known = op
+            .as_deref()
+            .map(|o| CONST_OPS.contains(&o) || LINEAR_OPS.contains(&o))
+            .unwrap_or(false);
         if !known {
             return Some(format!(
                 "applies a higher-order/opaque callee `{}` (its cost is unchecked)",
-                op.unwrap_or("<unknown>")
+                op.as_deref().unwrap_or("<unknown>")
             ));
         }
     }
@@ -349,7 +376,7 @@ fn path_work(node: &J) -> Class {
     }
     // A linear list op makes this expression O(n) regardless of its (bounded) arguments.
     if node.get("kind").and_then(|k| k.as_str()) == Some("app") {
-        if head_op(node).map(|o| LINEAR_OPS.contains(&o)).unwrap_or(false) {
+        if app_spine(node).map(|(o, _)| LINEAR_OPS.contains(&o.as_str())).unwrap_or(false) {
             return Class::poly(1);
         }
     }
@@ -544,17 +571,16 @@ fn list_size_degree(node: &J) -> u32 {
             .and_then(|a| a.as_array())
             .map(|a| a.iter().map(|arm| arm.get("body").map(list_size_degree).unwrap_or(0)).max().unwrap_or(0))
             .unwrap_or(0),
-        Some("app") => match head_op(node) {
-            Some("cons") => node.get("args").and_then(|a| a.as_array()).and_then(|a| a.get(1)).map(list_size_degree).unwrap_or(0),
-            Some("append") => node
-                .get("args")
-                .and_then(|a| a.as_array())
-                .map(|a| a.iter().map(list_size_degree).max().unwrap_or(0))
-                .unwrap_or(0),
-            Some("reverse") => node.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()).map(list_size_degree).unwrap_or(0),
-            // A first-order builtin returning a scalar (head/length/…) can't appear in list position other
-            // than as an already-handled sub-part; conservatively bound any other list-producing op at Θ(n).
-            _ => 1,
+        Some("app") => match app_spine(node) {
+            Some((op, sargs)) => match op.as_str() {
+                "cons" => sargs.get(1).map(list_size_degree).unwrap_or(0),
+                "append" => sargs.iter().map(list_size_degree).max().unwrap_or(0),
+                "reverse" => sargs.first().map(list_size_degree).unwrap_or(0),
+                // A first-order builtin returning a scalar (head/length/…) can't appear in list position
+                // other than as an already-handled sub-part; conservatively bound anything else at Θ(n).
+                _ => 1,
+            },
+            None => 1,
         },
         _ => 1,
     }

@@ -1,0 +1,42 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_b90c4d4937bae587c952b249e1d9a11ad440e9ac771487ef9fc98f3083f40130",
+  "name_hints": ["csv_second_int", "parse_second_field"],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [{ "kind": "builtin", "name": "string" }],
+      "result": {
+        "kind": "sum",
+        "variants": [
+          { "tag": "Just", "type": { "kind": "builtin", "name": "int" } },
+          { "tag": "None" }
+        ]
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [{ "kind": "string", "value": "id,21,ok" }],
+      "result": { "kind": "variant", "tag": "Just", "payload": { "kind": "int", "value": 21 } }
+    },
+    {
+      "args": [{ "kind": "string", "value": "a,-7" }],
+      "result": { "kind": "variant", "tag": "Just", "payload": { "kind": "int", "value": -7 } }
+    },
+    {
+      "args": [{ "kind": "string", "value": "x,y,z" }],
+      "result": { "kind": "variant", "tag": "None" }
+    }
+  ],
+  "properties": [],
+  "intent_tags": ["parse", "string"],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_09c4c7310b79c1f29d669cf230649614eb1ea518e9969766379ae3aa24bd6dcf"
+}

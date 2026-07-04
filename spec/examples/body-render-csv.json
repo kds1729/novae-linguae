@@ -1,0 +1,51 @@
+{
+  "body": {
+    "args": [
+      {
+        "args": [
+          {
+            "kind": "var",
+            "name": "xs"
+          }
+        ],
+        "fn": {
+          "args": [
+            {
+              "kind": "var",
+              "name": "to_string"
+            }
+          ],
+          "fn": {
+            "kind": "var",
+            "name": "map"
+          },
+          "kind": "app"
+        },
+        "kind": "app"
+      }
+    ],
+    "fn": {
+      "args": [
+        {
+          "kind": "lit",
+          "value": {
+            "kind": "string",
+            "value": ","
+          }
+        }
+      ],
+      "fn": {
+        "kind": "var",
+        "name": "str_join"
+      },
+      "kind": "app"
+    },
+    "kind": "app"
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "xs"
+    }
+  ]
+}

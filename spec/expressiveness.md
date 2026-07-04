@@ -110,6 +110,30 @@ huge), slicing/indexing (partial or Maybe-heavy; split covers the workflows), fl
 typecheck, effect-check, run with granted effects (and replay), and **certify**; GW1
 discovered and applied via `orchestrate --verify`.
 
+**Phase 1: DONE (2026-07-04).** The seven builtins are live across the whole semantic core
+(evaluator, typechecker, effects, termination, complexity, prover fragment guard, surface
+syntax, eval conventions). The exit gate ran end to end:
+
+- Records [`examples/csv-second-int.v0.2.json`](examples/csv-second-int.v0.2.json) and
+  [`examples/double-second-field.v0.2.json`](examples/double-second-field.v0.2.json) (GW1) and
+  [`examples/render-csv.v0.2.json`](examples/render-csv.v0.2.json) (GW2) validate, run all
+  their examples, and **certify** — the two first-order ones fully SOUND including termination
+  and `O(n)` complexity, `render_csv` with the honest higher-order UNVERIFIABLEs.
+- The effectful GW1 leg ran against a live HTTP server: `\url -> case parse_int (head (tail
+  (str_split "," (http_get url)))) of { Just(n) => n + n; None => int(0) }` under
+  `--grant net.read` fetched `"id,21,ok"` and returned 42, recorded a trace, and **replayed
+  to the same 42 with no grant and no I/O**.
+- The agent loop closed over it: `orchestrate --intent parse` discovered
+  `double_second_field` by intent, and `--verify --require-certified` certified it before
+  applying — query → ack → certify → propose → commit → assert 42 → CONFIRMED.
+
+En-route fix the gate surfaced: the termination/complexity analyzers only recognized builtins
+at the head of *flat* applications, so surface-parsed (curried) bodies read as "opaque callee"
+— UNVERIFIABLE for any juxtaposed multi-argument application. Both analyzers now flatten the
+curried spine (`((f a) b)` → `f(a, b)`, including curried `self`-calls), which is what turned
+the GW1 records' termination/complexity from UNVERIFIABLE into SOUND. Surface-authored and
+AST-authored bodies now analyze identically.
+
 ## Phase 2 — maps (dynamic key–value data)
 
 Pulled by the config/lookup halves of GW1/GW3 and by JSON (phase 3). Minimal set over
