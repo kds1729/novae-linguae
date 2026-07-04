@@ -175,6 +175,24 @@ This turns GW1 from "split the body text" into "parse the body, project the fiel
 practical form of the workflow. No new type-system machinery: it is a library-shaped sum type
 with two total conversions.
 
+**Phase 3: DONE (2026-07-04).** `parse_json : string → Maybe Json` and `render_json : Json →
+string` are live across the core (same six layers), with `Json` exactly the planned sum over
+the existing variants — nothing new in the type system, patterns, or serialization:
+
+- `parse_json` is total via `Maybe` (malformed text → `None`; duplicate object keys last-wins);
+  `render_json` emits **JCS-canonical** text via the validator's own canonicalizer, so
+  `render_json ∘ parse_json` *is* canonicalization — verified in-tree
+  (`{ "b" : [1, true, null] , "a": "x" }` renders `{"a":"x","b":[1,true,null]}`).
+- Field projection is ordinary nested `case`: exit-gate record
+  [`examples/json-port.v0.2.json`](examples/json-port.v0.2.json) (`json_port : string → int` —
+  `case parse_json s of { Just(JObj(m)) => case map_get "port" m of { Just(JNum(p)) => p;
+  _ => int(8080) }; _ => int(8080) }`) validates, runs 4/4 examples (real JSON, missing field,
+  mistyped field, garbage — all total), and **certifies fully SOUND**, authored entirely in
+  surface syntax with a canonical round-trip.
+- GW1's practical form now composes end to end from existing parts: `http_get` (phase 0) →
+  `parse_json` (phase 3) → `map_get` (phase 2) → `case` — an agent fetches a JSON API response
+  and uses a field, verified by default at every layer.
+
 ## Phase 4 — follow-through (already-proven loops, re-run)
 
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify

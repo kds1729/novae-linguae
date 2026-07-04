@@ -1,0 +1,40 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_589254829b0efcf46dd41e0e10b41e53f24ffde3f7afb34b24f2569486eace14",
+  "name_hints": ["json_port", "port_from_json"],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [{ "kind": "builtin", "name": "string" }],
+      "result": { "kind": "builtin", "name": "int" }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [{ "kind": "string", "value": "{\"host\": \"example.com\", \"port\": 9000}" }],
+      "result": { "kind": "int", "value": 9000 }
+    },
+    {
+      "args": [{ "kind": "string", "value": "{\"host\": \"example.com\"}" }],
+      "result": { "kind": "int", "value": 8080 }
+    },
+    {
+      "args": [{ "kind": "string", "value": "not json" }],
+      "result": { "kind": "int", "value": 8080 }
+    },
+    {
+      "args": [{ "kind": "string", "value": "{\"port\": \"nine thousand\"}" }],
+      "result": { "kind": "int", "value": 8080 }
+    }
+  ],
+  "properties": [],
+  "intent_tags": ["parse", "query", "string"],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_22c8feee5982c98843bd915c227ca2e50926efc581438707d03a8a3fede95da3"
+}

@@ -1,0 +1,112 @@
+{
+  "body": {
+    "arms": [
+      {
+        "body": {
+          "arms": [
+            {
+              "body": {
+                "kind": "var",
+                "name": "p"
+              },
+              "pattern": {
+                "kind": "variant",
+                "payload": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "bind",
+                    "name": "p"
+                  },
+                  "tag": "JNum"
+                },
+                "tag": "Just"
+              }
+            },
+            {
+              "body": {
+                "kind": "lit",
+                "value": {
+                  "kind": "int",
+                  "value": 8080
+                }
+              },
+              "pattern": {
+                "kind": "wildcard"
+              }
+            }
+          ],
+          "kind": "case",
+          "scrutinee": {
+            "args": [
+              {
+                "kind": "var",
+                "name": "m"
+              }
+            ],
+            "fn": {
+              "args": [
+                {
+                  "kind": "lit",
+                  "value": {
+                    "kind": "string",
+                    "value": "port"
+                  }
+                }
+              ],
+              "fn": {
+                "kind": "var",
+                "name": "map_get"
+              },
+              "kind": "app"
+            },
+            "kind": "app"
+          }
+        },
+        "pattern": {
+          "kind": "variant",
+          "payload": {
+            "kind": "variant",
+            "payload": {
+              "kind": "bind",
+              "name": "m"
+            },
+            "tag": "JObj"
+          },
+          "tag": "Just"
+        }
+      },
+      {
+        "body": {
+          "kind": "lit",
+          "value": {
+            "kind": "int",
+            "value": 8080
+          }
+        },
+        "pattern": {
+          "kind": "wildcard"
+        }
+      }
+    ],
+    "kind": "case",
+    "scrutinee": {
+      "args": [
+        {
+          "kind": "var",
+          "name": "s"
+        }
+      ],
+      "fn": {
+        "kind": "var",
+        "name": "parse_json"
+      },
+      "kind": "app"
+    }
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "s"
+    }
+  ]
+}

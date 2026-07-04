@@ -516,12 +516,96 @@ fn as_map(v: &Val) -> Result<BTreeMap<String, Val>> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// JSON-as-data (spec/expressiveness.md phase 3): the `Json` sum type — JNull | JBool bool |
+// JNum int/float | JStr string | JList (List Json) | JObj (Map string Json) — is an ordinary
+// variant tree over the existing value system; these two conversions are the only new machinery.
+// ---------------------------------------------------------------------------
+
+/// A parsed `serde_json` tree as a `Json` variant value.
+fn json_to_val(j: &J) -> Result<Val> {
+    Ok(match j {
+        J::Null => Val::Variant("JNull".to_string(), None),
+        J::Bool(b) => Val::Variant("JBool".to_string(), Some(Box::new(Val::Bool(*b)))),
+        J::Number(n) => {
+            let inner = if let Some(i) = n.as_i64() {
+                Val::Int(i as i128)
+            } else if let Some(u) = n.as_u64() {
+                Val::Int(u as i128)
+            } else if let Some(f) = n.as_f64() {
+                Val::Float(f)
+            } else {
+                bail!("unrepresentable JSON number: {n}")
+            };
+            Val::Variant("JNum".to_string(), Some(Box::new(inner)))
+        }
+        J::String(s) => Val::Variant("JStr".to_string(), Some(Box::new(Val::Str(s.clone())))),
+        J::Array(xs) => Val::Variant(
+            "JList".to_string(),
+            Some(Box::new(Val::List(xs.iter().map(json_to_val).collect::<Result<Vec<_>>>()?))),
+        ),
+        J::Object(m) => {
+            // serde_json already resolves duplicate keys last-wins; BTreeMap makes the order canonical.
+            let mut out = BTreeMap::new();
+            for (k, v) in m {
+                out.insert(k.clone(), json_to_val(v)?);
+            }
+            Val::Variant("JObj".to_string(), Some(Box::new(Val::Map(out))))
+        }
+    })
+}
+
+/// A `Json` variant value back as a `serde_json` tree. Errors on a value that isn't Json-shaped
+/// (partial like `head`, on inputs a `Json`-typed program can't produce) and on integers outside
+/// the JSON-representable i64/u64 range.
+fn val_to_json(v: &Val) -> Result<J> {
+    let Val::Variant(tag, payload) = v else {
+        bail!("render_json expects a Json value, got {}", encode_value(v));
+    };
+    Ok(match (tag.as_str(), payload) {
+        ("JNull", None) => J::Null,
+        ("JBool", Some(p)) => match &**p {
+            Val::Bool(b) => json!(b),
+            other => bail!("JBool payload must be a bool, got {}", encode_value(other)),
+        },
+        ("JNum", Some(p)) => match &**p {
+            Val::Int(i) => {
+                let i = i64::try_from(*i).map_err(|_| anyhow!("JNum integer out of JSON range: {i}"))?;
+                json!(i)
+            }
+            Val::Float(f) => serde_json::Number::from_f64(*f)
+                .map(J::Number)
+                .ok_or_else(|| anyhow!("JNum float is not finite"))?,
+            other => bail!("JNum payload must be a number, got {}", encode_value(other)),
+        },
+        ("JStr", Some(p)) => match &**p {
+            Val::Str(s) => json!(s),
+            other => bail!("JStr payload must be a string, got {}", encode_value(other)),
+        },
+        ("JList", Some(p)) => match &**p {
+            Val::List(xs) => J::Array(xs.iter().map(val_to_json).collect::<Result<Vec<_>>>()?),
+            other => bail!("JList payload must be a list, got {}", encode_value(other)),
+        },
+        ("JObj", Some(p)) => match &**p {
+            Val::Map(m) => {
+                let mut out = serde_json::Map::new();
+                for (k, v) in m {
+                    out.insert(k.clone(), val_to_json(v)?);
+                }
+                J::Object(out)
+            }
+            other => bail!("JObj payload must be a map, got {}", encode_value(other)),
+        },
+        _ => bail!("not a Json value: variant `{tag}`"),
+    })
+}
+
 /// Builtin arity, or `None` if `name` is not a builtin. `nil` is handled separately (a nullary value).
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
         "neg" | "abs" | "not" | "id" | "head" | "tail" | "last" | "init" | "length" | "null"
         | "reverse" | "fst" | "snd" | "str_length" | "to_string" | "parse_int"
-        | "map_size" | "map_keys" | "print" | "rand"
+        | "map_size" | "map_keys" | "parse_json" | "render_json" | "print" | "rand"
         | "now" | "panic" | "read_file" | "http_get" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
@@ -878,6 +962,18 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
         "map_size" => Val::Int(as_map(&a[0])?.len() as i128),
         // BTreeMap iterates sorted, so the key list is deterministic (principle 5).
         "map_keys" => Val::List(as_map(&a[0])?.into_keys().map(Val::Str).collect()),
+        // JSON-as-data (spec/expressiveness.md phase 3): the language's own canonical form becomes
+        // manipulable from inside. parse_json is total via Maybe; render_json emits the JCS-canonical
+        // text, so render_json of a parse_json IS canonicalization.
+        "parse_json" => match serde_json::from_str::<J>(&as_str(&a[0])?).ok().as_ref().map(json_to_val) {
+            Some(Ok(v)) => Val::Variant("Just".to_string(), Some(Box::new(v))),
+            _ => Val::Variant("None".to_string(), None),
+        },
+        "render_json" => {
+            let tree = val_to_json(&a[0])?;
+            let bytes = crate::canonicalize(&tree)?;
+            Val::Str(String::from_utf8(bytes).map_err(|e| anyhow!("canonical JSON is not UTF-8: {e}"))?)
+        }
         "parse_int" => {
             // Accepts exactly the canonical decimal rendering (optional leading `-`, no leading
             // zeros, no `-0`, no whitespace/`+`); everything else, incl. overflow, is None — the
@@ -1373,6 +1469,64 @@ mod tests {
                       "args": [{ "kind": "lit", "value": { "kind": "string", "value": "a" } }, { "kind": "var", "name": "m" }] } });
         assert_eq!(eval_body(&body, &[m]).unwrap(),
                    encode_value(&Val::Variant("Just".into(), Some(Box::new(Val::Int(1))))));
+    }
+
+    #[test]
+    fn json_parse_and_render() {
+        let app = |f: &str, args: Vec<J>| json!({ "kind": "app", "fn": { "kind": "var", "name": f }, "args": args });
+        let slit = |v: &str| json!({ "kind": "lit", "value": { "kind": "string", "value": v } });
+        let run_str = |f: &str, input: &str| {
+            let body = json!({ "kind": "lambda", "params": [{ "name": "s" }],
+                "body": app(f, vec![json!({ "kind": "var", "name": "s" })]) });
+            eval_body(&body, &[json!({ "kind": "string", "value": input })]).unwrap()
+        };
+        // parse_json is total via Maybe.
+        let none = encode_value(&Val::Variant("None".into(), None));
+        assert_eq!(run_str("parse_json", "{not json"), none);
+        // Every JSON shape lands in the Json variant tree.
+        let parsed = run_str("parse_json", r#"{"b": [1, true, null], "a": "x"}"#);
+        assert_eq!(parsed["kind"], "variant");
+        assert_eq!(parsed["tag"], "Just");
+        assert_eq!(parsed["payload"]["tag"], "JObj");
+        // render_json(parse_json(s)) IS canonicalization: keys sorted, minimal whitespace (JCS).
+        let round = json!({ "kind": "lambda", "params": [{ "name": "s" }], "body": {
+            "kind": "case",
+            "scrutinee": app("parse_json", vec![json!({ "kind": "var", "name": "s" })]),
+            "arms": [
+                { "pattern": { "kind": "variant", "tag": "Just", "payload": { "kind": "bind", "name": "j" } },
+                  "body": app("render_json", vec![json!({ "kind": "var", "name": "j" })]) },
+                { "pattern": { "kind": "variant", "tag": "None" }, "body": slit("invalid") }] } });
+        let canon = eval_body(&round, &[json!({ "kind": "string", "value": "{ \"b\" : [1, true, null] , \"a\": \"x\" }" })]).unwrap();
+        assert_eq!(canon, encode_value(&Val::Str(r#"{"a":"x","b":[1,true,null]}"#.into())));
+    }
+
+    #[test]
+    fn json_field_projection_runs() {
+        // The practical form of GW1 (spec/expressiveness.md phase 3): parse the payload as JSON and
+        // PROJECT the field — no more splitting body text. Malformed input and missing/mistyped
+        // fields all fall through to the default, totally.
+        let app = |f: &str, args: Vec<J>| json!({ "kind": "app", "fn": { "kind": "var", "name": f }, "args": args });
+        let dflt = json!({ "kind": "lit", "value": { "kind": "int", "value": 8080 } });
+        let vpat = |tag: &str, inner: J| json!({ "kind": "variant", "tag": tag, "payload": inner });
+        let bind = |n: &str| json!({ "kind": "bind", "name": n });
+        // case parse_json s of { Just(JObj(m)) => case map_get "port" m of { Just(JNum(p)) => p; _ => 8080 }; _ => 8080 }
+        let inner_case = json!({ "kind": "case",
+            "scrutinee": app("map_get", vec![json!({ "kind": "lit", "value": { "kind": "string", "value": "port" } }),
+                                             json!({ "kind": "var", "name": "m" })]),
+            "arms": [
+                { "pattern": vpat("Just", vpat("JNum", bind("p"))), "body": { "kind": "var", "name": "p" } },
+                { "pattern": { "kind": "wildcard" }, "body": dflt.clone() }] });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "s" }], "body": {
+            "kind": "case",
+            "scrutinee": app("parse_json", vec![json!({ "kind": "var", "name": "s" })]),
+            "arms": [
+                { "pattern": vpat("Just", vpat("JObj", bind("m"))), "body": inner_case },
+                { "pattern": { "kind": "wildcard" }, "body": dflt }] } });
+        let run = |input: &str| eval_body(&body, &[json!({ "kind": "string", "value": input })]).unwrap();
+        assert_eq!(run(r#"{"host": "h", "port": 9000}"#), encode_value(&Val::Int(9000)));
+        assert_eq!(run(r#"{"host": "h"}"#), encode_value(&Val::Int(8080)));
+        assert_eq!(run(r#"{"port": "not a number"}"#), encode_value(&Val::Int(8080)));
+        assert_eq!(run("not json at all"), encode_value(&Val::Int(8080)));
     }
 
     #[test]

@@ -41,6 +41,16 @@ comparison (`eq` `neq` `lt` `le` `gt` `ge`), booleans (`and` `or` `xor` `not`), 
 `map` `filter` `foldl` `foldr` `compose` `apply`. `eq`/structural equality is the semantics of the
 `lit` pattern.
 
+**JSON builtins** ([`expressiveness.md`](expressiveness.md) phase 3 — the language's own canonical
+form, manipulable from inside). `Json` is an ordinary sum type over the existing variant system —
+`JNull | JBool bool | JNum int/float | JStr string | JList (List Json) | JObj (Map string Json)` —
+destructured by `case` like any variant, so a field projection is `case parse_json s of { Just(JObj(m))
+=> case map_get "k" m of { Just(JNum(p)) => p; _ => … }; _ => … }`. Two conversions:
+`parse_json : string → Maybe Json` (total via `Maybe` — malformed text is `None`; duplicate object keys
+resolve last-wins) and `render_json : Json → string`, which emits the **JCS-canonical** text — so
+`render_json` of a `parse_json` *is* canonicalization, and equal JSON documents render identically
+(principles 2, 5).
+
 **Map builtins** ([`expressiveness.md`](expressiveness.md) phase 2 — total, pure, deterministic; key
 argument first, like the string ops): the nullary constant `map_empty : Map string a`;
 `map_put : (key, a, Map string a) → Map string a` (insert-or-overwrite);

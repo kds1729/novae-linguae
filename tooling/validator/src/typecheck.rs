@@ -426,6 +426,11 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
             let a = inf.fresh();
             Ty::Fun(vec![Ty::Con("Map".into(), vec![con("string"), a])], Box::new(list(con("string"))))
         }
+        // JSON-as-data (spec/expressiveness.md phase 3). `Json` is a sum type, and sum types are
+        // opaque `Sum` at the HM level throughout — so parse_json's Maybe-of-Json and render_json's
+        // Json parameter both read as `Sum`.
+        "parse_json" => Ty::Fun(vec![con("string")], Box::new(con("Sum"))),
+        "render_json" => Ty::Fun(vec![con("Sum")], Box::new(con("string"))),
         _ => return None,
     })
 }

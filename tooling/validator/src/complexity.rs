@@ -159,6 +159,8 @@ const LINEAR_OPS: &[&str] = &[
     "str_concat", "str_length", "str_contains", "str_split", "str_join", "to_string", "parse_int",
     // Map ops are O(log n) on a BTreeMap (map_keys O(n)); O(n) is the sound coarse class.
     "map_put", "map_get", "map_del", "map_size", "map_keys",
+    // JSON conversions are linear in the text/tree size.
+    "parse_json", "render_json",
 ];
 
 /// How a `self`-call's recursion argument descends its parameter.
