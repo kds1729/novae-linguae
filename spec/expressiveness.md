@@ -216,8 +216,12 @@ the existing variants — nothing new in the type system, patterns, or serializa
   Demonstrated end to end: a 6-function module (concat, split-count, rejoin, membership,
   labeling) plus an f-string function ingest to executable bodies that run 14/14 doctest-mined
   examples. Unannotated code keeps its numeric/list reading; a wrong guess fails the example
-  gate rather than shipping wrong. Dict/JSON idioms (`d.get(k)` → `map_get` with the
-  `Maybe`/`None` value-mapping question) and the Rust/Haskell/TS adapters remain.
+  gate rather than shipping wrong. *TypeScript too:* a `: string` parameter annotation roots the
+  same inference through the shared expression translator, with the TS-native spellings mapped —
+  `s.split(sep)`, the array-order `xs.join(sep)` (separator still lands first), `s.includes(x)` →
+  `str_contains`, `String(n)` → `to_string`, and `+`-concatenation. Dict/JSON idioms (`d.get(k)`
+  → `map_get` with the `Maybe`/`None` value-mapping question) and the Rust/Haskell adapters
+  remain.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

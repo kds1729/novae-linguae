@@ -391,6 +391,25 @@ class TestStringIdiomBodies(unittest.TestCase):
         func2 = pyast.parse('def f(n):\n    return f"{n:04d}"\n').body[0]
         self.assertIsNone(nl_body.body_ast_from_py(func2))
 
+    def test_ts_string_idioms_translate(self):
+        import nl_body
+        # A `: string` TS annotation roots the same inference: split fires (separator-first swap),
+        # the TS/JS array-join order maps too, includes -> str_contains, String(n) -> to_string.
+        b = nl_body.body_ast_from_ts("f", '(s: string) => s.split(",")')
+        self.assertIn('"str_split"', json.dumps(b))
+        b2 = nl_body.body_ast_from_ts("f", '(xs) => xs.join(",")')
+        self.assertIn('"str_join"', json.dumps(b2))
+        self.assertEqual(b2["body"]["args"][0], {"kind": "lit", "value": {"kind": "string", "value": ","}},
+                         "TS array-join must put the separator FIRST")
+        b3 = nl_body.body_ast_from_ts("f", '(s: string) => s.includes("x")')
+        self.assertIn('"str_contains"', json.dumps(b3))
+        b4 = nl_body.body_ast_from_ts("f", '(n) => "n=" + String(n)')
+        self.assertIn('"to_string"', json.dumps(b4))
+        self.assertIn('"str_concat"', json.dumps(b4))
+        # Unannotated TS split does NOT fire (receiver unproven-string).
+        b5 = nl_body.body_ast_from_ts("f", '(s) => s.split(",")')
+        self.assertNotIn('"str_split"', json.dumps(b5))
+
     def test_unannotated_keeps_numeric_reading(self):
         # Without a str annotation, + stays add and len stays length — no silent retyping.
         src = "def f(a, b):\n    return a + b\n"

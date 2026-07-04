@@ -53,9 +53,9 @@ _PY_CMP = {ast.Lt: "lt", ast.LtE: "le", ast.Gt: "gt", ast.GtE: "ge", ast.Eq: "eq
 _PY_BIN = {ast.Add: "add", ast.Sub: "sub", ast.Mult: "mul", ast.Div: "div", ast.Mod: "mod"}
 _PY_BOOL = {ast.And: "and", ast.Or: "or"}
 # Python builtin call -> Nova builtin (unary, unambiguous; arity-ambiguous ones like min/max excluded).
-# `str` maps to the canonical-decimal `to_string`; a semantic mismatch (e.g. str of a float) fails the
-# example gate rather than shipping wrong.
-_PY_CALL = {"len": "length", "abs": "abs", "str": "to_string"}
+# `str` (and TS's `String`) map to the canonical-decimal `to_string`; a semantic mismatch (e.g. str of
+# a float) fails the example gate rather than shipping wrong.
+_PY_CALL = {"len": "length", "abs": "abs", "str": "to_string", "String": "to_string"}
 
 
 class BodyError(Exception):
@@ -264,9 +264,19 @@ def _expr_from_py(node, strs=frozenset()):
             if fn.attr == "split" and _is_stringish(fn.value, strs):
                 return b_app(b_var("str_split"),
                              [_expr_from_py(node.args[0], strs), _expr_from_py(fn.value, strs)])
-            if fn.attr == "join" and _is_stringish(fn.value, strs):
-                return b_app(b_var("str_join"),
-                             [_expr_from_py(fn.value, strs), _expr_from_py(node.args[0], strs)])
+            if fn.attr == "join":
+                # Python order: `sep.join(xs)` (stringish receiver). TS/JS order: `xs.join(sep)`
+                # (stringish ARGUMENT). Either way the separator goes first.
+                if _is_stringish(fn.value, strs):
+                    return b_app(b_var("str_join"),
+                                 [_expr_from_py(fn.value, strs), _expr_from_py(node.args[0], strs)])
+                if _is_stringish(node.args[0], strs):
+                    return b_app(b_var("str_join"),
+                                 [_expr_from_py(node.args[0], strs), _expr_from_py(fn.value, strs)])
+            if fn.attr == "includes" and _is_stringish(fn.value, strs):
+                # TS `s.includes(needle)` -> str_contains(needle, s) (needle-first builtin).
+                return b_app(b_var("str_contains"),
+                             [_expr_from_py(node.args[0], strs), _expr_from_py(fn.value, strs)])
         if isinstance(fn, ast.Name):
             # `len` of a known string is str_length (Unicode scalars — matches Python's len).
             if fn.id == "len" and len(node.args) == 1 and _is_stringish(node.args[0], strs):
@@ -479,6 +489,36 @@ def _ts_params(prefix):
     return [last] if _VAR.match(last) else None
 
 
+def _ts_string_params(prefix):
+    """The subset of a TS arrow's parameters annotated `: string` — the roots of the known-string
+    inference, so `(s: string) => s.split(",")` lifts onto the string builtins like an annotated
+    Python function does."""
+    p = prefix.strip()
+    rp = p.rfind(")")
+    if rp == -1:
+        return frozenset()
+    depth, start = 0, None
+    for i in range(rp, -1, -1):
+        if p[i] == ")":
+            depth += 1
+        elif p[i] == "(":
+            depth -= 1
+            if depth == 0:
+                start = i
+                break
+    if start is None:
+        return frozenset()
+    out = set()
+    for part in split_top(p[start + 1:rp], ","):
+        pieces = part.split(":")
+        if len(pieces) >= 2:
+            nm = pieces[0].strip()
+            ty = pieces[1].split("=")[0].strip()
+            if _VAR.match(nm) and ty == "string":
+                out.add(nm)
+    return frozenset(out)
+
+
 def body_ast_from_ts(name, slice_text):
     """An *executable* body AST (a `lambda` over the arrow's parameters) for a TypeScript arrow with an
     *expression* body (`(x) => expr`). TypeScript expression syntax coincides with Python's for the
@@ -498,7 +538,7 @@ def body_ast_from_ts(name, slice_text):
         return None
     try:
         node = ast.parse(rhs, mode="eval").body
-        expr = _expr_from_py(node)
+        expr = _expr_from_py(node, _ts_string_params(slice_text[:idx]))
     except (SyntaxError, ValueError, BodyError):
         return None
     return b_lambda(params, expr) if params else expr
