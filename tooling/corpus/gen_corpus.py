@@ -3044,6 +3044,80 @@ def combinatorial_specs(exclude_names=()):
                     {"args": ['{"unrelated": 1}'], "result": 0},
                     {"args": ["not json"], "result": 0}], terminates="always"))
 
+    # 41. NEAR-BARE BUILTIN USAGE — the corpus10 residual diagnosis: families #39/#40 taught
+    # COMPOSITE idioms (split-then-count, get-or-default) but several phase-1/2/3 builtins never
+    # appeared in training at all (their bare curated golds leakage-drop), so the model invented
+    # `keys`/`sort`/regex or recursed over a string as if it were a list. Each shape here uses one
+    # new builtin with minimal decoration, multiplied over constants — enough mass to teach the
+    # OPERATION itself while the exact bare golds still drop.
+    for k in (0, 1, 3, 10):
+        add(_cspec(f"len_plus_{k}", f"The length of a string plus {k}.",
+                   f"str_length s + {k}", ["string"], fn([STRING], INT),
+                   lam(["s"], bapp("add", bapp("str_length", var("s")), int_lit(k))),
+                   [{"args": ["hello"], "result": 5 + k}, {"args": [""], "result": k},
+                    {"args": ["ab"], "result": 2 + k}], terminates="always"))
+        add(_cspec(f"longer_than_{k}", f"Whether a string is longer than {k} characters.",
+                   f"str_length s > {k}", ["string", "predicate"], fn([STRING], BOOL),
+                   lam(["s"], bapp("gt", bapp("str_length", var("s")), int_lit(k))),
+                   [{"args": ["hello"], "result": 5 > k}, {"args": [""], "result": 0 > k},
+                    {"args": ["abcd"], "result": 4 > k}], terminates="always"))
+    for sep, nm, word in _SEP39:
+        add(_cspec(f"has_sep_{nm}", f"Whether a string contains a {word.rstrip('s')}.",
+                   f'str_contains "{sep}" s', ["string", "predicate"], fn([STRING], BOOL),
+                   lam(["s"], bapp("str_contains", str_lit(sep), var("s"))),
+                   [{"args": [f"a{sep}b"], "result": True}, {"args": ["ab"], "result": False},
+                    {"args": [sep], "result": True}], terminates="always"))
+    for k in (1, 2, 5):
+        add(_cspec(f"show_plus_{k}", f"Render n plus {k} as a decimal string.",
+                   f"to_string (n + {k})", ["string", "format", "arithmetic"], fn([INT], STRING),
+                   lam(["n"], bapp("to_string", bapp("add", var("n"), int_lit(k)))),
+                   [{"args": [5], "result": str(5 + k)}, {"args": [-1], "result": str(-1 + k)},
+                    {"args": [0], "result": str(k)}], terminates="always"))
+    for key in _KEYS40:
+        add(_cspec(f"singleton_{key}", f'A one-entry map holding "{key}".',
+                   f'map_put "{key}" n map_empty', ["map", "transform"], fn([INT], map_of(INT)),
+                   lam(["n"], bapp("map_put", str_lit(key), var("n"), var("map_empty"))),
+                   [{"args": [5], "result": {key: 5}}, {"args": [0], "result": {key: 0}},
+                    {"args": [-3], "result": {key: -3}}], terminates="always"))
+        add(_cspec(f"without_{key}", f'A map with its "{key}" entry removed (no-op when absent).',
+                   f'map_del "{key}" m', ["map", "transform"], fn([map_of(INT)], map_of(INT)),
+                   lam(["m"], bapp("map_del", str_lit(key), var("m"))),
+                   [{"args": [{key: 1, "other": 2}], "result": {"other": 2}},
+                    {"args": [{"other": 2}], "result": {"other": 2}},
+                    {"args": [{}], "result": {}}], terminates="always"))
+        add(_cspec(f"keys_without_{key}", f'The sorted keys of a map after removing "{key}".',
+                   f'map_keys (map_del "{key}" m)', ["map", "query"], fn([map_of(INT)], list_of(STRING)),
+                   lam(["m"], bapp("map_keys", bapp("map_del", str_lit(key), var("m")))),
+                   [{"args": [{key: 1, "b": 2, "a": 3}], "result": ["a", "b"]},
+                    {"args": [{key: 1}], "result": []},
+                    {"args": [{"z": 9}], "result": ["z"]}], terminates="always"))
+        add(_cspec(f"size_without_{key}", f'How many entries a map has once "{key}" is removed.',
+                   f'map_size (map_del "{key}" m)', ["map", "aggregate"], fn([map_of(INT)], NAT),
+                   lam(["m"], bapp("map_size", bapp("map_del", str_lit(key), var("m")))),
+                   [{"args": [{key: 1, "b": 2}], "result": 1}, {"args": [{key: 1}], "result": 0},
+                    {"args": [{"a": 1, "b": 2}], "result": 2}], terminates="always"))
+    for k in (0, 1, 100):
+        add(_cspec(f"parses_over_{k}", f"Whether a string parses as an integer greater than {k}.",
+                   f"case parse_int s of Just(n) => n > {k}; None => false",
+                   ["string", "parse", "predicate", "variant", "case"], fn([STRING], BOOL),
+                   lam(["s"], _case_of(bapp("parse_int", var("s")),
+                                       (_vpat("Just", "n"), bapp("gt", var("n"), int_lit(k))),
+                                       (_vpat("None"), bool_lit(False)))),
+                   [{"args": ["7"], "result": 7 > k}, {"args": ["junk"], "result": False},
+                    {"args": ["-2"], "result": -2 > k}, {"args": [str(k)], "result": False}],
+                   terminates="always"))
+    for dflt in ("", "{}", "null"):
+        nm = {"": "empty", "{}": "obj", "null": "null"}[dflt]
+        add(_cspec(f"canon_or_{nm}", f'Canonicalize a JSON text, defaulting to "{dflt}" when invalid.',
+                   f'case parse_json s of Just(j) => render_json j; None => "{dflt}"',
+                   ["parse", "serialize", "string", "variant", "case"], fn([STRING], STRING),
+                   lam(["s"], _case_of(bapp("parse_json", var("s")),
+                                       (_vpat("Just", "j"), bapp("render_json", var("j"))),
+                                       (_vpat("None"), str_lit(dflt)))),
+                   [{"args": ["{ \"b\" : 2 , \"a\": 1 }"], "result": "{\"a\":1,\"b\":2}"},
+                    {"args": ["[1,  2]"], "result": "[1,2]"},
+                    {"args": ["nope"], "result": dflt}], terminates="always"))
+
     return out
 
 
