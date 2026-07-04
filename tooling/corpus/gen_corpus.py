@@ -3106,6 +3106,51 @@ def combinatorial_specs(exclude_names=()):
                    [{"args": ["7"], "result": 7 > k}, {"args": ["junk"], "result": False},
                     {"args": ["-2"], "result": -2 > k}, {"args": [str(k)], "result": False}],
                    terminates="always"))
+    # 42. LIST-RETURNING INDEX WALKS — the last designed write residual (take_rec/drop_rec failed
+    # every tier through corpus11). #38 taught the ELEMENT-returning index walk (`nth`); this family
+    # teaches the two walks that return LISTS: the take shape (double guard `n==0` then `null`,
+    # consing a TRANSFORMED head onto `self (n-1) (tail xs)` — the transform keeps the exact golds
+    # leakage-dropped) and the drop shape (same guards, recurse WITHOUT cons, varied base at n==0).
+    # Mixed counter+tail descent -> terminates=unknown (conservative), like #38.
+    def _take_walk(head_expr):
+        return lam(["n", "xs"], case_bool(bapp("eq", var("n"), int_lit(0)), var("nil"),
+                   case_null("xs", var("nil"),
+                             bapp("cons", head_expr,
+                                  bself(bapp("sub", var("n"), int_lit(1)), bapp("tail", var("xs")))))))
+    _TAKE_IN = [(2, [1, 2, 3, 4]), (0, [5, 6]), (3, [7, 8, 9]), (1, [4])]
+    for nm, head_expr, tf in (
+        ("take_double", bapp("mul", int_lit(2), bapp("head", var("xs"))), lambda v: 2 * v),
+        ("take_neg", bapp("neg", bapp("head", var("xs"))), lambda v: -v),
+        ("take_add_1", bapp("add", bapp("head", var("xs")), int_lit(1)), lambda v: v + 1),
+        ("take_add_10", bapp("add", bapp("head", var("xs")), int_lit(10)), lambda v: v + 10),
+    ):
+        add(_cspec(nm, f"The first n elements of a list, each {'doubled' if nm == 'take_double' else 'negated' if nm == 'take_neg' else 'increased by ' + nm.split('_')[-1]}.",
+                   "take walk: nil when n==0 or empty; else cons (f head) (self (n-1) (tail xs))",
+                   ["recursion", "list", "slice"], fn([INT, list_of(INT)], list_of(INT)),
+                   _take_walk(head_expr),
+                   [{"args": [n, lst], "result": [tf(v) for v in lst[:n]]} for n, lst in _TAKE_IN],
+                   terminates="unknown"))
+    def _drop_walk(base_expr, empty_expr):
+        return lam(["n", "xs"], case_bool(bapp("eq", var("n"), int_lit(0)), base_expr,
+                   case_null("xs", empty_expr,
+                             bself(bapp("sub", var("n"), int_lit(1)), bapp("tail", var("xs"))))))
+    for nm, base, empty, ty_res, pf in (
+        ("after_n_reversed", bapp("reverse", var("xs")), var("nil"), list_of(INT),
+         lambda n, lst: list(reversed(lst[n:]))),
+        ("after_n_count", bapp("length", var("xs")), int_lit(0), NAT,
+         lambda n, lst: len(lst[n:])),
+        ("after_n_count_plus_1", bapp("add", bapp("length", var("xs")), int_lit(1)), int_lit(1), INT,
+         lambda n, lst: len(lst[n:]) + 1),
+    ):
+        add(_cspec(nm, {"after_n_reversed": "The elements after the first n, reversed.",
+                        "after_n_count": "How many elements remain after dropping the first n.",
+                        "after_n_count_plus_1": "One more than the count of elements after the first n."}[nm],
+                   "drop walk: base when n==0; empty-base when the list runs out; else self (n-1) (tail xs)",
+                   ["recursion", "list", "slice"], fn([INT, list_of(INT)], ty_res),
+                   _drop_walk(base, empty),
+                   [{"args": [n, lst], "result": pf(n, lst)} for n, lst in _TAKE_IN],
+                   terminates="unknown"))
+
     for dflt in ("", "{}", "null"):
         nm = {"": "empty", "{}": "obj", "null": "null"}[dflt]
         add(_cspec(f"canon_or_{nm}", f'Canonicalize a JSON text, defaulting to "{dflt}" when invalid.',

@@ -108,8 +108,8 @@ of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **param
 comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
-parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,080 generated
-function records (3,306 examples total with the curated set)** across forty-one template families
+parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,087 generated
+function records (3,313 examples total with the curated set)** across forty-two template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
 teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — #39, **strings as data**
 (`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
@@ -120,8 +120,11 @@ key/default sets — and #41, **near-bare builtin usage**: the corpus10 residual
 phase-1/2/3 builtins never appeared in training at all (their bare curated golds leakage-drop), so the
 model invented `keys`/`sort`/regex or recursed over a string as if it were a list; #41 uses each
 untaught builtin (`str_length`, `str_contains`, bare `to_string`, `map_empty`-construction, `map_del`,
-`map_keys`, `map_size`, `render_json`, parse-predicates) with minimal decoration over constant sets),
-every one through the same validate →
+`map_keys`, `map_size`, `render_json`, parse-predicates) with minimal decoration over constant sets —
+and #42, **list-returning index walks**: the `take_rec`/`drop_rec` residual that survived every tier
+through corpus11; the take shape (double guard, cons a *transformed* head onto `self (n-1) (tail xs)`)
+and the drop shape (same guards, recurse without cons, varied base) — #38's element-returning walk,
+completed for lists), every one through the same validate →
 typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,
