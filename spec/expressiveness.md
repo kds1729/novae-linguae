@@ -80,11 +80,11 @@ two conversions) to keep the vocabulary orthogonal to the list ops:
 |---|---|---|
 | `str_concat` | `(string, string) → string` | |
 | `str_length` | `string → nat` | counts **Unicode scalar values** (not bytes, not graphemes) — exact and platform-independent |
-| `str_contains` | `(string, string) → bool` | substring test; empty needle → `true` |
-| `str_split` | `(string, string) → List string` | split subject by separator, **keeping empties** (`"a,,b"` by `","` → `["a","","b"]`); separator absent → `[subject]`; empty separator → one singleton per scalar value; total |
-| `str_join` | `(string, List string) → string` | separator-interleaved concatenation; `str_join(sep, str_split(sep, s)) = s` whenever `sep` is non-empty and present-or-absent as split produced it |
+| `str_contains` | `(needle: string, s: string) → bool` | substring test, **pattern-first** (like `str_split`/`str_join` — so `str_contains(x)` partially applies to a predicate usable with `filter`); empty needle → `true` |
+| `str_split` | `(sep: string, s: string) → List string` | **separator-first** (Haskell `splitOn`); splits keeping empties (`str_split(",", "a,,b")` → `["a","","b"]`); separator absent → `[s]`; empty separator → one singleton per scalar value; total |
+| `str_join` | `(sep: string, xs: List string) → string` | separator-interleaved concatenation (Haskell `intercalate`); `str_join(sep, str_split(sep, s)) = s` for non-empty `sep` |
 | `to_string` | `int → string` | canonical decimal (the JCS integer rendering) |
-| `parse_int` | `string → Maybe int` | accepts exactly canonical decimal with optional leading `-`; anything else (whitespace, `+`, empty, overflow past i64) → `None`. **Totality via Maybe** — this is the pattern that replaces `error` |
+| `parse_int` | `string → Maybe int` | accepts exactly canonical decimal with optional leading `-` (no leading zeros, no `-0`, no whitespace/`+`); anything else, or overflow past the evaluator's integer range (i128) → `None`. **Totality via Maybe** — the pattern that replaces `error`. Round-trips: `parse_int(to_string(n)) = Just(n)`, and `to_string(m) = s` whenever `parse_int(s) = Just(m)` |
 
 Deliberately excluded from phase 1 (each waits for a workflow to pull it): string ordering
 (`lt` on strings — locale/collation rabbit hole; `eq`/`neq` already work structurally),

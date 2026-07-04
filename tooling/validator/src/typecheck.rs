@@ -342,6 +342,17 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
             let a = inf.fresh();
             Ty::Fun(vec![list(a.clone()), list(a.clone())], Box::new(list(a)))
         }
+        // String operations (spec/expressiveness.md phase 1). All monomorphic over `string`;
+        // `str_length` returns `int` like `length` (`nat` is erased at the HM level and its
+        // non-negativity is `check-refinement`'s job); `parse_int` returns the opaque `Sum`,
+        // matching how variant construction and structural sum types are typed.
+        "str_concat" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("string"))),
+        "str_length" => Ty::Fun(vec![con("string")], Box::new(con("int"))),
+        "str_contains" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("bool"))),
+        "str_split" => Ty::Fun(vec![con("string"), con("string")], Box::new(list(con("string")))),
+        "str_join" => Ty::Fun(vec![con("string"), list(con("string"))], Box::new(con("string"))),
+        "to_string" => Ty::Fun(vec![con("int")], Box::new(con("string"))),
+        "parse_int" => Ty::Fun(vec![con("string")], Box::new(con("Sum"))),
         "map" => {
             let (a, b) = (inf.fresh(), inf.fresh());
             Ty::Fun(vec![Ty::Fun(vec![a.clone()], Box::new(b.clone())), list(a)], Box::new(list(b)))
@@ -642,6 +653,35 @@ mod tests {
                   "body": app(v("cons"), json!([app(v("last"), json!([v("xs")])),
                                                 app(v("self"), json!([app(v("init"), json!([v("xs")]))]))])) }] } });
         assert!(typecheck(&ty, &body).is_ok(), "reverse via last/init should type-check as List a -> List a");
+    }
+
+    #[test]
+    fn string_builtins_typecheck() {
+        let app = |fnj: serde_json::Value, args: serde_json::Value| json!({ "kind": "app", "fn": fnj, "args": args });
+        let v = |n: &str| json!({ "kind": "var", "name": n });
+        let string_ty = json!({ "kind": "builtin", "name": "string" });
+        let int_ty = json!({ "kind": "builtin", "name": "int" });
+        // The GW2 shape: \xs -> str_join(", ", map(to_string, xs)) : List int -> string.
+        let list_int = json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [int_ty] });
+        let ty = json!({ "kind": "fn", "params": [list_int], "result": string_ty });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "xs" }],
+            "body": app(v("str_join"), json!([
+                { "kind": "lit", "value": { "kind": "string", "value": ", " } },
+                app(v("map"), json!([v("to_string"), v("xs")]))])) });
+        assert!(typecheck(&ty, &body).is_ok(), "str_join(\", \", map(to_string, xs)) : List int -> string");
+        // parse_int : string -> Sum unifies with a declared structural Maybe-int result.
+        let sum = json!({ "kind": "sum", "variants": [
+            { "tag": "Just", "type": { "kind": "builtin", "name": "int" } }, { "tag": "None" }] });
+        let pty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "string" }], "result": sum });
+        let pbody = json!({ "kind": "lambda", "params": [{ "name": "s" }],
+            "body": app(v("parse_int"), json!([v("s")])) });
+        assert!(typecheck(&pty, &pbody).is_ok(), "parse_int : string -> Maybe int (structural sum)");
+        // And a misuse is rejected: str_length of an int is ill-typed.
+        let bad_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
+                             "result": { "kind": "builtin", "name": "int" } });
+        let bad = json!({ "kind": "lambda", "params": [{ "name": "n" }],
+            "body": app(v("str_length"), json!([v("n")])) });
+        assert!(typecheck(&bad_ty, &bad).is_err(), "str_length(int) must be rejected");
     }
 
     #[test]

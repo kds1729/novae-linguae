@@ -151,8 +151,13 @@ const CONST_OPS: &[&str] = &[
     "add", "sub", "mul", "neg", "abs", "min", "max", "mod", "div", "eq", "neq", "lt", "le", "gt", "ge",
     "and", "or", "xor", "not", "id", "head", "tail", "cons", "null",
 ];
-/// First-order list ops whose work is linear in the list size.
-const LINEAR_OPS: &[&str] = &["length", "append", "reverse", "last", "init"];
+/// First-order ops whose work is linear in their input size. The string ops are input-linear
+/// (`str_concat`/`str_join` are also output-linear, which is the sound `output_size` class;
+/// `to_string`/`parse_int` are digit-linear).
+const LINEAR_OPS: &[&str] = &[
+    "length", "append", "reverse", "last", "init",
+    "str_concat", "str_length", "str_contains", "str_split", "str_join", "to_string", "parse_int",
+];
 
 /// How a `self`-call's recursion argument descends its parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

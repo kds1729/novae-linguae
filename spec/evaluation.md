@@ -41,6 +41,17 @@ comparison (`eq` `neq` `lt` `le` `gt` `ge`), booleans (`and` `or` `xor` `not`), 
 `map` `filter` `foldl` `foldr` `compose` `apply`. `eq`/structural equality is the semantics of the
 `lit` pattern.
 
+**String builtins** ([`expressiveness.md`](expressiveness.md) phase 1 — total, pure, deterministic;
+pattern/separator arguments first, so partial applications are reusable predicates/splitters):
+`str_concat : (string, string) → string`; `str_length : string → nat` (**Unicode scalar values**, not
+bytes or graphemes); `str_contains : (needle, s) → bool` (empty needle → `true`); `str_split : (sep, s)
+→ List string` (keeps empties — `str_split(",", "a,,b") = ["a","","b"]`; absent separator → `[s]`;
+empty separator → one singleton per scalar value); `str_join : (sep, List string) → string`
+(`str_join(sep, str_split(sep, s)) = s` for non-empty `sep`); `to_string : int → string` (canonical
+decimal); `parse_int : string → Maybe int` — accepts exactly canonical decimal (optional leading `-`,
+no leading zeros / `-0` / whitespace / `+`; overflow → `None`): **totality via `Maybe`**, the pattern
+that replaces `error`, with the round-trip `parse_int(to_string(n)) = Just(n)`.
+
 **Composition.** Applying a `fn_ref` value resolves its target (a function content-address, or a
 body's own `expr_` address) against a link map and runs the referenced body — so records assemble and
 run end-to-end (principle 4). `nl-validator run --records <dir>` builds the link map from a directory
@@ -112,7 +123,7 @@ Every record declares `signature.terminates` (`always` / `conditional` / `never`
 only *propagated* (a composite is `always` only if every stage is), never *checked* — a record could claim
 `always` for a body that loops. `nl-validator check-termination <record> --body <body>` verifies a declared
 `always` **structurally**, with no solver. Over the first-order fragment (the arithmetic/boolean/comparison
-builtins plus `head`/`tail`/`last`/`init`/`cons`/`null`/`length`/`append`/`reverse`) a body provably halts when it is
+builtins plus `head`/`tail`/`last`/`init`/`cons`/`null`/`length`/`append`/`reverse` and the string ops) a body provably halts when it is
 **non-recursive**, or **structurally recursive**: every `self`-call's recursion argument is `tail^k(p)`
 (`k ≥ 1`) of one fixed parameter `p` — a list is a finite inductive structure and `tail` strictly shrinks
 it, so the recursion is well-founded and halts (normally, or with an error at `nil`). The analysis is
@@ -132,7 +143,7 @@ against the body: a record could claim `O(n)` for an `O(n²)` implementation. `n
 <record> --body <body>` verifies it **structurally**, with no solver. It infers a **sound upper bound** on the
 body's running time as a class in the input size and compares it to the declaration. Over the same first-order
 fragment, the classification is by op cost (the scalar ops and `head`/`tail`/`cons`/`null` are `O(1)`;
-`length`/`append`/`reverse`/`last`/`init` are `O(n)`): a **non-recursive** body is `O(1)` or `O(n)` (a finite AST over data
+`length`/`append`/`reverse`/`last`/`init` and the string ops are `O(n)`): a **non-recursive** body is `O(1)` or `O(n)` (a finite AST over data
 that stays `O(n)`); a **structural recursion** is solved as a recurrence `T(n) = a·T(n−k) + w`, where `a` is
 the branching factor (the number of `self`-calls on the worst-case execution path — `case` arms are mutually
 exclusive, so `filter` stays `O(n)` rather than reading as exponential), `k` the descent, and `w` the per-step

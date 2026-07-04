@@ -495,10 +495,11 @@ fn as_list(v: &Val) -> Result<Vec<Val>> {
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
         "neg" | "abs" | "not" | "id" | "head" | "tail" | "last" | "init" | "length" | "null"
-        | "reverse" | "fst" | "snd" | "print" | "rand" | "now" | "panic" | "read_file"
-        | "http_get" => 1,
+        | "reverse" | "fst" | "snd" | "str_length" | "to_string" | "parse_int" | "print" | "rand"
+        | "now" | "panic" | "read_file" | "http_get" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
+        | "str_concat" | "str_contains" | "str_split" | "str_join"
         | "apply" | "write_file" | "http_post" | "spawn" | "replicate" => 2,
         "foldl" | "foldr" | "compose" => 3,
         _ => return None,
@@ -790,6 +791,51 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             let mut xs = as_list(&a[0])?;
             xs.extend(as_list(&a[1])?);
             Val::List(xs)
+        }
+        // String operations (spec/expressiveness.md phase 1). All pure and total; pattern/separator
+        // arguments come FIRST so a partial application is a reusable predicate/splitter/joiner.
+        "str_concat" => {
+            let mut s = as_str(&a[0])?;
+            s.push_str(&as_str(&a[1])?);
+            Val::Str(s)
+        }
+        // Unicode scalar values, not bytes or graphemes — exact and platform-independent.
+        "str_length" => Val::Int(as_str(&a[0])?.chars().count() as i128),
+        "str_contains" => {
+            let needle = as_str(&a[0])?;
+            Val::Bool(as_str(&a[1])?.contains(needle.as_str()))
+        }
+        "str_split" => {
+            let sep = as_str(&a[0])?;
+            let s = as_str(&a[1])?;
+            let parts: Vec<Val> = if sep.is_empty() {
+                // Empty separator: one singleton string per Unicode scalar value.
+                s.chars().map(|c| Val::Str(c.to_string())).collect()
+            } else {
+                // Keeps empties ("a,,b" by "," -> ["a","","b"]); separator absent -> [s].
+                s.split(sep.as_str()).map(|p| Val::Str(p.to_string())).collect()
+            };
+            Val::List(parts)
+        }
+        "str_join" => {
+            let sep = as_str(&a[0])?;
+            Val::Str(as_str_list(&a[1])?.join(&sep))
+        }
+        "to_string" => Val::Str(as_int(&a[0])?.to_string()),
+        "parse_int" => {
+            // Accepts exactly the canonical decimal rendering (optional leading `-`, no leading
+            // zeros, no `-0`, no whitespace/`+`); everything else, incl. overflow, is None — the
+            // totality-via-Maybe pattern that replaces `error`.
+            let s = as_str(&a[0])?;
+            let digits = s.strip_prefix('-').unwrap_or(&s);
+            let canonical = !digits.is_empty()
+                && digits.chars().all(|c| c.is_ascii_digit())
+                && (digits == "0" || !digits.starts_with('0'))
+                && !(s.starts_with('-') && digits == "0");
+            match if canonical { s.parse::<i128>().ok() } else { None } {
+                Some(i) => Val::Variant("Just".to_string(), Some(Box::new(Val::Int(i)))),
+                None => Val::Variant("None".to_string(), None),
+            }
         }
         "map" => {
             let f = a[0].clone();
@@ -1150,6 +1196,82 @@ mod tests {
             "body": { "kind": "app", "fn": { "kind": "var", "name": "init" }, "args": [{ "kind": "var", "name": "xs" }] } });
         assert_eq!(eval_body(&init, &[lst]).unwrap(),
                    encode_value(&Val::List(vec![Val::Int(1), Val::Int(2)])));
+    }
+
+    #[test]
+    fn string_builtins() {
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+        let run2 = |f: &str, a: J, b: J| {
+            let l = json!({ "kind": "lambda", "params": [{ "name": "x" }, { "name": "y" }],
+                "body": { "kind": "app", "fn": { "kind": "var", "name": f },
+                          "args": [{ "kind": "var", "name": "x" }, { "kind": "var", "name": "y" }] } });
+            eval_body(&l, &[a, b]).unwrap()
+        };
+        let run1 = |f: &str, a: J| {
+            let l = json!({ "kind": "lambda", "params": [{ "name": "x" }],
+                "body": { "kind": "app", "fn": { "kind": "var", "name": f }, "args": [{ "kind": "var", "name": "x" }] } });
+            eval_body(&l, &[a]).unwrap()
+        };
+        assert_eq!(run2("str_concat", s("nova"), s(" lingua")), encode_value(&Val::Str("nova lingua".into())));
+        // str_length counts Unicode scalar values, not bytes.
+        assert_eq!(run1("str_length", s("héllo")), encode_value(&Val::Int(5)));
+        assert_eq!(run1("str_length", s("")), encode_value(&Val::Int(0)));
+        // str_contains is pattern-first; empty needle is true.
+        assert_eq!(run2("str_contains", s("ing"), s("nova lingua")), encode_value(&Val::Bool(true)));
+        assert_eq!(run2("str_contains", s("xyz"), s("nova lingua")), encode_value(&Val::Bool(false)));
+        assert_eq!(run2("str_contains", s(""), s("anything")), encode_value(&Val::Bool(true)));
+        // str_split is separator-first and keeps empties; absent separator -> [s]; empty separator -> scalars.
+        let strs = |xs: &[&str]| Val::List(xs.iter().map(|x| Val::Str((*x).into())).collect());
+        assert_eq!(run2("str_split", s(","), s("a,,b")), encode_value(&strs(&["a", "", "b"])));
+        assert_eq!(run2("str_split", s(";"), s("a,b")), encode_value(&strs(&["a,b"])));
+        assert_eq!(run2("str_split", s(""), s("héy")), encode_value(&strs(&["h", "é", "y"])));
+        // str_join inverts a non-empty-separator split.
+        let joined = run2("str_join", s(", "),
+            json!({ "kind": "list", "elems": [s("a"), s("b"), s("c")] }));
+        assert_eq!(joined, encode_value(&Val::Str("a, b, c".into())));
+    }
+
+    #[test]
+    fn to_string_and_parse_int_round_trip() {
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+        let run1 = |f: &str, a: J| {
+            let l = json!({ "kind": "lambda", "params": [{ "name": "x" }],
+                "body": { "kind": "app", "fn": { "kind": "var", "name": f }, "args": [{ "kind": "var", "name": "x" }] } });
+            eval_body(&l, &[a]).unwrap()
+        };
+        let just = |i: i128| encode_value(&Val::Variant("Just".into(), Some(Box::new(Val::Int(i)))));
+        let none = encode_value(&Val::Variant("None".into(), None));
+        assert_eq!(run1("to_string", nat(42)), encode_value(&Val::Str("42".into())));
+        assert_eq!(run1("to_string", json!({ "kind": "int", "value": -7 })), encode_value(&Val::Str("-7".into())));
+        // parse_int accepts exactly canonical decimal (totality via Maybe — never an error).
+        assert_eq!(run1("parse_int", s("42")), just(42));
+        assert_eq!(run1("parse_int", s("-7")), just(-7));
+        assert_eq!(run1("parse_int", s("0")), just(0));
+        for bad in ["", "abc", "007", "-0", "+5", " 5", "5 ", "1.5", "99999999999999999999999999999999999999999"] {
+            assert_eq!(run1("parse_int", s(bad)), none, "parse_int({bad:?}) must be None");
+        }
+    }
+
+    #[test]
+    fn extract_and_parse_field_runs() {
+        // The GW1 shape (spec/expressiveness.md): split a textual payload on a separator, walk to a
+        // field, parse it, and case on the Maybe — strings are now data, not just opaque carriers.
+        // \s -> case parse_int(head(tail(str_split(",", s)))) of { Just(n) => n + n; None => 0 }
+        let app = |f: &str, args: Vec<J>| json!({ "kind": "app", "fn": { "kind": "var", "name": f }, "args": args });
+        let sep = json!({ "kind": "lit", "value": { "kind": "string", "value": "," } });
+        let field = app("head", vec![app("tail", vec![app("str_split", vec![sep, json!({ "kind": "var", "name": "s" })])])]);
+        let body = json!({ "kind": "lambda", "params": [{ "name": "s" }], "body": {
+            "kind": "case",
+            "scrutinee": app("parse_int", vec![field]),
+            "arms": [
+                { "pattern": { "kind": "variant", "tag": "Just", "payload": { "kind": "bind", "name": "n" } },
+                  "body": app("add", vec![json!({ "kind": "var", "name": "n" }), json!({ "kind": "var", "name": "n" })]) },
+                { "pattern": { "kind": "variant", "tag": "None" },
+                  "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } }] } });
+        let payload = json!({ "kind": "string", "value": "id,21,ok" });
+        assert_eq!(eval_body(&body, &[payload]).unwrap(), encode_value(&Val::Int(42)));
+        let junk = json!({ "kind": "string", "value": "id,notanum,ok" });
+        assert_eq!(eval_body(&body, &[junk]).unwrap(), encode_value(&Val::Int(0)));
     }
 
     #[test]
