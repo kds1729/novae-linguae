@@ -11,12 +11,18 @@
 //! SMT solver re-checks it independently, so a receiver verifies by re-checking the certificate rather
 //! than trusting this tool — verification is re-execution, lifted to proof (principles 3, 5).
 //!
-//! Decidable fragment (honest scope). Sorts are `Int` and `Bool`; the function under test (`self`) is
-//! inlined as an SMT `define-fun` over `Int` parameters. Supported: arithmetic (`add`/`sub`/`mul`/
-//! `neg`/`abs`/`min`/`max`/`mod`/`div`), comparisons, boolean connectives, `let`, boolean `case`
-//! (→ `ite`), literals, and `self` applied to arguments. Anything outside it — lists, higher-order
-//! arguments, recursion, opaque callees — is reported UNSUPPORTED rather than silently "proved". This
-//! is the same boundary proptest draws (it reports those UNGENERATABLE).
+//! Decidable fragment (honest scope). Sorts are `Int`, `Bool`, and `String` (the solver's native
+//! string theory — spec/expressiveness.md phase 1 gets the same proof reach as arithmetic); the
+//! function under test (`self`) is inlined as an SMT `define-fun` whose parameter sorts are inferred
+//! from body usage (default `Int`). Supported: arithmetic (`add`/`sub`/`mul`/`neg`/`abs`/`min`/`max`/
+//! `mod`/`div`), comparisons, boolean connectives, the string operations `str_concat` (`str.++`),
+//! `str_length` (`str.len`), and `str_contains` (`str.contains` — note the needle/haystack argument
+//! swap), string literals and string equality, `let`, boolean `case` (→ `ite`), literals, and `self`
+//! applied to arguments. Anything outside it — lists, `str_split`/`str_join` (sequences-of-strings,
+//! not in the solver's string theory), `to_string`/`parse_int` (solver `str.from_int`/`str.to_int`
+//! semantics differ from ours on negatives — mapping them would be UNSOUND, so they stay out),
+//! maps/JSON, higher-order arguments, recursion, opaque callees — is reported UNSUPPORTED rather than
+//! silently "proved". This is the same boundary proptest draws (it reports those UNGENERATABLE).
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value as J;
@@ -26,6 +32,7 @@ use std::collections::BTreeMap;
 pub enum Sort {
     Int,
     Bool,
+    Str,
 }
 
 impl Sort {
@@ -33,6 +40,7 @@ impl Sort {
         match self {
             Sort::Int => "Int",
             Sort::Bool => "Bool",
+            Sort::Str => "String",
         }
     }
 }
@@ -61,9 +69,12 @@ pub struct Certificate {
 
 // --- self definition ------------------------------------------------------------------------------
 
-/// The function under test, lowered to an SMT `define-fun`. Parameters default to `Int`.
+/// The function under test, lowered to an SMT `define-fun`. Parameter sorts are inferred from how
+/// the body uses each parameter (string ops → `String`, boolean connectives → `Bool`), defaulting
+/// to `Int` — the sorts then also constrain the law's `self`-application arguments.
 struct SelfDef {
     params: Vec<String>,
+    param_sorts: Vec<Sort>,
     ret: Sort,
     body_smt: String,
 }
@@ -82,13 +93,51 @@ fn lower_self(body: &J) -> Result<SelfDef> {
     } else {
         (vec![], body)
     };
-    let mut env: BTreeMap<String, Sort> = params.iter().map(|p| (p.clone(), Sort::Int)).collect();
+    // Infer parameter sorts from body usage (the same walk the law-side inference uses — it reads
+    // both the op and fn/var application spellings), defaulting to Int.
+    let mut inferred: BTreeMap<String, Option<Sort>> = params.iter().map(|p| (p.clone(), None)).collect();
+    visit_for_sorts(inner, &params, &mut inferred, None)?;
+    let param_sorts: Vec<Sort> = params.iter().map(|p| inferred[p].unwrap_or(Sort::Int)).collect();
+    let mut env: BTreeMap<String, Sort> = params.iter().cloned().zip(param_sorts.iter().copied()).collect();
     let ret = sort_of(inner, &env, None)?;
     let body_smt = lower(inner, &mut env, None)?;
-    Ok(SelfDef { params, ret, body_smt })
+    Ok(SelfDef { params, param_sorts, ret, body_smt })
 }
 
 // --- translation ----------------------------------------------------------------------------------
+
+/// Rewrite curried direct-application spines — the surface parser's juxtaposition form,
+/// `((f a) b)` — into flat applications `f(a, b)`, so the translator sees one head with all its
+/// arguments (the same normalization the termination/complexity analyzers apply). Purely
+/// structural; `apply`-spines and everything else pass through untouched. Children are rewritten
+/// first, so one flattening step per node suffices (the loop is defensive).
+fn uncurry(node: &J) -> J {
+    match node {
+        J::Object(m) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in m {
+                out.insert(k.clone(), uncurry(v));
+            }
+            let mut node = J::Object(out);
+            loop {
+                let is_curried = node.get("kind").and_then(|k| k.as_str()) == Some("app")
+                    && node.get("op").is_none()
+                    && node.pointer("/fn/kind").and_then(|k| k.as_str()) == Some("app")
+                    && node.pointer("/fn/op").is_none();
+                if !is_curried {
+                    break;
+                }
+                let inner_fn = node.pointer("/fn/fn").cloned().unwrap_or(J::Null);
+                let mut args = node.pointer("/fn/args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+                args.extend(node.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default());
+                node = serde_json::json!({ "kind": "app", "fn": inner_fn, "args": args });
+            }
+            node
+        }
+        J::Array(items) => J::Array(items.iter().map(uncurry).collect()),
+        other => other.clone(),
+    }
+}
 
 /// Resolve the head operator of an application node: either an explicit `op` string (predicate form)
 /// or a `fn` that is a `var` (body form).
@@ -105,8 +154,9 @@ fn head_op(node: &J) -> Option<String> {
 /// Sort returned by `op` given the sorts of its operands are well-formed.
 fn op_result_sort(op: &str) -> Option<Sort> {
     Some(match op {
-        "add" | "sub" | "mul" | "neg" | "abs" | "min" | "max" | "mod" | "div" => Sort::Int,
-        "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and" | "or" | "xor" | "not" => Sort::Bool,
+        "add" | "sub" | "mul" | "neg" | "abs" | "min" | "max" | "mod" | "div" | "str_length" => Sort::Int,
+        "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and" | "or" | "xor" | "not" | "str_contains" => Sort::Bool,
+        "str_concat" => Sort::Str,
         _ => return None,
     })
 }
@@ -143,6 +193,7 @@ fn sort_of(node: &J, env: &BTreeMap<String, Sort>, self_def: Option<&SelfDef>) -
         "lit" => match node.pointer("/value/kind").and_then(|k| k.as_str()) {
             Some("int") | Some("nat") => Ok(Sort::Int),
             Some("bool") => Ok(Sort::Bool),
+            Some("string") => Ok(Sort::Str),
             other => bail!("unsupported literal kind: {other:?}"),
         },
         "var" => {
@@ -183,7 +234,7 @@ fn sort_of(node: &J, env: &BTreeMap<String, Sort>, self_def: Option<&SelfDef>) -
     }
 }
 
-/// Lower an integer/boolean literal value-AST to an SMT term.
+/// Lower an integer/boolean/string literal value-AST to an SMT term.
 fn lower_lit(value: &J) -> Result<String> {
     match value.get("kind").and_then(|k| k.as_str()) {
         Some("bool") => Ok(value.get("value").and_then(|v| v.as_bool()).unwrap_or(false).to_string()),
@@ -198,8 +249,28 @@ fn lower_lit(value: &J) -> Result<String> {
             };
             Ok(if n < 0 { format!("(- {})", -n) } else { n.to_string() })
         }
+        Some("string") => {
+            let s = value.get("value").and_then(|v| v.as_str()).ok_or_else(|| anyhow!("string literal has no value"))?;
+            Ok(smt_string_lit(s))
+        }
         other => bail!("unsupported literal kind: {other:?}"),
     }
+}
+
+/// An SMT-LIB 2.6 string literal: `"` doubles, and anything outside printable ASCII is emitted as a
+/// `\u{...}` escape so the certificate stays 7-bit clean and unambiguous.
+fn smt_string_lit(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\"\""),
+            c if (' '..='~').contains(&c) && c != '\\' => out.push(c),
+            c => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn lower(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfDef>) -> Result<String> {
@@ -348,20 +419,41 @@ fn lower_app(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfD
             let (a, b) = (lower(args[0], env, self_def)?, lower(args[1], env, self_def)?);
             Ok(format!("(ite (>= {a} {b}) {a} {b})"))
         }
+        // String theory (spec/expressiveness.md phase 1). NB our `str_contains` is needle-first;
+        // SMT-LIB's `str.contains` is haystack-first — the arguments swap.
+        "str_concat" => Ok(format!("(str.++ {} {})", lower(args[0], env, self_def)?, lower(args[1], env, self_def)?)),
+        "str_length" => Ok(format!("(str.len {})", lower(args[0], env, self_def)?)),
+        "str_contains" => Ok(format!("(str.contains {} {})", lower(args[1], env, self_def)?, lower(args[0], env, self_def)?)),
         other => bail!("unsupported operator `{other}` (out of fragment)"),
     }
 }
 
 // --- quantified-variable sort inference -----------------------------------------------------------
 
-/// Infer each quantified variable's sort (Int or Bool) from how it is used in the predicate. A var
-/// used under a boolean connective or as a case scrutinee is Bool; under arithmetic/comparison or as a
-/// `self` argument it is Int; unresolved defaults to Int. A var used in a list position makes the whole
-/// property unsupported.
-fn infer_var_sorts(pred: &J, vars: &[String]) -> Result<BTreeMap<String, Sort>> {
+/// Infer each quantified variable's sort (Int, Bool, or String) from how it is used in the predicate.
+/// A var used under a boolean connective is Bool; under a string operation it is String; under
+/// arithmetic/comparison it is Int; a `self` argument takes the corresponding inferred parameter sort;
+/// unresolved defaults to Int. A var used in a list position makes the whole property unsupported.
+fn infer_var_sorts(pred: &J, vars: &[String], self_param_sorts: Option<&[Sort]>) -> Result<BTreeMap<String, Sort>> {
     let mut sorts: BTreeMap<String, Option<Sort>> = vars.iter().map(|v| (v.clone(), None)).collect();
-    visit_for_sorts(pred, &sorts.keys().cloned().collect::<Vec<_>>(), &mut sorts)?;
+    visit_for_sorts(pred, &sorts.keys().cloned().collect::<Vec<_>>(), &mut sorts, self_param_sorts)?;
     Ok(sorts.into_iter().map(|(k, v)| (k, v.unwrap_or(Sort::Int))).collect())
+}
+
+/// The sort a node *evidently* produces without any variable context: a literal's kind, or a known
+/// operator's result sort. `None` for vars and anything else — used by the `eq`/`neq` cross-side
+/// inference (`eq(str_concat(a,b), c)` makes `c` a String).
+fn evident_sort(node: &J) -> Option<Sort> {
+    match node.get("kind").and_then(|k| k.as_str()) {
+        Some("lit") => match node.pointer("/value/kind").and_then(|k| k.as_str()) {
+            Some("int") | Some("nat") => Some(Sort::Int),
+            Some("bool") => Some(Sort::Bool),
+            Some("string") => Some(Sort::Str),
+            _ => None,
+        },
+        Some("app") => op_result_sort(&head_op(node)?),
+        _ => None,
+    }
 }
 
 fn var_name(node: &J) -> Option<&str> {
@@ -384,7 +476,7 @@ fn constrain(name: &str, sort: Sort, vars: &[String], sorts: &mut BTreeMap<Strin
     Ok(())
 }
 
-fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Option<Sort>>) -> Result<()> {
+fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Option<Sort>>, self_param_sorts: Option<&[Sort]>) -> Result<()> {
     let kind = node.get("kind").and_then(|k| k.as_str()).unwrap_or_default();
     if kind == "app" {
         let op = head_op(node).unwrap_or_default();
@@ -393,6 +485,7 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
         let operand_sort = match op.as_str() {
             "add" | "sub" | "mul" | "neg" | "abs" | "min" | "max" | "mod" | "div" | "lt" | "le" | "gt" | "ge" => Some(Sort::Int),
             "and" | "or" | "xor" | "not" => Some(Sort::Bool),
+            "str_concat" | "str_length" | "str_contains" => Some(Sort::Str),
             _ => None, // eq/neq/apply/self/id: don't constrain directly
         };
         if let Some(s) = operand_sort {
@@ -402,42 +495,56 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
                 }
             }
         }
-        // self/apply-of-self arguments are Int (self params default Int). A var in list-op position is
-        // a hard error (out of fragment) — surfaced here so the property reads UNSUPPORTED, not "Int".
+        // eq/neq don't fix a sort themselves, but if one side's sort is evident (a literal or a
+        // known operator), a bare var on the other side takes it: `eq(str_concat(a,b), c)` → c:String.
+        if matches!(op.as_str(), "eq" | "neq") && args.len() == 2 {
+            for (me, other) in [(0usize, 1usize), (1, 0)] {
+                if let (Some(n), Some(s)) = (var_name(args[me]), evident_sort(args[other])) {
+                    constrain(n, s, vars, sorts)?;
+                }
+            }
+        }
+        // A var in a list/structural position is a hard error (out of fragment) — surfaced here so
+        // the property reads UNSUPPORTED, not mis-sorted. str_concat/str_length/str_contains are IN
+        // the fragment now (the solver's string theory); split/join and the int<->string conversions
+        // stay out (no theory counterpart / unsound mapping).
         if matches!(op.as_str(), "length" | "head" | "tail" | "last" | "init" | "reverse" | "map" | "filter" | "foldl" | "foldr" | "cons" | "append" | "concat" | "null" | "fst" | "snd"
-            | "str_concat" | "str_length" | "str_contains" | "str_split" | "str_join" | "to_string" | "parse_int"
+            | "str_split" | "str_join" | "to_string" | "parse_int"
             | "map_put" | "map_get" | "map_del" | "map_size" | "map_keys" | "parse_json" | "render_json") {
             bail!("predicate uses list/structural operator `{op}` (out of fragment)");
         }
         if op == "apply" || op == "self" {
             if let Some((head, call_args)) = flatten_call(node) {
                 if head == "self" {
-                    for a in &call_args {
+                    for (i, a) in call_args.iter().enumerate() {
                         if let Some(n) = var_name(a) {
-                            constrain(n, Sort::Int, vars, sorts)?;
+                            // A self argument takes the function's inferred parameter sort (Int when
+                            // the body isn't available — the historical default).
+                            let s = self_param_sorts.and_then(|ps| ps.get(i)).copied().unwrap_or(Sort::Int);
+                            constrain(n, s, vars, sorts)?;
                         }
                     }
                 }
             }
         }
         for a in &args {
-            visit_for_sorts(a, vars, sorts)?;
+            visit_for_sorts(a, vars, sorts, self_param_sorts)?;
         }
     } else if let Some(arr) = node.get("args").and_then(|a| a.as_array()) {
         for a in arr {
-            visit_for_sorts(a, vars, sorts)?;
+            visit_for_sorts(a, vars, sorts, self_param_sorts)?;
         }
     }
     // Recurse into common subtrees regardless of kind.
     for key in ["body", "value", "scrutinee"] {
         if let Some(child) = node.get(key) {
-            visit_for_sorts(child, vars, sorts)?;
+            visit_for_sorts(child, vars, sorts, self_param_sorts)?;
         }
     }
     if let Some(arms) = node.get("arms").and_then(|a| a.as_array()) {
         for arm in arms {
             if let Some(b) = arm.get("body") {
-                visit_for_sorts(b, vars, sorts)?;
+                visit_for_sorts(b, vars, sorts, self_param_sorts)?;
             }
         }
     }
@@ -450,6 +557,11 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
 /// required only if the property references `self`. Returns Err if the property is outside the
 /// decidable fragment (the caller maps that to UNSUPPORTED).
 pub fn build_certificate(prop_expr: &J, body: Option<&J>) -> Result<Certificate> {
+    // Normalize away curried application spines first, so surface-parsed properties/bodies
+    // (juxtaposition parses curried) analyze identically to AST-authored flat ones.
+    let prop_expr = &uncurry(prop_expr);
+    let body_flat = body.map(uncurry);
+    let body = body_flat.as_ref();
     if prop_expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
         bail!("not a `forall` — no universally-quantified obligation to prove");
     }
@@ -472,7 +584,7 @@ pub fn build_certificate(prop_expr: &J, body: Option<&J>) -> Result<Certificate>
         None
     };
 
-    let var_sorts = infer_var_sorts(pred, &vars)?;
+    let var_sorts = infer_var_sorts(pred, &vars, self_def.as_ref().map(|s| s.param_sorts.as_slice()))?;
     let mut env: BTreeMap<String, Sort> = var_sorts.clone();
 
     // The predicate must be a Bool.
@@ -485,7 +597,13 @@ pub fn build_certificate(prop_expr: &J, body: Option<&J>) -> Result<Certificate>
     let mut out = String::new();
     out.push_str("(set-logic ALL)\n");
     if let Some(sd) = &self_def {
-        let params = sd.params.iter().map(|p| format!("({p} Int)")).collect::<Vec<_>>().join(" ");
+        let params = sd
+            .params
+            .iter()
+            .zip(sd.param_sorts.iter())
+            .map(|(p, s)| format!("({p} {})", s.smt()))
+            .collect::<Vec<_>>()
+            .join(" ");
         out.push_str(&format!("(define-fun self ({}) {} {})\n", params, sd.ret.smt(), sd.body_smt));
     }
     let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
@@ -687,6 +805,91 @@ mod tests {
         assert_eq!(cert.quantified, vec![("b".to_string(), Sort::Bool)]);
         assert!(cert.smt.contains("(declare-const b Bool)"));
         assert!(cert.smt.contains("(not (not b))"));
+    }
+
+    #[test]
+    fn string_length_of_concat_law_proves() {
+        // forall a b. eq(str_length(str_concat(a, b)), add(str_length(a), str_length(b))) — the
+        // distributivity of length over concatenation, PROVED over every string via the solver's
+        // string theory (spec/expressiveness.md phase 1 reaching "verified by default" parity).
+        let sl = |v: &str| json!({ "kind": "app", "op": "str_length", "args": [{ "kind": "var", "name": v }] });
+        let prop = json!({ "kind": "forall", "vars": ["a", "b"], "body": {
+            "kind": "app", "op": "eq", "args": [
+                { "kind": "app", "op": "str_length", "args": [
+                    { "kind": "app", "op": "str_concat", "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] }] },
+                { "kind": "app", "op": "add", "args": [sl("a"), sl("b")] }] } });
+        let cert = build_certificate(&prop, None).unwrap();
+        assert!(cert.quantified.iter().all(|(_, s)| *s == Sort::Str), "{:?}", cert.quantified);
+        assert!(cert.smt.contains("(declare-const a String)"));
+        assert!(cert.smt.contains("(str.len (str.++ a b))"));
+        assert_eq!(run_smt(&cert.smt, "z3").unwrap(), SatAnswer::Unsat, "\n{}", cert.smt);
+    }
+
+    #[test]
+    fn string_law_refuted_with_counterexample() {
+        // forall s. gt(str_length(s), 0) — false: the empty string. The solver refutes with a model.
+        let prop = json!({ "kind": "forall", "vars": ["s"], "body": {
+            "kind": "app", "op": "gt", "args": [
+                { "kind": "app", "op": "str_length", "args": [{ "kind": "var", "name": "s" }] },
+                { "kind": "lit", "value": { "kind": "int", "value": 0 } }] } });
+        let cert = build_certificate(&prop, None).unwrap();
+        assert!(matches!(run_smt(&cert.smt, "z3").unwrap(), SatAnswer::Sat(_)), "\n{}", cert.smt);
+    }
+
+    #[test]
+    fn contains_swaps_needle_and_haystack() {
+        // Our str_contains is needle-first; SMT's str.contains is haystack-first. The law
+        // forall a b. str_contains(a, str_concat(a, b)) — "a prefix is contained" — only proves if
+        // the swap is right (with the arguments backwards it is refutable, e.g. a="x", b="y").
+        let prop = json!({ "kind": "forall", "vars": ["a", "b"], "body": {
+            "kind": "app", "op": "str_contains", "args": [
+                { "kind": "var", "name": "a" },
+                { "kind": "app", "op": "str_concat", "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] }] } });
+        let cert = build_certificate(&prop, None).unwrap();
+        assert!(cert.smt.contains("(str.contains (str.++ a b) a)"), "\n{}", cert.smt);
+        assert_eq!(run_smt(&cert.smt, "z3").unwrap(), SatAnswer::Unsat, "\n{}", cert.smt);
+    }
+
+    #[test]
+    fn string_self_body_infers_string_params() {
+        // self = \s -> str_concat(s, "!") ; forall s. eq(str_length(self(s)), add(str_length(s), 1)).
+        // The parameter sort is inferred String from body usage, the define-fun and the quantified
+        // var follow, and the law PROVES (the appended "!" adds exactly one character).
+        let body = json!({ "kind": "lambda", "params": [{ "name": "s" }], "body": {
+            "kind": "app", "fn": { "kind": "var", "name": "str_concat" },
+            "args": [{ "kind": "var", "name": "s" }, { "kind": "lit", "value": { "kind": "string", "value": "!" } }] } });
+        let prop = json!({ "kind": "forall", "vars": ["s"], "body": {
+            "kind": "app", "op": "eq", "args": [
+                { "kind": "app", "op": "str_length", "args": [
+                    { "kind": "app", "op": "apply", "args": [{ "kind": "var", "name": "self" }, { "kind": "var", "name": "s" }] }] },
+                { "kind": "app", "op": "add", "args": [
+                    { "kind": "app", "op": "str_length", "args": [{ "kind": "var", "name": "s" }] },
+                    { "kind": "lit", "value": { "kind": "int", "value": 1 } }] }] } });
+        let cert = build_certificate(&prop, Some(&body)).unwrap();
+        assert!(cert.smt.contains("(define-fun self ((s String)) String"), "\n{}", cert.smt);
+        assert!(cert.smt.contains("(declare-const s String)"), "\n{}", cert.smt);
+        assert_eq!(run_smt(&cert.smt, "z3").unwrap(), SatAnswer::Unsat, "\n{}", cert.smt);
+    }
+
+    #[test]
+    fn smt_string_literals_escape_correctly() {
+        assert_eq!(smt_string_lit("plain"), "\"plain\"");
+        assert_eq!(smt_string_lit("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(smt_string_lit("a\\b"), "\"a\\u{5c}b\"");
+        assert_eq!(smt_string_lit("nl\nend"), "\"nl\\u{a}end\"");
+    }
+
+    #[test]
+    fn split_and_conversions_stay_unsupported() {
+        // str_split has no counterpart in the solver's string theory, and to_string/parse_int
+        // deliberately don't map (str.from_int/str.to_int differ on negatives) — all UNSUPPORTED.
+        for op in ["str_split", "str_join", "to_string", "parse_int"] {
+            let prop = json!({ "kind": "forall", "vars": ["s"], "body": {
+                "kind": "app", "op": "eq", "args": [
+                    { "kind": "app", "op": op, "args": [{ "kind": "var", "name": "s" }] },
+                    { "kind": "var", "name": "s" }] } });
+            assert!(build_certificate(&prop, None).is_err(), "{op} must stay out of fragment");
+        }
     }
 
     #[test]

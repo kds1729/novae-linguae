@@ -160,8 +160,9 @@ below). `implies`, `concat_lists`, `nand`, `reverse_concat` (older residuals) st
 
 > **Eval-set growth note (2026-07-04, expressiveness phases 1–3).** The string builtins added 13
 > curated records (+ combinatorial family #39) and the map/JSON builtins added 9 more, growing the
-> curated eval to **354 tasks (176 write / 166 read / 12 assemble)** from the 316 this re-pin was
-> measured on. The pinned numbers above are on the **316-task** set — not line-comparable to a future
-> eval on repo HEAD; the next GPU run re-baselines on corpus10 (3,038 specs — combinatorial families
-> #39 strings and #40 maps/JSON now teach all the new idioms; split at `/var/tmp/claude/ftdata10`,
-> 5,697 train). Oracle stays 100% on the grown set.
+> curated eval to **360 graded tasks at the shots-0 setting (179 write / 169 read / 12 assemble)**
+> from the 316 this re-pin was measured on (the shots-3 oracle grades 354 — 6 tasks are reserved as
+> few-shot exemplars). The pinned numbers above are on the **316-task** set — not line-comparable to
+> a future eval on repo HEAD; the corpus10 re-baseline (3,038 specs — combinatorial families #39
+> strings and #40 maps/JSON teach all the new idioms; split `ftdata10`, 5,697 train) re-baselines on
+> the 360-task set. Oracle stays 100% on the grown set.

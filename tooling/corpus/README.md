@@ -210,7 +210,7 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   JCS canonicalization) / `json_port` (the GW1 practical form — nested `case` over `Just(JObj(m))`
   then `Just(JNum(p))`) over JSON; examples carry real `map` values),
   and **provenance** (2: `quadruple_derived` `derived_from`
-  doubling, `negate_v2` `supersedes` a `0 − n` implementation). **56 properties are proved over the
+  doubling, `negate_v2` `supersedes` a `0 − n` implementation). **58 properties are proved over the
   unbounded domain**, including the `filter`/`reverse` commutation and the `reverse`-over-`append`
   antihomomorphism (both via lemma discovery), `filter` idempotence (direct induction), and the recursion
   families' laws by induction over the supplied body. Sum-typed (Maybe/Result) functions construct their

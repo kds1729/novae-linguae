@@ -101,6 +101,13 @@ huge), slicing/indexing (partial or Maybe-heavy; split covers the workflows), fl
 - `prove.rs` — recognized as out-of-Int-fragment (like list ops): a law over them reads
   UNSUPPORTED, never mis-typed. Inductive string lemmas are **explicitly deferred** (strings
   are morally `List char`; if a workflow ever needs proved string laws, that is the encoding).
+  *(Superseded same-day: the prover gained a **string fragment** — `str_concat`/`str_length`/
+  `str_contains` map onto the solver's native string theory, `self` parameter sorts are inferred
+  from body usage, and string laws PROVE over the unbounded domain; `equiv` decides
+  string-function equivalence and `check-refinement` proves `string → nat` results ≥ 0.
+  `str_split`/`str_join` stay out (no theory counterpart), and `to_string`/`parse_int`
+  deliberately do NOT map onto `str.from_int`/`str.to_int` — the solver's negative-number
+  semantics differ from ours, so the mapping would be unsound.)*
 - Surface syntax — string literals already lex/parse/unparse; only the builtin name set grows.
 - `spec/evaluation.md` + the eval harness conventions prompt — document the seven.
 - Tests: per-builtin eval, typecheck, the split/join inverse property, parse_int edge cases

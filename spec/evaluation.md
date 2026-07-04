@@ -257,19 +257,28 @@ would, and over a small domain it *is* a proof.
 
 `nl-validator prove <record> --body <body>` discharges a `forall` law over the **unbounded** domain,
 the rung above sampling and bounded enumeration. Each property and the function body are translated to
-**SMT-LIB 2** (the `Int`/`Bool` fragment: arithmetic, comparisons, boolean connectives, `let`, boolean
-`case` → `ite`, and `self` inlined as a `define-fun`); the tool asserts the **negation** of the law and
-asks a solver (z3 by default, anything that speaks SMT-LIB on `--solver`) whether it is satisfiable:
+**SMT-LIB 2** (the `Int`/`Bool`/`String` fragment: arithmetic, comparisons, boolean connectives, the
+string operations `str_concat`/`str_length`/`str_contains` mapped onto the solver's native string
+theory (`str.++`/`str.len`/`str.contains` — with the needle/haystack argument swap, ours is
+needle-first), string literals and string equality, `let`, boolean `case` → `ite`, and `self` inlined
+as a `define-fun` whose **parameter sorts are inferred from body usage** — a string-consuming function
+quantifies over `String`, not `Int`); the tool asserts the **negation** of the law and asks a solver
+(z3 by default, anything that speaks SMT-LIB on `--solver`) whether it is satisfiable:
 
 - **PROVED** — the solver returns `unsat`: no counterexample exists *anywhere*, a real proof over all
   inputs (not just a sampled range). E.g. `double`'s `forall n. eq(self(n), add(n,n))` is proved for
   every integer; a four-variable commutativity law that the bounded enumerator can't cover is proved
-  outright.
-- **REFUTED** — `sat`: the solver's model is a concrete counterexample (e.g. `n = 0`); exit 1.
+  outright; `str_length(str_concat(a, b)) = str_length(a) + str_length(b)` and `wrap_parens` adding
+  exactly two characters are proved over **every string**.
+- **REFUTED** — `sat`: the solver's model is a concrete counterexample (e.g. `n = 0`, or the empty
+  string against `forall s. str_length(s) > 0`); exit 1.
 - **UNKNOWN** — the solver gave up.
-- **UNSUPPORTED** — the property or body is outside the `Int`/`Bool` fragment (lists, higher-order
-  arguments, recursion, opaque callees). Reported honestly, never silently "proved" — the same
-  boundary the generative checker draws as UNGENERATABLE.
+- **UNSUPPORTED** — the property or body is outside the `Int`/`Bool`/`String` fragment (lists,
+  `str_split`/`str_join` — no counterpart in the solver's string theory — and `to_string`/`parse_int`,
+  which deliberately do NOT map onto `str.from_int`/`str.to_int` because the solver's semantics differ
+  from ours on negatives (mapping them would be unsound); higher-order arguments, recursion, opaque
+  callees). Reported honestly, never silently "proved" — the same boundary the generative checker
+  draws as UNGENERATABLE.
 
 The emitted SMT-LIB script **is the proof certificate** (`--smt-out <dir>` writes one per property):
 any SMT solver re-checks it independently, so a receiver verifies by re-checking the certificate
