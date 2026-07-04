@@ -200,6 +200,15 @@ the existing variants — nothing new in the type system, patterns, or serializa
 - **Ingestion**: map source-language string/dict idioms onto the new builtins in
   `nl_body.py` (+ the Rust/Haskell/TS adapters) — this is where "deeper ingestion fidelity"
   resumes, now with somewhere to land.
+  *Strings: DONE for the Python adapter (2026-07-04).* A known-string inference rooted in
+  `str`-annotated parameters drives the type-dependent translations a syntactic adapter can't
+  otherwise decide: `+` → `str_concat`, `len` → `str_length`, `s.split(sep)` → `str_split(sep,
+  s)` (receiver/argument swap onto the separator-first builtin), `sep.join(xs)` → `str_join`,
+  `in` → `str_contains`, `str(n)` → `to_string`. Demonstrated end to end: a 6-function module
+  (concat, split-count, rejoin, membership, labeling) ingests to executable bodies that run
+  12/12 doctest-mined examples. Unannotated code keeps its numeric/list reading; a wrong guess
+  fails the example gate rather than shipping wrong. Dict/JSON idioms (`d.get(k)` → `map_get`
+  with the `Maybe`/`None` value-mapping question) and the Rust/Haskell/TS adapters remain.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

@@ -339,5 +339,55 @@ class TestExecutableCorpus(unittest.TestCase):
                 self.assertIn("examples passed", out.stdout, name)
 
 
+class TestStringIdiomBodies(unittest.TestCase):
+    """The phase-4 string-idiom translations (spec/expressiveness.md): `str`-annotated parameters
+    drive `+` -> str_concat, `len` -> str_length, `s.split(sep)` -> str_split (separator-first —
+    receiver and argument SWAP), `sep.join(xs)` -> str_join, `needle in s` -> str_contains, and
+    `str(n)` -> to_string. Unannotated code keeps its numeric/list reading."""
+
+    def _body(self, src):
+        import ast as pyast
+        import nl_body
+        func = pyast.parse(src).body[0]
+        b = nl_body.body_ast_from_py(func)
+        self.assertIsNotNone(b, src)
+        return json.dumps(b)
+
+    def test_string_idioms_translate(self):
+        cases = [
+            ("def f(s: str):\n    return '<' + s + '>'\n", "str_concat"),
+            ("def f(s: str):\n    return len(s)\n", "str_length"),
+            ("def f(s: str):\n    return s.split(',')\n", "str_split"),
+            ("def f(s: str):\n    return ';'.join(s.split(','))\n", "str_join"),
+            ("def f(s: str):\n    return ',' in s\n", "str_contains"),
+            ("def f(n):\n    return 'n=' + str(n)\n", "to_string"),
+        ]
+        for src, builtin in cases:
+            self.assertIn(f'"{builtin}"', self._body(src), src)
+
+    def test_split_swaps_receiver_and_separator(self):
+        # s.split(",") must become str_split("," , s): separator FIRST.
+        import ast as pyast
+        import nl_body
+        func = pyast.parse("def f(s: str):\n    return s.split(',')\n").body[0]
+        body = nl_body.body_ast_from_py(func)["body"]
+        self.assertEqual(body["fn"], {"kind": "var", "name": "str_split"})
+        self.assertEqual(body["args"][0], {"kind": "lit", "value": {"kind": "string", "value": ","}})
+        self.assertEqual(body["args"][1], {"kind": "var", "name": "s"})
+
+    def test_unannotated_keeps_numeric_reading(self):
+        # Without a str annotation, + stays add and len stays length — no silent retyping.
+        src = "def f(a, b):\n    return a + b\n"
+        self.assertIn('"add"', self._body(src))
+        self.assertNotIn('"str_concat"', self._body(src))
+        src2 = "def f(xs):\n    return len(xs)\n"
+        self.assertIn('"length"', self._body(src2))
+        # And `in` over an unproven container stays out of subset (body falls back to None).
+        import ast as pyast
+        import nl_body
+        func = pyast.parse("def f(x, xs):\n    return x in xs\n").body[0]
+        self.assertIsNone(nl_body.body_ast_from_py(func))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
