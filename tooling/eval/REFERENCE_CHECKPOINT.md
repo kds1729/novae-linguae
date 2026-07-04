@@ -158,9 +158,10 @@ conses a result list: take/drop/`nth`-with-default variants) is the designed nex
 continues (family **#39** became strings-as-data — see below). `implies`, `concat_lists`, `nand`,
 `reverse_concat` (older residuals) stay solved.
 
-> **Eval-set growth note (2026-07-04, expressiveness phase 1).** The string builtins added 13 curated
-> records (+ combinatorial family #39), growing the curated eval to **336 tasks (167 write / 157
-> read / 12 assemble)** from the 316 this re-pin was measured on. The pinned numbers above are on the
-> **316-task** set — not line-comparable to a future eval on repo HEAD; the next GPU run (e.g. a
-> corpus9 retrain, which now also teaches the string idioms) re-baselines. Oracle stays 100% on the
-> grown set.
+> **Eval-set growth note (2026-07-04, expressiveness phases 1–3).** The string builtins added 13
+> curated records (+ combinatorial family #39) and the map/JSON builtins added 9 more, growing the
+> curated eval to **354 tasks (176 write / 166 read / 12 assemble)** from the 316 this re-pin was
+> measured on. The pinned numbers above are on the **316-task** set — not line-comparable to a future
+> eval on repo HEAD; the next GPU run (a corpus9+ retrain, which now also teaches the string idioms —
+> map/JSON shapes are curated-only until a combinatorial family multiplies them) re-baselines. Oracle
+> stays 100% on the grown set.

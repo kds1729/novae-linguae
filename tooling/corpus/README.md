@@ -109,7 +109,7 @@ comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
 parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,009 generated
-function records (3,226 examples total with the curated set)** across thirty-nine template families
+function records (3,235 examples total with the curated set)** across thirty-nine template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
 teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — and #39, **strings as data**
 (`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
@@ -147,9 +147,9 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
 
 ## Scope and where it grows
 
-217 examples today (203 positive, 14 negative), in four `category`s:
+226 examples today (212 positive, 14 negative), in four `category`s:
 
-- **function** (180) — Nova Lingua function records across **thirty-one families**: unary integer (8, incl.
+- **function** (189) — Nova Lingua function records across **thirty-two families**: unary integer (8, incl.
   `double` / `quadruple` / `decrement` / `abs_val`), binary integer (6, incl. `maximum` / `minimum` /
   `abs_diff`), boolean/predicate (8, incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` /
   `is_even`), list builtins (3: `sum` / `reverse` / `length`), list-transform (6: `map`/`filter`/`append`
@@ -200,6 +200,12 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   `render_ints` (`str_join`∘`map to_string`) and the parse quartet `parse_int_maybe` /
   `parse_or_zero` / `is_int_string` / `parse_and_double` — `parse_int`'s `Maybe` constructed AND
   consumed by `case`, the totality idiom that replaces `error`),
+  **maps + JSON** (9, `spec/expressiveness.md` phases 2–3 — the first records over dynamic key-value
+  data and JSON-as-data: `lookup_int` / `port_or_default` (the config-lookup idiom) / `key_count` /
+  `key_list` (sorted, deterministic) / `store_one` (build from `map_empty`) / `drop_key` (absent key
+  is a no-op) over maps, and `is_valid_json` / `canonical_json` (`render_json ∘ parse_json` IS
+  JCS canonicalization) / `json_port` (the GW1 practical form — nested `case` over `Just(JObj(m))`
+  then `Just(JNum(p))`) over JSON; examples carry real `map` values),
   and **provenance** (2: `quadruple_derived` `derived_from`
   doubling, `negate_v2` `supersedes` a `0 − n` implementation). **56 properties are proved over the
   unbounded domain**, including the `filter`/`reverse` commutation and the `reverse`-over-`append`

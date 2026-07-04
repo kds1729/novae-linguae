@@ -1,16 +1,16 @@
 {
   "corpus": "corpus.jsonl",
-  "examples": 217,
+  "examples": 226,
   "by_modality": {
-    "nova_lingua": 195,
+    "nova_lingua": 204,
     "nova_locutio": 22
   },
   "by_polarity": {
-    "positive": 203,
+    "positive": 212,
     "negative": 14
   },
   "by_category": {
-    "function": 180,
+    "function": 189,
     "exchange": 20,
     "transcript": 2,
     "composition": 15

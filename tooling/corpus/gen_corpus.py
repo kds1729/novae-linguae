@@ -143,6 +143,15 @@ def maybe_t(elem):
     return {"kind": "sum", "variants": [{"tag": "Just", "type": elem}, {"tag": "None"}]}
 
 
+def map_of(value_t):
+    """The type `Map string value_t` (spec/expressiveness.md phase 2)."""
+    return {"kind": "apply", "ctor": {"kind": "builtin", "name": "Map"},
+            "args": [{"kind": "builtin", "name": "string"}, value_t]}
+
+
+WILDCARD_PAT = {"kind": "wildcard"}
+
+
 def result_t(ok_t, err_t):
     """The sum type `[Ok(ok_t) Err(err_t)]`."""
     return {"kind": "sum", "variants": [{"tag": "Ok", "type": ok_t}, {"tag": "Err", "type": err_t}]}
@@ -196,6 +205,10 @@ def to_value_ast(pyval):
         return {"kind": "float", "value": pyval}
     if isinstance(pyval, str):
         return {"kind": "string", "value": pyval}
+    if isinstance(pyval, dict):
+        # A map value (Map string a): entries sorted by key — the canonical form check-value enforces.
+        return {"kind": "map", "entries": [{"key": k, "value": to_value_ast(v)}
+                                           for k, v in sorted(pyval.items())]}
     if isinstance(pyval, list):
         return {"kind": "list", "elems": [to_value_ast(x) for x in pyval]}
     if isinstance(pyval, V):
@@ -1647,6 +1660,92 @@ def string_funcs():
     ]
 
 
+def map_json_funcs():
+    # MAP + JSON functions (spec/expressiveness.md phases 2-3): dynamic key-value data and the
+    # language's own canonical form as a manipulable value. map_get/parse_json are total via Maybe,
+    # so most rows destructure a Maybe by case (incl. nested Json patterns — the GW1 practical form).
+    # Sums are opaque to the prover; these verify by validate + typecheck + run.
+    s, k, m, n, j = var("s"), var("k"), var("m"), var("n"), var("j")
+    return [
+        {"name": "lookup_int", "intent": "Look up a key in a map of integers, if present.",
+         "summary": "map_get k m — the key comes first; an absent key is None, never an error.",
+         "tags": ["map", "query", "maybe"], "type_ast": fn([STRING, map_of(INT)], maybe_t(INT)),
+         "body_ast": lam(["k", "m"], bapp("map_get", k, m)),
+         "examples": [{"args": ["a", {"a": 1, "b": 2}], "result": V("Just", 1)},
+                      {"args": ["z", {"a": 1}], "result": V("None")},
+                      {"args": ["x", {}], "result": V("None")}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "port_or_default", "intent": "The port entry of a config map, or 8080 if unset.",
+         "summary": 'case map_get "port" m of Just(p) => p; None => 8080 — the config-lookup idiom.',
+         "tags": ["map", "query", "variant", "case"], "type_ast": fn([map_of(INT)], INT),
+         "body_ast": lam(["m"], _case_of(bapp("map_get", str_lit("port"), m),
+                                         (_vpat("Just", "p"), var("p")), (_vpat("None"), int_lit(8080)))),
+         "examples": [{"args": [{"port": 9000, "timeout": 30}], "result": 9000},
+                      {"args": [{}], "result": 8080},
+                      {"args": [{"retries": 3}], "result": 8080}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "key_count", "intent": "How many entries a map has.",
+         "summary": "map_size m.", "tags": ["map", "aggregate"],
+         "type_ast": fn([map_of(INT)], NAT), "body_ast": lam(["m"], bapp("map_size", m)),
+         "examples": [{"args": [{"a": 1, "b": 2}], "result": 2}, {"args": [{}], "result": 0},
+                      {"args": [{"only": 7}], "result": 1}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "key_list", "intent": "The keys of a map, sorted.",
+         "summary": "map_keys m — deterministic (sorted) order.", "tags": ["map", "query"],
+         "type_ast": fn([map_of(INT)], list_of(STRING)), "body_ast": lam(["m"], bapp("map_keys", m)),
+         "examples": [{"args": [{"b": 2, "a": 1}], "result": ["a", "b"]}, {"args": [{}], "result": []},
+                      {"args": [{"z": 0}], "result": ["z"]}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "store_one", "intent": "A one-entry map from a key and a value.",
+         "summary": "map_put k n map_empty — build from the empty map.", "tags": ["map", "transform"],
+         "type_ast": fn([STRING, INT], map_of(INT)),
+         "body_ast": lam(["k", "n"], bapp("map_put", k, n, var("map_empty"))),
+         "examples": [{"args": ["a", 1], "result": {"a": 1}}, {"args": ["port", 9000], "result": {"port": 9000}},
+                      {"args": ["", 0], "result": {"": 0}}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "drop_key", "intent": "Remove a key from a map (a no-op if absent).",
+         "summary": "map_del k m — total; deleting an absent key returns the map unchanged.",
+         "tags": ["map", "transform"], "type_ast": fn([STRING, map_of(INT)], map_of(INT)),
+         "body_ast": lam(["k", "m"], bapp("map_del", k, m)),
+         "examples": [{"args": ["a", {"a": 1, "b": 2}], "result": {"b": 2}},
+                      {"args": ["z", {"a": 1}], "result": {"a": 1}},
+                      {"args": ["x", {}], "result": {}}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "is_valid_json", "intent": "Test whether a string is valid JSON.",
+         "summary": "true iff parse_json succeeds.", "tags": ["parse", "string", "predicate", "variant", "case"],
+         "type_ast": fn([STRING], BOOL),
+         "body_ast": lam(["s"], _case_of(bapp("parse_json", s), (_vpat("Just", "j"), bool_lit(True)),
+                                         (_vpat("None"), bool_lit(False)))),
+         "examples": [{"args": ["{\"a\": 1}"], "result": True}, {"args": ["[1, 2]"], "result": True},
+                      {"args": ["{nope"], "result": False}, {"args": [""], "result": False}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "canonical_json", "intent": "Canonicalize a JSON text, or empty on invalid input.",
+         "summary": "render_json of a parse_json IS canonicalization (JCS: sorted keys, minimal form).",
+         "tags": ["parse", "serialize", "string", "variant", "case"], "type_ast": fn([STRING], STRING),
+         "body_ast": lam(["s"], _case_of(bapp("parse_json", s), (_vpat("Just", "j"), bapp("render_json", j)),
+                                         (_vpat("None"), str_lit("")))),
+         "examples": [{"args": ["{ \"b\" : 2 , \"a\": 1 }"], "result": "{\"a\":1,\"b\":2}"},
+                      {"args": ["[1,  2]"], "result": "[1,2]"},
+                      {"args": ["junk"], "result": ""}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "json_port", "intent": "The integer port field of a JSON config text, or 8080.",
+         "summary": "parse the payload, project the field: nested case over Just(JObj(m)) then Just(JNum(p)).",
+         "tags": ["parse", "query", "string", "map", "variant", "case"], "type_ast": fn([STRING], INT),
+         "body_ast": lam(["s"], _case_of(
+             bapp("parse_json", s),
+             ({"kind": "variant", "tag": "Just", "payload": {"kind": "variant", "tag": "JObj", "payload": {"kind": "bind", "name": "m"}}},
+              _case_of(bapp("map_get", str_lit("port"), m),
+                       ({"kind": "variant", "tag": "Just", "payload": {"kind": "variant", "tag": "JNum", "payload": {"kind": "bind", "name": "p"}}},
+                        var("p")),
+                       (WILDCARD_PAT, int_lit(8080)))),
+             (WILDCARD_PAT, int_lit(8080)))),
+         "examples": [{"args": ["{\"host\": \"h\", \"port\": 9000}"], "result": 9000},
+                      {"args": ["{\"host\": \"h\"}"], "result": 8080},
+                      {"args": ["nope"], "result": 8080}],
+         "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
 def variant_consuming_funcs():
     # The write shape the corpus most lacked: bodies that CONSUME a sum type by pattern-matching its
     # variants (the existing maybe_funcs/result_funcs only CONSTRUCT variants). Plus two more constructors
@@ -2901,7 +3000,7 @@ def all_specs():
             + arith_laws() + bool_laws() + order_laws()
             + more_arith() + more_laws() + bool_more() + recursive_more()
             + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion()
-            + variant_consuming_funcs() + nested_hof_funcs() + string_funcs())
+            + variant_consuming_funcs() + nested_hof_funcs() + string_funcs() + map_json_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
