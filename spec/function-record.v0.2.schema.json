@@ -420,7 +420,8 @@
         { "$ref": "#/$defs/ve_tuple" },
         { "$ref": "#/$defs/ve_record" },
         { "$ref": "#/$defs/ve_variant" },
-        { "$ref": "#/$defs/ve_fn_ref" }
+        { "$ref": "#/$defs/ve_fn_ref" },
+        { "$ref": "#/$defs/ve_map" }
       ]
     },
     "ve_bool": {
@@ -548,6 +549,26 @@
       "properties": {
         "kind": { "const": "fn_ref" },
         "target": { "type": "string", "pattern": "^fn_[0-9a-f]{64}$" }
+      }
+    },
+    "ve_map": {
+      "type": "object",
+      "required": ["kind", "entries"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "map" },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string" },
+              "value": { "$ref": "#/$defs/ve_value" }
+            }
+          }
+        }
       }
     }
   }

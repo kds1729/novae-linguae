@@ -972,9 +972,41 @@ fn check_value_node(value: &Value) -> Result<()> {
                 check_value_node(payload)?;
             }
         }
+        "map" => {
+            // Keys must be unique AND sorted (code-point order): sortedness is part of the
+            // CANONICAL form — equal maps must serialize (and hash) identically, so an
+            // out-of-order entry list is ill-formed, not merely unconventional.
+            let entries = obj
+                .get("entries")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`map` missing `entries`"))?;
+            let mut prev: Option<&str> = None;
+            for entry in entries {
+                let key = entry
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("`map.entries[]` entry missing string `key`"))?;
+                match prev {
+                    Some(p) if p == key => {
+                        return Err(anyhow!("map key `{key}` appears more than once"));
+                    }
+                    Some(p) if p > key => {
+                        return Err(anyhow!(
+                            "map entries not in canonical order: `{key}` after `{p}` (sort by key, code-point order)"
+                        ));
+                    }
+                    _ => {}
+                }
+                prev = Some(key);
+                let val = entry
+                    .get("value")
+                    .ok_or_else(|| anyhow!("`map.entries[].value` is required"))?;
+                check_value_node(val)?;
+            }
+        }
         other => {
             return Err(anyhow!(
-                "unknown value-expression kind `{other}` (expected: bool, int, nat, float, string, bytes, unit, list, tuple, record, variant, fn_ref)"
+                "unknown value-expression kind `{other}` (expected: bool, int, nat, float, string, bytes, unit, list, tuple, record, variant, fn_ref, map)"
             ));
         }
     }

@@ -104,6 +104,27 @@ impl Parser {
                         self.expect(TokKind::Rparen, "`)` to close `int(...)`")?;
                         Ok(json!({ "kind": "int", "value": int_from_text(&n.text) }))
                     }
+                    // `map { "key" => <value>, ... }` — a Map-string-a value; `map {}` is empty.
+                    // The keyword prefix keeps `{}`/`{name = v}` unambiguously a record.
+                    "map" => {
+                        self.expect(TokKind::Lbrace, "`{` after `map`")?;
+                        let mut entries: Vec<Value> = Vec::new();
+                        if !self.at(&TokKind::Rbrace) {
+                            loop {
+                                let key = self.expect(TokKind::Str, "a string key in a map entry")?;
+                                self.expect(TokKind::FatArrow, "`=>` after map key")?;
+                                let val = self.parse_value()?;
+                                entries.push(json!({ "key": key.text, "value": val }));
+                                if self.at(&TokKind::Comma) {
+                                    self.bump();
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        self.expect(TokKind::Rbrace, "`}` to close map")?;
+                        Ok(json!({ "kind": "map", "entries": entries }))
+                    }
                     other => Err(SurfaceError::at(
                         t.offset,
                         format!(
@@ -509,6 +530,32 @@ pub fn unparse_value(ast: &Value) -> Result<String, SurfaceError> {
                 .ok_or_else(|| SurfaceError::msg("`fn_ref` missing `target`"))?;
             Ok(target.to_string())
         }
+        "map" => {
+            let entries = ast
+                .get("entries")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| SurfaceError::msg("`map` missing `entries`"))?;
+            let mut pairs: Vec<(String, String)> = Vec::with_capacity(entries.len());
+            for e in entries {
+                let key = e
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| SurfaceError::msg("map entry missing string `key`"))?;
+                let val = e
+                    .get("value")
+                    .ok_or_else(|| SurfaceError::msg("map entry missing `value`"))?;
+                pairs.push((key.to_string(), unparse_value(val)?));
+            }
+            // Canonical order is sorted-by-key (the well-formedness checker requires it of the
+            // AST; sorting here keeps the printer total on unchecked input).
+            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            let body = pairs
+                .into_iter()
+                .map(|(k, v)| format!("{} => {v}", escape_string(&k)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Ok(if body.is_empty() { "map {}".to_string() } else { format!("map {{{body}}}") })
+        }
         other => Err(SurfaceError::msg(format!(
             "unknown value-expression kind `{other}`"
         ))),
@@ -664,5 +711,29 @@ mod tests {
         let ast = parse_value("int(5)").unwrap();
         assert_eq!(ast["kind"], "int");
         assert_eq!(unparse_value(&ast).unwrap(), "int(5)");
+    }
+
+    #[test]
+    fn map_values_parse_and_round_trip() {
+        // `map { "k" => v, ... }` — the keyword prefix keeps `{}` unambiguously a record.
+        parses_to(
+            r#"map {"a" => int(1), "b" => [int(2)]}"#,
+            json!({"kind": "map", "entries": [
+                {"key": "a", "value": {"kind": "int", "value": 1}},
+                {"key": "b", "value": {"kind": "list", "elems": [{"kind": "int", "value": 2}]}}
+            ]}),
+        );
+        parses_to("map {}", json!({"kind": "map", "entries": []}));
+        for src in [r#"map {"a" => int(1), "b" => [int(2)]}"#, "map {}", r#"map {"" => ()}"#] {
+            let ast = parse_value(src).unwrap();
+            let printed = unparse_value(&ast).unwrap();
+            assert_eq!(parse_value(&printed).unwrap(), ast, "map value round trip for `{src}`");
+        }
+        // The printer emits canonical key order even from an unsorted AST.
+        let unsorted = json!({"kind": "map", "entries": [
+            {"key": "b", "value": {"kind": "nat", "value": 2}},
+            {"key": "a", "value": {"kind": "nat", "value": 1}}
+        ]});
+        assert_eq!(unparse_value(&unsorted).unwrap(), r#"map {"a" => 1, "b" => 2}"#);
     }
 }

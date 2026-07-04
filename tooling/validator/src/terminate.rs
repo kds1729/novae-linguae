@@ -35,6 +35,7 @@ const FIRST_ORDER_OPS: &[&str] = &[
     "and", "or", "xor", "not", "id", "head", "tail", "last", "init", "cons", "null", "length",
     "append", "reverse",
     "str_concat", "str_length", "str_contains", "str_split", "str_join", "to_string", "parse_int",
+    "map_put", "map_get", "map_del", "map_size", "map_keys",
 ];
 
 /// The parameter names of a `lambda` body, or `None` if it isn't one.

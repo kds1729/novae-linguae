@@ -144,6 +144,26 @@ records), so canonical serialization and deterministic iteration come for free �
 choice that makes records canonical. The `Map` type constructor already exists in the schema
 vocabulary. Tax as phase 1, plus a canonical JSON value encoding for map values.
 
+**Phase 2: DONE (2026-07-04).** The six operations are live across the whole core (all six of
+the phase-1 layers, plus the pieces strings didn't need):
+
+- A **`map` value kind** in `value-expression.schema.json` (and the `ve_map` mirror inlined in
+  `function-record.v0.2.schema.json`; the message schema picks it up by cross-file `$ref`):
+  `{kind: "map", entries: [{key, value}…]}` with **canonical form = unique keys sorted in
+  code-point order**, enforced by the well-formedness checker (an out-of-order entry list is
+  *ill-formed*, so equal maps always hash equal). No schema version bump — `Map` was already
+  in the type vocabulary.
+- Surface value syntax `map {"k" => v, …}` / `map {}` (the keyword prefix keeps `{}`
+  unambiguously a record), round-tripping canonically; `Map string int` already parsed as a
+  type. Bodies need no map literal — construction is `map_put` chains from `map_empty`.
+- Totality: `map_get` returns `Maybe`, absent-key `map_del` is a no-op — no error path
+  anywhere, same discipline as `parse_int`.
+- Exit-gate record [`examples/config-port.v0.2.json`](examples/config-port.v0.2.json)
+  (`config_port : Map string int → int` — `case map_get "port" m of {Just(p) => p;
+  None => int(8080)}`, the GW3 config-lookup idiom): validates, runs its examples over real
+  map values (incl. the empty map), and **certifies fully SOUND** — typecheck, effects,
+  termination, `O(n)` complexity — through the curried-spine analyzers phase 1 fixed.
+
 ## Phase 3 — JSON-as-data
 
 The thesis-aligned capstone: the language's own canonical form becomes manipulable *from

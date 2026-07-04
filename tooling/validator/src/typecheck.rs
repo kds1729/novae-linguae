@@ -260,6 +260,14 @@ fn lit_ty(v: &J, inf: &mut Infer) -> Result<Ty> {
         }
         "variant" => con("Sum"),       // opaque
         "fn_ref" => inf.fresh(),         // target type not resolved here
+        "map" => {
+            let e = inf.fresh();
+            for entry in v["entries"].as_array().ok_or_else(|| anyhow!("map entries"))? {
+                let et = lit_ty(&entry["value"], inf)?;
+                inf.unify(&e, &et)?;
+            }
+            Ty::Con("Map".into(), vec![con("string"), e])
+        }
         other => bail!("unknown value kind in literal: {other}"),
     })
 }
@@ -388,6 +396,35 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
         "nil" => {
             let a = inf.fresh();
             list(a)
+        }
+        // Map operations (spec/expressiveness.md phase 2): string keys, polymorphic values. The
+        // `Map` type constructor is already in the type-schema vocabulary; `map_get` returns the
+        // opaque `Sum` like every Maybe-producing builtin.
+        "map_empty" => {
+            let a = inf.fresh();
+            Ty::Con("Map".into(), vec![con("string"), a])
+        }
+        "map_put" => {
+            let a = inf.fresh();
+            let m = Ty::Con("Map".into(), vec![con("string"), a.clone()]);
+            Ty::Fun(vec![con("string"), a, m.clone()], Box::new(m))
+        }
+        "map_get" => {
+            let a = inf.fresh();
+            Ty::Fun(vec![con("string"), Ty::Con("Map".into(), vec![con("string"), a])], Box::new(con("Sum")))
+        }
+        "map_del" => {
+            let a = inf.fresh();
+            let m = Ty::Con("Map".into(), vec![con("string"), a]);
+            Ty::Fun(vec![con("string"), m.clone()], Box::new(m))
+        }
+        "map_size" => {
+            let a = inf.fresh();
+            Ty::Fun(vec![Ty::Con("Map".into(), vec![con("string"), a])], Box::new(con("int")))
+        }
+        "map_keys" => {
+            let a = inf.fresh();
+            Ty::Fun(vec![Ty::Con("Map".into(), vec![con("string"), a])], Box::new(list(con("string"))))
         }
         _ => return None,
     })
@@ -682,6 +719,36 @@ mod tests {
         let bad = json!({ "kind": "lambda", "params": [{ "name": "n" }],
             "body": app(v("str_length"), json!([v("n")])) });
         assert!(typecheck(&bad_ty, &bad).is_err(), "str_length(int) must be rejected");
+    }
+
+    #[test]
+    fn map_builtins_typecheck() {
+        let app = |fnj: serde_json::Value, args: serde_json::Value| json!({ "kind": "app", "fn": fnj, "args": args });
+        let v = |n: &str| json!({ "kind": "var", "name": n });
+        let string_ty = json!({ "kind": "builtin", "name": "string" });
+        let int_ty = json!({ "kind": "builtin", "name": "int" });
+        let map_ty = json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "Map" },
+                             "args": [string_ty, int_ty.clone()] });
+        // The config-lookup shape: \m -> map_get "k" m : Map string int -> Maybe int (structural sum).
+        let sum = json!({ "kind": "sum", "variants": [
+            { "tag": "Just", "type": { "kind": "builtin", "name": "int" } }, { "tag": "None" }] });
+        let get_ty = json!({ "kind": "fn", "params": [map_ty.clone()], "result": sum });
+        let get_body = json!({ "kind": "lambda", "params": [{ "name": "m" }],
+            "body": app(v("map_get"), json!([
+                { "kind": "lit", "value": { "kind": "string", "value": "k" } }, v("m")])) });
+        assert!(typecheck(&get_ty, &get_body).is_ok(), "map_get : Map string int -> Maybe int");
+        // Building from map_empty: \x -> map_put "a" x map_empty : int -> Map string int.
+        let put_ty = json!({ "kind": "fn", "params": [int_ty], "result": map_ty });
+        let put_body = json!({ "kind": "lambda", "params": [{ "name": "x" }],
+            "body": app(v("map_put"), json!([
+                { "kind": "lit", "value": { "kind": "string", "value": "a" } }, v("x"), v("map_empty")])) });
+        assert!(typecheck(&put_ty, &put_body).is_ok(), "map_put onto map_empty : int -> Map string int");
+        // Misuse rejected: a map value can't flow into a list op.
+        let bad_ty = json!({ "kind": "fn", "params": [map_ty],
+                             "result": { "kind": "builtin", "name": "int" } });
+        let bad = json!({ "kind": "lambda", "params": [{ "name": "m" }],
+            "body": app(v("length"), json!([v("m")])) });
+        assert!(typecheck(&bad_ty, &bad).is_err(), "length(Map) must be rejected");
     }
 
     #[test]

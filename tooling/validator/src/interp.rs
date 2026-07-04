@@ -179,6 +179,9 @@ pub enum Val {
     Tuple(Vec<Val>),
     Record(BTreeMap<String, Val>),
     Variant(String, Option<Box<Val>>),
+    /// A finite map with string keys (`Map string a`, spec/expressiveness.md phase 2). BTreeMap
+    /// gives deterministic (sorted-by-key) iteration and encoding — canonical form for free.
+    Map(BTreeMap<String, Val>),
     FnRef(String),
     Closure { params: Vec<String>, body: Rc<J>, env: Env },
     /// A self-recursive function value: like `Closure`, but every application first re-binds
@@ -238,6 +241,16 @@ pub fn decode_value(v: &J) -> Result<Val> {
             Val::Variant(tag, payload)
         }
         "fn_ref" => Val::FnRef(v["target"].as_str().ok_or_else(|| anyhow!("fn_ref target"))?.to_string()),
+        "map" => {
+            let mut m = BTreeMap::new();
+            for e in v["entries"].as_array().ok_or_else(|| anyhow!("map entries"))? {
+                let key = e["key"].as_str().ok_or_else(|| anyhow!("map key"))?.to_string();
+                if m.insert(key.clone(), decode_value(&e["value"])?).is_some() {
+                    bail!("map key {key:?} appears more than once");
+                }
+            }
+            Val::Map(m)
+        }
         other => bail!("unknown value kind: {other}"),
     })
 }
@@ -274,6 +287,11 @@ pub fn encode_value(v: &Val) -> J {
             None => json!({ "kind": "variant", "tag": tag }),
         },
         Val::FnRef(t) => json!({ "kind": "fn_ref", "target": t }),
+        // BTreeMap iterates sorted by key, so the encoding is canonical by construction.
+        Val::Map(m) => json!({
+            "kind": "map",
+            "entries": m.iter().map(|(k, v)| json!({ "key": k, "value": encode_value(v) })).collect::<Vec<_>>()
+        }),
         Val::Closure { params, .. } | Val::RecClosure { params, .. } => {
             json!({ "kind": "function", "params": params.len() })
         }
@@ -295,7 +313,7 @@ pub fn val_eq(a: &Val, b: &Val) -> bool {
         (Val::List(x), Val::List(y)) | (Val::Tuple(x), Val::Tuple(y)) => {
             x.len() == y.len() && x.iter().zip(y).all(|(p, q)| val_eq(p, q))
         }
-        (Val::Record(x), Val::Record(y)) => {
+        (Val::Record(x), Val::Record(y)) | (Val::Map(x), Val::Map(y)) => {
             x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| val_eq(v, w)))
         }
         (Val::Variant(t1, p1), Val::Variant(t2, p2)) => {
@@ -491,17 +509,26 @@ fn as_list(v: &Val) -> Result<Vec<Val>> {
     }
 }
 
+fn as_map(v: &Val) -> Result<BTreeMap<String, Val>> {
+    match v {
+        Val::Map(m) => Ok(m.clone()),
+        _ => bail!("expected a map, got {}", encode_value(v)),
+    }
+}
+
 /// Builtin arity, or `None` if `name` is not a builtin. `nil` is handled separately (a nullary value).
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
         "neg" | "abs" | "not" | "id" | "head" | "tail" | "last" | "init" | "length" | "null"
-        | "reverse" | "fst" | "snd" | "str_length" | "to_string" | "parse_int" | "print" | "rand"
+        | "reverse" | "fst" | "snd" | "str_length" | "to_string" | "parse_int"
+        | "map_size" | "map_keys" | "print" | "rand"
         | "now" | "panic" | "read_file" | "http_get" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
         | "str_concat" | "str_contains" | "str_split" | "str_join"
+        | "map_get" | "map_del"
         | "apply" | "write_file" | "http_post" | "spawn" | "replicate" => 2,
-        "foldl" | "foldr" | "compose" => 3,
+        "foldl" | "foldr" | "compose" | "map_put" => 3,
         _ => return None,
     })
 }
@@ -523,18 +550,23 @@ pub fn builtin_effect(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Whether `name` is a known builtin (incl. `nil`) — i.e. its meaning and effects are known statically.
+/// Whether `name` is a known builtin (incl. the nullary constants `nil`/`map_empty`) — i.e. its
+/// meaning and effects are known statically.
 pub fn is_builtin(name: &str) -> bool {
-    name == "nil" || builtin_arity(name).is_some()
+    name == "nil" || name == "map_empty" || builtin_arity(name).is_some()
 }
 
-/// Resolve a `var` name: lexical environment first, then the builtin library, then the `nil` constant.
+/// Resolve a `var` name: lexical environment first, then the builtin library, then the nullary
+/// constants (`nil`, `map_empty`).
 fn resolve_var(name: &str, env: &Env) -> Result<Val> {
     if let Some(v) = env.get(name) {
         return Ok(v.clone());
     }
     if name == "nil" {
         return Ok(Val::List(vec![]));
+    }
+    if name == "map_empty" {
+        return Ok(Val::Map(BTreeMap::new()));
     }
     if let Some(arity) = builtin_arity(name) {
         return Ok(Val::Builtin { name: name.to_string(), arity, applied: vec![] });
@@ -822,6 +854,30 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             Val::Str(as_str_list(&a[1])?.join(&sep))
         }
         "to_string" => Val::Str(as_int(&a[0])?.to_string()),
+        // Map operations (spec/expressiveness.md phase 2). String keys; key argument FIRST (like the
+        // string ops' pattern-first order); all total — an absent key is None/no-op, never an error.
+        "map_put" => {
+            let key = as_str(&a[0])?;
+            let mut m = as_map(&a[2])?;
+            m.insert(key, a[1].clone());
+            Val::Map(m)
+        }
+        "map_get" => {
+            let key = as_str(&a[0])?;
+            match as_map(&a[1])?.remove(&key) {
+                Some(v) => Val::Variant("Just".to_string(), Some(Box::new(v))),
+                None => Val::Variant("None".to_string(), None),
+            }
+        }
+        "map_del" => {
+            let key = as_str(&a[0])?;
+            let mut m = as_map(&a[1])?;
+            m.remove(&key);
+            Val::Map(m)
+        }
+        "map_size" => Val::Int(as_map(&a[0])?.len() as i128),
+        // BTreeMap iterates sorted, so the key list is deterministic (principle 5).
+        "map_keys" => Val::List(as_map(&a[0])?.into_keys().map(Val::Str).collect()),
         "parse_int" => {
             // Accepts exactly the canonical decimal rendering (optional leading `-`, no leading
             // zeros, no `-0`, no whitespace/`+`); everything else, incl. overflow, is None — the
@@ -1272,6 +1328,51 @@ mod tests {
         assert_eq!(eval_body(&body, &[payload]).unwrap(), encode_value(&Val::Int(42)));
         let junk = json!({ "kind": "string", "value": "id,notanum,ok" });
         assert_eq!(eval_body(&body, &[junk]).unwrap(), encode_value(&Val::Int(0)));
+    }
+
+    #[test]
+    fn map_builtins() {
+        // Build up from map_empty, read back, delete, and inspect — the config-lookup idiom
+        // (spec/expressiveness.md phase 2). Key argument first, like the string ops.
+        let app = |f: &str, args: Vec<J>| json!({ "kind": "app", "fn": { "kind": "var", "name": f }, "args": args });
+        let s = |v: &str| json!({ "kind": "lit", "value": { "kind": "string", "value": v } });
+        let i = |n: i64| json!({ "kind": "lit", "value": { "kind": "int", "value": n } });
+        let built = app("map_put", vec![s("b"), i(2), app("map_put", vec![s("a"), i(1), json!({ "kind": "var", "name": "map_empty" })])]);
+        let get = |k: &str, m: J| app("map_get", vec![s(k), m]);
+        let body = json!({ "kind": "lambda", "params": [{ "name": "u" }], "body": get("b", built.clone()) });
+        let just = |n: i128| encode_value(&Val::Variant("Just".into(), Some(Box::new(Val::Int(n)))));
+        let none = encode_value(&Val::Variant("None".into(), None));
+        assert_eq!(eval_body(&body, &[json!({ "kind": "unit" })]).unwrap(), just(2));
+        // A missing key is None (total), and map_del removes.
+        let body_missing = json!({ "kind": "lambda", "params": [{ "name": "u" }], "body": get("zz", built.clone()) });
+        assert_eq!(eval_body(&body_missing, &[json!({ "kind": "unit" })]).unwrap(), none);
+        let body_del = json!({ "kind": "lambda", "params": [{ "name": "u" }],
+            "body": get("a", app("map_del", vec![s("a"), built.clone()])) });
+        assert_eq!(eval_body(&body_del, &[json!({ "kind": "unit" })]).unwrap(), none);
+        // size + keys (sorted — BTreeMap iteration is deterministic); put overwrites, not duplicates.
+        let body_size = json!({ "kind": "lambda", "params": [{ "name": "u" }],
+            "body": app("map_size", vec![app("map_put", vec![s("a"), i(9), built.clone()])]) });
+        assert_eq!(eval_body(&body_size, &[json!({ "kind": "unit" })]).unwrap(), encode_value(&Val::Int(2)));
+        let body_keys = json!({ "kind": "lambda", "params": [{ "name": "u" }], "body": app("map_keys", vec![built]) });
+        assert_eq!(eval_body(&body_keys, &[json!({ "kind": "unit" })]).unwrap(),
+                   encode_value(&Val::List(vec![Val::Str("a".into()), Val::Str("b".into())])));
+    }
+
+    #[test]
+    fn map_value_decode_encode_round_trip() {
+        // A map VALUE (e.g. an example argument) decodes, and re-encodes in canonical sorted form.
+        let m = json!({ "kind": "map", "entries": [
+            { "key": "a", "value": { "kind": "int", "value": 1 } },
+            { "key": "b", "value": { "kind": "list", "elems": [{ "kind": "int", "value": 2 }] } }
+        ] });
+        let id = json!({ "kind": "lambda", "params": [{ "name": "m" }], "body": { "kind": "var", "name": "m" } });
+        assert_eq!(eval_body(&id, &[m.clone()]).unwrap(), m);
+        // Lookup into a passed-in map value.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "m" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "map_get" },
+                      "args": [{ "kind": "lit", "value": { "kind": "string", "value": "a" } }, { "kind": "var", "name": "m" }] } });
+        assert_eq!(eval_body(&body, &[m]).unwrap(),
+                   encode_value(&Val::Variant("Just".into(), Some(Box::new(Val::Int(1))))));
     }
 
     #[test]

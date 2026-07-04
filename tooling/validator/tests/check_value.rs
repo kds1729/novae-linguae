@@ -185,3 +185,66 @@ fn unknown_kind_fails() {
 fn not_an_object_fails() {
     assert!(check_value_well_formed(&json!([1, 2, 3])).is_err());
 }
+
+// ---- maps (spec/expressiveness.md phase 2) ----
+
+#[test]
+fn map_sorted_unique_keys_pass() {
+    let v = json!({
+        "kind": "map",
+        "entries": [
+            {"key": "a", "value": {"kind": "int", "value": 1}},
+            {"key": "b", "value": {"kind": "int", "value": 2}}
+        ]
+    });
+    assert!(check_value_well_formed(&v).is_ok());
+    // Empty maps are fine, and arbitrary string keys (not record-name-shaped) are allowed.
+    assert!(check_value_well_formed(&json!({"kind": "map", "entries": []})).is_ok());
+    let odd_keys = json!({
+        "kind": "map",
+        "entries": [
+            {"key": "", "value": {"kind": "unit"}},
+            {"key": "two words", "value": {"kind": "unit"}}
+        ]
+    });
+    assert!(check_value_well_formed(&odd_keys).is_ok());
+}
+
+#[test]
+fn map_duplicate_key_fails() {
+    let v = json!({
+        "kind": "map",
+        "entries": [
+            {"key": "a", "value": {"kind": "int", "value": 1}},
+            {"key": "a", "value": {"kind": "int", "value": 2}}
+        ]
+    });
+    let e = check_value_well_formed(&v).unwrap_err();
+    assert!(e.to_string().contains("more than once"), "{e}");
+}
+
+#[test]
+fn map_out_of_order_keys_fail() {
+    // Sortedness is part of the canonical form: equal maps must hash identically.
+    let v = json!({
+        "kind": "map",
+        "entries": [
+            {"key": "b", "value": {"kind": "int", "value": 2}},
+            {"key": "a", "value": {"kind": "int", "value": 1}}
+        ]
+    });
+    let e = check_value_well_formed(&v).unwrap_err();
+    assert!(e.to_string().contains("canonical order"), "{e}");
+}
+
+#[test]
+fn map_nested_value_is_checked() {
+    // A malformed value INSIDE a map entry is caught.
+    let v = json!({
+        "kind": "map",
+        "entries": [
+            {"key": "a", "value": {"kind": "bogus"}}
+        ]
+    });
+    assert!(check_value_well_formed(&v).is_err());
+}

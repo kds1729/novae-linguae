@@ -41,6 +41,16 @@ comparison (`eq` `neq` `lt` `le` `gt` `ge`), booleans (`and` `or` `xor` `not`), 
 `map` `filter` `foldl` `foldr` `compose` `apply`. `eq`/structural equality is the semantics of the
 `lit` pattern.
 
+**Map builtins** ([`expressiveness.md`](expressiveness.md) phase 2 — total, pure, deterministic; key
+argument first, like the string ops): the nullary constant `map_empty : Map string a`;
+`map_put : (key, a, Map string a) → Map string a` (insert-or-overwrite);
+`map_get : (key, Map string a) → Maybe a` (an absent key is `None`, never an error);
+`map_del : (key, Map string a) → Map string a` (absent key is a no-op); `map_size : Map string a → nat`;
+`map_keys : Map string a → List string` (sorted — iteration order is deterministic, principle 5).
+The runtime representation is an ordered map, so a map **value** (value kind `map`, entries sorted by
+key — the well-formedness checker rejects unsorted or duplicate keys) serializes canonically: equal maps
+hash equal. Surface value form: `map {"k" => v, …}` / `map {}`.
+
 **String builtins** ([`expressiveness.md`](expressiveness.md) phase 1 — total, pure, deterministic;
 pattern/separator arguments first, so partial applications are reusable predicates/splitters):
 `str_concat : (string, string) → string`; `str_length : string → nat` (**Unicode scalar values**, not

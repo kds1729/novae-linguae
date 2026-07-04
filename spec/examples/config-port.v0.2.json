@@ -1,0 +1,50 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_4372349eb874a3219bbbe336868d2126733bba1b25948cc5b42a048076cd2479",
+  "name_hints": ["config_port", "port_or_default"],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "apply",
+          "ctor": { "kind": "builtin", "name": "Map" },
+          "args": [
+            { "kind": "builtin", "name": "string" },
+            { "kind": "builtin", "name": "int" }
+          ]
+        }
+      ],
+      "result": { "kind": "builtin", "name": "int" }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [{ "kind": "map", "entries": [
+        { "key": "port", "value": { "kind": "int", "value": 9000 } },
+        { "key": "timeout", "value": { "kind": "int", "value": 30 } }
+      ] }],
+      "result": { "kind": "int", "value": 9000 }
+    },
+    {
+      "args": [{ "kind": "map", "entries": [] }],
+      "result": { "kind": "int", "value": 8080 }
+    },
+    {
+      "args": [{ "kind": "map", "entries": [
+        { "key": "retries", "value": { "kind": "int", "value": 3 } }
+      ] }],
+      "result": { "kind": "int", "value": 8080 }
+    }
+  ],
+  "properties": [],
+  "intent_tags": ["query", "coll"],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_352e9dab5b1ae9271ed7db48f97d7538f44f3f6e9e44966ea5462974aadb50ed"
+}

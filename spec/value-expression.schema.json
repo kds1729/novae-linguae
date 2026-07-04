@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://novae-linguae.org/spec/v0.1/value-expression.schema.json",
   "title": "Nova Lingua Value Expression",
-  "description": "Structured AST for Nova Lingua values. Used (in v0.2+) for fields like `examples.args[i]`, `examples.result`, and any other position where a concrete value appears in a function record. v0.1 covers eleven kinds: bool, int, nat, float, string, bytes, unit, list, tuple, record, variant, fn_ref. The bare-string convention currently used in examples.args (e.g. `\"double\"` to refer to a function) is a v0.1 informal shortcut; v0.2+ will require this structured form in function-record records and rely on bare strings only as JSON-literal string values inside `string`. Well-formedness (type-correct values, record-field uniqueness, variant tag resolution against a known sum) is the verifier's responsibility.",
+  "description": "Structured AST for Nova Lingua values. Used (in v0.2+) for fields like `examples.args[i]`, `examples.result`, and any other position where a concrete value appears in a function record. Covers thirteen kinds: bool, int, nat, float, string, bytes, unit, list, tuple, record, variant, fn_ref, map (the last added in v0.4 — spec/expressiveness.md phase 2). The bare-string convention currently used in examples.args (e.g. `\"double\"` to refer to a function) is a v0.1 informal shortcut; v0.2+ will require this structured form in function-record records and rely on bare strings only as JSON-literal string values inside `string`. Well-formedness (type-correct values, record-field uniqueness, map-key uniqueness/ordering, variant tag resolution against a known sum) is the verifier's responsibility.",
   "$ref": "#/$defs/value",
   "$defs": {
     "value": {
@@ -18,7 +18,8 @@
         { "$ref": "#/$defs/tuple" },
         { "$ref": "#/$defs/record" },
         { "$ref": "#/$defs/variant" },
-        { "$ref": "#/$defs/fn_ref" }
+        { "$ref": "#/$defs/fn_ref" },
+        { "$ref": "#/$defs/map" }
       ],
       "description": "Any Nova Lingua value. Discriminated by the 'kind' field."
     },
@@ -190,6 +191,31 @@
         }
       },
       "description": "A first-class function value, referenced by its commons content-address. Replaces the bare-string-naming-a-function convention used in v0.1 examples (`\"double\"` etc.)."
+    },
+    "map": {
+      "type": "object",
+      "required": ["kind", "entries"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "map" },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Map key. String keys only (v0.4 scope — spec/expressiveness.md phase 2); arbitrary strings, unlike record field names."
+              },
+              "value": { "$ref": "#/$defs/value" }
+            }
+          },
+          "description": "Key-value entries. JSON Schema cannot express 'unique by .key' or ordering; the verifier enforces both: keys unique, entries sorted by key in Unicode code-point order — the canonical form, so equal maps serialize (and hash) identically."
+        }
+      },
+      "description": "A finite map with string keys — an inhabitant of the `Map string a` type constructor (spec/expressiveness.md phase 2). Homogeneous values (verifier enforces); canonical form sorts entries by key."
     }
   }
 }

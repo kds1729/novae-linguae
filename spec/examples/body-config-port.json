@@ -1,0 +1,65 @@
+{
+  "body": {
+    "arms": [
+      {
+        "body": {
+          "kind": "var",
+          "name": "p"
+        },
+        "pattern": {
+          "kind": "variant",
+          "payload": {
+            "kind": "bind",
+            "name": "p"
+          },
+          "tag": "Just"
+        }
+      },
+      {
+        "body": {
+          "kind": "lit",
+          "value": {
+            "kind": "int",
+            "value": 8080
+          }
+        },
+        "pattern": {
+          "kind": "variant",
+          "tag": "None"
+        }
+      }
+    ],
+    "kind": "case",
+    "scrutinee": {
+      "args": [
+        {
+          "kind": "var",
+          "name": "m"
+        }
+      ],
+      "fn": {
+        "args": [
+          {
+            "kind": "lit",
+            "value": {
+              "kind": "string",
+              "value": "port"
+            }
+          }
+        ],
+        "fn": {
+          "kind": "var",
+          "name": "map_get"
+        },
+        "kind": "app"
+      },
+      "kind": "app"
+    }
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "m"
+    }
+  ]
+}

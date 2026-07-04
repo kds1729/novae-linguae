@@ -157,6 +157,8 @@ const CONST_OPS: &[&str] = &[
 const LINEAR_OPS: &[&str] = &[
     "length", "append", "reverse", "last", "init",
     "str_concat", "str_length", "str_contains", "str_split", "str_join", "to_string", "parse_int",
+    // Map ops are O(log n) on a BTreeMap (map_keys O(n)); O(n) is the sound coarse class.
+    "map_put", "map_get", "map_del", "map_size", "map_keys",
 ];
 
 /// How a `self`-call's recursion argument descends its parameter.
