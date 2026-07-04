@@ -2,20 +2,30 @@
 
 This pins the current best fine-tuned models for *Nova Lingua*. Per the project finding that **the corpus
 teaches the shapes and model capacity supplies the headroom to apply them**, the reference is a LoRA adapter
-over a code-pretrained Qwen2.5-Coder base. There are **two reference tiers** (both on the same `corpus7`):
+over a code-pretrained Qwen2.5-Coder base. All tiers are on `corpus8` (2-seed, 157 write tasks):
 
-| tier | base | write (held-out) | notes |
+| tier | base | write (held-out, s0 / s1) | notes |
 |---|---|---|---|
-| **best total / read** | **Coder-14B** | write **147/157 = 93.6%** (both seeds); total **96.2%**, read **98.6%** | capacity fixes *reading* (91→98.6%) + cracks `foldr_with`/`member`; write ceiling = 7B's (design-bound, not capacity) |
-| **best write efficiency** | **Coder-7B** | **141/151 = 93.4%** (both seeds) | seed-stable; **cracks `nand`** (capacity-bound, survived all corpus work + 3B) |
-| **efficient** | Coder-3B | 138/151 = 91% (best seed; ~134 mean) | half the size/VRAM; the deployable sweet spot |
+| **best write** | **Coder-7B** | **149 / 150 (95.5% best, 95.2% mean)** | near-seed-stable; on corpus8 it **matches-or-beats 14B on write** at half the size — `foldr_with`/`member` (once "capacity-only") crack at 7B given the idiom families |
+| **best total / read** | Coder-14B | 144 / 150 (93.6% mean) | total semantic **95.3–95.9%**, read semantic **95.9–98.6%** — capacity still owns *reading*; but c8 exposed 14B write seed-variance (±6) that 7B doesn't have |
+| **efficient** | Coder-3B | 143 / 140 (90.1% mean) | half the 7B size/VRAM; corpus8 lifted the mean +1.4 pts and halved the seed swing (8→3 tasks) |
 
 > **The capacity boundary (2026-07-03, Coder-14B 2-seed).** 14B moved the total to **96.2%** but taught the sharpest lesson: **capacity fixes *reading*, not *writing*.** `read` climbed 91→98.6% (the off-by-one / sign / absorption-law arithmetic errors are capacity-bound and mostly gone), and the two genuine reasoning-*write* residuals `foldr_with`/`member` cracked on both seeds — yet the `write` count is **dead-stable at 147/157 across both seeds AND across 7B↔14B**. The remaining write misses are not capacity-bound: they are the dialect's **totality by design** (no `^`, no `!!`, no `error`). Two of them were a missing-*idiom* gap, closed at $0/local: adding **`last`/`init`** list builtins made the model's already-correct `reverse` valid, and **corpus family #38** (index recursion) flipped `nth` `.`→`P` at 14B (`min_of_list` too, via #37). Genuinely stuck: `pow2` (its exact gold is the already-covered `rec_pow` shape → leakage-dropped → a generalization limit, not a coverage gap) and a small arithmetic core (`fib`, sign). Adapters (275 MB each) pulled to `/var/tmp/claude/adapter-coder14b-c{7,8}-s*`.
 
-7B both raised the score (+3–7 write) **and** killed the 3B seed variance (3B swung 130↔138; 7B is 141 on
-both seeds) — the capacity lever, confirmed. Pick 7B when accuracy matters, 3B when size/latency does. The
+> **The corpus8 re-pin (2026-07-04, all tiers 2-seed).** Retraining every tier on corpus8 (families
+> #37/#38 + the `last`/`init` builtins) *revised the capacity-boundary reading*: `foldr_with`/`member`,
+> which corpus7 could not move at 7B and which therefore looked capacity-bound, **crack at 7B on corpus8**
+> — they were idiom-bound after all; 14B just had the headroom to guess the idiom unaided. Net effect:
+> **7B write 149/150 (95.5% best seed) is the new best write tier**, beating 14B-corpus7's 147 ceiling and
+> matching 14B-corpus8's mean at half the size; 3B's 2-seed mean rose ~1.4 pts with the seed swing halved.
+> The residual write core, **common across all three tiers**: `divide`/`modulo` (the division-arithmetic
+> corner), `pow2` (the documented generalization limit), and `take_rec`/`drop_rec` — the *list-returning*
+> index walks, the one still-actionable coverage gap (#38 taught the element-returning walk `nth`; a
+> family #39 would target take/drop). Everything else failing at 7B/14B is per-seed churn.
+
+Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (and weights live in
-`adapter-coder7b-c7-s1`).
+`adapter-coder7b-c8-s1`, sha256 `25d720583d23fa91…`, 161,533,192 bytes).
 
 A LoRA adapter is small, but the *recipe* is what makes it a checkpoint: the run is **deterministic**
 (fixed seed, greedy eval, no RNG in the data path), so this manifest reproduces the adapter bit-for-bit
@@ -28,43 +38,43 @@ commons, not the source tree.
 |---|---|
 | **Base model** | `Qwen/Qwen2.5-Coder-3B-Instruct` (Apache-2.0) |
 | **Method** | LoRA, r=16, α=32, dropout=0.05, targets = all attn+MLP proj |
-| **Training** | 2 epochs, **seed 1**, bf16, `--max-seq-len 512`, lr 2e-4, grad-accum 8 (RTX 4090) |
+| **Training** | 2 epochs, **seed 0**, bf16, `--max-seq-len 512`, lr 2e-4, grad-accum 8 (RTX PRO 6000) |
 | **Trainer** | [`train_lora_cpu.py`](train_lora_cpu.py) (auto-uses CUDA when present) |
-| **Corpus** | `corpus7.jsonl` — 3,164 examples / 2,966 combinatorial specs, **36 template families** (incl. #35 min/max & clamp, #36 powers & digit arithmetic) (`gen_corpus.py --combinatorial`) · sha256 `1b158bfd83f9e992…` |
-| **Train split** | `ftdata7/` — 5,568 train / 293 valid, **conventions-off, curated eval held out** (`export_finetune.py --holdout-corpus`) · `train.jsonl` sha256 `dc4fbf16bf961adf…` |
+| **Corpus** | `corpus8.jsonl` — 3,177 examples / 2,973 combinatorial specs, **38 template families** (incl. #37 single-element-base reduce, #38 index recursion) (`gen_corpus.py --combinatorial`) · sha256 `49029e028fee70ab…` |
+| **Train split** | `ftdata8/` — 5,580 train / 293 valid, **conventions-off, curated eval held out** (`export_finetune.py --holdout-corpus`) · `train.jsonl` sha256 `048e543620272771…` |
 | **Grading** | [`eval_harness.py`](eval_harness.py) `--conventions off --shots 0`, curated set held out of training |
-| **Adapter weights** | `adapter-coder3b-c7-s1` (regenerable; gitignored). Local copy: `/var/tmp/claude/adapter-coder3b-c7-s1/adapter_model.safetensors`, 119,801,528 bytes, **sha256 `a8bf0b841f649c8af22ae07a1cfab2b22c841fa2166f3117c111716bc099f460`** (LoRA r16/α32/dropout0.05, targets = all attn+MLP proj — matches this pin) |
+| **Adapter weights** | `adapter-coder3b-c8-s0` (regenerable; gitignored). Local copy: `/var/tmp/claude/adapter-coder3b-c8-s0/adapter_model.safetensors`, 119,801,528 bytes, **sha256 `55568f944564c256803156bdbb8b13e27d28842b58e0ecbb50f37f2e764b9d0e`** (LoRA r16/α32/dropout0.05, targets = all attn+MLP proj — matches this pin) |
 
 ## Measured result (held out, conventions-off, shots-0)
 
-From `coder3b-c7-s1_eval.jsonl` (the 2026-06-29 corpus7 GPU run, **seed 1** — the best checkpoint):
+From `coder3b-c8-s0_eval.jsonl` (the 2026-07-04 corpus8 GPU run, **seed 0** — the best 3B checkpoint):
 
 | kind | surface-exact | semantic | n |
 |---|---|---|---|
-| **write** | **138 / 151 (91.4%)** | 138 / 151 | 151 |
-| read | 123 / 141 (87.2%) | 129 / 141 (91.5%) | 141 |
+| **write** | **143 / 157 (91.1%)** | 143 / 157 | 157 |
+| read | 132 / 147 (89.8%) | 139 / 147 (94.6%) | 147 |
 | assemble | 12 / 12 (100%) | 12 / 12 (100%) | 12 |
-| **total** | **273 / 304 (89.8%)** | 279 / 304 (91.8%) | 304 |
+| **total** | **287 / 316 (90.8%)** | 294 / 316 (93.0%) | 316 |
 
-**Read this as a best-checkpoint, not a corpus-level jump.** Seed 0 of the same run scored write 130/151, so
-the 2-seed mean (~134) is statistically flat against corpus6 (137/132, mean ~134.5) — the ±10/seed write
-floor dominates the aggregate now. What corpus7 (family #36) *did* add is **two robust capability fixes**:
-`square_diff` and `sum_digits` now pass **both** seeds (the model writes `mul a a` / div-mod recursion
-instead of the invented `a^2` / `show`). base `write` is 0% — the adapter is the whole signal.
+Seed 1 of the same run scored write 140/157, so the 3B 2-seed mean is **90.1%** — up from corpus7's ~88.7%
+with the seed swing halved (8→3 tasks): corpus8 moved the *distribution*, not just the best draw. The 7B
+tier (same recipe, `--base Qwen/Qwen2.5-Coder-7B-Instruct`, weights `adapter-coder7b-c8-s1`) is
+**149/150 of 157** — the number to quote for the project's best write. base `write` is 0% — the adapter is
+the whole signal.
 
 ## Reproduce / regenerate the weights
 
 This box has no GPU, so a 3B base is a GPU step. The portable recipe:
 
 ```bash
-# 1. build the leakage-guarded SFT split (local, $0)  [corpus7 = --combinatorial regen of gen_corpus.py]
-python3 tooling/eval/export_finetune.py --corpus corpus7.jsonl --conventions off --shots 0 \
-    --holdout-corpus tooling/corpus/corpus.jsonl --mlx-data ftdata7
+# 1. build the leakage-guarded SFT split (local, $0)  [corpus8 = --combinatorial regen of gen_corpus.py]
+python3 tooling/eval/export_finetune.py --corpus corpus8.jsonl --conventions off --shots 0 \
+    --holdout-corpus tooling/corpus/corpus.jsonl --mlx-data ftdata8
 
 # 2. train (the SAME script runs on CPU or GPU; on GPU it auto-selects CUDA+bf16)
-python3 tooling/eval/train_lora_cpu.py --train ftdata7/train.jsonl \
+python3 tooling/eval/train_lora_cpu.py --train ftdata8/train.jsonl \
     --base Qwen/Qwen2.5-Coder-3B-Instruct --out adapter-coder-3b \
-    --epochs 2 --seed 1 --max-seq-len 512 --dtype bfloat16
+    --epochs 2 --seed 0 --max-seq-len 512 --dtype bfloat16
 
 # 3. grade held-out, same settings as the pin
 NL_HF_DTYPE=bfloat16 python3 tooling/eval/eval_harness.py \
@@ -84,7 +94,7 @@ pair and generates (greedy, deterministic) — the same class the eval harness u
 # from tooling/eval/ ; `answer(task)` takes an object with .system and .user (greedy decode)
 from types import SimpleNamespace
 from model_client import HFModel
-m = HFModel("Qwen/Qwen2.5-Coder-3B-Instruct::/var/tmp/claude/adapter-coder3b-c7-s1")  # base::adapter
+m = HFModel("Qwen/Qwen2.5-Coder-3B-Instruct::/var/tmp/claude/adapter-coder3b-c8-s0")  # base::adapter
 task = SimpleNamespace(system="You write Nova Lingua function records.",
                        user="Write a function record for: double a natural number.")
 print(m.answer(task))
@@ -95,7 +105,7 @@ Or drive it straight through the harness (loads the adapter, prompts, and grades
 
 ```bash
 NL_HF_DTYPE=bfloat16 python3 tooling/eval/eval_harness.py \
-    --model hf:Qwen/Qwen2.5-Coder-3B-Instruct::/var/tmp/claude/adapter-coder3b-c7-s1 \
+    --model hf:Qwen/Qwen2.5-Coder-3B-Instruct::/var/tmp/claude/adapter-coder3b-c8-s0 \
     --conventions off --shots 0            # add --tasks write --limit N for a quick subset
 ```
 
@@ -105,38 +115,44 @@ is 0%** — the adapter is the entire signal, so it must be present.
 
 ## Verify the pinned number (GPU)
 
-The `write 138/151` figure was measured once on the training pod (now terminated). The local weights
-above reproduce it, but a full 304-task CPU eval of a 3B model is multi-hour — run the *verification* on a
+The `write 143/157` figure was measured once on the training pod (now terminated). The local weights
+above reproduce it, but a full 316-task CPU eval of a 3B model is multi-hour — run the *verification* on a
 rented GPU instead (see the local-only `RUNPOD.md`), where a full held-out eval of the existing adapter is
-~5 min. On a fresh pod (base cache warmed, repo + `adapter-coder3b-c7-s1` + `ftdata7` uploaded to `/root`):
+~5 min. On a fresh pod (base cache warmed, repo + `adapter-coder3b-c8-s0` + `ftdata8` uploaded to `/root`):
 
 ```bash
 # re-evaluate the EXISTING pinned adapter (no retrain) against the held-out curated set
 NL_HF_DTYPE=bfloat16 python -u repo/tooling/eval/eval_harness.py \
-    --model hf:Qwen/Qwen2.5-Coder-3B-Instruct::/root/adapter-coder3b-c7-s1 \
-    --conventions off --shots 0 --out /root/verify_c7_s1_eval.jsonl
+    --model hf:Qwen/Qwen2.5-Coder-3B-Instruct::/root/adapter-coder3b-c8-s0 \
+    --conventions off --shots 0 --out /root/verify_c8_s0_eval.jsonl
 ```
 
-Expect `write` ≈ 138/151 (seed-1 pin). A full retrain-then-eval (confirms the *recipe*, not just the
+Expect `write` ≈ 143/157 (seed-0 pin). A full retrain-then-eval (confirms the *recipe*, not just the
 weights) is the three-step block above run on the pod; `train_lora_cpu.py` auto-selects CUDA+bf16 there.
 
 ## Residuals & the plateau (2-seed)
 
-Two corpus-breadth families have now each fixed their named targets on **both** seeds:
+The corpus-breadth families keep fixing their named targets:
 - **#35 (min/max & clamp)** — `clamp`, `in_range`, `max_list_rec`, `max_self`, `min_of_list`, and the
   `max/min_*_absorb` laws all went `.`→`P P` in corpus6.
 - **#36 (powers & digits)** — `square_diff` and `sum_digits` went `.`→`P P` in corpus7 (model now uses
   `mul a a` / div-mod recursion, not the invented `a^2` / `show`).
+- **#37/#38 (total idioms: single-element-base reduce + index recursion)** — `nth`, `min_of_list`,
+  `max_list_rec` flipped in corpus8, and (with the `last`/`init` builtins) `reverse` is valid at every
+  tier. Beyond the named targets, corpus8 also cracked `foldr_with`/`member` **at 7B** — tasks corpus7
+  had left looking capacity-bound.
 
-**But the aggregate write score has plateaued at ~134/151 (2-seed mean), ~91% best single seed.** Each
-targeted family reliably fixes its 1–2 named tasks, yet the net is swamped by ~±10/seed churn — e.g.
-corpus7 fixed square_diff+sum_digits but the *same noise* knocked the #35 `clamp`/absorb tasks back on one
-seed. So **the corpus-breadth lever is into diminishing returns**: it still buys specific, durable
-capabilities, but no longer moves the headline number above the noise.
+The corpus7-era "plateau" reading (targeted fixes real, headline swamped by ±10/seed churn) softened with
+corpus8: at 3B the 2-seed mean moved +1.4 pts with the swing *halved*, and at 7B the gain (+8–9 write over
+corpus7) cleared the noise outright. The refined division of labor: **corpus breadth teaches idioms the
+dialect requires** (totality shapes a code-pretrained model won't guess below 14B), **capacity supplies
+read-side arithmetic** — and where corpus7 made residuals look capacity-bound (`foldr_with`/`member`,
+cracked at 14B only), corpus8 showed the cheaper lever was the missing idiom all along.
 
-Genuinely hard residuals that corpus breadth could NOT move turned out to be **capacity-bound, and the 7B
-run confirmed it**: `nand` (survived every corpus round + 3B) and `reverse_concat` both cracked at 7B on
-**both** seeds, and 7B erased the 3B seed variance entirely. So the lever for these was capacity, exactly as
-hypothesized — not more families. Still failing even at 7B (a small, mostly heavily-covered-and-thus-noise
-set): `nth` (still invents an `error` builtin the language lacks), `member`, `reverse`, `max_list_rec`,
-`foldr_with`, `pow2` (flickers). `implies`, `concat_lists` (old 1.5B residuals) stay solved.
+**The residual write core after corpus8, common to all three tiers** (everything else failing at 7B/14B is
+per-seed churn): `divide`/`modulo` (the division-arithmetic corner, flaky at every scale since 1.5B),
+`pow2` (gold = the already-covered `rec_pow` shape → leakage-dropped → a generalization limit, not
+coverage), and `take_rec`/`drop_rec` — the **list-returning index walks**, the one still-actionable
+coverage gap: #38 taught the element-returning walk (`nth`), so a **family #39** (index recursion that
+conses a result list: take/drop/`nth`-with-default variants) is the designed next move if the loop
+continues. `implies`, `concat_lists`, `nand`, `reverse_concat` (older residuals) stay solved.

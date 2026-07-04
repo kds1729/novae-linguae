@@ -263,3 +263,14 @@ Held-out `write` (of 150, conventions-off/shots-0, 2 epochs on the broadened cor
   heavily-covered noise): `nth` (still invents `error`), `member`, `reverse`, `max_list_rec`, `pow2`. **Two
   reference tiers now: Coder-3B (efficient, ~91%) and Coder-7B (best, 93.4%, stable).** Adapter
   `adapter-coder7b-c7-s1`.
+- **Corpus8 re-pin (2026-07-04) — the idiom lever revises the capacity reading.** All tiers retrained
+  2-seed on `corpus8` (families #37/#38, the *total idioms* for the list residuals, plus the `last`/`init`
+  builtins; 157 write tasks). **Coder-7B write 149/150 = 95.5% best seed — the new best write tier**,
+  beating even Coder-14B-on-corpus7's 147 ceiling at half the size; 3B's 2-seed mean rose to 90.1% with the
+  seed swing halved; 14B (144/150) keeps the total/read crown (95.3–95.9% semantic) but showed write
+  seed-variance 7B doesn't have. The headline revision: `foldr_with`/`member`, which corpus7 left failing
+  at 7B and 14B *cracked* (hence "capacity-bound"), pass **at 7B** on corpus8 — they were **idiom-bound**;
+  the bigger model had merely guessed the idiom unaided. Residual write core common to all tiers:
+  `divide`/`modulo`, `pow2` (design), and `take_rec`/`drop_rec` (the list-*returning* index walks — the
+  one actionable coverage gap left; #38 taught only the element-returning walk). Tiers and pins in
+  [`REFERENCE_CHECKPOINT.md`](REFERENCE_CHECKPOINT.md).
