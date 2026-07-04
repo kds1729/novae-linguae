@@ -228,8 +228,11 @@ examples' arguments. A **CONSISTENT** verdict then means "ran true on every exam
 ranging a `forall` over the worked examples, it **searches** for a counterexample. For each quantified
 variable it infers a value generator from how the variable is used in the predicate (a list argument
 of `length`/`map`/`reverse`/… → a list; an arithmetic/comparison operand → an integer; a boolean
-connective operand → a bool), samples `N` inputs (default 100), runs the body, and reports per
-property:
+connective operand → a bool; a string-op operand → a **string** over a small deterministic alphabet
+that includes separators and a non-ASCII scalar, with `str_join`'s second argument a *list of*
+strings — so laws over `str_split`/`str_join`, which the SMT string fragment cannot reach, are at
+least generatively checked: the split/join round-trip HOLDS over the generated domain), samples `N`
+inputs (default 100), runs the body, and reports per property:
 
 - **EXHAUSTIVE (n cases)** — when the inferred domain is finite and small (booleans, a bounded int
   range, short lists), *every* case is enumerated rather than sampled: a proof over that domain

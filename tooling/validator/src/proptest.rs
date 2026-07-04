@@ -28,9 +28,11 @@ enum GenKind {
     Int,
     Bool,
     List(Box<GenKind>),
+    Str,
 }
 
 /// The outcome of a generative check of one property.
+#[derive(Debug)]
 pub enum GenOutcome {
     /// Every case in the (finite, bounded) domain was checked — a proof over that domain. Stronger
     /// than `Held`: for an all-boolean property it is total; for bounded int/list domains it is
@@ -71,6 +73,11 @@ impl Rng {
     }
 }
 
+/// The string-generation alphabet: letters, a comma and a space (so separator-shaped laws —
+/// split/join/contains — exercise interesting cases), a digit, and a non-ASCII scalar (so
+/// length-in-scalars semantics is exercised). Deterministic like everything else here.
+const STR_ALPHABET: &[char] = &['a', 'b', ',', ' ', 'x', '7', 'é'];
+
 fn gen_value(kind: &GenKind, rng: &mut Rng) -> Val {
     match kind {
         GenKind::Int => Val::Int(rng.int_in(-32, 32)),
@@ -78,6 +85,10 @@ fn gen_value(kind: &GenKind, rng: &mut Rng) -> Val {
         GenKind::List(elem) => {
             let n = rng.int_in(0, 6) as usize;
             Val::List((0..n).map(|_| gen_value(elem, rng)).collect())
+        }
+        GenKind::Str => {
+            let n = rng.int_in(0, 6) as usize;
+            Val::Str((0..n).map(|_| STR_ALPHABET[rng.int_in(0, STR_ALPHABET.len() as i128 - 1) as usize]).collect())
         }
     }
 }
@@ -103,9 +114,9 @@ fn as_qvar<'a>(node: &'a J, vars: &BTreeSet<String>) -> Option<&'a str> {
 }
 
 fn set_kind(kinds: &mut BTreeMap<String, GenKind>, name: &str, k: GenKind) {
-    // List/Bool evidence is more specific than the default Int; don't let a later Int overwrite it.
+    // List/Bool/Str evidence is more specific than the default Int; don't let a later Int overwrite it.
     match kinds.get(name) {
-        Some(GenKind::List(_)) | Some(GenKind::Bool) if k == GenKind::Int => {}
+        Some(GenKind::List(_)) | Some(GenKind::Bool) | Some(GenKind::Str) if k == GenKind::Int => {}
         _ => {
             kinds.insert(name.to_string(), k);
         }
@@ -145,6 +156,13 @@ fn collect(
                         ("foldl" | "foldr", 2) => set_kind(kinds, name, int_list()),
                         ("append" | "concat", 0 | 1) => set_kind(kinds, name, int_list()),
                         ("cons", 1) => set_kind(kinds, name, int_list()),
+                        // String positions (spec/expressiveness.md phase 1): a var consumed by a
+                        // string op is a String; str_join's second argument is a list OF strings.
+                        ("str_concat" | "str_contains" | "str_split", 0 | 1)
+                        | ("str_length" | "parse_int", 0)
+                        | ("str_join", 0) => set_kind(kinds, name, GenKind::Str),
+                        ("str_join", 1) => set_kind(kinds, name, GenKind::List(Box::new(GenKind::Str))),
+                        ("to_string", 0) => set_kind(kinds, name, GenKind::Int),
                         // Boolean positions.
                         ("and" | "or" | "xor" | "implies" | "iff", _) | ("not", 0) => set_kind(kinds, name, GenKind::Bool),
                         // Integer positions.
@@ -195,6 +213,15 @@ fn shrink_candidates(v: &Val) -> Vec<Val> {
                 })
                 .collect()
         }
+        Val::Str(s) if !s.is_empty() => {
+            // Drop each single character (as with lists — smaller strings first).
+            let chars: Vec<char> = s.chars().collect();
+            (0..chars.len())
+                .map(|drop| {
+                    Val::Str(chars.iter().enumerate().filter(|(i, _)| *i != drop).map(|(_, c)| c).collect())
+                })
+                .collect()
+        }
         _ => vec![],
     }
 }
@@ -240,6 +267,12 @@ fn domain_of(kind: &GenKind) -> Vec<Val> {
     match kind {
         GenKind::Bool => vec![Val::Bool(false), Val::Bool(true)],
         GenKind::Int => (INT_LO..=INT_HI).map(Val::Int).collect(),
+        // A curated bounded string domain (edge shapes: empty, singletons, separators, repeats,
+        // a non-ASCII scalar) — like Int's bounded range, "exhaustive" means over THIS domain.
+        GenKind::Str => ["", "a", "b", ",", " ", "ab", "a,b", "a,,b", "é"]
+            .iter()
+            .map(|s| Val::Str((*s).to_string()))
+            .collect(),
         GenKind::List(elem) => {
             let ev = domain_of(elem);
             let mut out = vec![Val::List(vec![])];
@@ -416,6 +449,54 @@ mod tests {
         match generative_check(&expr, &None, 200, 7) {
             GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
             _ => panic!("reverse∘reverse = id should hold"),
+        }
+    }
+
+    #[test]
+    fn split_join_round_trip_holds_over_generated_strings() {
+        // forall s. eq(str_join(",", str_split(",", s)), s) — a TRUE string law the SMT string
+        // fragment cannot reach (split/join have no theory counterpart); the generative checker
+        // covers it: s is inferred a String and the law holds over the generated/bounded domain.
+        let comma = json!({ "kind": "lit", "value": { "kind": "string", "value": "," } });
+        let expr = json!({ "kind": "forall", "vars": ["s"], "body": {
+            "kind": "app", "op": "eq", "args": [
+                { "kind": "app", "op": "str_join", "args": [comma.clone(),
+                    { "kind": "app", "op": "str_split", "args": [comma, { "kind": "var", "name": "s" }] }] },
+                { "kind": "var", "name": "s" }] } });
+        match generative_check(&expr, &None, 200, 7) {
+            GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
+            other => panic!("join . split should hold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn false_string_law_is_refuted_and_shrunk() {
+        // forall s. str_contains("a", s) — false; shrinking should land on the empty string.
+        let expr = json!({ "kind": "forall", "vars": ["s"], "body": {
+            "kind": "app", "op": "str_contains", "args": [
+                { "kind": "lit", "value": { "kind": "string", "value": "a" } },
+                { "kind": "var", "name": "s" }] } });
+        match generative_check(&expr, &None, 200, 7) {
+            GenOutcome::Refuted(bind) => {
+                assert_eq!(bind.len(), 1);
+                assert_eq!(bind[0].1, json!({ "kind": "string", "value": "" }),
+                           "shrinking should reach the empty string");
+            }
+            other => panic!("contains(\"a\", s) should be refuted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_list_position_infers_list_of_strings() {
+        // forall xs. eq(str_join("", xs), str_join("", xs)) — xs must generate as List(Str), not
+        // List(Int) (a List(Int) would make str_join error → every case undecided → UNGENERATABLE).
+        let empty = json!({ "kind": "lit", "value": { "kind": "string", "value": "" } });
+        let join = json!({ "kind": "app", "op": "str_join", "args": [empty, { "kind": "var", "name": "xs" }] });
+        let expr = json!({ "kind": "forall", "vars": ["xs"], "body": {
+            "kind": "app", "op": "eq", "args": [join.clone(), join] } });
+        match generative_check(&expr, &None, 100, 3) {
+            GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
+            other => panic!("str_join over generated List(Str) should hold, got {other:?}"),
         }
     }
 
