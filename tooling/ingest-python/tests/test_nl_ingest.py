@@ -375,6 +375,22 @@ class TestStringIdiomBodies(unittest.TestCase):
         self.assertEqual(body["args"][0], {"kind": "lit", "value": {"kind": "string", "value": ","}})
         self.assertEqual(body["args"][1], {"kind": "var", "name": "s"})
 
+    def test_fstrings_translate(self):
+        import ast as pyast
+        import nl_body
+        # f"n={n}" -> str_concat("n=", to_string(n)); a str-annotated interpolation skips to_string.
+        body = self._body('def f(n):\n    return f"n={n}"\n')
+        self.assertIn('"str_concat"', body)
+        self.assertIn('"to_string"', body)
+        body2 = self._body('def f(s: str):\n    return f"[{s}]"\n')
+        self.assertIn('"str_concat"', body2)
+        self.assertNotIn('"to_string"', body2)
+        # Conversions / format specs are out of subset (body falls back to None).
+        func = pyast.parse('def f(n):\n    return f"{n!r}"\n').body[0]
+        self.assertIsNone(nl_body.body_ast_from_py(func))
+        func2 = pyast.parse('def f(n):\n    return f"{n:04d}"\n').body[0]
+        self.assertIsNone(nl_body.body_ast_from_py(func2))
+
     def test_unannotated_keeps_numeric_reading(self):
         # Without a str annotation, + stays add and len stays length — no silent retyping.
         src = "def f(a, b):\n    return a + b\n"

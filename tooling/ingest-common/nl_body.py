@@ -15,8 +15,11 @@ form, matching `spec/examples/body-double.json`) whose body is built from:
     `str`-annotated parameters (plus str literals, `str(…)`, `.join(…)`, stringish `let`s):
     `a + b` → `str_concat`, `len(s)` → `str_length`, `s.split(sep)` → `str_split(sep, s)`
     (separator-first — receiver and argument swap), `sep.join(xs)` → `str_join`,
-    `needle in s` → `str_contains`, and `str(n)` → `to_string`. Unannotated code keeps its
-    numeric/list reading, and a wrong guess fails the example gate rather than shipping wrong.
+    `needle in s` → `str_contains`, `str(n)` → `to_string`, and **f-strings** —
+    `f"n={n}"` → `str_concat("n=", to_string(n))` (known-string interpolations skip the
+    `to_string`; `!r`-style conversions and format specs are out of subset). Unannotated code
+    keeps its numeric/list reading, and a wrong guess fails the example gate rather than
+    shipping wrong.
 Conditionals (and comprehension filters) are only translated when the test is genuinely boolean (a
 comparison / boolean connective / `not` / bool literal) so Python truthiness is never silently
 mistranslated. Anything outside the subset (`while`, non-accumulator `for`, multi-generator / dict /
@@ -148,6 +151,8 @@ def _is_stringish(node, strs):
         return _is_stringish(node.left, strs) or _is_stringish(node.right, strs)
     if isinstance(node, ast.IfExp):
         return _is_stringish(node.body, strs) and _is_stringish(node.orelse, strs)
+    if isinstance(node, ast.JoinedStr):
+        return True  # an f-string always produces a string
     return False
 
 
@@ -166,6 +171,30 @@ def _is_boolish(node):
 
 
 def _expr_from_py(node, strs=frozenset()):
+    if isinstance(node, ast.JoinedStr):
+        # f-strings (spec/expressiveness.md phase 4): f"n={n}" -> str_concat("n=", to_string(n)).
+        # A known-string interpolation passes through as-is; anything else goes through to_string
+        # (Python renders ints identically; a non-int mismatch fails the example gate rather than
+        # shipping wrong). Conversions (!r/!s/!a) and format specs are out of subset.
+        parts = []
+        for piece in node.values:
+            if isinstance(piece, ast.Constant) and isinstance(piece.value, str):
+                if piece.value:
+                    parts.append(b_lit(_value(piece.value)))
+            elif isinstance(piece, ast.FormattedValue):
+                if piece.conversion != -1 or piece.format_spec is not None:
+                    raise BodyError("f-string conversions/format specs are out of subset")
+                inner = _expr_from_py(piece.value, strs)
+                parts.append(inner if _is_stringish(piece.value, strs)
+                             else b_app(b_var("to_string"), [inner]))
+            else:
+                raise BodyError("unsupported f-string piece")
+        if not parts:
+            return b_lit(_value(""))
+        expr = parts.pop()
+        while parts:
+            expr = b_app(b_var("str_concat"), [parts.pop(), expr])
+        return expr
     if isinstance(node, ast.IfExp):
         if not _is_boolish(node.test):
             raise BodyError("non-boolean ternary test (Python truthiness is not representable)")

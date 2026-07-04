@@ -211,11 +211,13 @@ the existing variants — nothing new in the type system, patterns, or serializa
   `str`-annotated parameters drives the type-dependent translations a syntactic adapter can't
   otherwise decide: `+` → `str_concat`, `len` → `str_length`, `s.split(sep)` → `str_split(sep,
   s)` (receiver/argument swap onto the separator-first builtin), `sep.join(xs)` → `str_join`,
-  `in` → `str_contains`, `str(n)` → `to_string`. Demonstrated end to end: a 6-function module
-  (concat, split-count, rejoin, membership, labeling) ingests to executable bodies that run
-  12/12 doctest-mined examples. Unannotated code keeps its numeric/list reading; a wrong guess
-  fails the example gate rather than shipping wrong. Dict/JSON idioms (`d.get(k)` → `map_get`
-  with the `Maybe`/`None` value-mapping question) and the Rust/Haskell/TS adapters remain.
+  `in` → `str_contains`, `str(n)` → `to_string`, and **f-strings** (`f"n={n}"` →
+  `str_concat("n=", to_string(n))`; conversions/format specs honestly out of subset).
+  Demonstrated end to end: a 6-function module (concat, split-count, rejoin, membership,
+  labeling) plus an f-string function ingest to executable bodies that run 14/14 doctest-mined
+  examples. Unannotated code keeps its numeric/list reading; a wrong guess fails the example
+  gate rather than shipping wrong. Dict/JSON idioms (`d.get(k)` → `map_get` with the
+  `Maybe`/`None` value-mapping question) and the Rust/Haskell/TS adapters remain.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 
