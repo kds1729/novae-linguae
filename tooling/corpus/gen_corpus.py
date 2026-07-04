@@ -2990,6 +2990,53 @@ def combinatorial_specs(exclude_names=()):
                    [{"args": [5], "result": f"{pre}5"}, {"args": [-1], "result": f"{pre}-1"},
                     {"args": [0], "result": f"{pre}0"}], terminates="always"))
 
+    # 40. MAPS & JSON (spec/expressiveness.md phases 2-3) — the config-lookup and field-projection
+    # idioms multiplied over key/default sets. Teaches: key-first argument order, map_get/parse_json's
+    # totality-via-Maybe consumed by case (incl. the NESTED Just(JObj(m))/Just(JNum(p)) pattern — the
+    # GW1 practical form), and building maps from map_empty. Exact curated golds dedupe/leakage-drop.
+    _KEYS40 = ["port", "count", "size", "level", "id"]
+    _DFLT40 = [0, 1, 8080]
+    for key in _KEYS40:
+        for k in _DFLT40:
+            add(_cspec(f"get_{key}_or_{k}", f'The "{key}" entry of a map of integers, or {k} if unset.',
+                       f'case map_get "{key}" m of Just(v) => v; None => {k}',
+                       ["map", "query", "variant", "case"], fn([map_of(INT)], INT),
+                       lam(["m"], _case_of(bapp("map_get", str_lit(key), var("m")),
+                                           (_vpat("Just", "v"), var("v")), (_vpat("None"), int_lit(k)))),
+                       [{"args": [{key: 9, "other": 3}], "result": 9},
+                        {"args": [{}], "result": k},
+                        {"args": [{"unrelated": 7}], "result": k}], terminates="always"))
+        add(_cspec(f"has_{key}", f'Whether a map of integers has a "{key}" entry.',
+                   f'case map_get "{key}" m of Just(v) => true; None => false',
+                   ["map", "query", "predicate", "variant", "case"], fn([map_of(INT)], BOOL),
+                   lam(["m"], _case_of(bapp("map_get", str_lit(key), var("m")),
+                                       (_vpat("Just", "v"), bool_lit(True)), (_vpat("None"), bool_lit(False)))),
+                   [{"args": [{key: 1}], "result": True}, {"args": [{}], "result": False},
+                    {"args": [{"zz": 2}], "result": False}], terminates="always"))
+        add(_cspec(f"set_{key}", f'Set the "{key}" entry of a map of integers.',
+                   f'map_put "{key}" n m', ["map", "transform"], fn([INT, map_of(INT)], map_of(INT)),
+                   lam(["n", "m"], bapp("map_put", str_lit(key), var("n"), var("m"))),
+                   [{"args": [5, {}], "result": {key: 5}},
+                    {"args": [2, {key: 1}], "result": {key: 2}},
+                    {"args": [0, {"other": 9}], "result": {"other": 9, key: 0}}], terminates="always"))
+        # The GW1 practical form: parse a JSON config text, project an integer field, default on
+        # anything malformed/missing/mistyped — nested variant patterns end to end.
+        _JP = {"kind": "variant", "tag": "Just",
+               "payload": {"kind": "variant", "tag": "JObj", "payload": {"kind": "bind", "name": "m"}}}
+        _JN = {"kind": "variant", "tag": "Just",
+               "payload": {"kind": "variant", "tag": "JNum", "payload": {"kind": "bind", "name": "p"}}}
+        add(_cspec(f"json_{key}", f'The integer "{key}" field of a JSON object text, or 0.',
+                   f'case parse_json s of Just(JObj(m)) => (case map_get "{key}" m of Just(JNum(p)) => p; _ => 0); _ => 0',
+                   ["parse", "query", "string", "map", "variant", "case"], fn([STRING], INT),
+                   lam(["s"], _case_of(
+                       bapp("parse_json", var("s")),
+                       (_JP, _case_of(bapp("map_get", str_lit(key), var("m")),
+                                      (_JN, var("p")), (WILDCARD_PAT, int_lit(0)))),
+                       (WILDCARD_PAT, int_lit(0)))),
+                   [{"args": [f'{{"{key}": 42, "x": true}}'], "result": 42},
+                    {"args": ['{"unrelated": 1}'], "result": 0},
+                    {"args": ["not json"], "result": 0}], terminates="always"))
+
     return out
 
 

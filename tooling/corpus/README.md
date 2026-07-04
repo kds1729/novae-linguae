@@ -108,12 +108,15 @@ of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **param
 comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
-parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,009 generated
-function records (3,235 examples total with the curated set)** across thirty-nine template families
+parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,038 generated
+function records (3,264 examples total with the curated set)** across forty template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
-teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — and #39, **strings as data**
+teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — #39, **strings as data**
 (`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
-separator and constant sets, incl. the parse-then-`case`-the-`Maybe` shape that replaces `error`), every one through the same validate →
+separator and constant sets, incl. the parse-then-`case`-the-`Maybe` shape that replaces `error` — and
+#40, **maps & JSON** (phases 2–3): the config-lookup (`get_K_or_D`/`has_K`/`set_K`) and JSON
+field-projection (`json_K`, nested `Just(JObj(m))`/`Just(JNum(p))` patterns) idioms multiplied over
+key/default sets), every one through the same validate →
 typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,

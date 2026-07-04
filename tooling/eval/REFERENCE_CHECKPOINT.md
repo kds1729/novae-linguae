@@ -153,15 +153,15 @@ cracked at 14B only), corpus8 showed the cheaper lever was the missing idiom all
 per-seed churn): `divide`/`modulo` (the division-arithmetic corner, flaky at every scale since 1.5B),
 `pow2` (gold = the already-covered `rec_pow` shape → leakage-dropped → a generalization limit, not
 coverage), and `take_rec`/`drop_rec` — the **list-returning index walks**, the one still-actionable
-coverage gap: #38 taught the element-returning walk (`nth`), so a **family #40** (index recursion that
-conses a result list: take/drop/`nth`-with-default variants) is the designed next move if the loop
-continues (family **#39** became strings-as-data — see below). `implies`, `concat_lists`, `nand`,
-`reverse_concat` (older residuals) stay solved.
+coverage gap: #38 taught the element-returning walk (`nth`), so a family of index recursions that
+cons a result list (take/drop/`nth`-with-default variants) is the designed next move if the loop
+continues (families **#39/#40** became the expressiveness follow-through: strings, maps & JSON — see
+below). `implies`, `concat_lists`, `nand`, `reverse_concat` (older residuals) stay solved.
 
 > **Eval-set growth note (2026-07-04, expressiveness phases 1–3).** The string builtins added 13
 > curated records (+ combinatorial family #39) and the map/JSON builtins added 9 more, growing the
 > curated eval to **354 tasks (176 write / 166 read / 12 assemble)** from the 316 this re-pin was
 > measured on. The pinned numbers above are on the **316-task** set — not line-comparable to a future
-> eval on repo HEAD; the next GPU run (a corpus9+ retrain, which now also teaches the string idioms —
-> map/JSON shapes are curated-only until a combinatorial family multiplies them) re-baselines. Oracle
-> stays 100% on the grown set.
+> eval on repo HEAD; the next GPU run re-baselines on corpus10 (3,038 specs — combinatorial families
+> #39 strings and #40 maps/JSON now teach all the new idioms; split at `/var/tmp/claude/ftdata10`,
+> 5,697 train). Oracle stays 100% on the grown set.
