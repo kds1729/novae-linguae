@@ -153,6 +153,14 @@ cracked at 14B only), corpus8 showed the cheaper lever was the missing idiom all
 per-seed churn): `divide`/`modulo` (the division-arithmetic corner, flaky at every scale since 1.5B),
 `pow2` (gold = the already-covered `rec_pow` shape → leakage-dropped → a generalization limit, not
 coverage), and `take_rec`/`drop_rec` — the **list-returning index walks**, the one still-actionable
-coverage gap: #38 taught the element-returning walk (`nth`), so a **family #39** (index recursion that
+coverage gap: #38 taught the element-returning walk (`nth`), so a **family #40** (index recursion that
 conses a result list: take/drop/`nth`-with-default variants) is the designed next move if the loop
-continues. `implies`, `concat_lists`, `nand`, `reverse_concat` (older residuals) stay solved.
+continues (family **#39** became strings-as-data — see below). `implies`, `concat_lists`, `nand`,
+`reverse_concat` (older residuals) stay solved.
+
+> **Eval-set growth note (2026-07-04, expressiveness phase 1).** The string builtins added 13 curated
+> records (+ combinatorial family #39), growing the curated eval to **336 tasks (167 write / 157
+> read / 12 assemble)** from the 316 this re-pin was measured on. The pinned numbers above are on the
+> **316-task** set — not line-comparable to a future eval on repo HEAD; the next GPU run (e.g. a
+> corpus9 retrain, which now also teaches the string idioms) re-baselines. Oracle stays 100% on the
+> grown set.

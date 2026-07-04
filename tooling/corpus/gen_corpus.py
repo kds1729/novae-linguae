@@ -66,6 +66,10 @@ def bool_lit(b):
     return {"kind": "lit", "value": {"kind": "bool", "value": b}}
 
 
+def str_lit(s):
+    return {"kind": "lit", "value": {"kind": "string", "value": s}}
+
+
 def op(name, *args):
     # The `op` form — used in PROPERTY/predicate expressions (the prover's head_op reads it).
     return {"kind": "app", "op": name, "args": list(args)}
@@ -148,6 +152,7 @@ INT = {"kind": "builtin", "name": "int"}
 NAT = {"kind": "builtin", "name": "nat"}
 BOOL = {"kind": "builtin", "name": "bool"}
 FLOAT = {"kind": "builtin", "name": "float"}
+STRING = {"kind": "builtin", "name": "string"}
 
 
 def fn(params, result):
@@ -189,6 +194,8 @@ def to_value_ast(pyval):
         return {"kind": "int", "value": pyval}
     if isinstance(pyval, float):
         return {"kind": "float", "value": pyval}
+    if isinstance(pyval, str):
+        return {"kind": "string", "value": pyval}
     if isinstance(pyval, list):
         return {"kind": "list", "elems": [to_value_ast(x) for x in pyval]}
     if isinstance(pyval, V):
@@ -1541,6 +1548,105 @@ def _case_of(scrutinee, *arms):
     return {"kind": "case", "scrutinee": scrutinee, "arms": [{"pattern": p, "body": b} for p, b in arms]}
 
 
+def string_funcs():
+    # STRING functions (spec/expressiveness.md phase 1): strings as data, not just carriers. The seven
+    # builtins are total/pure/deterministic; parse_int returns a Maybe (totality-via-Maybe — the pattern
+    # that replaces `error`), so several rows both construct AND consume variants over strings. String
+    # laws are out of the prover's fragment, so these verify by validate + typecheck + run.
+    s, n, xs, x = var("s"), var("n"), var("xs"), var("x")
+    return [
+        {"name": "str_len", "intent": "The length of a string in characters.",
+         "summary": "str_length s — Unicode scalar values, not bytes.", "tags": ["string"],
+         "type_ast": fn([STRING], NAT), "body_ast": lam(["s"], bapp("str_length", s)),
+         "examples": [{"args": ["hello"], "result": 5}, {"args": [""], "result": 0},
+                      {"args": ["héllo"], "result": 5}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "wrap_parens", "intent": "Wrap a string in parentheses.",
+         "summary": 'str_concat "(" (str_concat s ")").', "tags": ["string", "format"],
+         "type_ast": fn([STRING], STRING),
+         "body_ast": lam(["s"], bapp("str_concat", str_lit("("), bapp("str_concat", s, str_lit(")")))),
+         "examples": [{"args": ["x"], "result": "(x)"}, {"args": [""], "result": "()"},
+                      {"args": ["a,b"], "result": "(a,b)"}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "contains_comma", "intent": "Test whether a string contains a comma.",
+         "summary": 'str_contains "," s — the needle comes first.', "tags": ["string", "predicate"],
+         "type_ast": fn([STRING], BOOL), "body_ast": lam(["s"], bapp("str_contains", str_lit(","), s)),
+         "examples": [{"args": ["a,b"], "result": True}, {"args": ["ab"], "result": False},
+                      {"args": [","], "result": True}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "count_fields", "intent": "How many comma-separated fields a string has.",
+         "summary": 'length (str_split "," s) — split keeps empties, so "" has one field.',
+         "tags": ["string", "parse"], "type_ast": fn([STRING], NAT),
+         "body_ast": lam(["s"], bapp("length", bapp("str_split", str_lit(","), s))),
+         "examples": [{"args": ["a,b,c"], "result": 3}, {"args": [""], "result": 1},
+                      {"args": ["a,,b"], "result": 3}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "second_field", "intent": "The second comma-separated field of a string.",
+         "summary": 'head (tail (str_split "," s)).', "tags": ["string", "parse"],
+         "type_ast": fn([STRING], STRING),
+         "body_ast": lam(["s"], bapp("head", bapp("tail", bapp("str_split", str_lit(","), s)))),
+         "examples": [{"args": ["a,b,c"], "result": "b"}, {"args": ["x,y"], "result": "y"},
+                      {"args": ["1,2,3,4"], "result": "2"}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "comma_join", "intent": "Join a list of strings with commas.",
+         "summary": 'str_join "," xs — the separator comes first.', "tags": ["string", "format"],
+         "type_ast": fn([list_of(STRING)], STRING), "body_ast": lam(["xs"], bapp("str_join", str_lit(","), xs)),
+         "examples": [{"args": [["a", "b"]], "result": "a,b"}, {"args": [[]], "result": ""},
+                      {"args": [["z"]], "result": "z"}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "split_words", "intent": "Split a string on spaces.",
+         "summary": 'str_split " " s — keeps empty fields from repeated spaces.', "tags": ["string", "parse"],
+         "type_ast": fn([STRING], list_of(STRING)), "body_ast": lam(["s"], bapp("str_split", str_lit(" "), s)),
+         "examples": [{"args": ["a b"], "result": ["a", "b"]}, {"args": ["ab"], "result": ["ab"]},
+                      {"args": ["a  b"], "result": ["a", "", "b"]}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "show_int", "intent": "Render an integer as its decimal string.",
+         "summary": "to_string n — the canonical decimal rendering.", "tags": ["string", "format", "arithmetic"],
+         "type_ast": fn([INT], STRING), "body_ast": lam(["n"], bapp("to_string", n)),
+         "examples": [{"args": [42], "result": "42"}, {"args": [-7], "result": "-7"},
+                      {"args": [0], "result": "0"}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "parse_int_maybe", "intent": "Parse a string as an integer, if it is one.",
+         "summary": "parse_int s — Just(n) for exactly canonical decimal, else None (never an error).",
+         "tags": ["string", "parse", "maybe"], "type_ast": fn([STRING], maybe_t(INT)),
+         "body_ast": lam(["s"], bapp("parse_int", s)),
+         "examples": [{"args": ["42"], "result": V("Just", 42)}, {"args": ["abc"], "result": V("None")},
+                      {"args": ["-7"], "result": V("Just", -7)}, {"args": ["007"], "result": V("None")}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "parse_or_zero", "intent": "Parse a string as an integer, defaulting to zero.",
+         "summary": "case parse_int s of Just(n) => n; None => 0 — consume the Maybe.",
+         "tags": ["string", "parse", "variant", "case"], "type_ast": fn([STRING], INT),
+         "body_ast": lam(["s"], _case_of(bapp("parse_int", s), (_vpat("Just", "n"), n),
+                                         (_vpat("None"), int_lit(0)))),
+         "examples": [{"args": ["9"], "result": 9}, {"args": ["junk"], "result": 0},
+                      {"args": ["-3"], "result": -3}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "is_int_string", "intent": "Test whether a string is a canonical decimal integer.",
+         "summary": "true iff parse_int s is a Just.", "tags": ["string", "parse", "predicate", "variant", "case"],
+         "type_ast": fn([STRING], BOOL),
+         "body_ast": lam(["s"], _case_of(bapp("parse_int", s), (_vpat("Just", "n"), bool_lit(True)),
+                                         (_vpat("None"), bool_lit(False)))),
+         "examples": [{"args": ["12"], "result": True}, {"args": ["1.5"], "result": False},
+                      {"args": [""], "result": False}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "parse_and_double", "intent": "Parse a string as an integer and double it, or zero if unparseable.",
+         "summary": "case parse_int s of Just(n) => n + n; None => 0.",
+         "tags": ["string", "parse", "variant", "case", "arithmetic"], "type_ast": fn([STRING], INT),
+         "body_ast": lam(["s"], _case_of(bapp("parse_int", s), (_vpat("Just", "n"), bapp("add", n, n)),
+                                         (_vpat("None"), int_lit(0)))),
+         "examples": [{"args": ["21"], "result": 42}, {"args": ["x"], "result": 0},
+                      {"args": ["-5"], "result": -10}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "render_ints", "intent": "Render a list of integers as a comma-separated string.",
+         "summary": 'str_join "," (map to_string xs).', "tags": ["string", "format", "list"],
+         "type_ast": fn([list_of(INT)], STRING),
+         "body_ast": lam(["xs"], bapp("str_join", str_lit(","), bapp("map", var("to_string"), xs))),
+         "examples": [{"args": [[1, 2, 3]], "result": "1,2,3"}, {"args": [[]], "result": ""},
+                      {"args": [[-4]], "result": "-4"}],
+         "properties": [], "prove": False},
+    ]
+
+
 def variant_consuming_funcs():
     # The write shape the corpus most lacked: bodies that CONSUME a sum type by pattern-matching its
     # variants (the existing maybe_funcs/result_funcs only CONSTRUCT variants). Plus two more constructors
@@ -2725,6 +2831,66 @@ def combinatorial_specs(exclude_names=()):
                    fn([INT, list_of(INT)], INT), _nth(base),
                    [{"args": [i, lst], "result": rf(lst[i])} for i, lst in _IDX38], terminates="unknown"))
 
+    # 39. STRINGS AS DATA (spec/expressiveness.md phase 1) — the split/join/concat/parse-int idioms
+    # multiplied over separator/constant sets. Teaches: pattern/separator-first argument order, split
+    # keeps empties, parse_int's totality-via-Maybe consumed by a case (never `error`), and
+    # format-by-join-over-map. The exact curated golds (comma variants) dedupe/leakage-drop as usual;
+    # the other separators teach the SHAPE.
+    s = var("s")
+    _SEP39 = [(",", "comma", "commas"), (";", "semi", "semicolons"), ("|", "pipe", "pipes"),
+              (" ", "space", "spaces"), (":", "colon", "colons")]
+    _STR_IN = ["a{0}b{0}c", "x{0}y", "", "one", "a{0}{0}b"]  # templates instantiated per separator
+    _STRLIST_IN = [["a", "b"], [], ["z"], ["a", "", "c"]]
+    _INTLIST39 = [[1, 2, 3], [], [-4], [0, 7]]
+    for sep, nm, word in _SEP39:
+        inputs = [t.format(sep) for t in _STR_IN]
+        add(_cspec(f"count_fields_{nm}", f"How many fields a string has when split on {word}.",
+                   f'length (str_split "{sep}" s)', ["string", "parse"], fn([STRING], NAT),
+                   lam(["s"], bapp("length", bapp("str_split", str_lit(sep), s))),
+                   [{"args": [t], "result": len(t.split(sep))} for t in inputs], terminates="always"))
+        two_field = [t.format(sep) for t in ("a{0}b{0}c", "x{0}y", "1{0}2{0}3{0}4")]
+        add(_cspec(f"second_field_{nm}", f"The second field of a string split on {word}.",
+                   f'head (tail (str_split "{sep}" s))', ["string", "parse"], fn([STRING], STRING),
+                   lam(["s"], bapp("head", bapp("tail", bapp("str_split", str_lit(sep), s)))),
+                   [{"args": [t], "result": t.split(sep)[1]} for t in two_field], terminates="always"))
+        add(_cspec(f"join_{nm}", f"Join a list of strings with {word}.",
+                   f'str_join "{sep}" xs', ["string", "format"], fn([list_of(STRING)], STRING),
+                   lam(["xs"], bapp("str_join", str_lit(sep), xs)),
+                   [{"args": [l], "result": sep.join(l)} for l in _STRLIST_IN], terminates="always"))
+        add(_cspec(f"render_ints_{nm}", f"Render a list of integers as a string separated by {word}.",
+                   f'str_join "{sep}" (map to_string xs)', ["string", "format", "list"],
+                   fn([list_of(INT)], STRING),
+                   lam(["xs"], bapp("str_join", str_lit(sep), bapp("map", var("to_string"), xs))),
+                   [{"args": [l], "result": sep.join(str(v) for v in l)} for l in _INTLIST39]))
+        add(_cspec(f"parse_first_{nm}", f"Parse the first field (split on {word}) as an integer, if it is one.",
+                   f'parse_int (head (str_split "{sep}" s))', ["string", "parse", "maybe"],
+                   fn([STRING], maybe_t(INT)),
+                   lam(["s"], bapp("parse_int", bapp("head", bapp("str_split", str_lit(sep), s)))),
+                   [{"args": [f"21{sep}x"], "result": V("Just", 21)},
+                    {"args": [f"junk{sep}x"], "result": V("None")},
+                    {"args": [f"-3{sep}9"], "result": V("Just", -3)}], terminates="always"))
+    for pre, post, nm in (("(", ")", "parens"), ("[", "]", "brackets"), ("<", ">", "angles"), ("{", "}", "braces")):
+        add(_cspec(f"wrap_{nm}", f"Wrap a string in {nm}.",
+                   f'str_concat "{pre}" (str_concat s "{post}")', ["string", "format"], fn([STRING], STRING),
+                   lam(["s"], bapp("str_concat", str_lit(pre), bapp("str_concat", s, str_lit(post)))),
+                   [{"args": ["x"], "result": f"{pre}x{post}"}, {"args": [""], "result": f"{pre}{post}"},
+                    {"args": ["a b"], "result": f"{pre}a b{post}"}], terminates="always"))
+    for k in (0, 1, -1, 9, 100):
+        add(_cspec(f"parse_or_neg{-k}" if k < 0 else f"parse_or_{k}", f"Parse a string as an integer, defaulting to {k}.",
+                   f"case parse_int s of Just(n) => n; None => {k}", ["string", "parse", "variant", "case"],
+                   fn([STRING], INT),
+                   lam(["s"], _case_of(bapp("parse_int", s), (_vpat("Just", "n"), n),
+                                       (_vpat("None"), int_lit(k)))),
+                   [{"args": ["7"], "result": 7}, {"args": ["junk"], "result": k},
+                    {"args": ["-2"], "result": -2}], terminates="always"))
+    for pre in ("n=", "id:", "#"):
+        nm = {"n=": "neq", "id:": "id", "#": "hash"}[pre]
+        add(_cspec(f"label_{nm}", f'Render an integer with the prefix "{pre}".',
+                   f'str_concat "{pre}" (to_string n)', ["string", "format", "arithmetic"], fn([INT], STRING),
+                   lam(["n"], bapp("str_concat", str_lit(pre), bapp("to_string", n))),
+                   [{"args": [5], "result": f"{pre}5"}, {"args": [-1], "result": f"{pre}-1"},
+                    {"args": [0], "result": f"{pre}0"}], terminates="always"))
+
     return out
 
 
@@ -2735,7 +2901,7 @@ def all_specs():
             + arith_laws() + bool_laws() + order_laws()
             + more_arith() + more_laws() + bool_more() + recursive_more()
             + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion()
-            + variant_consuming_funcs() + nested_hof_funcs())
+            + variant_consuming_funcs() + nested_hof_funcs() + string_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------

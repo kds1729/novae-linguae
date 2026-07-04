@@ -108,10 +108,12 @@ of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **param
 comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
-parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **2,973 generated
-function records (3,177 examples total with the curated set)** across thirty-eight template families
+parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,009 generated
+function records (3,226 examples total with the curated set)** across thirty-nine template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
-teaches the shape; a 14B run confirmed it flips `nth` from fail to pass), every one through the same validate →
+teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — and #39, **strings as data**
+(`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
+separator and constant sets, incl. the parse-then-`case`-the-`Maybe` shape that replaces `error`), every one through the same validate →
 typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,
@@ -145,9 +147,9 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
 
 ## Scope and where it grows
 
-204 examples today (190 positive, 14 negative), in four `category`s:
+217 examples today (203 positive, 14 negative), in four `category`s:
 
-- **function** (167) — Nova Lingua function records across **thirty families**: unary integer (8, incl.
+- **function** (180) — Nova Lingua function records across **thirty-one families**: unary integer (8, incl.
   `double` / `quadruple` / `decrement` / `abs_val`), binary integer (6, incl. `maximum` / `minimum` /
   `abs_diff`), boolean/predicate (8, incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` /
   `is_even`), list builtins (3: `sum` / `reverse` / `length`), list-transform (6: `map`/`filter`/`append`
@@ -192,6 +194,12 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   `apply_to` / `twice` / `compose2` / `all_with` / `any_with` / `count_with` — records whose
   *type* takes a function argument, run end to end with the function supplied as an `fn_ref` to a helper
   record resolved from the run directory; the grader can render the fn_ref argument by the helper's name),
+  **strings** (13, `spec/expressiveness.md` phase 1 — the first records over string *data*:
+  `str_len` (Unicode scalar count) / `wrap_parens` / `contains_comma` (needle-first) /
+  `count_fields` / `second_field` / `split_words` (split keeps empties) / `comma_join` / `show_int` /
+  `render_ints` (`str_join`∘`map to_string`) and the parse quartet `parse_int_maybe` /
+  `parse_or_zero` / `is_int_string` / `parse_and_double` — `parse_int`'s `Maybe` constructed AND
+  consumed by `case`, the totality idiom that replaces `error`),
   and **provenance** (2: `quadruple_derived` `derived_from`
   doubling, `negate_v2` `supersedes` a `0 − n` implementation). **56 properties are proved over the
   unbounded domain**, including the `filter`/`reverse` commutation and the `reverse`-over-`append`
