@@ -137,6 +137,23 @@ a trusted root vouching for `double`, `--verify --intent arithmetic` over `[21]`
 confirms it trusted, proves its `doubles` property, applies it, and re-verifies `21 → 42` (CONFIRMED);
 drop the vouching attestation and the same run ABORTS at the trust gate.
 
+### Over a live node (`--node`)
+
+The same loop — plain or `--verify --require-certified` — runs against a **remote commons** instead
+of a local directory: `nl-validator orchestrate --node https://<node> --intent <tag> --arg <v> --seed
+<s> [--publish]`. Discovery goes through the node's `POST /v0/query`; the candidates' records,
+bodies, and `fn_ref` helpers are fetched by content-address (a bounded reference-closure walk) and
+**every fetched artifact is re-hashed locally** — it must equal the address it was requested by, so
+the store stays untrusted infrastructure (principle 7): a lying or corrupted node can only *fail* a
+run, never spoof a function into it. `--publish` sends the final signed `assert` back through the
+node's verify-then-store gate, making the result claim a public commons artifact. The receiving half
+is symmetric: `nl-validator verify-claim msg_<hash> --node https://<node>` lets a third party who
+knows *only an address and a node URL* fetch the claim and everything it references (all
+hash-verified) and re-run it — verification is re-execution, across the network. Worked, against the
+production node: `--node https://nl.1105software.com --intent parse` over `"id,21,ok"` discovered
+three candidates, chose `double_second_field`, certified it, applied it, CONFIRMED `42`, and
+published the assert; an independent `verify-claim msg_5d22cb… --node …` then re-ran it to CONFIRMED.
+
 ## Scope (v0.2, honest)
 
 - **The inbound speech acts are wired.** Beyond `apply`/`validate`/`query`/`propose`, the responder

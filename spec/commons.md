@@ -103,6 +103,13 @@ Body: a single record (function record, body, type, proof, or message) as JSON.
 The node verifies (§"Verification on ingest"). On success it stores the record under its hash and
 returns the hash. Publishing the same content again is a no-op (idempotent).
 
+**Bare body expressions are self-addressing.** A body expression carries no embedded `hash` field —
+the whole expression *is* the hashed content (spec/canonical-serialization.md) — so a node MUST accept
+a hashless artifact whose top-level `kind` is a body-expression kind (`var`/`lit`/`app`/`let`/
+`lambda`/`case`/`field`), compute its `expr_…` content address itself after schema validation, store
+it under that address, and return the computed address. This is what lets a record's `body_hash`
+resolve on the same node that serves the record — the precondition for a *remote* agent loop.
+
 ```
 201 Created   { "hash": "fn_3a9b…", "stored": true }      # newly stored
 200 OK        { "hash": "fn_3a9b…", "stored": false }     # already present

@@ -122,6 +122,14 @@ mod tests {
     }
 }
 
+/// The `fn_…`/`expr_…` addresses an artifact references — the seed set for a closure walk over
+/// everything a claim (or record) needs in order to re-run.
+pub fn seed_addresses(artifact: &J) -> Vec<String> {
+    let mut out = Vec::new();
+    referenced_addresses(artifact, &mut out);
+    out
+}
+
 /// Materialize the `(record_map, link_map)` pair every existing loop consumes, from a node, by
 /// walking the reference closure of `seeds` (records pull their bodies; `fn_ref`s pull their
 /// helper records; bounded by [`MAX_FETCHES`]). Each fetched artifact is hash-verified. Mirrors

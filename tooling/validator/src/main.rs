@@ -456,11 +456,17 @@ enum Commands {
     /// receiver half of the agent loop — trust nothing, re-execute (principle 3). Exit 0 if the
     /// claim re-runs true (CONFIRMED), 1 if false (REFUTED) or undecidable.
     VerifyClaim {
-        /// Path to the `assert` message whose claim to re-run.
-        assert: PathBuf,
+        /// The `assert` message whose claim to re-run: a path to a JSON file, or (with `--node`) a
+        /// bare `msg_…` content-address fetched from the node — the true third-party receiver, who
+        /// knows only an address and a node URL.
+        assert: String,
         /// Directory of records/bodies to resolve the claim's functions against.
+        #[arg(long, conflicts_with = "node", required_unless_present = "node")]
+        records: Option<PathBuf>,
+        /// A live commons node URL: the assert (when given as an address) and every function/body
+        /// the claim references are fetched by content-address and hash-verified locally.
         #[arg(long)]
-        records: PathBuf,
+        node: Option<String>,
     },
     /// Verify a delegation chain (spec/trust-model.md): can `--grantee` wield `--capability` by a chain
     /// of signed `delegate` tokens back to a recognized `--root`? Checks every token's signature,
@@ -668,7 +674,9 @@ fn main() -> ExitCode {
         Commands::Compose { records } => (cmd_compose(&records), false),
         Commands::Cluster { records, solver } => (cmd_cluster(&records, &solver), false),
         Commands::Normalize { body, hash } => (cmd_normalize(&body, hash), false),
-        Commands::VerifyClaim { assert, records } => (cmd_verify_claim(&assert, &records), false),
+        Commands::VerifyClaim { assert, records, node } => {
+            (cmd_verify_claim(&assert, records.as_ref(), node.as_deref()), false)
+        }
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
             (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
         }
@@ -1269,9 +1277,27 @@ fn cmd_cluster(records: &PathBuf, solver: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_verify_claim(assert: &PathBuf, records: &PathBuf) -> Result<()> {
-    let assert = nl_validator::read_json(assert)?;
-    let link_map = nl_validator::build_link_map(records)?;
+fn cmd_verify_claim(assert: &str, records: Option<&PathBuf>, node: Option<&str>) -> Result<()> {
+    // The assert is a local file, or — the third-party receiver's case — a bare `msg_…` address
+    // fetched (and hash-verified) from the node.
+    let assert = if assert.starts_with("msg_") {
+        let url = node.ok_or_else(|| anyhow::anyhow!("a msg_… address needs --node to fetch from"))?;
+        nl_validator::commons_client::fetch_artifact(url, assert)?
+    } else {
+        nl_validator::read_json(&PathBuf::from(assert))?
+    };
+    let link_map = match (records, node) {
+        (Some(dir), None) => nl_validator::build_link_map(dir)?,
+        (None, Some(url)) => {
+            // Resolve everything the claim references from the node, hash-verified.
+            let (_, link_map) = nl_validator::commons_client::maps_from_node(
+                url,
+                &nl_validator::commons_client::seed_addresses(&assert),
+            )?;
+            link_map
+        }
+        _ => anyhow::bail!("supply exactly one of --records / --node"),
+    };
     if nl_validator::verify_claim(&assert, link_map)? {
         println!("CONFIRMED  the claim re-ran true against the commons");
         Ok(())
