@@ -366,7 +366,7 @@ fn as_str_list(v: &Val) -> Result<Vec<String>> {
 /// A minimal, dependency-free HTTP/1.1 request over a raw TCP socket — `http://` only (no TLS).
 /// Returns the response body (after the header block). Backs `http_get` (net.read) / `http_post`
 /// (net.write); the gating + record/replay live in `effect_op`.
-fn http_request(method: &str, url: &str, body: Option<&str>) -> Result<String> {
+pub(crate) fn http_request(method: &str, url: &str, body: Option<&str>) -> Result<String> {
     use std::net::TcpStream;
     use std::time::Duration;
 

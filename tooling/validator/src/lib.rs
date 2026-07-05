@@ -90,13 +90,16 @@ pub use attestation::{Attestation, AttestationGraph};
 pub mod policy;
 pub use policy::{CapabilityVerdict, CertificationVerdict, Policy, TrustVerdict};
 
+pub mod commons_client;
 pub mod respond;
 pub use respond::{
     respond_to_message, respond_to_message_with_trust, respond_to_request, verify_claim, TrustPolicy,
 };
 
 pub mod orchestrate;
-pub use orchestrate::{orchestrate, orchestrate_verified, Run, Step, VerifiedRun};
+pub use orchestrate::{
+    orchestrate, orchestrate_verified, orchestrate_verified_with_maps, orchestrate_with_maps, Run, Step, VerifiedRun,
+};
 
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {

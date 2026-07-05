@@ -46,6 +46,20 @@ pub fn orchestrate(
 ) -> Result<Run> {
     let link = build_link_map(records_dir)?;
     let records = build_record_map(records_dir)?;
+    orchestrate_with_maps(link, records, stages, args, orchestrator, responder, timestamp)
+}
+
+/// [`orchestrate`] over already-materialized maps — the commons view may come from a local
+/// directory or a remote node ([`crate::commons_client::maps_from_node`]); the loop is identical.
+pub fn orchestrate_with_maps(
+    link: std::collections::HashMap<String, J>,
+    records: std::collections::HashMap<String, J>,
+    stages: &[String],
+    args: Vec<J>,
+    orchestrator: &SigningKey,
+    responder: &SigningKey,
+    timestamp: Option<&str>,
+) -> Result<Run> {
     let responder_did = did_nova_from_pubkey(&responder.verifying_key());
     let mut steps = Vec::new();
     let mut stage_args = args; // stage 0 gets the initial args; each later stage gets [prev result]
@@ -330,6 +344,27 @@ pub fn orchestrate_verified(
 ) -> Result<VerifiedRun> {
     let link = build_link_map(records_dir)?;
     let records = build_record_map(records_dir)?;
+    orchestrate_verified_with_maps(
+        link, records, intent, args, orchestrator, responder, solver, policy, attestations, timestamp, require_certified,
+    )
+}
+
+/// [`orchestrate_verified`] over already-materialized maps (local directory or a remote node —
+/// [`crate::commons_client::maps_from_node`]); the verified loop is identical either way.
+#[allow(clippy::too_many_arguments)]
+pub fn orchestrate_verified_with_maps(
+    link: std::collections::HashMap<String, J>,
+    records: std::collections::HashMap<String, J>,
+    intent: &str,
+    args: Vec<J>,
+    orchestrator: &SigningKey,
+    responder: &SigningKey,
+    solver: &str,
+    policy: Option<&Policy>,
+    attestations: &[J],
+    timestamp: Option<&str>,
+    require_certified: bool,
+) -> Result<VerifiedRun> {
     let responder_did = did_nova_from_pubkey(&responder.verifying_key());
     let mut steps = Vec::new();
 

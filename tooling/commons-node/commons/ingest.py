@@ -11,8 +11,10 @@ from .models import Record
 from .vectorindex import store_vector
 
 
-def create_record(raw, kind, version):
-    """Create and return a Record for an already-verified record.
+def create_record(raw, kind, version, address=None):
+    """Create and return a Record for an already-verified record. `address` is the content
+    address `verify_record` returned; it defaults to the embedded `hash` for the artifact kinds
+    that carry one (a bare body expression doesn't — the node computed its `expr_…` address).
 
     The embedding is computed best-effort: if the embedder (e.g. a neural model server) is momentarily
     unavailable, the record is still admitted with a null embedding and `embedding_model` left unset, so
@@ -24,7 +26,7 @@ def create_record(raw, kind, version):
     except Exception:
         vector = None
     row = Record.objects.create(
-        hash=raw["hash"], kind=kind, schema_version=version, raw=raw,
+        hash=address or raw["hash"], kind=kind, schema_version=version, raw=raw,
         embedding=vector, embedding_model=(emb.model_id if vector else None),
         **V.extract(raw, kind),
     )
@@ -39,15 +41,15 @@ def ingest_records(records, on_reject=None):
     stored = skipped = failed = 0
     for raw in records:
         try:
-            kind, version = V.verify_record(raw)
+            kind, version, address = V.verify_record(raw)
         except V.VerifyError as exc:
             failed += 1
             if on_reject:
                 on_reject(exc.code, exc.detail)
             continue
-        if Record.objects.filter(hash=raw.get("hash")).exists():
+        if Record.objects.filter(hash=address).exists():
             skipped += 1
             continue
-        create_record(raw, kind, version)
+        create_record(raw, kind, version, address)
         stored += 1
     return stored, skipped, failed

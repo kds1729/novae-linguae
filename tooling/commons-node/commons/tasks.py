@@ -50,9 +50,11 @@ def replicate_peer(peer):
                 continue
             try:
                 raw = _get_json(f"{base}/v0/records/{h}")
-                kind, version = V.verify_record(raw)            # untrusted-peer admission gate
-                if not Record.objects.filter(hash=raw["hash"]).exists():
-                    create_record(raw, kind, version)
+                kind, version, address = V.verify_record(raw)   # untrusted-peer admission gate
+                if address != h:
+                    continue  # the peer served different content under this address — refuse it
+                if not Record.objects.filter(hash=address).exists():
+                    create_record(raw, kind, version, address)
                     mirrored += 1
             except Exception:
                 continue  # unverifiable / malformed / hash-mismatch — skip, do not trust the peer

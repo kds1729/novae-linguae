@@ -42,18 +42,17 @@ def records(request):
         return JsonResponse({"error": "malformed_json", "detail": str(exc)}, status=400)
 
     try:
-        kind, version = V.verify_record(raw)
+        kind, version, address = V.verify_record(raw)
     except V.VerifyError as exc:
         if exc.code == "verifier_unavailable":
             return JsonResponse({"error": exc.code, "detail": exc.detail}, status=503)
         status = 422 if exc.code in _UNPROCESSABLE else 400
         return JsonResponse({"error": exc.code, "detail": exc.detail}, status=status)
 
-    address = raw["hash"]
     if Record.objects.filter(hash=address).exists():
         return JsonResponse({"hash": address, "stored": False}, status=200)
 
-    create_record(raw, kind, version)
+    create_record(raw, kind, version, address)
     return JsonResponse({"hash": address, "stored": True}, status=201)
 
 

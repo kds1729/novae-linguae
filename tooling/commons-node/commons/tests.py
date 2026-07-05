@@ -55,6 +55,24 @@ class CommonsProtocolTests(TestCase):
         self.assertEqual(again.status_code, 200)
         self.assertEqual(again.json(), {"hash": rec["hash"], "stored": False})
 
+    def test_publish_bare_body_is_self_addressing(self):
+        # A body expression carries NO embedded hash — the whole expression IS the hashed content —
+        # so the node computes its expr_… address on ingest and serves it back byte-exactly. This is
+        # what lets a remote agent loop (`orchestrate --node`) resolve a record's body_hash.
+        body = _load("body-double-second-field.json")
+        resp = self._publish(body)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        address = resp.json()["hash"]
+        self.assertTrue(address.startswith("expr_"), address)
+        # The address is the record's declared body_hash — the two halves link up.
+        rec = _load("double-second-field.v0.2.json")
+        self.assertEqual(address, rec["body_hash"])
+        # Idempotent, and resolvable to the exact bare body.
+        again = self._publish(body)
+        self.assertEqual(again.status_code, 200)
+        got = self.client.get(f"/v0/records/{address}")
+        self.assertEqual(got.json(), body)
+
     def test_resolve_returns_exact_record(self):
         rec = _load("map.json")
         self._publish(rec)

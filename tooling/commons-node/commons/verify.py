@@ -61,11 +61,21 @@ def _run(*args):
         raise VerifyError("verifier_unavailable", str(exc))
 
 
+# Body-expression node kinds (body-expression.schema.json). A BARE body has no embedded `hash`
+# field — the whole expression IS the hashed content — so it is self-addressing on ingest.
+_BODY_EXPR_KINDS = {"var", "lit", "app", "let", "lambda", "case", "field"}
+
+
 def verify_record(raw):
-    """Verify a parsed record. Returns (kind, schema_version) on success, else raises VerifyError."""
+    """Verify a parsed record. Returns (kind, schema_version, address) on success, else raises
+    VerifyError. For hash-carrying artifacts the address is the embedded `hash` (verified by
+    recomputation); a bare body expression is validated against the body schema and its `expr_…`
+    address computed server-side."""
     if not isinstance(raw, dict):
         raise VerifyError("schema_invalid", "record must be a JSON object")
     if not isinstance(raw.get("hash"), str):
+        if raw.get("kind") in _BODY_EXPR_KINDS:
+            return _verify_bare_body(raw)
         raise VerifyError("schema_invalid", "record is missing a string 'hash'")
 
     kind, version = detect(raw)
@@ -89,7 +99,31 @@ def verify_record(raw):
             raise VerifyError(code, (verified.stderr or "").strip())
     finally:
         os.unlink(path)
-    return kind, version
+    return kind, version, raw["hash"]
+
+
+def _verify_bare_body(raw):
+    """Verify a bare body expression: schema-valid, then self-addressing — the node computes the
+    `expr_…` content address (there is no embedded hash to check; the content IS the address)."""
+    schema = _schema_path("body", "0.1.0")
+    if schema is None:
+        raise VerifyError("unsupported_kind", "no schema for body 0.1.0")
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(raw, f)
+        path = f.name
+    try:
+        validated = _run("validate", schema, path)
+        if validated.returncode != 0:
+            raise VerifyError("schema_invalid", (validated.stderr or "").strip())
+        hashed = _run("hash", path)
+        if hashed.returncode != 0:
+            raise VerifyError("schema_invalid", (hashed.stderr or "").strip())
+        address = (hashed.stdout or "").strip()
+        if not address.startswith("expr_"):
+            raise VerifyError("schema_invalid", f"body hashed to unexpected address {address!r}")
+    finally:
+        os.unlink(path)
+    return "body", "0.1.0", address
 
 
 def extract(raw, kind):

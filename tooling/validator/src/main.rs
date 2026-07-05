@@ -404,9 +404,19 @@ enum Commands {
     /// proposes applying it to the `--arg`s, the responder commits + fulfils, and the orchestrator
     /// verifies the result. Prints the signed transcript; exit 1 if it isn't CONFIRMED.
     Orchestrate {
-        /// Directory of records/bodies (the commons view).
+        /// Directory of records/bodies (the commons view). Exactly one of `--records`/`--node`.
+        #[arg(long, conflicts_with = "node", required_unless_present = "node")]
+        records: Option<PathBuf>,
+        /// A LIVE commons node URL (e.g. https://nl.1105software.com): discovery goes through the
+        /// node's `POST /v0/query`, and every record/body is fetched by content-address and
+        /// **hash-verified locally** — the store stays untrusted (principle 7). Same loop,
+        /// network-fed.
         #[arg(long)]
-        records: PathBuf,
+        node: Option<String>,
+        /// With `--node`: publish the final signed `assert` (the result claim) back to the node
+        /// through its verify-then-store gate, closing the loop.
+        #[arg(long, requires = "node")]
+        publish: bool,
         /// Intent tag for a pipeline stage (repeatable). Each `--intent` discovers a function by that
         /// intent and applies it to the previous stage's result — composing the discovered functions.
         #[arg(long = "intent")]
@@ -671,11 +681,11 @@ fn main() -> ExitCode {
         Commands::Authorize { policy, capability, grantee, delegations, at } => {
             (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
-        Commands::Orchestrate { records, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified } => {
+        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified } => {
             if verify {
-                (cmd_orchestrate_verified(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified), false)
+                (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified), false)
             } else {
-                (cmd_orchestrate(&records, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
+                (cmd_orchestrate(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
             }
         }
         #[cfg(feature = "surface")]
@@ -1389,8 +1399,52 @@ fn cmd_authorize(
     }
 }
 
+/// Materialize the commons view for the loop: from a local directory, or from a live node by
+/// querying each intent for candidate `fn_…` addresses and walking their hash-verified reference
+/// closure ([`nl_validator::commons_client::maps_from_node`]).
+fn commons_view(
+    records: Option<&PathBuf>,
+    node: Option<&str>,
+    intents: &[String],
+) -> Result<(std::collections::HashMap<String, serde_json::Value>, std::collections::HashMap<String, serde_json::Value>)> {
+    match (records, node) {
+        (Some(dir), None) => Ok((nl_validator::build_link_map(dir)?, nl_validator::build_record_map(dir)?)),
+        (None, Some(url)) => {
+            let mut seeds: Vec<String> = Vec::new();
+            for intent in intents {
+                let matched = nl_validator::commons_client::query_intent(url, intent, 25)?;
+                eprintln!("node query  intent {intent:?} -> {} match(es)", matched.len());
+                seeds.extend(matched);
+            }
+            let (record_map, link_map) = nl_validator::commons_client::maps_from_node(url, &seeds)?;
+            eprintln!("node fetch  {} record(s) + {} linked artifact(s), all hash-verified", record_map.len(),
+                      link_map.len().saturating_sub(record_map.len()));
+            Ok((link_map, record_map))
+        }
+        _ => anyhow::bail!("supply exactly one of --records / --node"),
+    }
+}
+
+/// With `--publish`, send the run's final signed `assert` (the result claim) back to the node —
+/// through its verify-then-store gate, like any other artifact.
+fn publish_final_assert(node: &str, steps: &[nl_validator::Step]) -> Result<()> {
+    let assert = steps
+        .iter()
+        .rev()
+        .find(|s| s.message.get("kind").and_then(|k| k.as_str()) == Some("assert"))
+        .ok_or_else(|| anyhow::anyhow!("no assert step to publish"))?;
+    let resp = nl_validator::commons_client::publish_artifact(node, &assert.message)?;
+    let h = assert.message.get("hash").and_then(|h| h.as_str()).unwrap_or("");
+    println!("published  {}… -> node accepted ({})", &h[..h.len().min(18)],
+             resp.get("status").and_then(|s| s.as_str()).unwrap_or("stored"));
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn cmd_orchestrate(
-    records: &PathBuf,
+    records: Option<&PathBuf>,
+    node: Option<&str>,
+    publish: bool,
     intents: &[String],
     args: &[PathBuf],
     seed: &str,
@@ -1400,7 +1454,8 @@ fn cmd_orchestrate(
     let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
     let orch = nl_validator::signing_key_from_seed(seed);
     let resp = nl_validator::signing_key_from_seed(responder_seed);
-    let run = nl_validator::orchestrate(records, intents, argv, &orch, &resp, timestamp)?;
+    let (link, recs) = commons_view(records, node, intents)?;
+    let run = nl_validator::orchestrate_with_maps(link, recs, intents, argv, &orch, &resp, timestamp)?;
     for step in &run.steps {
         let m = &step.message;
         let hash = m.get("hash").and_then(|h| h.as_str()).unwrap_or("");
@@ -1418,6 +1473,9 @@ fn cmd_orchestrate(
     }
     if run.confirmed {
         println!("CONFIRMED  discovered the function, applied it, and re-verified the result");
+        if publish {
+            publish_final_assert(node.expect("--publish requires --node"), &run.steps)?;
+        }
         Ok(())
     } else {
         Err(anyhow::anyhow!("orchestration did not confirm (rejected, or the claim failed to re-run)"))
@@ -1426,7 +1484,9 @@ fn cmd_orchestrate(
 
 #[allow(clippy::too_many_arguments)]
 fn cmd_orchestrate_verified(
-    records: &PathBuf,
+    records: Option<&PathBuf>,
+    node: Option<&str>,
+    publish: bool,
     intents: &[String],
     args: &[PathBuf],
     seed: &str,
@@ -1445,7 +1505,8 @@ fn cmd_orchestrate_verified(
     let resp = nl_validator::signing_key_from_seed(responder_seed);
     let pol = policy.map(|p| nl_validator::read_json(p).and_then(|j| nl_validator::Policy::from_json(&j))).transpose()?;
     let atts = attestations.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
-    let run = nl_validator::orchestrate_verified(records, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified)?;
+    let (link, recs) = commons_view(records, node, intents)?;
+    let run = nl_validator::orchestrate_verified_with_maps(link, recs, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified)?;
 
     for step in &run.steps {
         let m = &step.message;
@@ -1468,6 +1529,9 @@ fn cmd_orchestrate_verified(
     if run.confirmed && property_ok && trust_ok && certify_ok {
         let cert_note = match run.certified { Some(true) => ", certified", Some(false) => ", NOT certified", None => "" };
         println!("CONFIRMED  trusted, its property proved{cert_note}, applied, and re-verified");
+        if publish {
+            publish_final_assert(node.expect("--publish requires --node"), &run.steps)?;
+        }
         Ok(())
     } else if run.trusted == Some(false) {
         Err(anyhow::anyhow!("ABORTED    the discovered function is not trusted under the policy"))
