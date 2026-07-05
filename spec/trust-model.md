@@ -176,6 +176,19 @@ A consequence worth being explicit about: **reputation-driven filtering at the a
 
 **Operator legal compliance.** An agent runs somewhere. Whoever runs it operates under some jurisdiction's law. Local law can compel disclosure of keys, content, or attestations. The protocol cannot grant immunity from law. This is the most important non-protocol failure mode and is the reason confidentiality (principle 6 extension: payload encryption in v0.2+) matters.
 
+## Open question: effect grants for discovered functions
+
+The remote agent loop executes functions the responder never chose. Whether — and under what policy —
+a responder grants a *discovered* function's declared effects (`net.read`, `fs.write`,
+`process.spawn`, …) is an **open design decision (2026-07-05, discussion ongoing)**: a verified
+effect declaration is honest but not therefore safe to grant on an open commons. The current leaning
+is trust-model-tied grants (per-effect-*domain* trust under the responder's local policy, riding this
+document's machinery — `evaluate_trust` domain scoping and/or `cap:`-style capabilities), possibly
+inside a broader **modes-of-operation** frame (pure-only / allowlisted / trust-gated responders, the
+way the capability gate already has possession-only vs chain-verified modes). Full statement of the
+options and the effectful-claim re-runnability wrinkle: `spec/agent-loop.md` §Scope. Nothing is
+implemented until this concludes.
+
 ---
 
 ## What this means for the existing spec

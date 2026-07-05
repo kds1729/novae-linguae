@@ -177,9 +177,34 @@ implemented until a real workload makes the 1.5 s substantial.
   back to a recognized root, checked by `verify_delegation_chain` (signatures, attenuation, expiry,
   conditions; see `spec/trust-model.md` and `nl-validator verify-delegation`). Listing the string no
   longer suffices.
-- **Pure targets.** The target must be a body the v0.1 evaluator handles (`spec/evaluation.md`):
-  effects are not modelled, so an effectful target is out of scope. An unresolvable target or args
-  that don't decode are an honest error, never a silent empty assert.
+- **Pure targets — and the OPEN DESIGN QUESTION behind that line.** The responder fulfils only
+  targets whose evaluation performs no effects: it grants nothing, so an effectful builtin in a
+  discovered function rejects at eval time. This is deliberate, and lifting it is a **pending
+  decision (2026-07-05), not a code detail**. The situation: in the remote loop the responder
+  executes a function *it never chose* — the orchestrator discovered it by intent on an open commons
+  (a node MUST NOT reject a verifying record, principle 7). The function's declared effects are
+  *honest* (`check-effects` proves the body performs nothing beyond them, and certification includes
+  that check) — but honest ≠ safe: auto-granting declared effects would let anyone who can get a
+  function discovered make the responder's machine originate HTTP requests (`net.read`), write its
+  disk (`fs.write`), or spawn processes (`process.spawn` — remote code execution with one hop of
+  ceremony). Candidate designs discussed so far:
+  1. **Pure-only** (status quo) — safe; the remote loop can never do real-world I/O responder-side.
+  2. **Responder-side effect allowlist** — a local policy of grantable effects (e.g. "at most
+     `net.read`, never write/spawn"), checked against the record's *verified* declaration.
+  3. **Trust-model-tied grants** (current leaning) — an effect is granted only when the responder's
+     policy, over its own attestation graph, trusts the function *for that effect's domain*
+     (`evaluate_trust`'s existing domain scoping / the `cap:` capability machinery), plus a free
+     trustless local `check-effects` before every grant.
+  4. **Modes of operation** — the above aren't mutually exclusive: a responder could run in an
+     explicitly selected mode (pure-only / allowlisted / trust-gated), the way the capability gate
+     already has possession-only vs chain-verified modes. Which modes exist, what the default is,
+     and whether modes can differ per effect kind is part of the open discussion.
+  A further wrinkle any design must answer: **an effectful claim is an *observation*, not a stably
+  re-runnable equation** — `eq(fetch(url), result)` may legitimately differ on re-execution, so
+  "verification is re-execution" needs a story for effectful asserts (grant-equipped re-runs?
+  replayable traces as evidence? a distinct claim kind?). **Not implemented until the discussion
+  concludes.** An unresolvable target or args that don't decode remain an honest error, never a
+  silent empty assert.
 - **`predicate` claims.** The responder emits — and `verify-claim` re-runs — a `predicate` claim. The
   `satisfies` / `verified` claim kinds are descriptive and not re-run here.
 - **Example-exact, not proven.** A CONFIRMED verdict means the claim's equation evaluated true on the
