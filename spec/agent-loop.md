@@ -154,6 +154,14 @@ production node: `--node https://nl.1105software.com --intent parse` over `"id,2
 three candidates, chose `double_second_field`, certified it, applied it, CONFIRMED `42`, and
 published the assert; an independent `verify-claim msg_5d22cb… --node …` then re-ran it to CONFIRMED.
 
+**Cost (measured, deliberately unoptimized):** the remote loop adds ~1.5 s over local — 7 sequential
+HTTPS requests (1 query + 6 artifact fetches) at ~210 ms each, dominated by per-request TCP+TLS
+handshakes (the client sends `Connection: close`). Acceptable for discovery-then-run. If it ever
+matters, the designed remedies in order: a **local content-addressed cache** (artifacts are immutable
+— same address, same bytes, forever — so caching is staleness-free by construction and makes repeat
+runs local-speed), connection reuse across the closure walk, and parallel artifact fetches. None
+implemented until a real workload makes the 1.5 s substantial.
+
 ## Scope (v0.2, honest)
 
 - **The inbound speech acts are wired.** Beyond `apply`/`validate`/`query`/`propose`, the responder
