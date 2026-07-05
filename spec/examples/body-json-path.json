@@ -1,0 +1,170 @@
+{
+  "body": {
+    "arms": [
+      {
+        "body": {
+          "kind": "variant",
+          "payload": {
+            "kind": "var",
+            "name": "j"
+          },
+          "tag": "Just"
+        },
+        "pattern": {
+          "kind": "lit",
+          "value": {
+            "kind": "bool",
+            "value": true
+          }
+        }
+      },
+      {
+        "body": {
+          "arms": [
+            {
+              "body": {
+                "arms": [
+                  {
+                    "body": {
+                      "args": [
+                        {
+                          "kind": "var",
+                          "name": "j2"
+                        }
+                      ],
+                      "fn": {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "kind": "var",
+                                "name": "path"
+                              }
+                            ],
+                            "fn": {
+                              "kind": "var",
+                              "name": "tail"
+                            },
+                            "kind": "app"
+                          }
+                        ],
+                        "fn": {
+                          "kind": "var",
+                          "name": "self"
+                        },
+                        "kind": "app"
+                      },
+                      "kind": "app"
+                    },
+                    "pattern": {
+                      "kind": "variant",
+                      "payload": {
+                        "kind": "bind",
+                        "name": "j2"
+                      },
+                      "tag": "Just"
+                    }
+                  },
+                  {
+                    "body": {
+                      "kind": "variant",
+                      "tag": "None"
+                    },
+                    "pattern": {
+                      "kind": "variant",
+                      "tag": "None"
+                    }
+                  }
+                ],
+                "kind": "case",
+                "scrutinee": {
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "m"
+                    }
+                  ],
+                  "fn": {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "kind": "var",
+                            "name": "path"
+                          }
+                        ],
+                        "fn": {
+                          "kind": "var",
+                          "name": "head"
+                        },
+                        "kind": "app"
+                      }
+                    ],
+                    "fn": {
+                      "kind": "var",
+                      "name": "map_get"
+                    },
+                    "kind": "app"
+                  },
+                  "kind": "app"
+                }
+              },
+              "pattern": {
+                "kind": "variant",
+                "payload": {
+                  "kind": "bind",
+                  "name": "m"
+                },
+                "tag": "JObj"
+              }
+            },
+            {
+              "body": {
+                "kind": "variant",
+                "tag": "None"
+              },
+              "pattern": {
+                "kind": "wildcard"
+              }
+            }
+          ],
+          "kind": "case",
+          "scrutinee": {
+            "kind": "var",
+            "name": "j"
+          }
+        },
+        "pattern": {
+          "kind": "lit",
+          "value": {
+            "kind": "bool",
+            "value": false
+          }
+        }
+      }
+    ],
+    "kind": "case",
+    "scrutinee": {
+      "args": [
+        {
+          "kind": "var",
+          "name": "path"
+        }
+      ],
+      "fn": {
+        "kind": "var",
+        "name": "null"
+      },
+      "kind": "app"
+    }
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "path"
+    },
+    {
+      "name": "j"
+    }
+  ]
+}

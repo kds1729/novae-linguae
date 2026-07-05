@@ -31,10 +31,11 @@ fn is_atomic_builtin(s: &str) -> bool {
     )
 }
 
-/// PascalCase built-in type constructors (parsed from `tag`). Matches the
+/// PascalCase built-in type names (parsed from `tag`). Matches the
 /// `type-expression.schema.json` enum (note: `Maybe`, not `Option`; no `IO`).
+/// `Json` is nominal and nullary — a builtin atom that happens to be PascalCase.
 fn is_ctor_builtin(s: &str) -> bool {
-    matches!(s, "List" | "Maybe" | "Result" | "Map" | "Set")
+    matches!(s, "List" | "Maybe" | "Result" | "Map" | "Set" | "Json")
 }
 
 // ---- parser ----
@@ -551,6 +552,8 @@ mod tests {
             "{age: nat, name: string}",
             "[None | Some(a)]",
             "List (List a)",
+            "Json",
+            "List string -> Json -> [Just(Json) | None]",
         ] {
             let ast = parse_type(s).unwrap();
             let printed = unparse_type(&ast).unwrap();

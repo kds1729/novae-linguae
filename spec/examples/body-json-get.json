@@ -1,0 +1,61 @@
+{
+  "body": {
+    "arms": [
+      {
+        "body": {
+          "args": [
+            {
+              "kind": "var",
+              "name": "m"
+            }
+          ],
+          "fn": {
+            "args": [
+              {
+                "kind": "var",
+                "name": "k"
+              }
+            ],
+            "fn": {
+              "kind": "var",
+              "name": "map_get"
+            },
+            "kind": "app"
+          },
+          "kind": "app"
+        },
+        "pattern": {
+          "kind": "variant",
+          "payload": {
+            "kind": "bind",
+            "name": "m"
+          },
+          "tag": "JObj"
+        }
+      },
+      {
+        "body": {
+          "kind": "variant",
+          "tag": "None"
+        },
+        "pattern": {
+          "kind": "wildcard"
+        }
+      }
+    ],
+    "kind": "case",
+    "scrutinee": {
+      "kind": "var",
+      "name": "j"
+    }
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "k"
+    },
+    {
+      "name": "j"
+    }
+  ]
+}

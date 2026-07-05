@@ -200,7 +200,19 @@ the existing variants — nothing new in the type system, patterns, or serializa
   `parse_json` (phase 3) → `map_get` (phase 2) → `case` — an agent fetches a JSON API response
   and uses a field, verified by default at every layer.
 
-## Phase 4 — follow-through (already-proven loops, re-run)
+**Nested projection (2026-07-05): real APIs nest objects, and the path idiom is now in the
+commons — as ordinary certified functions, not new builtins.**
+[`examples/json-get.v0.2.json`](examples/json-get.v0.2.json) (`json_get : string → Json →
+Maybe Json`, one `case` on `JObj` + `map_get`) and
+[`examples/json-path.v0.2.json`](examples/json-path.v0.2.json) (`json_path : List string →
+Json → Maybe Json`, structural recursion over the key path; any miss — absent key, non-object,
+leftover path — is `None`, the empty path is `Just`) both **certify fully SOUND**
+(typecheck / effects / termination / complexity `O(n)` resp. `O(n²)`). Their signatures are the
+first to *mention* `Json`: the type-expression vocabulary gained a nominal, nullary `Json`
+builtin (the subject of `parse_json`/`render_json`; it erases to the opaque `Sum` at the HM
+level like every sum type). Demonstrated against a live API: `http_get` (traced, replayable) →
+`parse_json` → `json_path ["owner", "login"]` projects a nested field out of a real GitHub
+response, and the replay reproduces the live run byte-for-byte with no network grant.
 
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.

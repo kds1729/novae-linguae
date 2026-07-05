@@ -122,6 +122,10 @@ Uppercase shorthands for common constructors — parsed as `tag`, resolved to an
 
 `List`, `Maybe`, `Result`, `Map`, `Set`
 
+`Json` is also a `tag`-parsed builtin, but **nominal and nullary** — it names the sum type consumed
+and produced by the `parse_json`/`render_json` builtins and takes no type arguments, so it appears
+bare in a type position (`string -> Json -> [Just(Json) | None]`).
+
 Any other `Tag` token in a type position is a type variable that happens to start uppercase — currently an error (type variables are lowercase per the schema). Reserved for future higher-kinded work.
 
 ### Precedence summary (lowest → highest)

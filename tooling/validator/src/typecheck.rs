@@ -191,7 +191,14 @@ fn ast_to_ty(t: &J) -> Result<Ty> {
         "var" => Ty::Con(format!("${}", t["name"].as_str().ok_or_else(|| anyhow!("type var name"))?), vec![]),
         "builtin" => {
             let n = t["name"].as_str().ok_or_else(|| anyhow!("builtin name"))?;
-            con(if n == "nat" { "int" } else { n }) // nat ≡ int in this checker
+            // nat ≡ int in this checker; Json is a sum type, and sum types are opaque `Sum`
+            // at the HM level throughout — a declared `Json` must unify with variant
+            // construction/patterns and with parse_json's result.
+            con(match n {
+                "nat" => "int",
+                "Json" => "Sum",
+                _ => n,
+            })
         }
         "ref" => Ty::Con(format!("ref:{}", t["target"].as_str().unwrap_or("?")), vec![]),
         "forall" => ast_to_ty(&t["body"])?, // vars become rigid via the `var` rule above
@@ -839,6 +846,31 @@ mod tests {
                     { "kind": "app", "fn": { "kind": "var", "name": "not" }, "args": [{ "kind": "var", "name": "a" }] }] } } });
         let bad_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }], "result": sum });
         assert!(typecheck(&bad_ty, &bad).is_err(), "a payload type error is not hidden by the opaque Sum");
+    }
+
+    #[test]
+    fn declared_json_builtin_erases_to_sum() {
+        // json_get : string -> Json -> [Just(Json) | None] — a declared `Json` param must unify
+        // with variant patterns on the body side (both erase to the opaque `Sum`).
+        let body = json!({ "kind": "lambda", "params": [{ "name": "k" }, { "name": "j" }], "body": {
+            "kind": "case", "scrutinee": { "kind": "var", "name": "j" },
+            "arms": [
+                { "pattern": { "kind": "variant", "tag": "JObj", "payload": { "kind": "bind", "name": "m" } },
+                  "body": { "kind": "app", "fn": { "kind": "app", "fn": { "kind": "var", "name": "map_get" },
+                      "args": [{ "kind": "var", "name": "k" }] }, "args": [{ "kind": "var", "name": "m" }] } },
+                { "pattern": { "kind": "wildcard" }, "body": { "kind": "variant", "tag": "None" } }] } });
+        let ty = json!({ "kind": "fn",
+            "params": [{ "kind": "builtin", "name": "string" }, { "kind": "builtin", "name": "Json" }],
+            "result": { "kind": "sum", "variants": [
+                { "tag": "Just", "type": { "kind": "builtin", "name": "Json" } }, { "tag": "None" }] } });
+        assert!(typecheck(&ty, &body).is_ok(), "json_get : string -> Json -> Maybe Json");
+        // A declared Json param used as an int is still a type error (Sum ≠ int).
+        let misuse = json!({ "kind": "lambda", "params": [{ "name": "j" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                      "args": [{ "kind": "var", "name": "j" }, { "kind": "lit", "value": { "kind": "int", "value": 1 } }] } });
+        let misuse_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "Json" }],
+                                "result": { "kind": "builtin", "name": "int" } });
+        assert!(typecheck(&misuse_ty, &misuse).is_err(), "Json is not int — the erasure is to Sum, not to a free var");
     }
 
     #[test]

@@ -1,0 +1,352 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_3324a194be5118b74e29458cd27077b6c08233139be799ae6464e87193aaf567",
+  "name_hints": [
+    "json_path",
+    "json_project"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "args": [
+            {
+              "kind": "builtin",
+              "name": "string"
+            }
+          ],
+          "ctor": {
+            "kind": "builtin",
+            "name": "List"
+          },
+          "kind": "apply"
+        },
+        {
+          "kind": "builtin",
+          "name": "Json"
+        }
+      ],
+      "result": {
+        "kind": "sum",
+        "variants": [
+          {
+            "tag": "Just",
+            "type": {
+              "kind": "builtin",
+              "name": "Json"
+            }
+          },
+          {
+            "tag": "None"
+          }
+        ]
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n^2)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "elems": [
+            {
+              "kind": "string",
+              "value": "owner"
+            },
+            {
+              "kind": "string",
+              "value": "login"
+            }
+          ],
+          "kind": "list"
+        },
+        {
+          "kind": "variant",
+          "payload": {
+            "entries": [
+              {
+                "key": "name",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "string",
+                    "value": "novae-linguae"
+                  },
+                  "tag": "JStr"
+                }
+              },
+              {
+                "key": "owner",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "entries": [
+                      {
+                        "key": "id",
+                        "value": {
+                          "kind": "variant",
+                          "payload": {
+                            "kind": "nat",
+                            "value": 7
+                          },
+                          "tag": "JNum"
+                        }
+                      },
+                      {
+                        "key": "login",
+                        "value": {
+                          "kind": "variant",
+                          "payload": {
+                            "kind": "string",
+                            "value": "kds1729"
+                          },
+                          "tag": "JStr"
+                        }
+                      }
+                    ],
+                    "kind": "map"
+                  },
+                  "tag": "JObj"
+                }
+              }
+            ],
+            "kind": "map"
+          },
+          "tag": "JObj"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "payload": {
+          "kind": "variant",
+          "payload": {
+            "kind": "string",
+            "value": "kds1729"
+          },
+          "tag": "JStr"
+        },
+        "tag": "Just"
+      }
+    },
+    {
+      "args": [
+        {
+          "elems": [],
+          "kind": "list"
+        },
+        {
+          "kind": "variant",
+          "payload": {
+            "kind": "nat",
+            "value": 5
+          },
+          "tag": "JNum"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "payload": {
+          "kind": "variant",
+          "payload": {
+            "kind": "nat",
+            "value": 5
+          },
+          "tag": "JNum"
+        },
+        "tag": "Just"
+      }
+    },
+    {
+      "args": [
+        {
+          "elems": [
+            {
+              "kind": "string",
+              "value": "owner"
+            },
+            {
+              "kind": "string",
+              "value": "missing"
+            }
+          ],
+          "kind": "list"
+        },
+        {
+          "kind": "variant",
+          "payload": {
+            "entries": [
+              {
+                "key": "name",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "string",
+                    "value": "novae-linguae"
+                  },
+                  "tag": "JStr"
+                }
+              },
+              {
+                "key": "owner",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "entries": [
+                      {
+                        "key": "id",
+                        "value": {
+                          "kind": "variant",
+                          "payload": {
+                            "kind": "nat",
+                            "value": 7
+                          },
+                          "tag": "JNum"
+                        }
+                      },
+                      {
+                        "key": "login",
+                        "value": {
+                          "kind": "variant",
+                          "payload": {
+                            "kind": "string",
+                            "value": "kds1729"
+                          },
+                          "tag": "JStr"
+                        }
+                      }
+                    ],
+                    "kind": "map"
+                  },
+                  "tag": "JObj"
+                }
+              }
+            ],
+            "kind": "map"
+          },
+          "tag": "JObj"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "None"
+      }
+    },
+    {
+      "args": [
+        {
+          "elems": [
+            {
+              "kind": "string",
+              "value": "owner"
+            },
+            {
+              "kind": "string",
+              "value": "login"
+            },
+            {
+              "kind": "string",
+              "value": "deeper"
+            }
+          ],
+          "kind": "list"
+        },
+        {
+          "kind": "variant",
+          "payload": {
+            "entries": [
+              {
+                "key": "name",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "string",
+                    "value": "novae-linguae"
+                  },
+                  "tag": "JStr"
+                }
+              },
+              {
+                "key": "owner",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "entries": [
+                      {
+                        "key": "id",
+                        "value": {
+                          "kind": "variant",
+                          "payload": {
+                            "kind": "nat",
+                            "value": 7
+                          },
+                          "tag": "JNum"
+                        }
+                      },
+                      {
+                        "key": "login",
+                        "value": {
+                          "kind": "variant",
+                          "payload": {
+                            "kind": "string",
+                            "value": "kds1729"
+                          },
+                          "tag": "JStr"
+                        }
+                      }
+                    ],
+                    "kind": "map"
+                  },
+                  "tag": "JObj"
+                }
+              }
+            ],
+            "kind": "map"
+          },
+          "tag": "JObj"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "None"
+      }
+    },
+    {
+      "args": [
+        {
+          "elems": [
+            {
+              "kind": "string",
+              "value": "port"
+            }
+          ],
+          "kind": "list"
+        },
+        {
+          "kind": "variant",
+          "payload": {
+            "kind": "string",
+            "value": "not an object"
+          },
+          "tag": "JStr"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "None"
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "query",
+    "json"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_85c356c6dddd97a6d4b9feccbd81e2935736549955e4b809aa16474b0f327e3c"
+}

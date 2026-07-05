@@ -70,9 +70,10 @@
             "Maybe",
             "Result",
             "Map",
-            "Set"
+            "Set",
+            "Json"
           ],
-          "description": "v0.1 built-in vocabulary. Atomic types (lowercase: bool, int, nat, float, string, bytes, unit, never) and common type constructors (PascalCase: List, Maybe, Result, Map, Set). Closed enum — adding a builtin requires a schema version bump. v0.2+ will likely fold these into 'ref' once the primitives have stable hashes in the commons."
+          "description": "v0.1 built-in vocabulary. Atomic types (lowercase: bool, int, nat, float, string, bytes, unit, never), common type constructors (PascalCase: List, Maybe, Result, Map, Set), and the nominal sum type Json (added in v0.4 — spec/expressiveness.md phase 3; the subject of the parse_json/render_json builtins, nullary: it takes no type arguments). Closed enum. v0.2+ will likely fold these into 'ref' once the primitives have stable hashes in the commons."
         }
       },
       "description": "A built-in primitive type (atomic) or built-in type constructor. Distinguished from 'ref' because v0.1 does not yet have commons entries for the standard types; v0.2+ may unify."

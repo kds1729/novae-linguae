@@ -237,7 +237,7 @@
           "type": "string",
           "enum": [
             "bool", "int", "nat", "float", "string", "bytes", "unit", "never",
-            "List", "Maybe", "Result", "Map", "Set"
+            "List", "Maybe", "Result", "Map", "Set", "Json"
           ]
         }
       }

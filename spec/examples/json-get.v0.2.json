@@ -1,0 +1,264 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_0fd5a61bab63ba647e84b67df54558845ed47bf9633d3143003121b3e827b03c",
+  "name_hints": [
+    "json_get",
+    "json_field"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "string"
+        },
+        {
+          "kind": "builtin",
+          "name": "Json"
+        }
+      ],
+      "result": {
+        "kind": "sum",
+        "variants": [
+          {
+            "tag": "Just",
+            "type": {
+              "kind": "builtin",
+              "name": "Json"
+            }
+          },
+          {
+            "tag": "None"
+          }
+        ]
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "port"
+        },
+        {
+          "kind": "variant",
+          "payload": {
+            "entries": [
+              {
+                "key": "host",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "string",
+                    "value": "example.com"
+                  },
+                  "tag": "JStr"
+                }
+              },
+              {
+                "key": "port",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "nat",
+                    "value": 9000
+                  },
+                  "tag": "JNum"
+                }
+              }
+            ],
+            "kind": "map"
+          },
+          "tag": "JObj"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "payload": {
+          "kind": "variant",
+          "payload": {
+            "kind": "nat",
+            "value": 9000
+          },
+          "tag": "JNum"
+        },
+        "tag": "Just"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "owner"
+        },
+        {
+          "kind": "variant",
+          "payload": {
+            "entries": [
+              {
+                "key": "name",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "string",
+                    "value": "novae-linguae"
+                  },
+                  "tag": "JStr"
+                }
+              },
+              {
+                "key": "owner",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "entries": [
+                      {
+                        "key": "id",
+                        "value": {
+                          "kind": "variant",
+                          "payload": {
+                            "kind": "nat",
+                            "value": 7
+                          },
+                          "tag": "JNum"
+                        }
+                      },
+                      {
+                        "key": "login",
+                        "value": {
+                          "kind": "variant",
+                          "payload": {
+                            "kind": "string",
+                            "value": "kds1729"
+                          },
+                          "tag": "JStr"
+                        }
+                      }
+                    ],
+                    "kind": "map"
+                  },
+                  "tag": "JObj"
+                }
+              }
+            ],
+            "kind": "map"
+          },
+          "tag": "JObj"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "payload": {
+          "kind": "variant",
+          "payload": {
+            "entries": [
+              {
+                "key": "id",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "nat",
+                    "value": 7
+                  },
+                  "tag": "JNum"
+                }
+              },
+              {
+                "key": "login",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "string",
+                    "value": "kds1729"
+                  },
+                  "tag": "JStr"
+                }
+              }
+            ],
+            "kind": "map"
+          },
+          "tag": "JObj"
+        },
+        "tag": "Just"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "missing"
+        },
+        {
+          "kind": "variant",
+          "payload": {
+            "entries": [
+              {
+                "key": "host",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "string",
+                    "value": "example.com"
+                  },
+                  "tag": "JStr"
+                }
+              },
+              {
+                "key": "port",
+                "value": {
+                  "kind": "variant",
+                  "payload": {
+                    "kind": "nat",
+                    "value": 9000
+                  },
+                  "tag": "JNum"
+                }
+              }
+            ],
+            "kind": "map"
+          },
+          "tag": "JObj"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "None"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "port"
+        },
+        {
+          "kind": "variant",
+          "payload": {
+            "kind": "nat",
+            "value": 5
+          },
+          "tag": "JNum"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "None"
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "query",
+    "json"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_9901ba1ceafff48305256b553c5b062d0be7602818530399588c1008db70fbb6"
+}
