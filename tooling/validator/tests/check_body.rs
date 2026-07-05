@@ -245,6 +245,27 @@ fn field_bad_record_fails() {
     assert!(check_body_well_formed(&v).is_err());
 }
 
+// ---- variant construction ----
+
+#[test]
+fn variant_construction_passes() {
+    // `Just(a / b)` — a computed-payload variant expression (in the language since Maybe landed;
+    // the commons ingest gate surfaced that schema + walker had drifted behind).
+    let v = json!({
+        "kind": "variant",
+        "tag": "Just",
+        "payload": {"kind": "app", "fn": {"kind": "var", "name": "div"},
+                    "args": [{"kind": "var", "name": "a"}, {"kind": "var", "name": "b"}]}
+    });
+    assert!(check_body_well_formed(&v).is_ok());
+    // Nullary constructors omit the payload.
+    assert!(check_body_well_formed(&json!({"kind": "variant", "tag": "None"})).is_ok());
+    // A missing tag, or a malformed payload EXPRESSION, is caught.
+    assert!(check_body_well_formed(&json!({"kind": "variant"})).is_err());
+    assert!(check_body_well_formed(&json!({"kind": "variant", "tag": "Just",
+                                           "payload": {"kind": "bogus"}})).is_err());
+}
+
 // ---- unknown kind ----
 
 #[test]

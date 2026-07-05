@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://novae-linguae.org/spec/v0.1/body-expression.schema.json",
   "title": "Nova Lingua Body Expression",
-  "description": "Structured AST for the executable body of a Nova Lingua function. Function records reference a body by `body_hash` (a content-address with the `expr_` prefix); this schema defines the body that hash resolves to. v0.1 covers seven expression kinds — `var`, `lit`, `app`, `let`, `lambda`, `case`, `field` — and four pattern kinds — `wildcard`, `bind`, `variant`, `lit`. Conditional `if` is intentionally absent: write it as `case` on a `bool` value (principle 7: minimal orthogonal vocabulary). Embedded types (in `lambda.params[].type`) and embedded values (in `lit.value` and `pat_lit.value`) are accepted as opaque objects at this layer; they must validate independently against type-expression.schema.json and value-expression.schema.json respectively. v0.2+ may tighten this via cross-file $refs once schema-resolution tooling exists. Well-formedness rules NOT enforced here (left to the verifier): variable scoping (every `var.name` bound by an enclosing function input, `let`, `lambda` param, or `case` pattern binding), pattern exhaustiveness in `case`, single-name-binding-per-arm, type-correctness of `app.fn` against args, payload-pattern-only-where-the-variant-carries-one. The body is just an expression — the function's parameter binding is on the OUTSIDE (typically the body is itself a `lambda` whose params match the function's signature). For deferred-to-later versions of this schema: type annotations on let bindings (currently inferred), multi-arm lambda equivalence, multi-binding let (currently chained), do-notation / monadic sugar, and (much later) effect rows / handler expressions.",
+  "description": "Structured AST for the executable body of a Nova Lingua function. Function records reference a body by `body_hash` (a content-address with the `expr_` prefix); this schema defines the body that hash resolves to. Covers eight expression kinds — `var`, `lit`, `app`, `let`, `lambda`, `case`, `field`, `variant` (construction, with a computed payload) — and four pattern kinds — `wildcard`, `bind`, `variant`, `lit`. Conditional `if` is intentionally absent: write it as `case` on a `bool` value (principle 7: minimal orthogonal vocabulary). Embedded types (in `lambda.params[].type`) and embedded values (in `lit.value` and `pat_lit.value`) are accepted as opaque objects at this layer; they must validate independently against type-expression.schema.json and value-expression.schema.json respectively. v0.2+ may tighten this via cross-file $refs once schema-resolution tooling exists. Well-formedness rules NOT enforced here (left to the verifier): variable scoping (every `var.name` bound by an enclosing function input, `let`, `lambda` param, or `case` pattern binding), pattern exhaustiveness in `case`, single-name-binding-per-arm, type-correctness of `app.fn` against args, payload-pattern-only-where-the-variant-carries-one. The body is just an expression — the function's parameter binding is on the OUTSIDE (typically the body is itself a `lambda` whose params match the function's signature). For deferred-to-later versions of this schema: type annotations on let bindings (currently inferred), multi-arm lambda equivalence, multi-binding let (currently chained), do-notation / monadic sugar, and (much later) effect rows / handler expressions.",
   "$ref": "#/$defs/body",
   "$defs": {
     "body": {
@@ -13,9 +13,30 @@
         { "$ref": "#/$defs/let" },
         { "$ref": "#/$defs/lambda" },
         { "$ref": "#/$defs/case" },
-        { "$ref": "#/$defs/field" }
+        { "$ref": "#/$defs/field" },
+        { "$ref": "#/$defs/variant_expr" }
       ],
       "description": "Any body expression. Discriminated by `kind`."
+    },
+    "variant_expr": {
+      "type": "object",
+      "required": ["kind", "tag"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "variant" },
+        "tag": {
+          "type": "string",
+          "pattern": "^[A-Z][a-zA-Z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Variant tag, PascalCase per the sum-type convention."
+        },
+        "payload": {
+          "$ref": "#/$defs/body",
+          "description": "The payload EXPRESSION — variant construction with a computed payload (`Just(a / b)`). Omit for nullary constructors (`None`). This is the expression-level counterpart of the `variant` VALUE kind (which carries a value, not an expression)."
+        }
+      },
+      "description": "Construct an inhabitant of a sum type. In the language since Maybe/Result landed; this schema entry closes a drift the commons ingest gate surfaced (bodies constructing variants were evaluator/typechecker-legal but schema-invalid)."
     },
     "var": {
       "type": "object",

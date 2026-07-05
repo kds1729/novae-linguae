@@ -1124,9 +1124,19 @@ fn check_body_node(value: &Value) -> Result<()> {
                 .ok_or_else(|| anyhow!("`field` missing `record`"))?;
             check_body_node(record)?;
         }
+        "variant" => {
+            // Variant CONSTRUCTION with an optional computed-payload EXPRESSION (`Just(a / b)`) —
+            // the expression-level counterpart of the `variant` value kind.
+            obj.get("tag")
+                .and_then(|t| t.as_str())
+                .ok_or_else(|| anyhow!("`variant` expression missing string `tag`"))?;
+            if let Some(payload) = obj.get("payload") {
+                check_body_node(payload)?;
+            }
+        }
         other => {
             return Err(anyhow!(
-                "unknown body-expression kind `{other}` (expected: var, lit, app, let, lambda, case, field)"
+                "unknown body-expression kind `{other}` (expected: var, lit, app, let, lambda, case, field, variant)"
             ));
         }
     }
