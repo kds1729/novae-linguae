@@ -165,6 +165,10 @@ fn best_trusted(
 enum Ty {
     Int, // int and nat (nat ≡ int in the evaluator)
     Bool,
+    Str,
+    Float,
+    Map, // Map string a — key type is fixed, the value type stays coarse
+    Sum, // any variant value / any sum-typed (incl. Json) parameter — sums are opaque, matching typecheck
     Lst(Box<Ty>),
     Fun,
     Any, // unknown — unifies with anything (kept permissive to avoid dropping valid candidates)
@@ -175,6 +179,10 @@ fn value_ty(v: &J) -> Ty {
     match v.get("kind").and_then(|k| k.as_str()) {
         Some("int") | Some("nat") => Ty::Int,
         Some("bool") => Ty::Bool,
+        Some("string") => Ty::Str,
+        Some("float") => Ty::Float,
+        Some("map") => Ty::Map,
+        Some("variant") => Ty::Sum,
         Some("fn_ref") => Ty::Fun,
         Some("list") => {
             let elem = v.get("elems").and_then(|e| e.as_array()).and_then(|a| a.first()).map(value_ty);
@@ -214,17 +222,22 @@ fn unify_ty(ptype: &J, arg: &Ty, subst: &mut std::collections::HashMap<String, T
         Some("builtin") => match ptype.get("name").and_then(|n| n.as_str()) {
             Some("int") | Some("nat") => *arg == Ty::Int,
             Some("bool") => *arg == Ty::Bool,
+            Some("string") => *arg == Ty::Str,
+            Some("float") => *arg == Ty::Float,
+            Some("Json") => *arg == Ty::Sum, // a Json parameter takes a variant value (JNull/JObj/…)
             Some("List") => matches!(arg, Ty::Lst(_)),
+            Some("Map") => *arg == Ty::Map,
             _ => true, // unknown builtin sort: permissive
         },
+        Some("sum") => *arg == Ty::Sum, // a structurally-spelled sum parameter takes a variant value
         Some("apply") => {
-            if ptype.pointer("/ctor/name").and_then(|n| n.as_str()) == Some("List") {
-                match arg {
+            match ptype.pointer("/ctor/name").and_then(|n| n.as_str()) {
+                Some("List") => match arg {
                     Ty::Lst(e) => ptype.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()).map_or(true, |pe| unify_ty(pe, e, subst)),
                     _ => false,
-                }
-            } else {
-                true // other type constructors: permissive
+                },
+                Some("Map") => *arg == Ty::Map,
+                _ => true, // other type constructors: permissive
             }
         }
         Some("fn") => *arg == Ty::Fun,
@@ -245,12 +258,18 @@ fn type_to_ty(t: &J) -> Ty {
         Some("builtin") => match t.get("name").and_then(|n| n.as_str()) {
             Some("int") | Some("nat") => Ty::Int,
             Some("bool") => Ty::Bool,
+            Some("string") => Ty::Str,
+            Some("float") => Ty::Float,
+            Some("Json") => Ty::Sum,
             Some("List") => Ty::Lst(Box::new(Ty::Any)),
+            Some("Map") => Ty::Map,
             _ => Ty::Any,
         },
+        Some("sum") => Ty::Sum,
         Some("apply") if t.pointer("/ctor/name").and_then(|n| n.as_str()) == Some("List") => {
             Ty::Lst(Box::new(t.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()).map_or(Ty::Any, type_to_ty)))
         }
+        Some("apply") if t.pointer("/ctor/name").and_then(|n| n.as_str()) == Some("Map") => Ty::Map,
         Some("fn") => Ty::Fun,
         _ => Ty::Any, // var or unknown
     }
@@ -597,6 +616,35 @@ mod tests {
         // reverse : forall a. List a -> List a
         assert!(signature_fits(&reverse, &[list.clone()], &records), "a list fits List a");
         assert!(!signature_fits(&reverse, &[int.clone()], &records), "an int does not fit List a");
+    }
+
+    #[test]
+    fn signature_filter_discriminates_string_map_and_json_sorts() {
+        // The live-workflow gap this closes: json_get : string -> Json -> Maybe Json and
+        // json_path : List string -> Json -> Maybe Json share the intent tag "json" and arity 2 —
+        // with a (List string, Json) application only json_path may survive the filter, else the
+        // orchestrator proposes json_get and the responder rejects at apply time.
+        let records = crate::build_record_map(&examples()).unwrap();
+        let load = |n: &str| crate::read_json(&examples().join(n)).unwrap();
+        let (json_get, json_path) = (load("json-get.v0.2.json"), load("json-path.v0.2.json"));
+        let path = json!({ "kind": "list", "elems": [{ "kind": "string", "value": "owner" }] });
+        let key = json!({ "kind": "string", "value": "owner" });
+        let jval = json!({ "kind": "variant", "tag": "JNum", "payload": { "kind": "int", "value": 7 } });
+
+        assert!(signature_fits(&json_path, &[path.clone(), jval.clone()], &records));
+        assert!(!signature_fits(&json_get, &[path.clone(), jval.clone()], &records),
+            "a List string arg must not pass a string parameter");
+        assert!(signature_fits(&json_get, &[key.clone(), jval.clone()], &records));
+        assert!(!signature_fits(&json_path, &[key.clone(), jval.clone()], &records),
+            "a string arg must not pass a List string parameter");
+        // The Json-typed parameter takes only variant values.
+        assert!(!signature_fits(&json_get, &[key.clone(), key.clone()], &records),
+            "a string arg must not pass a Json parameter");
+        // A Map-typed parameter (config_port : Map string int -> int) rejects non-map values.
+        let config_port = load("config-port.v0.2.json");
+        let map = json!({ "kind": "map", "entries": [{ "key": "port", "value": { "kind": "int", "value": 1 } }] });
+        assert!(signature_fits(&config_port, &[map], &records));
+        assert!(!signature_fits(&config_port, &[key], &records), "a string arg must not pass a Map parameter");
     }
 
     #[test]

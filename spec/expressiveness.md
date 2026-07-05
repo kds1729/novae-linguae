@@ -213,6 +213,12 @@ builtin (the subject of `parse_json`/`render_json`; it erases to the opaque `Sum
 level like every sum type). Demonstrated against a live API: `http_get` (traced, replayable) →
 `parse_json` → `json_path ["owner", "login"]` projects a nested field out of a real GitHub
 response, and the replay reproduces the live run byte-for-byte with no network grant.
+Both are published to the live commons with signed certifications, and the verified remote
+agent loop closes over them: `orchestrate --node … --intent json --verify --require-certified`
+discovers both, disambiguates **by signature** (the coarse argument-fit filter learned the
+string/float/Map/Json sorts en route — before that it proposed the wrong candidate and the
+responder rejected at apply time), certifies, applies, publishes the assert, and an
+independent `verify-claim` re-confirms it from the address alone.
 
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.
