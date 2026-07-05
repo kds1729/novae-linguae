@@ -58,9 +58,12 @@ detailed recipe below is the **3B efficient default**; the 7B differs only in `-
 
 A LoRA adapter is small, but the *recipe* is what makes it a checkpoint: the run is **deterministic**
 (fixed seed, greedy eval, no RNG in the data path), so this manifest reproduces the adapter bit-for-bit
-on the same base + corpus. The weights themselves are gitignored (regenerable); pin/host them in the
-commons, not the source tree — the designed shape for that is the `wgt_` pointer record + eval
-attestations of [`spec/weights.md`](../../spec/weights.md) (proposed, not yet implemented).
+on the same base + corpus. The weights themselves are gitignored (regenerable) and **hosted in the
+commons** per [`spec/weights.md`](../../spec/weights.md): all three pinned tiers are published to Arca
+as `wgt_` pointer records with signed eval attestations of the measured scores, blobs fetchable (and
+hash-verifiable) from `https://nl.1105software.com/v0/blobs/<sha256>` —
+3B `wgt_fd2b1c74cef80874…`, **7B `wgt_3a9906acb8b042e4…`**, 14B `wgt_19cb0740b13c354e…`
+(records + attestations committed under [`spec/examples/`](../../spec/examples/)).
 
 ## The pin
 
