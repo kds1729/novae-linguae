@@ -410,6 +410,44 @@ class TestStringIdiomBodies(unittest.TestCase):
         b5 = nl_body.body_ast_from_ts("f", '(s) => s.split(",")')
         self.assertNotIn('"str_split"', json.dumps(b5))
 
+    def test_dict_idioms_translate(self):
+        import ast as pyast
+        import nl_body
+        # The TOTAL dict subset: get-with-default, membership, len, sorted keys.
+        b = self._body('def f(d: dict[str, int]):\n    return d.get("k", 0)\n')
+        self.assertIn('"map_get"', b)
+        self.assertIn('"Just"', b)  # the Maybe is consumed by a case
+        b2 = self._body('def f(d: dict):\n    return "k" in d\n')
+        self.assertIn('"map_get"', b2)
+        b3 = self._body('def f(d: dict[str, int]):\n    return len(d)\n')
+        self.assertIn('"map_size"', b3)
+        b4 = self._body('def f(d: dict[str, int]):\n    return sorted(d.keys())\n')
+        self.assertIn('"map_keys"', b4)
+        # The bare 1-arg get (an Optional boundary) and subscript (raises) stay out of subset.
+        func = pyast.parse('def f(d: dict):\n    return d.get("k")\n').body[0]
+        self.assertIsNone(nl_body.body_ast_from_py(func))
+        func2 = pyast.parse('def f(d: dict):\n    return d["k"]\n').body[0]
+        self.assertIsNone(nl_body.body_ast_from_py(func2))
+        # Unannotated receivers keep the untyped reading (no map_get).
+        func3 = pyast.parse('def f(d):\n    return d.get("k", 0)\n').body[0]
+        b5 = nl_body.body_ast_from_py(func3)
+        self.assertNotIn('"map_get"', json.dumps(b5))
+
+    def test_dict_values_encode_as_maps_or_records(self):
+        import nl_values
+        map_ty = {"kind": "apply", "ctor": {"kind": "builtin", "name": "Map"},
+                  "args": [{"kind": "builtin", "name": "string"}, {"kind": "builtin", "name": "int"}]}
+        # Map-typed expectation -> map kind, entries sorted by key.
+        v = nl_values.to_value_ast({"b": 2, "a": 1}, map_ty)
+        self.assertEqual(v["kind"], "map")
+        self.assertEqual([e["key"] for e in v["entries"]], ["a", "b"])
+        # No expectation + identifier keys -> the historical record encoding (hash-stable).
+        v2 = nl_values.to_value_ast({"x": 1})
+        self.assertEqual(v2["kind"], "record")
+        # No expectation + non-identifier string keys -> map (previously an error).
+        v3 = nl_values.to_value_ast({"two words": 1})
+        self.assertEqual(v3["kind"], "map")
+
     def test_unannotated_keeps_numeric_reading(self):
         # Without a str annotation, + stays add and len stays length — no silent retyping.
         src = "def f(a, b):\n    return a + b\n"

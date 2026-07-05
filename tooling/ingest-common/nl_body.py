@@ -130,7 +130,7 @@ def _fold(op, terms):
 
 # --- Python front-end ---------------------------------------------------------------------------
 
-def _is_stringish(node, strs):
+def _is_stringish(node, strs, dicts=frozenset()):
     """Whether `node` is syntactically known to produce a STRING: a str literal, a str-annotated
     parameter (or a `let` name bound to a stringish value), `str(x)`, a `sep.join(...)` call, string
     concatenation, or a ternary whose branches are both stringish. Drives the type-dependent
@@ -148,12 +148,34 @@ def _is_stringish(node, strs):
             return True
         return False
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return _is_stringish(node.left, strs) or _is_stringish(node.right, strs)
+        return _is_stringish(node.left, strs, dicts) or _is_stringish(node.right, strs, dicts)
     if isinstance(node, ast.IfExp):
-        return _is_stringish(node.body, strs) and _is_stringish(node.orelse, strs)
+        return _is_stringish(node.body, strs, dicts) and _is_stringish(node.orelse, strs, dicts)
     if isinstance(node, ast.JoinedStr):
         return True  # an f-string always produces a string
     return False
+
+
+def _is_dictish(node, dicts):
+    """Whether `node` is syntactically known to be a DICT (a `dict`-annotated parameter, or a `let`
+    name bound to one). Drives the map-idiom translations (`d.get(k, v)`, `k in d`, `len(d)`,
+    `sorted(d.keys())`); anything unproven keeps its untyped reading, and a wrong guess fails the
+    example gate rather than shipping wrong."""
+    return isinstance(node, ast.Name) and node.id in dicts
+
+
+def _maybe_case(scrutinee, just_body_of, none_body):
+    """`case <scrutinee> of { Just(_got) => <just_body_of(var)>; None => <none_body> }` — the shape
+    every Maybe-consuming translation shares."""
+    return {
+        "kind": "case",
+        "scrutinee": scrutinee,
+        "arms": [
+            {"pattern": {"kind": "variant", "tag": "Just", "payload": {"kind": "bind", "name": "_got"}},
+             "body": just_body_of(b_var("_got"))},
+            {"pattern": {"kind": "variant", "tag": "None"}, "body": none_body},
+        ],
+    }
 
 
 def _is_boolish(node):
@@ -170,7 +192,7 @@ def _is_boolish(node):
     return False
 
 
-def _expr_from_py(node, strs=frozenset()):
+def _expr_from_py(node, strs=frozenset(), dicts=frozenset()):
     if isinstance(node, ast.JoinedStr):
         # f-strings (spec/expressiveness.md phase 4): f"n={n}" -> str_concat("n=", to_string(n)).
         # A known-string interpolation passes through as-is; anything else goes through to_string
@@ -184,8 +206,8 @@ def _expr_from_py(node, strs=frozenset()):
             elif isinstance(piece, ast.FormattedValue):
                 if piece.conversion != -1 or piece.format_spec is not None:
                     raise BodyError("f-string conversions/format specs are out of subset")
-                inner = _expr_from_py(piece.value, strs)
-                parts.append(inner if _is_stringish(piece.value, strs)
+                inner = _expr_from_py(piece.value, strs, dicts)
+                parts.append(inner if _is_stringish(piece.value, strs, dicts)
                              else b_app(b_var("to_string"), [inner]))
             else:
                 raise BodyError("unsupported f-string piece")
@@ -198,8 +220,8 @@ def _expr_from_py(node, strs=frozenset()):
     if isinstance(node, ast.IfExp):
         if not _is_boolish(node.test):
             raise BodyError("non-boolean ternary test (Python truthiness is not representable)")
-        return b_if(_expr_from_py(node.test, strs), _expr_from_py(node.body, strs),
-                    _expr_from_py(node.orelse, strs))
+        return b_if(_expr_from_py(node.test, strs, dicts), _expr_from_py(node.body, strs, dicts),
+                    _expr_from_py(node.orelse, strs, dicts))
     if isinstance(node, ast.ListComp):
         # [elt for v in src (if cond)] -> map(\v -> elt, filter(\v -> cond, src))  (builtins, no loop)
         if len(node.generators) != 1:
@@ -208,51 +230,58 @@ def _expr_from_py(node, strs=frozenset()):
         if getattr(gen, "is_async", 0) or not isinstance(gen.target, ast.Name) or len(gen.ifs) > 1:
             raise BodyError("comprehension shape out of subset")
         var = gen.target.id
-        inner = strs - {var}  # the comprehension variable shadows any str-annotated name
-        src = _expr_from_py(gen.iter, strs)
+        inner = strs - {var}  # the comprehension variable shadows any annotated name
+        inner_d = dicts - {var}
+        src = _expr_from_py(gen.iter, strs, dicts)
         if gen.ifs:
             if not _is_boolish(gen.ifs[0]):
                 raise BodyError("comprehension filter must be boolean")
-            src = b_app(b_var("filter"), [b_lambda([var], _expr_from_py(gen.ifs[0], inner)), src])
-        elt = _expr_from_py(node.elt, inner)
+            src = b_app(b_var("filter"), [b_lambda([var], _expr_from_py(gen.ifs[0], inner, inner_d)), src])
+        elt = _expr_from_py(node.elt, inner, inner_d)
         if elt == b_var(var):
             return src  # `[v for v in src ...]` is the (filtered) source — no identity map
         return b_app(b_var("map"), [b_lambda([var], elt), src])
     if isinstance(node, ast.BoolOp):
-        return _fold(_PY_BOOL[type(node.op)], [_expr_from_py(v, strs) for v in node.values])
+        return _fold(_PY_BOOL[type(node.op)], [_expr_from_py(v, strs, dicts) for v in node.values])
     if isinstance(node, ast.UnaryOp):
         if isinstance(node.op, ast.Not):
-            return _op_app("not", [_expr_from_py(node.operand, strs)])
+            return _op_app("not", [_expr_from_py(node.operand, strs, dicts)])
         if isinstance(node.op, ast.USub):
             if isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, (int, float)) \
                     and not isinstance(node.operand.value, bool):
                 return b_lit(_value(-node.operand.value))
-            return _op_app("neg", [_expr_from_py(node.operand, strs)])
+            return _op_app("neg", [_expr_from_py(node.operand, strs, dicts)])
         raise BodyError("unsupported unary operator")
     if isinstance(node, ast.Compare):
         terms, left = [], node.left
         for op, right in zip(node.ops, node.comparators):
-            # `needle in s` / `needle not in s` over a KNOWN string -> str_contains (needle-first,
-            # matching the builtin's pattern-first order). Membership over anything unproven-string
-            # stays out of subset (there is no list-membership builtin).
+            # `needle in s` over a KNOWN string -> str_contains (needle-first); `k in d` over a KNOWN
+            # dict -> a has-key case over map_get's Maybe. Membership over anything unproven stays out
+            # of subset (there is no list-membership builtin).
             if type(op) in (ast.In, ast.NotIn):
-                if not _is_stringish(right, strs):
-                    raise BodyError("`in` is only in subset over a known string (str_contains)")
-                t = b_app(b_var("str_contains"), [_expr_from_py(left, strs), _expr_from_py(right, strs)])
+                if _is_stringish(right, strs):
+                    t = b_app(b_var("str_contains"),
+                              [_expr_from_py(left, strs, dicts), _expr_from_py(right, strs, dicts)])
+                elif _is_dictish(right, dicts):
+                    t = _maybe_case(
+                        b_app(b_var("map_get"), [_expr_from_py(left, strs, dicts), _expr_from_py(right, strs, dicts)]),
+                        lambda _v: b_lit(_value(True)), b_lit(_value(False)))
+                else:
+                    raise BodyError("`in` is only in subset over a known string or dict")
                 terms.append(_op_app("not", [t]) if isinstance(op, ast.NotIn) else t)
             elif type(op) not in _PY_CMP:
                 raise BodyError("unsupported comparison operator")
             else:
-                terms.append(_op_app(_PY_CMP[type(op)], [_expr_from_py(left, strs), _expr_from_py(right, strs)]))
+                terms.append(_op_app(_PY_CMP[type(op)], [_expr_from_py(left, strs, dicts), _expr_from_py(right, strs, dicts)]))
             left = right
         return terms[0] if len(terms) == 1 else _fold("and", terms)
     if isinstance(node, ast.BinOp):
         # String concatenation: `a + b` where either side is a known string -> str_concat.
-        if isinstance(node.op, ast.Add) and (_is_stringish(node.left, strs) or _is_stringish(node.right, strs)):
-            return b_app(b_var("str_concat"), [_expr_from_py(node.left, strs), _expr_from_py(node.right, strs)])
+        if isinstance(node.op, ast.Add) and (_is_stringish(node.left, strs, dicts) or _is_stringish(node.right, strs, dicts)):
+            return b_app(b_var("str_concat"), [_expr_from_py(node.left, strs, dicts), _expr_from_py(node.right, strs, dicts)])
         if type(node.op) not in _PY_BIN:
             raise BodyError("unsupported arithmetic operator")
-        return _op_app(_PY_BIN[type(node.op)], [_expr_from_py(node.left, strs), _expr_from_py(node.right, strs)])
+        return _op_app(_PY_BIN[type(node.op)], [_expr_from_py(node.left, strs, dicts), _expr_from_py(node.right, strs, dicts)])
     if isinstance(node, ast.Call):
         if node.keywords or any(isinstance(a, ast.Starred) for a in node.args):
             raise BodyError("calls with keyword/starred args are out of subset")
@@ -261,34 +290,61 @@ def _expr_from_py(node, strs=frozenset()):
         # map onto the separator-FIRST builtins (note split swaps receiver and argument). Only the
         # 1-argument `.split(sep)` translates — Python's 0-arg whitespace split has no counterpart.
         if isinstance(fn, ast.Attribute) and len(node.args) == 1:
-            if fn.attr == "split" and _is_stringish(fn.value, strs):
+            if fn.attr == "split" and _is_stringish(fn.value, strs, dicts):
                 return b_app(b_var("str_split"),
-                             [_expr_from_py(node.args[0], strs), _expr_from_py(fn.value, strs)])
+                             [_expr_from_py(node.args[0], strs, dicts), _expr_from_py(fn.value, strs, dicts)])
             if fn.attr == "join":
                 # Python order: `sep.join(xs)` (stringish receiver). TS/JS order: `xs.join(sep)`
                 # (stringish ARGUMENT). Either way the separator goes first.
-                if _is_stringish(fn.value, strs):
+                if _is_stringish(fn.value, strs, dicts):
                     return b_app(b_var("str_join"),
-                                 [_expr_from_py(fn.value, strs), _expr_from_py(node.args[0], strs)])
-                if _is_stringish(node.args[0], strs):
+                                 [_expr_from_py(fn.value, strs, dicts), _expr_from_py(node.args[0], strs, dicts)])
+                if _is_stringish(node.args[0], strs, dicts):
                     return b_app(b_var("str_join"),
-                                 [_expr_from_py(node.args[0], strs), _expr_from_py(fn.value, strs)])
+                                 [_expr_from_py(node.args[0], strs, dicts), _expr_from_py(fn.value, strs, dicts)])
             if fn.attr == "includes" and _is_stringish(fn.value, strs):
                 # TS `s.includes(needle)` -> str_contains(needle, s) (needle-first builtin).
                 return b_app(b_var("str_contains"),
-                             [_expr_from_py(node.args[0], strs), _expr_from_py(fn.value, strs)])
+                             [_expr_from_py(node.args[0], strs, dicts), _expr_from_py(fn.value, strs, dicts)])
+        # Dict idioms (spec/expressiveness.md phase 4): only the TOTAL forms translate. The bare
+        # 1-arg `d.get(k)` (an Optional at the record boundary — needs the None<->Maybe example
+        # value-mapping design) stays out of subset; `d[k]` raises, so it stays out too.
+        if isinstance(fn, ast.Attribute) and _is_dictish(fn.value, dicts):
+            if fn.attr == "get" and len(node.args) == 2:
+                # d.get(k, default) -> case map_get(k, d) of { Just(v) => v; None => default }.
+                return _maybe_case(
+                    b_app(b_var("map_get"), [_expr_from_py(node.args[0], strs, dicts),
+                                             _expr_from_py(fn.value, strs, dicts)]),
+                    lambda v: v, _expr_from_py(node.args[1], strs, dicts))
+            if fn.attr == "get" and len(node.args) == 1:
+                # The bare 1-arg get returns an Optional at the record boundary — out of subset
+                # until the None<->Maybe example value-mapping is designed. Refuse explicitly
+                # rather than emitting an unrunnable projection.
+                raise BodyError("1-arg dict.get (Optional boundary) is out of subset")
         if isinstance(fn, ast.Name):
-            # `len` of a known string is str_length (Unicode scalars — matches Python's len).
+            # `len` of a known string is str_length (Unicode scalars — matches Python's len); of a
+            # known dict, map_size.
             if fn.id == "len" and len(node.args) == 1 and _is_stringish(node.args[0], strs):
-                return b_app(b_var("str_length"), [_expr_from_py(node.args[0], strs)])
+                return b_app(b_var("str_length"), [_expr_from_py(node.args[0], strs, dicts)])
+            if fn.id == "len" and len(node.args) == 1 and _is_dictish(node.args[0], dicts):
+                return b_app(b_var("map_size"), [_expr_from_py(node.args[0], strs, dicts)])
+            # `sorted(d)` / `sorted(d.keys())` over a known dict -> map_keys (which is sorted —
+            # deterministic iteration is exactly what makes this translation sound).
+            if fn.id == "sorted" and len(node.args) == 1:
+                target = node.args[0]
+                if isinstance(target, ast.Call) and isinstance(target.func, ast.Attribute) \
+                        and target.func.attr == "keys" and not target.args:
+                    target = target.func.value
+                if _is_dictish(target, dicts):
+                    return b_app(b_var("map_keys"), [_expr_from_py(target, strs, dicts)])
             fnexpr = b_var(_PY_CALL.get(fn.id, fn.id))  # map len->length, abs->abs; else as-named
         elif isinstance(fn, ast.Attribute):
-            fnexpr = _expr_from_py(fn, strs)  # qualified/method call -> app over a field projection
+            fnexpr = _expr_from_py(fn, strs, dicts)  # qualified/method call -> app over a field projection
         else:
             raise BodyError("unsupported call target")
-        return b_app(fnexpr, [_expr_from_py(a, strs) for a in node.args])
+        return b_app(fnexpr, [_expr_from_py(a, strs, dicts) for a in node.args])
     if isinstance(node, ast.Attribute):
-        return b_field(_expr_from_py(node.value, strs), node.attr)
+        return b_field(_expr_from_py(node.value, strs, dicts), node.attr)
     if isinstance(node, ast.Name):
         return b_var(node.id)
     if isinstance(node, ast.Constant):
@@ -296,30 +352,34 @@ def _expr_from_py(node, strs=frozenset()):
     raise BodyError(f"unsupported expression {type(node).__name__}")
 
 
-def _block_from_py(stmts, strs=frozenset()):
+def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
     """Translate a statement sequence that must produce a value into an expression: `return r` is the
     result; `x = e; …` becomes `let x = e in …`; `if c: …`/`else`/early-return becomes `case`.
-    `strs` carries the names known to hold STRINGS (str-annotated parameters and stringish `let`s)."""
+    `strs`/`dicts` carry the names known to hold STRINGS / DICTS (annotation-rooted, threaded through
+    `let`s with shadowing)."""
     if not stmts:
         raise BodyError("block falls off the end without returning a value")
     head, tail = stmts[0], stmts[1:]
     if isinstance(head, ast.Return):
         if head.value is None:
             raise BodyError("bare `return` (no value)")
-        return _expr_from_py(head.value, strs)  # statements after a return are dead
+        return _expr_from_py(head.value, strs, dicts)  # statements after a return are dead
     if isinstance(head, ast.Assign):
         if len(head.targets) != 1 or not isinstance(head.targets[0], ast.Name):
             raise BodyError("only single-name assignment targets are in subset")
         name = head.targets[0].id
         inner = (strs | {name}) if _is_stringish(head.value, strs) else (strs - {name})
-        return b_let(name, _expr_from_py(head.value, strs), _block_from_py(tail, inner))
+        inner_d = (dicts | {name}) if _is_dictish(head.value, dicts) else (dicts - {name})
+        return b_let(name, _expr_from_py(head.value, strs, dicts), _block_from_py(tail, inner, inner_d))
     if isinstance(head, ast.AnnAssign):
         if not isinstance(head.target, ast.Name) or head.value is None:
             raise BodyError("annotated assignment must be `name: T = value`")
         name = head.target.id
         annotated_str = isinstance(head.annotation, ast.Name) and head.annotation.id == "str"
+        annotated_dict = isinstance(head.annotation, ast.Name) and head.annotation.id in _DICT_ANNOTATIONS
         inner = (strs | {name}) if (annotated_str or _is_stringish(head.value, strs)) else (strs - {name})
-        return b_let(name, _expr_from_py(head.value, strs), _block_from_py(tail, inner))
+        inner_d = (dicts | {name}) if (annotated_dict or _is_dictish(head.value, dicts)) else (dicts - {name})
+        return b_let(name, _expr_from_py(head.value, strs, dicts), _block_from_py(tail, inner, inner_d))
     if isinstance(head, ast.AugAssign):
         # `acc += e` (or -=, *=, /=, %=) re-binds `acc` to `acc <op> e` — a `let` over the rest. `acc`
         # must already be bound (a parameter or a preceding assignment). `s += t` over a known string
@@ -328,19 +388,19 @@ def _block_from_py(stmts, strs=frozenset()):
             raise BodyError("augmented assignment must target a single name")
         name = head.target.id
         if isinstance(head.op, ast.Add) and (name in strs or _is_stringish(head.value, strs)):
-            update = b_app(b_var("str_concat"), [b_var(name), _expr_from_py(head.value, strs)])
-            return b_let(name, update, _block_from_py(tail, strs | {name}))
+            update = b_app(b_var("str_concat"), [b_var(name), _expr_from_py(head.value, strs, dicts)])
+            return b_let(name, update, _block_from_py(tail, strs | {name}, dicts - {name}))
         if type(head.op) not in _PY_BIN:
             raise BodyError("unsupported augmented-assignment operator")
-        update = _op_app(_PY_BIN[type(head.op)], [b_var(name), _expr_from_py(head.value, strs)])
-        return b_let(name, update, _block_from_py(tail, strs - {name}))
+        update = _op_app(_PY_BIN[type(head.op)], [b_var(name), _expr_from_py(head.value, strs, dicts)])
+        return b_let(name, update, _block_from_py(tail, strs - {name}, dicts - {name}))
     if isinstance(head, ast.If):
         if not _is_boolish(head.test):
             raise BodyError("non-boolean `if` test (Python truthiness is not representable)")
-        then_expr = _block_from_py(head.body, strs)
+        then_expr = _block_from_py(head.body, strs, dicts)
         # An `else`/`elif` block is the false branch; without one, the rest of the function is.
-        else_expr = _block_from_py(head.orelse if head.orelse else tail, strs)
-        return b_if(_expr_from_py(head.test, strs), then_expr, else_expr)
+        else_expr = _block_from_py(head.orelse if head.orelse else tail, strs, dicts)
+        return b_if(_expr_from_py(head.test, strs, dicts), then_expr, else_expr)
     if isinstance(head, ast.For):
         # An accumulator loop `for <x> in <src>: <acc> = <update>` is a left fold over `src`. `acc`
         # must already be bound (a preceding `acc = init` -> let), and the fold re-binds it:
@@ -351,6 +411,7 @@ def _block_from_py(stmts, strs=frozenset()):
             raise BodyError("loop body must be a single accumulator assignment")
         asg = head.body[0]
         loop_strs = strs - {head.target.id}
+        loop_dicts = dicts - {head.target.id}
         if isinstance(asg, ast.AugAssign):
             # `for x in src: acc += f(x)` -> foldl(\acc x -> acc <op> f(x), acc, src) — the common
             # sum/product/count idiom, equivalent to the explicit `acc = acc <op> f(x)` form below.
@@ -358,18 +419,18 @@ def _block_from_py(stmts, strs=frozenset()):
                 raise BodyError("accumulator assignment must target a single name")
             acc, x = asg.target.id, head.target.id
             if isinstance(asg.op, ast.Add) and (acc in strs or _is_stringish(asg.value, loop_strs)):
-                update = b_app(b_var("str_concat"), [b_var(acc), _expr_from_py(asg.value, loop_strs)])
+                update = b_app(b_var("str_concat"), [b_var(acc), _expr_from_py(asg.value, loop_strs, loop_dicts)])
             elif type(asg.op) not in _PY_BIN:
                 raise BodyError("unsupported augmented-assignment operator")
             else:
-                update = _op_app(_PY_BIN[type(asg.op)], [b_var(acc), _expr_from_py(asg.value, loop_strs)])
+                update = _op_app(_PY_BIN[type(asg.op)], [b_var(acc), _expr_from_py(asg.value, loop_strs, loop_dicts)])
         else:
             if len(asg.targets) != 1 or not isinstance(asg.targets[0], ast.Name):
                 raise BodyError("accumulator assignment must target a single name")
             acc, x = asg.targets[0].id, head.target.id
-            update = _expr_from_py(asg.value, loop_strs)
-        fold = b_app(b_var("foldl"), [b_lambda([acc, x], update), b_var(acc), _expr_from_py(head.iter, strs)])
-        return b_let(acc, fold, _block_from_py(tail, strs))
+            update = _expr_from_py(asg.value, loop_strs, loop_dicts)
+        fold = b_app(b_var("foldl"), [b_lambda([acc, x], update), b_var(acc), _expr_from_py(head.iter, strs, dicts)])
+        return b_let(acc, fold, _block_from_py(tail, strs, dicts))
     raise BodyError(f"unsupported statement {type(head).__name__}")
 
 
@@ -378,12 +439,29 @@ def _fixed_param_names(func):
     return [p.arg for p in (list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs))]
 
 
+_DICT_ANNOTATIONS = ("dict", "Dict", "Mapping", "MutableMapping")
+
+
 def _str_annotated_params(func):
     """The parameter names annotated `str` — the roots of the known-string inference that drives the
     type-dependent translations (`+` -> str_concat, `len` -> str_length, `.split`/`.join`, `in`)."""
     a = func.args
     return frozenset(p.arg for p in (list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs))
                      if isinstance(p.annotation, ast.Name) and p.annotation.id == "str")
+
+
+def _dict_annotated_params(func):
+    """The parameter names annotated as dicts (`dict`, `dict[...]`, `Dict[...]`, `Mapping[...]`) —
+    the roots of the known-dict inference behind the map-idiom translations."""
+    def is_dict_ann(ann):
+        if isinstance(ann, ast.Name):
+            return ann.id in _DICT_ANNOTATIONS
+        if isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name):
+            return ann.value.id in _DICT_ANNOTATIONS
+        return False
+    a = func.args
+    return frozenset(p.arg for p in (list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs))
+                     if is_dict_ann(p.annotation))
 
 
 def body_ast_from_py(func):
@@ -397,7 +475,7 @@ def body_ast_from_py(func):
     if not stmts:
         return None
     try:
-        expr = _block_from_py(stmts, _str_annotated_params(func))
+        expr = _block_from_py(stmts, _str_annotated_params(func), _dict_annotated_params(func))
         params = _fixed_param_names(func)
         # A 0-arg function is its bare result (applying it to [] still evaluates); else wrap in a
         # lambda so `run` can apply the example's arguments.

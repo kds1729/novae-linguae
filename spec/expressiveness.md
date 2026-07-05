@@ -219,9 +219,19 @@ the existing variants — nothing new in the type system, patterns, or serializa
   gate rather than shipping wrong. *TypeScript too:* a `: string` parameter annotation roots the
   same inference through the shared expression translator, with the TS-native spellings mapped —
   `s.split(sep)`, the array-order `xs.join(sep)` (separator still lands first), `s.includes(x)` →
-  `str_contains`, `String(n)` → `to_string`, and `+`-concatenation. Dict/JSON idioms (`d.get(k)`
-  → `map_get` with the `Maybe`/`None` value-mapping question) and the Rust/Haskell adapters
-  remain.
+  `str_contains`, `String(n)` → `to_string`, and `+`-concatenation.
+  *Dicts: the TOTAL subset is DONE for Python (2026-07-04).* A `dict`/`dict[...]`/`Mapping[...]`
+  annotation roots a known-dict inference: `d.get(k, default)` → `case map_get(k, d) of {Just(v)
+  => v; None => default}`, `k in d` → the has-key case, `len(d)` → `map_size`,
+  `sorted(d)`/`sorted(d.keys())` → `map_keys` (sound precisely because `map_keys` is sorted).
+  Dict example values encode as the `map` value kind when the signature expects `Map …` (or the
+  keys aren't identifier-shaped); identifier-keyed dicts without a Map expectation keep the
+  historical record encoding, so existing ingested hashes are stable. Demonstrated: a 4-function
+  config module runs 8/8 doctest examples over real map values. **Deliberately out of subset:**
+  the bare 1-arg `d.get(k)` — an `Optional` at the record boundary whose `None`↔`Maybe` example
+  mapping is a design decision not yet taken — and `d[k]` (raises). The Haskell body subset
+  (flat token applications, no method calls) has no string/dict surface to map yet, and the Rust
+  adapter's body lifter is a separate Rust-side implementation — both remain.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 
