@@ -87,6 +87,13 @@ pub fn set_effect_grants<I: IntoIterator<Item = String>>(granted: I) {
     });
 }
 
+/// The currently installed effect-grant set (operator-declared; empty = pure-only). Lets the
+/// responder's static effect gate report *which* effects a target needs beyond what the operator
+/// granted, before the sandbox would reject the run anyway.
+pub fn current_effect_grants() -> std::collections::BTreeSet<String> {
+    EFFECTS.with(|e| e.borrow().granted.iter().cloned().collect())
+}
+
 /// Install a recorded effect trace to REPLAY: effectful builtins return their recorded results in
 /// order without performing real I/O, so an effectful run reproduces deterministically (principle 5;
 /// the trace is sufficient to re-run — principle 9). `entries` is the trace from a prior live run.

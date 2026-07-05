@@ -176,18 +176,18 @@ A consequence worth being explicit about: **reputation-driven filtering at the a
 
 **Operator legal compliance.** An agent runs somewhere. Whoever runs it operates under some jurisdiction's law. Local law can compel disclosure of keys, content, or attestations. The protocol cannot grant immunity from law. This is the most important non-protocol failure mode and is the reason confidentiality (principle 6 extension: payload encryption in v0.2+) matters.
 
-## Open question: effect grants for discovered functions
+## Effect grants for discovered functions (resolved 2026-07-05)
 
-The remote agent loop executes functions the responder never chose. Whether — and under what policy —
-a responder grants a *discovered* function's declared effects (`net.read`, `fs.write`,
-`process.spawn`, …) is an **open design decision (2026-07-05, discussion ongoing)**: a verified
-effect declaration is honest but not therefore safe to grant on an open commons. The current leaning
-is trust-model-tied grants (per-effect-*domain* trust under the responder's local policy, riding this
-document's machinery — `evaluate_trust` domain scoping and/or `cap:`-style capabilities), possibly
-inside a broader **modes-of-operation** frame (pure-only / allowlisted / trust-gated responders, the
-way the capability gate already has possession-only vs chain-verified modes). Full statement of the
-options and the effectful-claim re-runnability wrinkle: `spec/agent-loop.md` §Scope. Nothing is
-implemented until this concludes.
+**Resolved simply: operator-declared grants, sandbox-enforced, default pure.** The question reduced
+to "which effects will this operator perform on a stranger's behalf?" — a property of the *operator*,
+not of the function: the risk in an effect rides in the arguments, which the remote sender chooses,
+so per-function trust-gating would have discriminated on the wrong variable. The responder grants
+nothing unless its operator passes `--grant <effect>` (`respond`/`orchestrate`); a target needing
+more is refused with a signed, policy-shaped `reject`; the runtime sandbox enforces at perform time
+regardless. Trust-model-tied grants remain expressible later if a real need appears, but none of this
+document's machinery is involved today. Full semantics — including that effectful asserts are the
+signer's *testimony*, not something a verifier can CONFIRM by re-execution — in
+`spec/agent-loop.md` §Scope.
 
 ---
 

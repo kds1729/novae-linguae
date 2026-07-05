@@ -429,6 +429,14 @@ enum Commands {
         /// deterministic for a given seed).
         #[arg(long)]
         timestamp: Option<String>,
+        /// Grant an effect this responder will perform on a remote sender's behalf (e.g. `net.read`).
+        /// Repeatable. Default NONE — the responder fulfils only pure targets; an effectful target is
+        /// refused with a signed `reject` (`effect not granted: …`). Grants are measured against the
+        /// target's *verified* effect declaration and enforced by the runtime sandbox at perform time.
+        /// Granting `net.read` means this machine fetches URLs chosen by remote input — front with
+        /// egress controls if that matters (spec/agent-loop.md §Scope).
+        #[arg(long)]
+        grant: Vec<String>,
     },
     /// Autonomous orchestration (spec/agent-loop.md): drive a full `query → propose → commit →
     /// assert → verify` conversation. The orchestrator discovers a commons function by `--intent`,
@@ -481,6 +489,12 @@ enum Commands {
         /// before applying it, and ABORT if it isn't certified — "assemble only from verified parts".
         #[arg(long)]
         require_certified: bool,
+        /// Grant an effect the responder half of this loop will perform (e.g. `net.read`). Repeatable.
+        /// Default NONE (pure-only). The orchestrator's own verify step re-runs under the same grants.
+        /// Granting `net.read` means this machine fetches URLs chosen by the discovered function's
+        /// arguments — see spec/agent-loop.md §Scope.
+        #[arg(long)]
+        grant: Vec<String>,
     },
     /// Verify a Nova Locutio `assert` by RE-RUNNING its `predicate` claim against the commons:
     /// resolve the claim's content-addressed function(s) from `--records` and evaluate it. The
@@ -498,6 +512,11 @@ enum Commands {
         /// the claim references are fetched by content-address and hash-verified locally.
         #[arg(long)]
         node: Option<String>,
+        /// Grant an effect the re-run may perform (repeatable; default NONE). An effectful claim
+        /// without matching grants is undecidable — it is the signer's testimony, not something this
+        /// verifier can CONFIRM by re-execution (spec/agent-loop.md §Scope).
+        #[arg(long)]
+        grant: Vec<String>,
     },
     /// Verify a delegation chain (spec/trust-model.md): can `--grantee` wield `--capability` by a chain
     /// of signed `delegate` tokens back to a recognized `--root`? Checks every token's signature,
@@ -698,7 +717,8 @@ fn main() -> ExitCode {
         Commands::AttestWeights { record, eval, results, sign, timestamp } => {
             (cmd_attest_weights(&record, &eval, &results, &sign, timestamp.as_deref()), false)
         }
-        Commands::Respond { request, records, seed, timestamp } => {
+        Commands::Respond { request, records, seed, timestamp, grant } => {
+            nl_validator::set_effect_grants(grant.iter().cloned());
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
         }
         Commands::Prove { record, body, smt_out, solver } => {
@@ -708,7 +728,8 @@ fn main() -> ExitCode {
         Commands::Compose { records } => (cmd_compose(&records), false),
         Commands::Cluster { records, solver } => (cmd_cluster(&records, &solver), false),
         Commands::Normalize { body, hash } => (cmd_normalize(&body, hash), false),
-        Commands::VerifyClaim { assert, records, node } => {
+        Commands::VerifyClaim { assert, records, node, grant } => {
+            nl_validator::set_effect_grants(grant.iter().cloned());
             (cmd_verify_claim(&assert, records.as_ref(), node.as_deref()), false)
         }
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
@@ -723,7 +744,8 @@ fn main() -> ExitCode {
         Commands::Authorize { policy, capability, grantee, delegations, at } => {
             (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
-        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified } => {
+        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, grant } => {
+            nl_validator::set_effect_grants(grant.iter().cloned());
             if verify {
                 (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified), false)
             } else {

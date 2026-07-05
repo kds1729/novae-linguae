@@ -14,9 +14,14 @@
 //! (spec/predicate-expression.schema.json) that any receiver can re-run with the same evaluator to
 //! confirm — verification is re-execution, no trusted responder required (principles 3, 6, 7).
 //!
-//! Scope (v0.1 evaluator): the target must be a pure body the evaluator handles; effects are not
-//! modelled. A request whose args don't decode, or whose target has no resolvable body, is an
-//! honest error rather than a silent empty assert.
+//! Scope: by default the responder fulfils only **pure** targets — it grants no effects, so an
+//! effectful target is refused with a signed, policy-shaped `reject` (see [`effect_refusal`]). The
+//! *operator* may grant specific effects ([`crate::set_effect_grants`] / the `--grant` flag on
+//! `respond`/`orchestrate`); grants are measured against the target's verified effect declaration
+//! and the runtime sandbox enforces at perform time regardless (spec/agent-loop.md §Scope). A
+//! request whose args don't decode, or whose target has no resolvable body, is an honest error
+//! rather than a silent empty assert. Note an assert produced under grants is an *observation* —
+//! a verifier without the same grants (and the same world) cannot CONFIRM it by re-execution.
 
 use anyhow::{anyhow, bail, Context, Result};
 use ed25519_dalek::SigningKey;
@@ -188,11 +193,33 @@ pub fn respond_to_message_with_trust(
     policy: &TrustPolicy,
 ) -> Result<J> {
     let kind = message.get("kind").and_then(|k| k.as_str()).unwrap_or_default();
+
+    // Effect gate for the target-executing paths: refuse (signed, policy-shaped) when the target
+    // needs effects beyond the operator's grants — see [`effect_refusal`]. Threading mirrors each
+    // arm's reply addressee: a `commit`'s reply goes to its `to` (the original proposer), falling
+    // back to its sender; everything else replies to `from`.
+    let effect_gate = |target_ptr: &str| -> Option<Result<J>> {
+        let target = message.pointer(target_ptr).and_then(|t| t.as_str())?;
+        let (code, reason) = effect_refusal(target, &link_map, &record_map)?;
+        let hash = message.get("hash").and_then(|h| h.as_str())?;
+        let reply_to = if kind == "commit" {
+            message.get("to").and_then(|t| t.as_str()).or_else(|| message.get("from").and_then(|f| f.as_str()))?
+        } else {
+            message.get("from").and_then(|f| f.as_str())?
+        };
+        Some(sign_envelope(
+            build_envelope("reject", reply_to, hash, timestamp,
+                json!({ "rejects": hash, "code": code, "reason": reason })),
+            signing_key,
+        ))
+    };
     match kind {
         "request" => {
             let action = message.pointer("/body/action").and_then(|a| a.as_str()).unwrap_or_default();
             match action {
-                "apply" => match capability_gate(message, &record_map, policy, signing_key, timestamp) {
+                "apply" => match capability_gate(message, &record_map, policy, signing_key, timestamp)
+                    .or_else(|| effect_gate("/body/target"))
+                {
                     Some(reject) => reject,
                     None => respond_to_request(message, link_map, signing_key, timestamp),
                 },
@@ -202,11 +229,16 @@ pub fn respond_to_message_with_trust(
             }
         }
         "query" => query_reply(message, record_map, signing_key, timestamp),
-        "propose" => match capability_gate(message, &record_map, policy, signing_key, timestamp) {
+        "propose" => match capability_gate(message, &record_map, policy, signing_key, timestamp)
+            .or_else(|| effect_gate("/body/target"))
+        {
             Some(reject) => reject,
             None => propose_reply(message, link_map, signing_key, timestamp),
         },
-        "commit" => commit_reply(message, link_map, signing_key, timestamp),
+        "commit" => match effect_gate("/body/commitment/fn") {
+            Some(reject) => reject,
+            None => commit_reply(message, link_map, signing_key, timestamp),
+        },
         "delegate" => delegate_reply(message, signing_key, timestamp),
         "retract" => retract_reply(message, signing_key, timestamp),
         other => bail!("respond handles request/query/propose/commit/delegate/retract, not `{other}`"),
@@ -282,6 +314,62 @@ fn capability_gate(
     reject(format!(
         "no valid signed delegation chain authorizes `{from}` for capabilit{} [{}] back to a recognized root",
         if unbacked.len() == 1 { "y" } else { "ies" }, unbacked.join(", ")
+    ))
+}
+
+/// Static effect gate for a target about to be *executed* on behalf of a remote sender
+/// (spec/agent-loop.md §Scope). The operator declares the effects this responder will perform for
+/// strangers by installing grants ([`crate::set_effect_grants`], the `--grant` flag); the default is
+/// none — pure-only. This gate runs before execution so an effectful target gets a *distinct,
+/// policy-shaped* refusal instead of a generic eval error (the runtime sandbox still enforces at
+/// perform time regardless — this is reporting, the sandbox is the boundary). Two checks:
+///
+/// 1. **Honesty**: the body's statically inferred effects must not exceed the record's *declared*
+///    `signature.effects` (a free local `check-effects` — grants are measured against verified
+///    declarations, never the record's word). Violation → `constraint_violated`.
+/// 2. **Policy**: every inferred effect must be operator-granted. Shortfall → `refused`, with an
+///    `effect not granted:` reason naming the missing effects.
+///
+/// Returns `Some((code, reason))` to refuse, `None` to proceed. A pure target always proceeds.
+fn effect_refusal(
+    target: &str,
+    link_map: &HashMap<String, J>,
+    record_map: &HashMap<String, J>,
+) -> Option<(&'static str, String)> {
+    let body = link_map.get(target)?;
+    let inf = crate::effects::infer_effects(body, record_map);
+    if inf.effects.is_empty() {
+        return None; // pure (any opaque callee is the runtime sandbox's to stop)
+    }
+    if let Some(declared) = record_map.get(target).map(|r| {
+        r.pointer("/signature/effects")
+            .and_then(|e| e.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect::<std::collections::BTreeSet<_>>())
+            .unwrap_or_default()
+    }) {
+        let undeclared: Vec<&String> = inf.effects.iter().filter(|e| !declared.contains(*e)).collect();
+        if !undeclared.is_empty() {
+            return Some((
+                "constraint_violated",
+                format!(
+                    "under-declared effects: body performs [{}] beyond the record's declared effects",
+                    undeclared.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                ),
+            ));
+        }
+    }
+    let granted = crate::interp::current_effect_grants();
+    let ungranted: Vec<&String> = inf.effects.iter().filter(|e| !granted.contains(*e)).collect();
+    if ungranted.is_empty() {
+        return None;
+    }
+    Some((
+        "refused",
+        format!(
+            "effect not granted: target requires [{}] beyond the responder's granted effects [{}]",
+            ungranted.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
+            granted.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+        ),
     ))
 }
 
@@ -682,6 +770,102 @@ mod tests {
         assert_eq!(reply["kind"], "reject");
         assert_eq!(reply["body"]["code"], "unknown_target");
         verify_signature(&reply).unwrap();
+    }
+
+    // ---- operator effect grants (spec/agent-loop.md §Scope) ----
+
+    fn greet_addr() -> String {
+        load("greet.v0.2.json")["hash"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn effectful_apply_refused_without_grants() {
+        // Default = pure-only: applying greet (io.console) with no grants installed gets a signed,
+        // policy-shaped refusal — a distinct `refused`/"effect not granted", not a generic eval error.
+        crate::interp::set_effect_grants(Vec::<String>::new());
+        let req = json!({ "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null,
+            "body": { "action": "apply", "target": greet_addr(), "args": [{ "kind": "string", "value": "hi" }] } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&req, link, recs, &key, None).unwrap();
+        assert_eq!(reply["kind"], "reject");
+        assert_eq!(reply["body"]["code"], "refused");
+        let reason = reply["body"]["reason"].as_str().unwrap();
+        assert!(reason.contains("effect not granted") && reason.contains("io.console"), "{reason}");
+        verify_signature(&reply).unwrap();
+    }
+
+    #[test]
+    fn effectful_apply_runs_with_matching_grant() {
+        // The operator granted io.console — greet fulfils and the reply is an ordinary assert.
+        crate::interp::set_effect_grants(vec!["io.console".to_string()]);
+        let req = json!({ "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null,
+            "body": { "action": "apply", "target": greet_addr(), "args": [{ "kind": "string", "value": "hi" }] } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&req, link, recs, &key, None).unwrap();
+        crate::interp::clear_effects();
+        assert_eq!(reply["kind"], "assert", "{reply}");
+        assert_eq!(reply["body"]["subject"], greet_addr().as_str());
+        verify_signature(&reply).unwrap();
+    }
+
+    #[test]
+    fn pure_apply_unaffected_by_grants() {
+        // Grants present, pure target: nothing changes — double still asserts eq(double(21), 42).
+        crate::interp::set_effect_grants(vec!["net.read".to_string()]);
+        let req = json!({ "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null,
+            "body": { "action": "apply", "target": double_addr(), "args": [{ "kind": "nat", "value": 21 }] } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&req, link, recs, &key, None).unwrap();
+        crate::interp::clear_effects();
+        assert_eq!(reply["kind"], "assert");
+        assert_eq!(reply["body"]["claim"]["expr"]["args"][1]["value"], json!({ "kind": "int", "value": 42 }));
+    }
+
+    #[test]
+    fn under_declared_effect_refused_even_when_granted() {
+        // A body that performs io.console while its record declares NO effects: refused as
+        // under-declared even though the effect is granted — grants are measured against the
+        // *verified* declaration, never the record's word.
+        crate::interp::set_effect_grants(vec!["io.console".to_string()]);
+        let target = "fn_1111111111111111111111111111111111111111111111111111111111111111";
+        let body = json!({ "kind": "lambda", "params": [{ "name": "msg" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "print" },
+                      "args": [{ "kind": "var", "name": "msg" }] } });
+        let record = json!({ "hash": target, "signature": { "effects": [] } });
+        let link: HashMap<String, J> = [(target.to_string(), body)].into();
+        let recs: HashMap<String, J> = [(target.to_string(), record)].into();
+        let req = json!({ "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null,
+            "body": { "action": "apply", "target": target, "args": [{ "kind": "string", "value": "hi" }] } });
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&req, link, recs, &key, None).unwrap();
+        crate::interp::clear_effects();
+        assert_eq!(reply["kind"], "reject");
+        assert_eq!(reply["body"]["code"], "constraint_violated");
+        assert!(reply["body"]["reason"].as_str().unwrap().contains("under-declared"), "{reply}");
+    }
+
+    #[test]
+    fn effectful_commit_gated_like_apply() {
+        // Acting on an apply commitment is an execution path too — the same gate covers it.
+        crate::interp::set_effect_grants(Vec::<String>::new());
+        let committer = "did:nova:aaaa2222333344445555666677778888999900001111222233334444555566bb";
+        let commit = json!({ "schema_version": "0.2.0", "kind": "commit", "from": committer, "hash": A_MSG,
+            "to": REQUESTER, "in_reply_to": null,
+            "body": { "commitment": { "kind": "apply", "fn": greet_addr(),
+                                       "args": [{ "kind": "string", "value": "hi" }] } } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&commit, link, recs, &key, None).unwrap();
+        assert_eq!(reply["kind"], "reject");
+        assert_eq!(reply["body"]["code"], "refused");
+        assert_eq!(reply["to"], REQUESTER, "commit refusal threads to the commit's `to`");
     }
 
     #[test]
