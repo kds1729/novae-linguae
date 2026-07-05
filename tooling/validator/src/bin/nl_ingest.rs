@@ -1105,10 +1105,32 @@ fn body_op_app(op: &str, args: Vec<Value>) -> Option<Value> {
     Some(json!({ "kind": "app", "fn": p_var(op)?, "args": args }))
 }
 
-fn expr_to_body(expr: &syn::Expr) -> Option<Value> {
+/// Whether `expr` is syntactically known to produce a STRING: a `&str`/`String` parameter, a string
+/// literal, `x.to_string()` on one, or `+`-concatenation of one. Drives the type-dependent string
+/// translations (Rust is typed, but `syn` is not — parameter annotations root the inference, and a
+/// wrong guess fails the example gate rather than shipping wrong).
+fn is_stringish(expr: &syn::Expr, strs: &HashSet<String>) -> bool {
     match expr {
-        syn::Expr::Paren(p) => expr_to_body(&p.expr),
-        syn::Expr::Group(g) => expr_to_body(&g.expr),
+        syn::Expr::Paren(p) => is_stringish(&p.expr, strs),
+        syn::Expr::Group(g) => is_stringish(&g.expr, strs),
+        syn::Expr::Reference(r) => is_stringish(&r.expr, strs),
+        syn::Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
+            strs.contains(&p.path.segments[0].ident.to_string())
+        }
+        syn::Expr::Lit(l) => matches!(l.lit, syn::Lit::Str(_)),
+        syn::Expr::MethodCall(m) => m.method == "to_string" && m.args.is_empty(),
+        syn::Expr::Binary(b) if matches!(b.op, syn::BinOp::Add(_)) => {
+            is_stringish(&b.left, strs) || is_stringish(&b.right, strs)
+        }
+        _ => false,
+    }
+}
+
+fn expr_to_body(expr: &syn::Expr, strs: &HashSet<String>) -> Option<Value> {
+    match expr {
+        syn::Expr::Paren(p) => expr_to_body(&p.expr, strs),
+        syn::Expr::Group(g) => expr_to_body(&g.expr, strs),
+        syn::Expr::Reference(r) => expr_to_body(&r.expr, strs),
         syn::Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
             p_var(&p.path.segments[0].ident.to_string())
         }
@@ -1118,13 +1140,46 @@ fn expr_to_body(expr: &syn::Expr) -> Option<Value> {
             syn::UnOp::Neg(_) if matches!(&*u.expr, syn::Expr::Lit(_)) => {
                 value_ast(expr, None).map(|v| json!({ "kind": "lit", "value": v }))
             }
-            syn::UnOp::Neg(_) => body_op_app("neg", vec![expr_to_body(&u.expr)?]),
-            syn::UnOp::Not(_) => body_op_app("not", vec![expr_to_body(&u.expr)?]),
+            syn::UnOp::Neg(_) => body_op_app("neg", vec![expr_to_body(&u.expr, strs)?]),
+            syn::UnOp::Not(_) => body_op_app("not", vec![expr_to_body(&u.expr, strs)?]),
             _ => None,
         },
         syn::Expr::Binary(b) => {
+            // `+` over a known string is str_concat (spec/expressiveness.md phase 4).
+            if matches!(b.op, syn::BinOp::Add(_))
+                && (is_stringish(&b.left, strs) || is_stringish(&b.right, strs))
+            {
+                return body_op_app(
+                    "str_concat",
+                    vec![expr_to_body(&b.left, strs)?, expr_to_body(&b.right, strs)?],
+                );
+            }
             let op = binop_name(&b.op)?;
-            body_op_app(op, vec![expr_to_body(&b.left)?, expr_to_body(&b.right)?])
+            body_op_app(op, vec![expr_to_body(&b.left, strs)?, expr_to_body(&b.right, strs)?])
+        }
+        // String-method idioms on a KNOWN string receiver. NB `s.len()` counts BYTES in Rust and
+        // Unicode scalars in Nova Lingua — identical on ASCII; a non-ASCII doc-test example fails
+        // the gate rather than shipping a wrong equivalence. `format!` (a macro) and the
+        // iterator-returning `.split()` stay out of subset.
+        syn::Expr::MethodCall(m) if is_stringish(&m.receiver, strs) => {
+            let recv = expr_to_body(&m.receiver, strs)?;
+            match (m.method.to_string().as_str(), m.args.len()) {
+                ("len", 0) => body_op_app("str_length", vec![recv]),
+                ("is_empty", 0) => body_op_app(
+                    "eq",
+                    vec![body_op_app("str_length", vec![recv])?, json!({ "kind": "lit", "value": { "kind": "int", "value": 0 } })],
+                ),
+                ("contains", 1) => body_op_app(
+                    "str_contains",
+                    vec![expr_to_body(m.args.first()?, strs)?, recv],
+                ),
+                ("to_string", 0) => Some(recv), // a string's to_string is the identity
+                _ => None,
+            }
+        }
+        // `n.to_string()` on a non-string is the canonical decimal rendering.
+        syn::Expr::MethodCall(m) if m.method == "to_string" && m.args.is_empty() => {
+            body_op_app("to_string", vec![expr_to_body(&m.receiver, strs)?])
         }
         syn::Expr::Call(c) => {
             let fnv = match &*c.func {
@@ -1135,7 +1190,7 @@ fn expr_to_body(expr: &syn::Expr) -> Option<Value> {
             };
             let mut args = Vec::new();
             for a in &c.args {
-                args.push(expr_to_body(a)?);
+                args.push(expr_to_body(a, strs)?);
             }
             Some(json!({ "kind": "app", "fn": fnv, "args": args }))
         }
@@ -1147,13 +1202,35 @@ fn expr_to_body(expr: &syn::Expr) -> Option<Value> {
                 if !ok {
                     return None;
                 }
-                Some(json!({ "kind": "field", "record": expr_to_body(&f.base)?, "name": name }))
+                Some(json!({ "kind": "field", "record": expr_to_body(&f.base, strs)?, "name": name }))
             } else {
                 None // tuple index (`.0`) has no field name
             }
         }
         _ => None,
     }
+}
+
+/// The parameter names typed `&str` / `String` — the roots of the known-string inference.
+fn str_typed_params(func: &syn::ItemFn) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for input in &func.sig.inputs {
+        if let syn::FnArg::Typed(pt) = input {
+            if let syn::Pat::Ident(pi) = &*pt.pat {
+                let is_str = match &*pt.ty {
+                    syn::Type::Reference(r) => {
+                        matches!(&*r.elem, syn::Type::Path(p) if p.path.is_ident("str") || p.path.is_ident("String"))
+                    }
+                    syn::Type::Path(p) => p.path.is_ident("String") || p.path.is_ident("str"),
+                    _ => false,
+                };
+                if is_str {
+                    out.insert(pi.ident.to_string());
+                }
+            }
+        }
+    }
+    out
 }
 
 /// A body AST for an expression-bodied fn — a block with a single trailing expression (or a single
@@ -1168,7 +1245,7 @@ fn body_ast(func: &syn::ItemFn) -> Option<Value> {
         syn::Stmt::Expr(syn::Expr::Return(r), Some(_)) => r.expr.as_deref()?,
         _ => return None,
     };
-    expr_to_body(expr)
+    expr_to_body(expr, &str_typed_params(func))
 }
 
 // --- v0.2: curated algebraic-law catalog (opt-in --properties) ---------------------------------

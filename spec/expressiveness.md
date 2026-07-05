@@ -230,8 +230,14 @@ the existing variants — nothing new in the type system, patterns, or serializa
   config module runs 8/8 doctest examples over real map values. **Deliberately out of subset:**
   the bare 1-arg `d.get(k)` — an `Optional` at the record boundary whose `None`↔`Maybe` example
   mapping is a design decision not yet taken — and `d[k]` (raises). The Haskell body subset
-  (flat token applications, no method calls) has no string/dict surface to map yet, and the Rust
-  adapter's body lifter is a separate Rust-side implementation — both remain.
+  (flat token applications, no method calls) has no string/dict surface to map yet.
+  *Rust too (2026-07-05):* the Rust adapter's own lifter roots a known-string inference in
+  `&str`/`String` parameter types — `+` → `str_concat`, `s.len()` → `str_length` (bytes vs
+  scalars agree on ASCII; a non-ASCII doc-test fails the gate), `s.contains(x)` →
+  `str_contains(x, s)`, `s.is_empty()` → `str_length = 0`, `n.to_string()` → `to_string` (and
+  the identity on an already-string receiver). `format!` (a macro) and iterator-returning
+  `.split()` stay out of subset. Verified by hash equality: four doc-tested Rust functions emit
+  exactly the expected translated body addresses, and the lifted bodies evaluate correctly.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 
