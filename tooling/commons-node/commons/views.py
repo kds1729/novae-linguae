@@ -19,7 +19,7 @@ from .query import (QueryError, check_token_budget, greedy_budget, record_summar
 from .search import run_search, SearchError
 
 _SCHEMA_VERSIONS = ["0.1.0", "0.2.0"]
-_KINDS = ["function-record", "message", "body", "type", "certification"]
+_KINDS = ["function-record", "message", "body", "type", "certification", "weights", "eval-attestation"]
 
 # Verification failures that mean "the record is not valid" (422) vs. node-side problems.
 _UNPROCESSABLE = {"schema_invalid", "hash_mismatch", "signature_invalid", "unsupported_kind"}
@@ -94,6 +94,55 @@ def certifications(request, address):
     # Certifications are content-addressed and immutable, but the SET about a subject grows as new ones
     # are published, so cache only briefly (unlike an individual immutable `resolve`).
     resp["Cache-Control"] = "public, max-age=10"
+    return resp
+
+
+@csrf_exempt
+def attestations(request, address):
+    """GET /v0/records/{wgt-hash}/attestations — the signed eval attestations about a weights record.
+
+    The weights counterpart of `certifications` (spec/weights.md rung 3): a client that resolved a
+    weights pointer fetches the eval attestations here, verifies each (hash + signature), and decides —
+    under *its own* local policy — whether any attesting certifier is trusted (`nl-validator certified
+    --subject wgt_…`, `Policy.eval_attestation_verdict`). The node does not judge (principle 7).
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    rows = Record.objects.filter(kind="eval-attestation", subject=address)
+    atts = [r.raw for r in rows.order_by("id")]
+    resp = JsonResponse({"subject": address, "attestations": atts, "count": len(atts)})
+    # Immutable individually, but the set about a subject grows — cache briefly, like certifications.
+    resp["Cache-Control"] = "public, max-age=10"
+    return resp
+
+
+def blob(request, sha256):
+    """GET /v0/blobs/{sha256} — serve a binary blob by content hash (spec/weights.md).
+
+    Deliberately gate-free: blobs are opaque bytes outside the record store; a weights record's
+    `files[].sha256` is what makes any host — including this one — safe to fetch from (the client
+    verifies after download; the hash is the truth). Files live in COMMONS_BLOB_DIR keyed by their
+    sha256; `addblob` puts them there. In production a static file server / CDN can front or replace
+    this view entirely — the URL shape is the contract, not the implementation.
+    """
+    if request.method not in ("GET", "HEAD"):
+        return HttpResponseNotAllowed(["GET", "HEAD"])
+    import os
+
+    from django.conf import settings as dj_settings
+    from django.http import FileResponse
+
+    blob_dir = getattr(dj_settings, "COMMONS_BLOB_DIR", None)
+    path = os.path.join(blob_dir, sha256) if blob_dir else None
+    if not path or not os.path.isfile(path):
+        return JsonResponse({"error": "absent"}, status=404)
+    if request.method == "HEAD":
+        resp = HttpResponse(status=200)
+        resp["Content-Length"] = str(os.path.getsize(path))
+        return resp
+    resp = FileResponse(open(path, "rb"), content_type="application/octet-stream")
+    # Content-addressed, immutable — cache forever.
+    resp["Cache-Control"] = "public, max-age=31536000, immutable"
     return resp
 
 

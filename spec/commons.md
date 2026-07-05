@@ -150,6 +150,34 @@ certifications; by default all are returned (a `certified: false` record is serv
 200 OK   { "subject": "fn_…", "certifications": [ <signed cert>, … ], "count": 1 }
 ```
 
+### `GET /v0/records/{hash}/attestations` — eval attestations about a weights record
+
+The weights counterpart of `certifications` ([`weights.md`](weights.md) rung 3): returns the signed
+**eval attestation** records ([`eval-attestation.schema.json`](eval-attestation.schema.json), from
+`attest-weights --sign`) whose `subject` is this `wgt_…` address — a certifier's measured-capability
+statement about weights whose bytes the commons does not hold. Published through the ordinary
+verify-then-store gate (`evl_` hash + Ed25519 signature); the node stores and serves, but does not
+judge — the client verifies each attestation and decides under its own policy
+(`nl-validator certified --subject wgt_…`).
+
+```
+200 OK   { "subject": "wgt_…", "attestations": [ <signed attestation>, … ], "count": 1 }
+```
+
+### `GET /v0/blobs/{sha256}` — binary blobs, by content hash
+
+Serves opaque binary bytes (adapter weights, [`weights.md`](weights.md)) keyed by their sha256.
+**Deliberately gate-free and outside the record store**: blobs are not records — a weights record's
+`files[].sha256` is the security boundary, so any host (including a hostile mirror) is safe to fetch
+from; the client hashes the download and rejects a mismatch. The URL shape is the contract, not the
+implementation — a static file server or CDN may front or replace the node's view; `urls[]` entries in
+a weights record are advisory hints, primary-first by convention. Content-addressed and immutable
+(cache-forever). A node populates its blob store out-of-band (the reference node: `manage.py addblob`).
+
+```
+200 OK   <application/octet-stream>          404  { "error": "absent" }
+```
+
 ### `POST /v0/query` — typed discovery (exact, portable)
 
 Body: a structured filter. All fields are optional and combine with AND.

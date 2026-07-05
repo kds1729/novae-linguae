@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/eval-attestation.schema.json",
+  "title": "Novae Linguae Eval Attestation (v0.1)",
+  "description": "A signed eval attestation: a certifier's statement of MEASURED capability for a weights record (spec/weights.md rung 3) — the weights analogue of a function certification. Produced by `nl-validator attest-weights --sign <seed>`. Hashed and signed by exactly the same canonical-serialization rules as a Nova Locutio message (remove 'hash' and 'signature' before hashing; remove only 'signature' before signing; resolve the signer's key from the 'from' DID), differing only in the address prefix: `evl_<64 hex>`. The attestation graph ingests a signature-valid one as an `attests-eval` edge, so a consumer's local policy can answer 'is this model's measured score attested by a certifier I trust?' — for opaque bytes, this layer is the artifact's value.",
+  "type": "object",
+  "required": ["schema_version", "kind", "subject", "eval", "results", "from", "hash", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "kind": {
+      "type": "string",
+      "const": "eval-attestation",
+      "description": "Discriminates this artifact as an eval attestation."
+    },
+    "subject": {
+      "type": "string",
+      "pattern": "^wgt_[0-9a-f]{64}$",
+      "description": "Content-address of the weights record this attestation is about."
+    },
+    "eval": {
+      "type": "object",
+      "required": ["harness", "task_set"],
+      "description": "What was measured: the harness, its settings, and the content identity of the task set — enough for an independent certifier to run the same eval.",
+      "properties": {
+        "harness": {
+          "type": "string",
+          "description": "The grading entry point, e.g. 'tooling/eval/eval_harness.py'."
+        },
+        "settings": {
+          "type": "object",
+          "description": "Harness settings the score depends on (e.g. conventions off, shots 0, dtype)."
+        },
+        "task_set": {
+          "type": "object",
+          "description": "Content identity of the graded task set (e.g. the curated corpus sha256 + task count). The score is meaningless without it.",
+          "properties": {
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "tasks": { "type": "integer", "minimum": 1 },
+            "description": { "type": "string" }
+          }
+        }
+      }
+    },
+    "results": {
+      "type": "object",
+      "description": "The measured scores. Convention: per-kind objects {pass, total} (surface-exact) with optional semantic counts, plus a 'total' entry — but any shape the named harness emits is admissible; the eval descriptor is what makes it interpretable."
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "Optional ISO-8601 time the eval was run. Omitted for a byte-reproducible attestation."
+    },
+    "from": {
+      "type": "string",
+      "pattern": "^did:nova:[0-9a-f]{64}$",
+      "description": "DID of the attesting agent (the Ed25519 public key that signed this attestation)."
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^evl_[0-9a-f]{64}$",
+      "description": "BLAKE3-256 of the canonical serialization of this attestation with 'hash' and 'signature' removed."
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^ed25519:[A-Za-z0-9+/=]+$",
+      "description": "Ed25519 signature over the canonical serialization with only 'signature' removed (so the signature covers the hash)."
+    }
+  }
+}

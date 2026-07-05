@@ -142,6 +142,75 @@ class CommonsProtocolTests(TestCase):
         self.assertEqual(resp.status_code, 422)
         self.assertIn(resp.json()["error"], {"signature_invalid", "hash_mismatch"})
 
+    # --- weights records + eval attestations (spec/weights.md) ---------------------------------
+
+    def test_weights_record_publishes_and_resolves(self):
+        # A weights POINTER record is a first-class artifact: schema-gated + wgt_ hash-verified on
+        # ingest, resolved back byte-for-byte. The blobs it points at never enter the record store.
+        rec = _load("weights-coder7b-c12-s1.json")
+        self.assertTrue(rec["hash"].startswith("wgt_"))
+        resp = self._publish(rec)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        got = self.client.get(f"/v0/records/{rec['hash']}")
+        self.assertEqual(got.status_code, 200)
+        self.assertEqual(got.json(), rec)
+
+    def test_tampered_weights_record_rejected(self):
+        # Repointing the blob manifest breaks the wgt_ address — the gate refuses it.
+        rec = _load("weights-coder7b-c12-s1.json")
+        rec["files"][0]["sha256"] = "0" * 64
+        resp = self._publish(rec)
+        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(resp.json()["error"], "hash_mismatch")
+
+    def test_eval_attestations_served_by_subject(self):
+        # The weights counterpart of certifications-by-subject: a consumer that resolved a wgt_
+        # pointer fetches the signed eval attestations about it, then judges under its OWN policy.
+        att = _load("attest-coder7b-c12-s1.json")
+        self.assertTrue(att["hash"].startswith("evl_"))
+        resp = self._publish(att)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        subject = att["subject"]
+        got = self.client.get(f"/v0/records/{subject}/attestations")
+        self.assertEqual(got.status_code, 200)
+        body = got.json()
+        self.assertEqual(body["subject"], subject)
+        self.assertEqual(body["count"], 1)
+        self.assertEqual(body["attestations"][0]["hash"], att["hash"])
+
+    def test_tampered_eval_attestation_rejected(self):
+        # Inflating the signed score fails Ed25519 verification on ingest — accountability holds.
+        att = _load("attest-coder7b-c12-s1.json")
+        att["results"]["write"]["pass"] = att["results"]["write"]["total"]
+        resp = self._publish(att)
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn(resp.json()["error"], {"signature_invalid", "hash_mismatch"})
+
+    def test_blob_store_and_serve(self):
+        # /v0/blobs/{sha256}: content-addressed, gate-free, verified client-side. `addblob` stores.
+        with tempfile.TemporaryDirectory() as tmp:
+            blob = Path(tmp) / "adapter_model.safetensors"
+            blob.write_bytes(b"weights bytes, opaque to the commons")
+            import hashlib
+            digest = hashlib.sha256(blob.read_bytes()).hexdigest()
+            with override_settings(COMMONS_BLOB_DIR=str(Path(tmp) / "blobs")):
+                out = io.StringIO()
+                call_command("addblob", str(blob), stdout=out)
+                self.assertIn(digest, out.getvalue())
+                self.assertIn("stored", out.getvalue())
+                # Idempotent.
+                out2 = io.StringIO()
+                call_command("addblob", str(blob), stdout=out2)
+                self.assertIn("already present", out2.getvalue())
+                # HEAD then GET; the served bytes hash back to the address.
+                self.assertEqual(self.client.head(f"/v0/blobs/{digest}").status_code, 200)
+                got = self.client.get(f"/v0/blobs/{digest}")
+                self.assertEqual(got.status_code, 200)
+                served = b"".join(got.streaming_content)
+                self.assertEqual(hashlib.sha256(served).hexdigest(), digest)
+        # Absent blob is a 404.
+        self.assertEqual(self.client.get("/v0/blobs/" + "f" * 64).status_code, 404)
+
     def test_message_publishes_and_verifies(self):
         # request.json is a signed message; verify-on-ingest must check hash AND signature.
         msg = _load("request.json")

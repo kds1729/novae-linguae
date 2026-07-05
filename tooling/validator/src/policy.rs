@@ -441,6 +441,34 @@ impl Policy {
         };
         CertificationVerdict { certified, trusted_certifiers, reason }
     }
+
+    /// Whether a **weights record** (`subject`, a `wgt_…` content-address) has its measured capability
+    /// attested *by a certifier this policy trusts*, given the attestation graph (which ingests signed
+    /// eval-attestation records as `attests-eval` edges). The weights counterpart of
+    /// [`Self::certification_verdict`]: for opaque bytes the attestation layer is the artifact's value,
+    /// and an attestation signed by an unknown key counts for nothing.
+    pub fn eval_attestation_verdict(
+        &self,
+        graph: &AttestationGraph,
+        subject: &str,
+        domain: Option<&str>,
+        at: Option<&str>,
+    ) -> CertificationVerdict {
+        let trusted_certifiers: Vec<String> = graph
+            .eval_attestors(subject)
+            .into_iter()
+            .filter(|c| self.evaluate_trust(graph, c, domain, at).trusted)
+            .collect();
+        let certified = !trusted_certifiers.is_empty();
+        let reason = if certified {
+            format!("eval-attested by {} trusted certifier(s)", trusted_certifiers.len())
+        } else if graph.eval_attestors(subject).is_empty() {
+            "no eval attestation found for these weights".to_string()
+        } else {
+            "eval-attested, but no attesting certifier is trusted under this policy".to_string()
+        };
+        CertificationVerdict { certified, trusted_certifiers, reason }
+    }
 }
 
 /// The result of a certification query: is a function certified by a certifier the policy trusts?
@@ -520,6 +548,42 @@ mod tests {
         let g = AttestationGraph::from_messages(&[certification("mallory", &f)], None);
         let v = policy(&[&root], 1).certification_verdict(&g, &f, None, None);
         assert!(!v.certified, "an untrusted certifier's certification must not count");
+    }
+
+    fn eval_attestation(certifier_seed: &str, subject: &str) -> J {
+        use crate::{sign_artifact, ArtifactKind};
+        let mut a = json!({
+            "schema_version": "0.1.0", "kind": "eval-attestation", "subject": subject,
+            "eval": { "harness": "tooling/eval/eval_harness.py", "task_set": { "tasks": 360 } },
+            "results": { "write": { "pass": 167, "total": 179 } },
+        });
+        sign_artifact(&mut a, &signing_key_from_seed(certifier_seed), ArtifactKind::EvalAttestation).unwrap();
+        a
+    }
+
+    #[test]
+    fn eval_attestation_by_a_trusted_certifier_counts() {
+        // root vouches for `carol`; carol attests the measured eval of weights W. Under the policy, W is
+        // attested because a TRUSTED certifier signed the attestation — the weights analogue of
+        // `certification_by_a_trusted_certifier_counts`.
+        let (root, carol) = (did("root"), did("carol"));
+        let w = format!("wgt_{}", "c".repeat(64));
+        let g = AttestationGraph::from_messages(
+            &[attest("root", &carol, "vouches-for", None), eval_attestation("carol", &w)],
+            None,
+        );
+        let v = policy(&[&root], 1).eval_attestation_verdict(&g, &w, None, None);
+        assert!(v.certified, "{}", v.reason);
+        assert!(v.trusted_certifiers.contains(&carol));
+    }
+
+    #[test]
+    fn eval_attestation_by_an_untrusted_certifier_does_not_count() {
+        let root = did("root");
+        let w = format!("wgt_{}", "d".repeat(64));
+        let g = AttestationGraph::from_messages(&[eval_attestation("mallory", &w)], None);
+        let v = policy(&[&root], 1).eval_attestation_verdict(&g, &w, None, None);
+        assert!(!v.certified, "an untrusted certifier's eval attestation must not count");
     }
 
     #[test]

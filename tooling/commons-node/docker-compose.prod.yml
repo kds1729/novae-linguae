@@ -55,11 +55,14 @@ services:
       COMMONS_REDIS_URL: redis://redis:6379/0
       COMMONS_CELERY_BROKER: redis://redis:6379/0
       COMMONS_EMBEDDINGS_URL: http://embeddings:80
+      COMMONS_BLOB_DIR: /blobs       # content-addressed binary blobs (spec/weights.md), on a volume
     # Single line on purpose: a YAML folded scalar (`>`) with extra-indented continuation lines keeps
     # the newlines, which would split the gunicorn args onto a dead line and drop --bind.
     command: ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn commons_node.wsgi:application --bind 0.0.0.0:8000 --workers 3 --threads 2 --timeout 60 --access-logfile -"]
     ports:
       - "127.0.0.1:8001:8000"        # loopback only — the host's edge proxy fronts this
+    volumes:
+      - commons_blobs:/blobs         # blobs survive image rebuilds (records live in pg; blobs live here)
     depends_on:
       db: { condition: service_healthy }
       redis: { condition: service_started }
@@ -110,5 +113,6 @@ volumes:
   commons_pgdata:
   commons_redis:
   commons_tei:
+  commons_blobs:
   caddy_data:
   caddy_config:

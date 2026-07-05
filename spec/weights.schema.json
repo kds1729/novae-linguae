@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/weights.schema.json",
+  "title": "Novae Linguae Model Weights (v0.1)",
+  "description": "A content-addressed POINTER record for model weights (spec/weights.md): identity (base model + per-file sha256 blob manifest), provenance (the deterministic training recipe over content-addressed corpus data), and advisory fetch locations. The blobs themselves are NOT stored in the commons — they live on ordinary static hosting and are verified client-side against files[].sha256 (the host is untrusted; the hash is the truth). Hashed like a function record (remove 'hash' before JCS-canonicalizing and BLAKE3-256 hashing), address prefix `wgt_`. Unsigned — provenance and measured capability are carried by signed eval-attestation records about this address, never by the pointer itself.",
+  "type": "object",
+  "required": ["schema_version", "kind", "hash", "base", "format", "files", "recipe"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "kind": {
+      "type": "string",
+      "const": "weights",
+      "description": "Discriminates this artifact as a weights pointer record."
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^wgt_[0-9a-f]{64}$",
+      "description": "BLAKE3-256 of the canonical serialization of this record with 'hash' removed."
+    },
+    "name_hints": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Non-normative human/agent-friendly names, as in function records."
+    },
+    "base": {
+      "type": "object",
+      "required": ["model"],
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "The base model the weights apply to, e.g. 'Qwen/Qwen2.5-Coder-7B-Instruct'."
+        },
+        "license": {
+          "type": "string",
+          "description": "The base model's license (rides along, not enforced — the record cannot launder it)."
+        }
+      }
+    },
+    "format": {
+      "type": "string",
+      "enum": ["lora-peft-safetensors"],
+      "description": "What the bytes are. Closed enum — adding a format requires a schema version bump."
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The blob manifest. sha256 (not BLAKE3) deliberately: blobs are not JCS-canonicalizable JSON, so any collision-resistant hash serves, and sha256 is the ML-ecosystem convention (safetensors, HF).",
+      "items": {
+        "type": "object",
+        "required": ["name", "sha256", "bytes"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "File name within the adapter directory, e.g. 'adapter_model.safetensors'."
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "recipe": {
+      "type": "object",
+      "required": ["corpus", "train_split", "trainer", "seed", "epochs"],
+      "additionalProperties": false,
+      "description": "The deterministic derivation: same base + recipe reproduces files[].sha256 bit-for-bit. This is the reproducibility claim a certifier can re-execute.",
+      "properties": {
+        "corpus": {
+          "type": "object",
+          "required": ["sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "description": { "type": "string", "description": "How the corpus was produced, e.g. 'gen_corpus.py --combinatorial (corpus12, 42 template families)'." }
+          }
+        },
+        "train_split": {
+          "type": "object",
+          "required": ["sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "examples": { "type": "integer", "minimum": 0 },
+            "description": { "type": "string", "description": "How the split was produced, e.g. 'export_finetune.py --conventions off --shots 0 --holdout-corpus' (the leakage guard)." }
+          }
+        },
+        "trainer": {
+          "type": "string",
+          "description": "The training entry point, e.g. 'tooling/eval/train_lora_cpu.py'."
+        },
+        "seed": { "type": "integer" },
+        "epochs": { "type": "integer", "minimum": 1 },
+        "hyperparameters": {
+          "type": "object",
+          "description": "Remaining knobs needed for bit-identical reproduction (lora rank/alpha/dropout, max-seq-len, lr, dtype, …)."
+        }
+      }
+    },
+    "measured": {
+      "type": "object",
+      "description": "OPTIONAL self-reported eval summary. Normatively UNTRUSTED — consumers rely on signed eval-attestation records about this wgt_ address, never on this field."
+    },
+    "urls": {
+      "type": "array",
+      "items": { "type": "string", "format": "uri" },
+      "description": "Advisory fetch locations, primary first (convention: <origin>/blobs/<sha256>). Any mirror may serve; files[].sha256 decides."
+    },
+    "derived_from": {
+      "type": ["string", "null"],
+      "description": "Optional lineage pointer (e.g. the wgt_ address these weights were further trained from)."
+    },
+    "supersedes": {
+      "type": ["string", "null"],
+      "description": "The wgt_ address this record supersedes. Versioning is a supersedes chain, not mutable tags."
+    }
+  }
+}

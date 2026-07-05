@@ -159,6 +159,36 @@ impl AttestationGraph {
                         hash,
                     });
                 }
+                // A signed **eval attestation** (`attest-weights --sign`): `<certifier> attests-eval
+                // <weights>`. The weights analogue of a certification — an accountable, re-runnable
+                // measured-capability statement about a `wgt_` record. Like `certifies`, it is a
+                // separate axis from vouches-for: it records that this certifier measured the model,
+                // not that anyone is trusted.
+                Some("eval-attestation") => {
+                    let hash = match m.get("hash").and_then(|h| h.as_str()) {
+                        Some(h) if !retracted.contains(h) => h.to_string(),
+                        _ => continue,
+                    };
+                    if crate::verify_signature(m).is_err() {
+                        continue;
+                    }
+                    let (Some(attester), Some(subject)) = (
+                        m.get("from").and_then(|f| f.as_str()),
+                        m.get("subject").and_then(|s| s.as_str()),
+                    ) else {
+                        continue;
+                    };
+                    edges.push(Attestation {
+                        attester: attester.to_string(),
+                        subject: subject.to_string(),
+                        verb: "attests-eval".to_string(),
+                        domain: None,
+                        confidence: None,
+                        issued_at: m.get("timestamp").and_then(|t| t.as_str()).map(String::from),
+                        expires_at: None,
+                        hash,
+                    });
+                }
                 _ => continue,
             }
         }
@@ -198,6 +228,17 @@ impl AttestationGraph {
         self.edges
             .iter()
             .filter(|e| e.subject == subject && e.verb == "certifies")
+            .map(|e| e.attester.clone())
+            .collect()
+    }
+
+    /// Distinct certifiers who have signed an `attests-eval` edge for `subject` (a weights record's
+    /// content-address). The weights counterpart of [`Self::certifiers`]: an eval attestation is
+    /// meaningful only when the attesting certifier is itself trusted under the consumer's policy.
+    pub fn eval_attestors(&self, subject: &str) -> BTreeSet<String> {
+        self.edges
+            .iter()
+            .filter(|e| e.subject == subject && e.verb == "attests-eval")
             .map(|e| e.attester.clone())
             .collect()
     }
@@ -356,5 +397,49 @@ mod tests {
         let h = c["hash"].as_str().unwrap().to_string();
         let g = AttestationGraph::from_messages(&[c, retract("carol", &h)], None);
         assert!(g.certifiers(&f).is_empty(), "a retracted certification is dropped");
+    }
+
+    // ---- eval attestations as `attests-eval` edges ----
+
+    /// A signed eval attestation (`attest-weights --sign`): `certifier` attests measured capability
+    /// of weights `subject`.
+    fn eval_attestation(certifier_seed: &str, subject: &str) -> J {
+        use crate::{sign_artifact, ArtifactKind};
+        let mut a = json!({
+            "schema_version": "0.1.0", "kind": "eval-attestation", "subject": subject,
+            "eval": { "harness": "tooling/eval/eval_harness.py",
+                      "task_set": { "tasks": 360 } },
+            "results": { "write": { "pass": 167, "total": 179 } },
+        });
+        sign_artifact(&mut a, &signing_key_from_seed(certifier_seed), ArtifactKind::EvalAttestation).unwrap();
+        a
+    }
+
+    #[test]
+    fn eval_attestation_builds_an_attests_eval_edge() {
+        let w = format!("wgt_{}", "5".repeat(64));
+        let g = AttestationGraph::from_messages(&[eval_attestation("carol", &w)], None);
+        assert!(g.eval_attestors(&w).contains(&did("carol")), "an eval attestation names its certifier");
+        // A separate axis from both vouches-for and certifies.
+        assert!(g.positive_attesters(&w, None).is_empty(), "attests-eval is not vouches-for");
+        assert!(g.certifiers(&w).is_empty(), "attests-eval is not certifies");
+    }
+
+    #[test]
+    fn tampered_eval_attestation_is_skipped() {
+        let w = format!("wgt_{}", "6".repeat(64));
+        let mut a = eval_attestation("carol", &w);
+        a["results"] = json!({ "write": { "pass": 179, "total": 179 } }); // inflate after signing
+        let g = AttestationGraph::from_messages(&[a], None);
+        assert!(g.is_empty(), "a tampered eval attestation fails signature verification and is skipped");
+    }
+
+    #[test]
+    fn retracted_eval_attestation_drops_the_edge() {
+        let w = format!("wgt_{}", "7".repeat(64));
+        let a = eval_attestation("carol", &w);
+        let h = a["hash"].as_str().unwrap().to_string();
+        let g = AttestationGraph::from_messages(&[a, retract("carol", &h)], None);
+        assert!(g.eval_attestors(&w).is_empty(), "a retracted eval attestation is dropped");
     }
 }

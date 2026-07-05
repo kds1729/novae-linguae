@@ -16,6 +16,11 @@ enum CliKind {
     Message,
     /// Body expression (top-level `expr_<hex>` hash, nothing stripped).
     Body,
+    /// Weights pointer record (top-level `wgt_<hex>` hash, strips `hash` before hashing).
+    Weights,
+    /// Signed eval attestation (top-level `evl_<hex>` hash, strips `hash` and `signature`;
+    /// Ed25519 signature covers the hash).
+    EvalAttestation,
 }
 
 impl From<CliKind> for nl_validator::ArtifactKind {
@@ -24,6 +29,8 @@ impl From<CliKind> for nl_validator::ArtifactKind {
             CliKind::FunctionRecord => Self::FunctionRecord,
             CliKind::Message => Self::Message,
             CliKind::Body => Self::BodyExpression,
+            CliKind::Weights => Self::Weights,
+            CliKind::EvalAttestation => Self::EvalAttestation,
         }
     }
 }
@@ -300,6 +307,30 @@ enum Commands {
         sign: Option<String>,
         /// Optional ISO-8601 timestamp to stamp into a signed certification (omitted → no timestamp, so the
         /// certificate stays byte-reproducible).
+        #[arg(long)]
+        timestamp: Option<String>,
+    },
+    /// Produce a signed **eval attestation** (`evl_…`) about a weights record (spec/weights.md rung 3)
+    /// — the weights analogue of `certify --sign`: a certifier's statement of MEASURED capability.
+    /// Verifies the weights record's `wgt_` hash first (attest only what you can address), then builds
+    /// `{subject, eval, results}` from the supplied descriptor + results JSON and signs it with the
+    /// deterministic Ed25519 key derived from the seed. The attestation graph ingests the result as an
+    /// `attests-eval` edge; `certified --subject wgt_…` answers whether a trusted certifier attested it.
+    AttestWeights {
+        /// Path to the weights record (`wgt_…`) being attested.
+        record: PathBuf,
+        /// Path to the eval descriptor JSON: `{harness, settings?, task_set{sha256?, tasks?, …}}` —
+        /// what was measured, precisely enough for an independent re-run.
+        #[arg(long)]
+        eval: PathBuf,
+        /// Path to the measured results JSON (the scores the named harness emitted).
+        #[arg(long)]
+        results: PathBuf,
+        /// Seed for the attesting identity's deterministic Ed25519 key.
+        #[arg(long)]
+        sign: String,
+        /// Optional ISO-8601 timestamp (omitted → no timestamp, so the attestation stays
+        /// byte-reproducible).
         #[arg(long)]
         timestamp: Option<String>,
     },
@@ -664,6 +695,9 @@ fn main() -> ExitCode {
         Commands::Certify { record, body, records, solver, json, sign, timestamp } => {
             (cmd_certify(&record, &body, records.as_ref(), &solver, json, sign.as_deref(), timestamp.as_deref()), false)
         }
+        Commands::AttestWeights { record, eval, results, sign, timestamp } => {
+            (cmd_attest_weights(&record, &eval, &results, &sign, timestamp.as_deref()), false)
+        }
         Commands::Respond { request, records, seed, timestamp } => {
             (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
         }
@@ -793,13 +827,19 @@ fn cmd_verify(record: &PathBuf, kind_override: Option<nl_validator::ArtifactKind
     };
     println!("{hash_line}");
 
-    // Signature check (messages only).
+    // Signature check (signed kinds only).
     let sig_pass = match kind {
         nl_validator::ArtifactKind::FunctionRecord => {
             println!("signature N/A   function records have no signature");
             true
         }
-        nl_validator::ArtifactKind::Message | nl_validator::ArtifactKind::Certification => match nl_validator::verify_signature(&value) {
+        nl_validator::ArtifactKind::Weights => {
+            println!("signature N/A   weights records have no signature (provenance is attested, not signed)");
+            true
+        }
+        nl_validator::ArtifactKind::Message
+        | nl_validator::ArtifactKind::Certification
+        | nl_validator::ArtifactKind::EvalAttestation => match nl_validator::verify_signature(&value) {
             Ok(()) => {
                 println!("signature PASS");
                 true
@@ -1063,6 +1103,52 @@ fn cmd_certify(
     if !certified {
         return Err(anyhow::anyhow!("record is NOT certified (a check failed its declaration)"));
     }
+    Ok(())
+}
+
+fn cmd_attest_weights(
+    record: &PathBuf,
+    eval: &PathBuf,
+    results: &PathBuf,
+    seed: &str,
+    timestamp: Option<&str>,
+) -> Result<()> {
+    use std::io::Write;
+    // Attest only what you can address: the weights record's wgt_ hash must verify.
+    let weights = nl_validator::read_json(record)?;
+    let kind = nl_validator::ArtifactKind::detect(&weights)?;
+    if kind != nl_validator::ArtifactKind::Weights {
+        return Err(anyhow::anyhow!(
+            "attest-weights takes a weights record (kind = \"weights\"); got {kind:?}"
+        ));
+    }
+    let v = nl_validator::verify_artifact_hash_with_kind(&weights, kind)?;
+    if !v.matches {
+        return Err(anyhow::anyhow!(
+            "weights record hash does not verify (stored {:?}, computed {}) — refusing to attest",
+            v.stored,
+            v.computed
+        ));
+    }
+    let subject = v.computed;
+
+    let eval_desc = nl_validator::read_json(eval)?;
+    let results_json = nl_validator::read_json(results)?;
+    let mut att = serde_json::json!({
+        "schema_version": "0.1.0",
+        "kind": "eval-attestation",
+        "subject": subject,
+        "eval": eval_desc,
+        "results": results_json,
+    });
+    if let Some(ts) = timestamp {
+        att.as_object_mut().unwrap().insert("timestamp".into(), serde_json::Value::String(ts.into()));
+    }
+    let key = nl_validator::signing_key_from_seed(seed);
+    nl_validator::sign_artifact(&mut att, &key, nl_validator::ArtifactKind::EvalAttestation)?;
+    let pretty = serde_json::to_string_pretty(&att).map_err(|e| anyhow::anyhow!("{e}"))?;
+    std::io::stdout().write_all(pretty.as_bytes())?;
+    std::io::stdout().write_all(b"\n")?;
     Ok(())
 }
 
@@ -1393,9 +1479,15 @@ fn cmd_certified(
     at: Option<&str>,
 ) -> Result<()> {
     let policy = nl_validator::Policy::from_json(&nl_validator::read_json(policy)?)?;
-    let messages = load_json_messages(attestations, None)?; // certifications + attestations + retracts
+    let messages = load_json_messages(attestations, None)?; // certifications + eval attestations + attestations + retracts
     let graph = nl_validator::AttestationGraph::from_messages(&messages, at);
-    let verdict = policy.certification_verdict(&graph, subject, domain, at);
+    // A `wgt_…` subject asks the weights question (signed eval attestations, `attests-eval` edges);
+    // anything else asks the function question (signed certifications, `certifies` edges).
+    let verdict = if subject.starts_with("wgt_") {
+        policy.eval_attestation_verdict(&graph, subject, domain, at)
+    } else {
+        policy.certification_verdict(&graph, subject, domain, at)
+    };
     if verdict.certified {
         println!("CERTIFIED    `{subject}`: {}", verdict.reason);
         for c in &verdict.trusted_certifiers {
@@ -1798,6 +1890,16 @@ fn cmd_sign(record: &PathBuf, seed: &str, in_place: bool) -> Result<()> {
         nl_validator::ArtifactKind::Certification => {
             return Err(anyhow::anyhow!(
                 "a certification is signed by `certify --sign <seed>`, not `sign`"
+            ));
+        }
+        nl_validator::ArtifactKind::Weights => {
+            return Err(anyhow::anyhow!(
+                "weights records are unsigned — measured capability is attested by `attest-weights --sign <seed>`"
+            ));
+        }
+        nl_validator::ArtifactKind::EvalAttestation => {
+            return Err(anyhow::anyhow!(
+                "an eval attestation is signed by `attest-weights --sign <seed>`, not `sign`"
             ));
         }
     }

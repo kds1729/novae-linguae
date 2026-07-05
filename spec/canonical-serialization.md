@@ -119,6 +119,24 @@ DID on verification — the only difference being the address prefix: a certific
 `expr_…` address) name what was certified, so a certification is itself a content-addressed, tamper-evident
 commons artifact that other agents can rely on when assembling.
 
+### Weights records
+
+A **weights pointer record** (top-level `kind: "weights"`, [`weights.schema.json`](weights.schema.json) /
+[`weights.md`](weights.md)) is hashed by **exactly the same rules as a function record** — remove `hash`,
+JCS-canonicalize, BLAKE3-256 — with the address prefix `wgt_`. It is **unsigned**: provenance and measured
+capability are carried by signed eval attestations *about* its address, never by the pointer itself. Note
+the two hash layers: the record's *address* is BLAKE3 over its canonical JSON as everywhere in the commons,
+while the `files[].sha256` entries inside it identify the **binary blobs** the record points at (sha256 by
+ML-ecosystem convention — blobs are not JSON and never enter the JCS pipeline).
+
+### Eval attestations
+
+An **eval attestation** (top-level `kind: "eval-attestation"`, produced by `nl-validator attest-weights
+--sign`, [`eval-attestation.schema.json`](eval-attestation.schema.json)) is hashed and signed by **exactly
+the same rules as a message** — remove `hash` and `signature` before hashing; remove only `signature` before
+signing; resolve the signer's key from the `from` DID — with the address prefix `evl_`. Its `subject` (a
+`wgt_…` address) names the weights whose measured capability is attested.
+
 ## Worked example
 
 Given this minimal function record:

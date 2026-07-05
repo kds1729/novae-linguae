@@ -72,6 +72,12 @@ COMMONS_VALIDATOR = os.environ.get(
 )
 COMMONS_SPEC_DIR = os.environ.get("COMMONS_SPEC_DIR", str(REPO_ROOT / "spec"))
 
+# Binary blobs (spec/weights.md): opaque bytes served by content hash at /v0/blobs/{sha256}, OUTSIDE
+# the record store and its gate — a weights record's files[].sha256 is what makes any host safe to
+# fetch from (the client verifies after download). `manage.py addblob <file>` stores a file here under
+# its sha256. In production a static server/CDN can front or replace the Django view.
+COMMONS_BLOB_DIR = os.environ.get("COMMONS_BLOB_DIR", str(BASE_DIR / "blobs"))
+
 # Optional proof service (/v0/prove): runs `nl-validator prove` over a record's forall properties[]
 # with an SMT solver. Node-local and best-effort (like search), never an admission gate; it needs a
 # solver on PATH or every property reports NO-SOLVER. The timeout caps the (occasionally solver-heavy)

@@ -250,6 +250,14 @@ pub enum ArtifactKind {
     /// A signed **certification** record — a certifier's attestation that a function record passed every
     /// "verified by default" check (`certify --sign`). Hashed and signed like a message.
     Certification,
+    /// A **weights pointer** record (spec/weights.md): identity + provenance for model weights whose
+    /// blobs live on ordinary static hosting, verified client-side against the record's per-file sha256.
+    /// Unsigned, hashed like a function record.
+    Weights,
+    /// A signed **eval attestation** (`attest-weights --sign`) — a certifier's measured-capability
+    /// statement about a weights record; the weights analogue of a certification. Hashed and signed
+    /// like a message.
+    EvalAttestation,
 }
 
 impl ArtifactKind {
@@ -258,8 +266,10 @@ impl ArtifactKind {
     /// `hash` field — the whole expression IS what gets hashed.
     fn strip_fields(self) -> &'static [&'static str] {
         match self {
-            ArtifactKind::FunctionRecord => &["hash"],
-            ArtifactKind::Message | ArtifactKind::Certification => &["hash", "signature"],
+            ArtifactKind::FunctionRecord | ArtifactKind::Weights => &["hash"],
+            ArtifactKind::Message | ArtifactKind::Certification | ArtifactKind::EvalAttestation => {
+                &["hash", "signature"]
+            }
             ArtifactKind::BodyExpression => &[],
         }
     }
@@ -271,6 +281,8 @@ impl ArtifactKind {
             ArtifactKind::Message => "msg",
             ArtifactKind::BodyExpression => "expr",
             ArtifactKind::Certification => "cert",
+            ArtifactKind::Weights => "wgt",
+            ArtifactKind::EvalAttestation => "evl",
         }
     }
 
@@ -304,6 +316,12 @@ impl ArtifactKind {
             }
             if kind_str == "certification" {
                 return Ok(ArtifactKind::Certification);
+            }
+            if kind_str == "weights" {
+                return Ok(ArtifactKind::Weights);
+            }
+            if kind_str == "eval-attestation" {
+                return Ok(ArtifactKind::EvalAttestation);
             }
             const BODY_KINDS: &[&str] = &[
                 "var", "lit", "app", "let", "lambda", "case", "field",

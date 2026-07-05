@@ -19,7 +19,10 @@ import tempfile
 from django.conf import settings
 
 # Address prefix -> artifact kind.
-_PREFIX_KIND = {"fn": "function-record", "msg": "message", "expr": "body", "type": "type", "cert": "certification"}
+_PREFIX_KIND = {
+    "fn": "function-record", "msg": "message", "expr": "body", "type": "type",
+    "cert": "certification", "wgt": "weights", "evl": "eval-attestation",
+}
 
 # (kind, schema_version) -> schema filename in COMMONS_SPEC_DIR.
 _SCHEMA = {
@@ -30,6 +33,8 @@ _SCHEMA = {
     ("body", "0.1.0"): "body-expression.schema.json",
     ("type", "0.1.0"): "type-expression.schema.json",
     ("certification", "0.2.0"): "certification.schema.json",
+    ("weights", "0.1.0"): "weights.schema.json",
+    ("eval-attestation", "0.1.0"): "eval-attestation.schema.json",
 }
 
 
@@ -128,7 +133,7 @@ def _verify_bare_body(raw):
 
 def extract(raw, kind):
     """Pull the queryable columns out of a verified record (function records carry the signature;
-    certifications carry the `subject`/`certified` they attest to)."""
+    certifications and eval attestations carry the `subject` they attest to)."""
     signature = raw.get("signature", {}) if kind == "function-record" else {}
     type_value = signature.get("type")
     return {
@@ -141,8 +146,9 @@ def extract(raw, kind):
         "type_str": type_value if isinstance(type_value, str)
         else (json.dumps(type_value) if type_value is not None else None),
         "body_hash": raw.get("body_hash"),
-        # Certification records: the `fn_…` this certification is about, and its verdict. Indexed so
-        # "certifications about this function" is a keyed lookup (views.certifications).
-        "subject": raw.get("subject") if kind == "certification" else None,
+        # Certifications: the `fn_…` this certification is about, and its verdict. Eval attestations:
+        # the `wgt_…` weights record they attest. Indexed so "attestations about this artifact" is a
+        # keyed lookup (views.certifications / views.attestations).
+        "subject": raw.get("subject") if kind in ("certification", "eval-attestation") else None,
         "certified": raw.get("certified") if kind == "certification" else None,
     }

@@ -1,9 +1,15 @@
 # Model weights in the commons — pointer records + eval attestations
 
-**Status: proposed design (v0.1 draft) — not yet implemented.** No `wgt_` artifact kind exists in the
-validator or the node yet; this records the agreed design so implementation has a spec to land against.
-The normative store/discovery protocol is [`commons.md`](commons.md); this document will merge into it
-(plus a `weights.schema.json`) when the kind is built.
+**Status: implemented (v0.1).** The `wgt_` and `evl_` artifact kinds are live end to end: schemas
+([`weights.schema.json`](weights.schema.json), [`eval-attestation.schema.json`](eval-attestation.schema.json)),
+hashing/signing rules ([`canonical-serialization.md`](canonical-serialization.md)), the validator
+(`hash`/`verify` auto-detect both kinds; `attest-weights --sign` produces signed eval attestations;
+`certified --subject wgt_…` answers the trust question over `attests-eval` edges), and the node
+(verify-then-store gate for both kinds, `GET /v0/records/{wgt}/attestations`, the gate-free
+content-addressed blob store `GET /v0/blobs/{sha256}` + `manage.py addblob`). The pinned reference
+adapters are published as the first hosted weights (`spec/examples/weights-*.json` +
+`attest-*.json`). This document records the design and its rationale; the normative store/discovery
+protocol is [`commons.md`](commons.md).
 
 ## Why
 

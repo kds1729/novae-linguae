@@ -148,3 +148,58 @@ fn certification_hash_uses_the_cert_prefix() {
     let h = hash_artifact(&unsigned_certification()).unwrap();
     assert!(h.starts_with("cert_"), "got {h}");
 }
+
+// ---- weights pointer records + signed eval attestations (spec/weights.md) ----
+
+fn weights_record() -> serde_json::Value {
+    json!({
+        "schema_version": "0.1.0",
+        "kind": "weights",
+        "base": { "model": "Qwen/Qwen2.5-Coder-7B-Instruct", "license": "Apache-2.0" },
+        "format": "lora-peft-safetensors",
+        "files": [{ "name": "adapter_model.safetensors", "sha256": "f".repeat(64), "bytes": 161061273 }],
+        "recipe": {
+            "corpus": { "sha256": "a".repeat(64) },
+            "train_split": { "sha256": "b".repeat(64), "examples": 5787 },
+            "trainer": "tooling/eval/train_lora_cpu.py",
+            "seed": 1, "epochs": 2
+        },
+    })
+}
+
+#[test]
+fn weights_record_detects_and_hashes_with_the_wgt_prefix() {
+    // A weights record is unsigned and hashed like a function record (strip `hash` only).
+    let mut w = weights_record();
+    assert_eq!(ArtifactKind::detect(&w).unwrap(), ArtifactKind::Weights);
+    let h = hash_artifact(&w).unwrap();
+    assert!(h.starts_with("wgt_"), "got {h}");
+    w["hash"] = json!(h);
+    assert!(verify_artifact_hash(&w).unwrap().matches);
+    // Tampering with the blob manifest breaks the address.
+    w["files"][0]["sha256"] = json!("0".repeat(64));
+    assert!(!verify_artifact_hash(&w).unwrap().matches);
+}
+
+#[test]
+fn signed_eval_attestation_hash_and_signature_verify() {
+    let key = signing_key_from_seed("novae-linguae-example-certifier");
+    let mut att = json!({
+        "schema_version": "0.1.0",
+        "kind": "eval-attestation",
+        "subject": format!("wgt_{}", "e".repeat(64)),
+        "eval": { "harness": "tooling/eval/eval_harness.py",
+                  "settings": { "conventions": "off", "shots": 0 },
+                  "task_set": { "tasks": 360 } },
+        "results": { "write": { "pass": 167, "total": 179 } },
+    });
+    sign_artifact(&mut att, &key, ArtifactKind::EvalAttestation).unwrap();
+    assert_eq!(ArtifactKind::detect(&att).unwrap(), ArtifactKind::EvalAttestation);
+    assert!(att["hash"].as_str().unwrap().starts_with("evl_"));
+    assert!(verify_artifact_hash(&att).unwrap().matches);
+    assert!(verify_signature(&att).is_ok());
+    // Inflating the signed score fails signature verification — the accountability property.
+    let mut tampered = att.clone();
+    tampered["results"]["write"]["pass"] = json!(179);
+    assert!(verify_signature(&tampered).is_err(), "a mutated eval attestation must fail signature verification");
+}

@@ -1,0 +1,78 @@
+{
+  "schema_version": "0.1.0",
+  "kind": "weights",
+  "hash": "wgt_19cb0740b13c354e309192f993348026826257e1fccb32af067f32aef3c82fdf",
+  "name_hints": [
+    "nova-lingua-coder-14b",
+    "reference-best-read"
+  ],
+  "base": {
+    "model": "Qwen/Qwen2.5-Coder-14B-Instruct",
+    "license": "Apache-2.0"
+  },
+  "format": "lora-peft-safetensors",
+  "files": [
+    {
+      "name": "adapter_config.json",
+      "sha256": "6938bb025d35f19ca20b2da4121d8e30f79d293efda01dde45173fecf12a28b1",
+      "bytes": 1110
+    },
+    {
+      "name": "adapter_model.safetensors",
+      "sha256": "502a67715c0909dff1dc75b8c32112086ca3c32f5e9cf1ff794aafc4e7926e91",
+      "bytes": 275341720
+    }
+  ],
+  "recipe": {
+    "corpus": {
+      "sha256": "d7c96dd0a4a07373ba08cfe4ac9551be153473ff88e7f9174141f31650c7a96a",
+      "description": "gen_corpus.py --combinatorial (verified synthetic training corpus)"
+    },
+    "train_split": {
+      "sha256": "f2c4cb2254cc38abceb5f414a52782cda1c87bf00033e80c574846c525f0aa7c",
+      "examples": 5697,
+      "description": "export_finetune.py --conventions off --shots 0 --holdout-corpus (curated eval held out)"
+    },
+    "trainer": "tooling/eval/train_lora_cpu.py",
+    "seed": 1,
+    "epochs": 2,
+    "hyperparameters": {
+      "lora_r": 16,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "target_modules": "all attn+MLP proj",
+      "max_seq_len": 512,
+      "learning_rate": 0.0002,
+      "grad_accum": 8,
+      "dtype": "bfloat16"
+    }
+  },
+  "measured": {
+    "write": {
+      "pass": 162,
+      "semantic_pass": 162,
+      "total": 179
+    },
+    "read": {
+      "pass": 159,
+      "semantic_pass": 163,
+      "total": 169
+    },
+    "assemble": {
+      "pass": 12,
+      "semantic_pass": 12,
+      "total": 12
+    },
+    "total": {
+      "pass": 333,
+      "semantic_pass": 337,
+      "total": 360
+    }
+  },
+  "urls": [
+    "https://nl.1105software.com/v0/blobs/6938bb025d35f19ca20b2da4121d8e30f79d293efda01dde45173fecf12a28b1",
+    "https://nl.1105software.com/v0/blobs/502a67715c0909dff1dc75b8c32112086ca3c32f5e9cf1ff794aafc4e7926e91"
+  ],
+  "derived_from": null,
+  "supersedes": null
+}
