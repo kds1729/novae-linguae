@@ -380,6 +380,11 @@ fn escape_string(s: &str) -> String {
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            // No raw control byte ever reaches the canonical surface form: a lone `\r` (or any
+            // other control character) inside a quoted literal survives value-correctly but is
+            // silently corrupted by line-ending-translating transports — escape it instead.
+            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
             _ => out.push(ch),
         }
     }
@@ -711,6 +716,19 @@ mod tests {
         let ast = parse_value("int(5)").unwrap();
         assert_eq!(ast["kind"], "int");
         assert_eq!(unparse_value(&ast).unwrap(), "int(5)");
+    }
+
+    #[test]
+    fn control_characters_round_trip_escaped() {
+        // A string carrying \r (or any control char) must never reach the canonical surface RAW —
+        // a CRLF-translating transport would silently corrupt it. The printer escapes, the lexer
+        // reads it back, and the round trip is exact.
+        let ast = json!({"kind": "string", "value": "a\rb\u{1}c"});
+        let printed = unparse_value(&ast).unwrap();
+        assert!(!printed.contains('\r'), "raw CR in canonical surface: {printed:?}");
+        assert!(!printed.contains('\u{1}'), "raw control byte in canonical surface: {printed:?}");
+        assert_eq!(printed, r#""a\rb\u{1}c""#);
+        assert_eq!(parse_value(&printed).unwrap(), ast, "escaped round trip must be exact");
     }
 
     #[test]

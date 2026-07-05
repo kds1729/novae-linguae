@@ -359,6 +359,10 @@ fn escape_string(s: &str) -> String {
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            // Mirror of values.rs: control characters never reach the surface raw (transport
+            // line-ending translation would silently corrupt them).
+            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
             _ => out.push(ch),
         }
     }

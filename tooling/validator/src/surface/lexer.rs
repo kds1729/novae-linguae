@@ -250,6 +250,35 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, SurfaceError> {
                         b'\\' => buf.push(b'\\'),
                         b'n' => buf.push(b'\n'),
                         b't' => buf.push(b'\t'),
+                        b'r' => buf.push(b'\r'),
+                        // `\u{HEX}` — the canonical printer emits this for control characters, so
+                        // a canonical surface string stays free of raw control bytes (which
+                        // line-ending-translating transports silently corrupt).
+                        b'u' => {
+                            if p + 2 >= len || b[p + 2] != b'{' {
+                                return Err(SurfaceError::at(p, "`\\u` escape must be `\\u{HEX}`"));
+                            }
+                            let mut q = p + 3;
+                            let hex_start = q;
+                            while q < len && b[q] != b'}' {
+                                q += 1;
+                            }
+                            if q >= len {
+                                return Err(SurfaceError::at(p, "unterminated `\\u{...}` escape"));
+                            }
+                            let hex = std::str::from_utf8(&b[hex_start..q])
+                                .ok()
+                                .filter(|h| !h.is_empty() && h.len() <= 6)
+                                .ok_or_else(|| SurfaceError::at(p, "bad `\\u{...}` escape"))?;
+                            let cp = u32::from_str_radix(hex, 16)
+                                .ok()
+                                .and_then(char::from_u32)
+                                .ok_or_else(|| SurfaceError::at(p, "invalid code point in `\\u{...}`"))?;
+                            let mut tmp = [0u8; 4];
+                            buf.extend_from_slice(cp.encode_utf8(&mut tmp).as_bytes());
+                            p = q + 1;
+                            continue;
+                        }
                         other => {
                             return Err(SurfaceError::at(
                                 p,
