@@ -1,0 +1,43 @@
+{
+  "eval": {
+    "harness": "tooling/eval/eval_harness.py",
+    "settings": {
+      "conventions": "off",
+      "dtype": "bfloat16",
+      "shots": 0
+    },
+    "task_set": {
+      "description": "curated corpus (held out of training), graded shots-0",
+      "sha256": "1804949c2e5e62ce0b06c1a6871f23f5035e46bfe92e32ab46cb8f0dd59c9a82",
+      "tasks": 380
+    }
+  },
+  "from": "did:nova:bb344fb77bdeabee14b89adb5310c6c85ea24900520829f1b3abf1ace7acf337",
+  "hash": "evl_2463f6270847f42c0ac22bcc2eddbbe5820a7e4d0035da94ac77a9b2b2acdaa0",
+  "kind": "eval-attestation",
+  "results": {
+    "assemble": {
+      "pass": 12,
+      "semantic_pass": 12,
+      "total": 12
+    },
+    "read": {
+      "pass": 154,
+      "semantic_pass": 162,
+      "total": 179
+    },
+    "total": {
+      "pass": 351,
+      "semantic_pass": 359,
+      "total": 380
+    },
+    "write": {
+      "pass": 185,
+      "semantic_pass": 185,
+      "total": 189
+    }
+  },
+  "schema_version": "0.1.0",
+  "signature": "ed25519:ETWTRJe35iVowSCeWj3Ohfj9ne1+Gm+12LJb32p2zUWQQX3I0XtZR9yK9QxEof+Y01rbE54EFX1yuSIxNBXqBw==",
+  "subject": "wgt_83ad513dab1e98c4543e26842508c33a4daa69291e15dfdbcf8d5f5f2492b523"
+}
