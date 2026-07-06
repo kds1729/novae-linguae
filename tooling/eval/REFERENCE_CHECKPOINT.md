@@ -221,4 +221,7 @@ bare parse-predicate shape (`is_int_string` — passed 3B-s1, failed 7B both see
 > figures quoted alongside (c13-s1 holds 169/178 at 7B and 167/178 at 3B on the shared old-set
 > write tasks, both above their c12 pins). Historical write ceilings for line comparison:
 > corpus8 7B = 150/157 on the old set; the aggregate is now carried by a strictly larger,
-> harder task pool.
+> harder task pool. The GW5 float-report pull (2026-07-06, later the same day) grew the eval
+> again 370 → **380 (189 write / 179 read / 12 assemble**; oracle 380/380) with the float rows
+> `to_float`/`show_float`/`half_of`/`mean_of`/`stat_line`; the corpus14 retrain (family #45 +
+> the 14B re-baseline, driver staged) re-measures the tiers on that set.

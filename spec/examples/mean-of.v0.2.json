@@ -1,0 +1,143 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_97896ad154923666db07034e8fe6a5c9f6f71dafcf94e5fedd1f4818d52ba8b1",
+  "name_hints": [
+    "mean_of"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "apply",
+          "ctor": {
+            "kind": "builtin",
+            "name": "List"
+          },
+          "args": [
+            {
+              "kind": "builtin",
+              "name": "float"
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "sum",
+        "variants": [
+          {
+            "tag": "Just",
+            "type": {
+              "kind": "builtin",
+              "name": "float"
+            }
+          },
+          {
+            "tag": "None"
+          }
+        ]
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "float",
+              "value": 1.5
+            },
+            {
+              "kind": "float",
+              "value": 2.5
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "Just",
+        "payload": {
+          "kind": "float",
+          "value": 2.0
+        }
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": []
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "None"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "float",
+              "value": 1.0
+            },
+            {
+              "kind": "float",
+              "value": 2.0
+            },
+            {
+              "kind": "float",
+              "value": 6.0
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "Just",
+        "payload": {
+          "kind": "float",
+          "value": 3.0
+        }
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "list",
+          "elems": [
+            {
+              "kind": "float",
+              "value": 0.5
+            }
+          ]
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "Just",
+        "payload": {
+          "kind": "float",
+          "value": 0.5
+        }
+      }
+    }
+  ],
+  "intent_tags": [
+    "aggregate",
+    "float",
+    "arithmetic"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_a8ff5dbd623454c9c39589ba786415a5a1a30d4f12023c60c37916a89445ae82"
+}

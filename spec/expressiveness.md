@@ -91,8 +91,10 @@ Deliberately excluded from phase 1 (each waits for a workflow to pull it): strin
 case conversion (Unicode tailoring), regex (determinism is satisfiable but the vocabulary is
 huge), slicing/indexing (partial or Maybe-heavy; split covers the workflows), float formatting.
 *(GW4 — the sorted-report workflow, below — later pulled exactly two: `str_lt`, code-point
-order sidestepping collation entirely, and `str_lower`, the untailored default mapping. The
-rest remain excluded.)*
+order sidestepping collation entirely, and `str_lower`, the untailored default mapping. GW5 —
+the numeric report — later pulled the rendering half of float formatting: `to_float`, numeric
+`div`/`mod`, and numeric `to_string` emitting the JCS canonical rendering. Regex, slicing,
+`parse_float`, and format control remain excluded.)*
 
 **The tax, itemized** (template: the `last`/`init` commit `6a5cbc3`):
 
@@ -248,6 +250,36 @@ the claim **undecidable** (an effectful assert is testimony) while a granted one
 (`orchestrate --node … --intent io --grant net.read --verify --require-certified --publish`)
 discovered, certified, applied, and published the live sorted report.
 
+**GW5 — the numeric report (2026-07-06): the smallest tier-2 pull.** A real workflow — *take a
+numeric series, compute count/mean/max, render a stats line* (the float-precise half of GW2) —
+pulled **one new builtin and two signature generalizations**, and no more:
+**`to_float : int → float`** (total; IEEE-754 nearest-even for magnitudes beyond 2⁵³ — a
+deterministic rounding, documented rather than hidden), **`div`/`mod` lifted to
+numeric-polymorphic** (the evaluator could already divide floats — the surface the type system
+refused; the lift adds the missing **zero-divisor guard on the float path**, so `Infinity`/`NaN`
+— unrepresentable in canonical JCS — cannot be produced; float `div`/`mod` stay partial-at-zero
+exactly like their int forms), and **`to_string` lifted to numeric-polymorphic** (the float arm
+emits the **JCS / ECMAScript Number-to-String canonical rendering** the hashing layer already
+uses — `to_string(3.0) = "3"`, `to_string(3.25) = "3.25"` — one rendering everywhere; non-finite
+inputs are refused, not rendered). `parse_float`, rounding, and formatting *control* (precision,
+padding) stay unpulled — the workflow didn't need them. The pull also **paid down a latent
+soundness gap as its prover-tax line item**: `prove`/`check-refinement`/`equiv` inferred SMT
+sorts from body usage with an Int default and never read the declared type, so a float-typed
+record carrying an arithmetic law (e.g. associativity — true over ℤ, false over IEEE floats)
+would have been "PROVED" over the wrong domain; all three now **guard on `float` in the declared
+signature** and report UNSUPPORTED/UNVERIFIABLE — honest, never mis-proved. Everything above the
+primitives is in-language certified records:
+[`examples/mean-of.v0.2.json`](examples/mean-of.v0.2.json) (`List float → Maybe float` —
+**totality via Maybe**: the empty series has no mean, so the division-by-zero case is
+unrepresentable rather than guarded), [`examples/stat-line.v0.2.json`](examples/stat-line.v0.2.json)
+(`(string, float) → string`, the `label=value` renderer), and
+[`examples/stats-report.v0.2.json`](examples/stats-report.v0.2.json) (`List float → string` —
+total: the empty series reports `count=0`; `count` renders integrally through `to_float` because
+the canonical rendering of a whole float has no fraction). All three certify and are published
+to Arca with signed certifications; the corpus grows curated rows + combinatorial family #45 so
+the new operations have training shapes from day one (the pinned every-builtin-needs-a-shape
+lesson, applied preemptively like #43).
+
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.
 - **Ingestion**: map source-language string/dict idioms onto the new builtins in
@@ -293,6 +325,9 @@ Order: **1 → 2 → 3**, with phase 4 items interleaved opportunistically (corp
 trail each phase). Each phase merges only through its exit gate (tests + golden workflow(s)
 end to end + certify).
 
-Non-goals for v0.4: bytes/Set operations, string ordering/collation, regex, Unicode case ops,
-float↔string formatting, polymorphic map keys, mutation of any kind, and any primitive no
+Non-goals for v0.4: bytes/Set operations, string *collation* (code-point `str_lt` was pulled by
+GW4; locale collation stays out), regex, Unicode case *tailoring* (untailored `str_lower` was
+pulled by GW4), float *parsing* and format *control* (canonical float *rendering* was pulled by
+GW5 — `to_string` emits the one JCS rendering; precision/padding/`parse_float` stay out),
+polymorphic map keys, mutation of any kind, and any primitive no
 golden workflow demands. The tie-breaker remains AI-efficiency, not human ergonomics.

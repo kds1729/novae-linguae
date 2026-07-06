@@ -28,7 +28,7 @@ pub use eval::{check_properties, evaluate_property, Verdict};
 pub mod proptest;
 
 pub mod prove;
-pub use prove::{build_certificate, prove_property, Certificate, ProofOutcome, Sort};
+pub use prove::{build_certificate, prove_property, type_mentions_float, Certificate, ProofOutcome, Sort};
 
 pub mod lemmas;
 pub mod explore;

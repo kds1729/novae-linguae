@@ -149,7 +149,7 @@ pub enum ComplexityOutcome {
 /// higher-order combinators, which are opaque).
 const CONST_OPS: &[&str] = &[
     "add", "sub", "mul", "neg", "abs", "min", "max", "mod", "div", "eq", "neq", "lt", "le", "gt", "ge",
-    "and", "or", "xor", "not", "id", "head", "tail", "cons", "null",
+    "and", "or", "xor", "not", "id", "head", "tail", "cons", "null", "to_float",
 ];
 /// First-order ops whose work is linear in their input size. The string ops are input-linear
 /// (`str_concat`/`str_join` are also output-linear, which is the sound `output_size` class;

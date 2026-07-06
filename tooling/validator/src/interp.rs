@@ -611,7 +611,8 @@ fn val_to_json(v: &Val) -> Result<J> {
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
         "neg" | "abs" | "not" | "id" | "head" | "tail" | "last" | "init" | "length" | "null"
-        | "reverse" | "fst" | "snd" | "str_length" | "str_lower" | "to_string" | "parse_int"
+        | "reverse" | "fst" | "snd" | "str_length" | "str_lower" | "to_string" | "to_float"
+        | "parse_int"
         | "map_size" | "map_keys" | "parse_json" | "render_json" | "print" | "rand"
         | "now" | "panic" | "read_file" | "http_get" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
@@ -842,7 +843,15 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
                 }
                 Val::Int(x.div_euclid(*y))
             }
-            _ => Val::Float(as_f64n(&a[0])? / as_f64n(&a[1])?),
+            // Partial at zero exactly like the int form — Infinity/NaN are unrepresentable in
+            // canonical JCS, so a zero divisor is an error, never a non-finite value (GW5).
+            _ => {
+                let (x, y) = (as_f64n(&a[0])?, as_f64n(&a[1])?);
+                if y == 0.0 {
+                    bail!("division by zero");
+                }
+                Val::Float(x / y)
+            }
         },
         "mod" => match (&a[0], &a[1]) {
             (Val::Int(x), Val::Int(y)) => {
@@ -851,7 +860,13 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
                 }
                 Val::Int(x.rem_euclid(*y))
             }
-            _ => Val::Float(as_f64n(&a[0])? % as_f64n(&a[1])?),
+            _ => {
+                let (x, y) = (as_f64n(&a[0])?, as_f64n(&a[1])?);
+                if y == 0.0 {
+                    bail!("modulo by zero");
+                }
+                Val::Float(x % y)
+            }
         },
         "neg" => match &a[0] {
             Val::Int(i) => Val::Int(-i),
@@ -951,7 +966,21 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             let sep = as_str(&a[0])?;
             Val::Str(as_str_list(&a[1])?.join(&sep))
         }
-        "to_string" => Val::Str(as_int(&a[0])?.to_string()),
+        // One rendering concept over both numeric types (GW5): canonical decimal for int, the
+        // JCS / ECMAScript Number-to-String rendering for float — the SAME rendering the
+        // hashing layer's canonicalizer emits, so to_string(3.0) = "3", to_string(3.25) = "3.25".
+        // Non-finite floats (only reachable via arithmetic overflow) are refused, not rendered.
+        "to_string" => match &a[0] {
+            Val::Float(f) => {
+                if !f.is_finite() {
+                    bail!("to_string on a non-finite float");
+                }
+                Val::Str(serde_jcs::to_string(&J::from(*f)).map_err(|e| anyhow!("float rendering: {e}"))?)
+            }
+            v => Val::Str(as_int(v)?.to_string()),
+        },
+        // Total int -> float widening (GW5); IEEE nearest-even beyond 2^53 — deterministic.
+        "to_float" => Val::Float(as_int(&a[0])? as f64),
         // Map operations (spec/expressiveness.md phase 2). String keys; key argument FIRST (like the
         // string ops' pattern-first order); all total — an absent key is None/no-op, never an error.
         "map_put" => {
@@ -1427,6 +1456,45 @@ mod tests {
         for bad in ["", "abc", "007", "-0", "+5", " 5", "5 ", "1.5", "99999999999999999999999999999999999999999"] {
             assert_eq!(run1("parse_int", s(bad)), none, "parse_int({bad:?}) must be None");
         }
+    }
+
+    #[test]
+    fn float_report_primitives_gw5() {
+        // to_float / numeric to_string / numeric div-mod — the GW5 pull.
+        let fl = |v: f64| json!({ "kind": "float", "value": v });
+        let run1 = |f: &str, a: J| {
+            let l = json!({ "kind": "lambda", "params": [{ "name": "x" }],
+                "body": { "kind": "app", "fn": { "kind": "var", "name": f }, "args": [{ "kind": "var", "name": "x" }] } });
+            eval_body(&l, &[a])
+        };
+        let run2 = |f: &str, a: J, b: J| {
+            let l = json!({ "kind": "lambda", "params": [{ "name": "x" }, { "name": "y" }],
+                "body": { "kind": "app", "fn": { "kind": "var", "name": f },
+                          "args": [{ "kind": "var", "name": "x" }, { "kind": "var", "name": "y" }] } });
+            eval_body(&l, &[a, b])
+        };
+        // to_float widens exactly on small ints (IEEE nearest-even beyond 2^53 — deterministic).
+        assert_eq!(run1("to_float", json!({ "kind": "int", "value": 3 })).unwrap(), encode_value(&Val::Float(3.0)));
+        assert_eq!(run1("to_float", json!({ "kind": "int", "value": -2 })).unwrap(), encode_value(&Val::Float(-2.0)));
+        // to_string on a float is the JCS / ECMAScript canonical rendering — whole floats have
+        // no fraction ("3", not "3.0"), and it is the SAME rendering the hashing layer emits.
+        assert_eq!(run1("to_string", fl(3.0)).unwrap(), encode_value(&Val::Str("3".into())));
+        assert_eq!(run1("to_string", fl(3.25)).unwrap(), encode_value(&Val::Str("3.25".into())));
+        assert_eq!(run1("to_string", fl(-0.5)).unwrap(), encode_value(&Val::Str("-0.5".into())));
+        // Float division works and is partial at zero — Infinity/NaN are never produced.
+        assert_eq!(run2("div", fl(6.5), fl(2.0)).unwrap(), encode_value(&Val::Float(3.25)));
+        assert!(run2("div", fl(1.0), fl(0.0)).is_err(), "float div by zero must error, not yield inf");
+        assert!(run2("mod", fl(1.0), fl(0.0)).is_err(), "float mod by zero must error, not yield NaN");
+        // The GW5 mean shape: div (sum) (to_float (length)) over [1.0, 2.0, 4.0] = 7/3-ish -> exact 2.3333…?
+        // Use an exact case: mean of [1.5, 2.5] = 2.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+            "kind": "app", "fn": { "kind": "var", "name": "div" }, "args": [
+                { "kind": "app", "fn": { "kind": "var", "name": "foldl" },
+                  "args": [{ "kind": "var", "name": "add" }, { "kind": "lit", "value": { "kind": "float", "value": 0.0 } }, { "kind": "var", "name": "xs" }] },
+                { "kind": "app", "fn": { "kind": "var", "name": "to_float" },
+                  "args": [{ "kind": "app", "fn": { "kind": "var", "name": "length" }, "args": [{ "kind": "var", "name": "xs" }] }] }] } });
+        let xs = json!({ "kind": "list", "elems": [fl(1.5), fl(2.5)] });
+        assert_eq!(eval_body(&body, &[xs]).unwrap(), encode_value(&Val::Float(2.0)));
     }
 
     #[test]

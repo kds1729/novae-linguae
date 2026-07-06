@@ -292,8 +292,14 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
             let a = inf.fresh_numeric();
             Ty::Fun(vec![a.clone()], Box::new(a))
         }
-        // Integer-only: division and modulo keep `int` semantics.
-        "div" | "mod" => Ty::Fun(vec![con("int"), con("int")], Box::new(con("int"))),
+        // Numeric like add/mul (GW5): int keeps euclidean semantics, float is IEEE — both partial
+        // at a zero divisor (the evaluator guards the float path so Infinity/NaN can't be produced).
+        "div" | "mod" => {
+            let a = inf.fresh_numeric();
+            Ty::Fun(vec![a.clone(), a.clone()], Box::new(a))
+        }
+        // Total int -> float widening (GW5). IEEE nearest-even beyond 2^53 — deterministic.
+        "to_float" => Ty::Fun(vec![con("int")], Box::new(con("float"))),
         // Effectful builtins (effects tracked at eval, not in this checker): `print : forall a. a ->
         // unit`, `rand : int -> int`.
         "print" => {
@@ -369,7 +375,12 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
         "str_lower" => Ty::Fun(vec![con("string")], Box::new(con("string"))),
         "str_split" => Ty::Fun(vec![con("string"), con("string")], Box::new(list(con("string")))),
         "str_join" => Ty::Fun(vec![con("string"), list(con("string"))], Box::new(con("string"))),
-        "to_string" => Ty::Fun(vec![con("int")], Box::new(con("string"))),
+        // Numeric (GW5): one rendering concept — canonical decimal for int, the JCS/ECMAScript
+        // Number-to-String rendering for float (the same rendering the hashing layer uses).
+        "to_string" => {
+            let a = inf.fresh_numeric();
+            Ty::Fun(vec![a], Box::new(con("string")))
+        }
         "parse_int" => Ty::Fun(vec![con("string")], Box::new(con("Sum"))),
         "map" => {
             let (a, b) = (inf.fresh(), inf.fresh());
@@ -904,6 +915,30 @@ mod tests {
         let bool_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "bool" }],
                               "result": { "kind": "builtin", "name": "bool" } });
         assert!(typecheck(&bool_ty, &body).is_err(), "add over bool must be rejected");
+    }
+
+    #[test]
+    fn float_report_primitives_typecheck_gw5() {
+        let app1 = |f: &str, x: &str| json!({ "kind": "lambda", "params": [{ "name": x }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": f }, "args": [{ "kind": "var", "name": x }] } });
+        let fnty = |p: &str, r: &str| json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": p }],
+                                              "result": { "kind": "builtin", "name": r } });
+        // to_float : int -> float — and only int -> float.
+        assert!(typecheck(&fnty("int", "float"), &app1("to_float", "n")).is_ok());
+        assert!(typecheck(&fnty("float", "float"), &app1("to_float", "n")).is_err(), "to_float takes an int");
+        // to_string is numeric: int -> string AND float -> string, but never bool -> string.
+        assert!(typecheck(&fnty("int", "string"), &app1("to_string", "n")).is_ok());
+        assert!(typecheck(&fnty("float", "string"), &app1("to_string", "x")).is_ok());
+        assert!(typecheck(&fnty("bool", "string"), &app1("to_string", "b")).is_err(), "to_string needs a number");
+        // div/mod are numeric like add/mul: float -> float -> float now checks.
+        let div2 = json!({ "kind": "lambda", "params": [{ "name": "x" }, { "name": "y" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "div" },
+                      "args": [{ "kind": "var", "name": "x" }, { "kind": "var", "name": "y" }] } });
+        let ty2 = |n: &str| json!({ "kind": "fn",
+            "params": [{ "kind": "builtin", "name": n }, { "kind": "builtin", "name": n }],
+            "result": { "kind": "builtin", "name": n } });
+        assert!(typecheck(&ty2("float"), &div2).is_ok(), "div over float : (float, float) -> float");
+        assert!(typecheck(&ty2("int"), &div2).is_ok(), "div over int unchanged");
     }
 
     #[test]

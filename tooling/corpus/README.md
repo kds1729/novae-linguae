@@ -108,8 +108,8 @@ of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **param
 comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
-parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,087 generated
-function records (3,313 examples total with the curated set)** across forty-two template families
+parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,139 generated
+function records (3,375 examples total with the curated set)** across forty-five template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
 teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — #39, **strings as data**
 (`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
@@ -124,7 +124,15 @@ untaught builtin (`str_length`, `str_contains`, bare `to_string`, `map_empty`-co
 and #42, **list-returning index walks**: the `take_rec`/`drop_rec` residual that survived every tier
 through corpus11; the take shape (double guard, cons a *transformed* head onto `self (n-1) (tail xs)`)
 and the drop shape (same guards, recurse without cons, varied base) — #38's element-returning walk,
-completed for lists), every one through the same validate →
+completed for lists — and #43, **sort/case shapes**: the GW4 `str_lt`/`str_lower` pull taught
+preemptively (near-bare order comparisons and case-folds over word sets, the min-vs-constant
+case-select, order filters, and the insert-into-sorted walk in transformed int/descending/case-folded
+variants so the curated golds leakage-drop) — and #44, **bare-reverse reinforcement**: the corpus12
+watch item (7B `write/reverse` dilution regression), fixed with near-bare `reverse` shapes (snoc via
+double reverse, reverse-of-tail, map-then-reverse) plus the `last`/`init` reverse walk in transformed
+variants — and #45, **float report shapes**: the GW5 pull (`to_float`, numeric `div`/`mod`, numeric
+`to_string`) taught on day one (near-bare widen/divide/render over constants, `label=value` lines,
+guarded float mean/max reduces)), every one through the same validate →
 typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,

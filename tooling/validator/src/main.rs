@@ -1207,6 +1207,17 @@ fn cmd_prove(
         println!("no properties to prove");
         return Ok(());
     }
+    // The float-domain guard (GW5): the fragment's arithmetic is Int — proving a float-typed
+    // record's law over Int semantics would be unsound (associativity is the classic divergence).
+    if let Some(ty) = value.pointer("/signature/type") {
+        if nl_validator::type_mentions_float(ty) {
+            for prop in &props {
+                let name = prop.get("name").and_then(|v| v.as_str()).unwrap_or("<unnamed>");
+                println!("{name}: UNSUPPORTED  float domain (the proof fragment is Int/Bool/String; IEEE float laws would be mis-proved over Int)");
+            }
+            return Ok(());
+        }
+    }
     if let Some(dir) = smt_out {
         std::fs::create_dir_all(dir).map_err(|e| anyhow::anyhow!("creating {}: {e}", dir.display()))?;
     }

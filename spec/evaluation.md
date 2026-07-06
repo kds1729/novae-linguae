@@ -78,6 +78,20 @@ the Unicode **default (untailored)** lowercase mapping, deterministic and locale
 Turkish-i tailoring). `str_lt` maps into the prover's string fragment (SMT-LIB `str.<` has exactly
 these semantics); `str_lower` stays out (no theory counterpart).
 
+**Float report builtins** (tier-2, pulled by GW5 — the numeric-report workflow): `to_float : int →
+float` — total; IEEE-754 nearest-even for magnitudes beyond 2⁵³ (deterministic rounding, stated
+rather than hidden). `div`/`mod` are **numeric-polymorphic** like `add`/`mul` (int keeps euclidean
+semantics; float is IEEE) and **partial at a zero divisor in both domains** — the float path errors
+rather than yield `Infinity`/`NaN`, which are unrepresentable in canonical JCS. `to_string` is
+numeric-polymorphic too: canonical decimal for `int`, and for `float` the **JCS / ECMAScript
+Number-to-String canonical rendering** — the same rendering the hashing layer's canonicalizer
+emits, so `to_string(3.0) = "3"` and `to_string(3.25) = "3.25"`; a non-finite float (reachable only
+via arithmetic overflow) is refused, not rendered. **The float-domain prover guard** ships with the
+pull: the proof fragment's arithmetic is the solver's *Int* theory, so `prove`,
+`check-refinement`, and `cluster` refuse a record whose declared signature mentions `float`
+(UNSUPPORTED / UNVERIFIABLE / a singleton class) — an IEEE law like non-associativity of `add`
+would otherwise be mis-proved over ℤ. `parse_float`, rounding, and format control stay unpulled.
+
 **Composition.** Applying a `fn_ref` value resolves its target (a function content-address, or a
 body's own `expr_` address) against a link map and runs the referenced body — so records assemble and
 run end-to-end (principle 4). `nl-validator run --records <dir>` builds the link map from a directory

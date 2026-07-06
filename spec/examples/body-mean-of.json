@@ -1,0 +1,107 @@
+{
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "xs"
+    }
+  ],
+  "body": {
+    "kind": "case",
+    "scrutinee": {
+      "kind": "app",
+      "fn": {
+        "kind": "var",
+        "name": "null"
+      },
+      "args": [
+        {
+          "kind": "var",
+          "name": "xs"
+        }
+      ]
+    },
+    "arms": [
+      {
+        "pattern": {
+          "kind": "lit",
+          "value": {
+            "kind": "bool",
+            "value": true
+          }
+        },
+        "body": {
+          "kind": "variant",
+          "tag": "None"
+        }
+      },
+      {
+        "pattern": {
+          "kind": "lit",
+          "value": {
+            "kind": "bool",
+            "value": false
+          }
+        },
+        "body": {
+          "kind": "variant",
+          "tag": "Just",
+          "payload": {
+            "kind": "app",
+            "fn": {
+              "kind": "var",
+              "name": "div"
+            },
+            "args": [
+              {
+                "kind": "app",
+                "fn": {
+                  "kind": "var",
+                  "name": "foldl"
+                },
+                "args": [
+                  {
+                    "kind": "var",
+                    "name": "add"
+                  },
+                  {
+                    "kind": "lit",
+                    "value": {
+                      "kind": "float",
+                      "value": 0.0
+                    }
+                  },
+                  {
+                    "kind": "var",
+                    "name": "xs"
+                  }
+                ]
+              },
+              {
+                "kind": "app",
+                "fn": {
+                  "kind": "var",
+                  "name": "to_float"
+                },
+                "args": [
+                  {
+                    "kind": "app",
+                    "fn": {
+                      "kind": "var",
+                      "name": "length"
+                    },
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "xs"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

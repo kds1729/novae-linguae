@@ -1,0 +1,53 @@
+{
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "label"
+    },
+    {
+      "name": "v"
+    }
+  ],
+  "body": {
+    "kind": "app",
+    "fn": {
+      "kind": "var",
+      "name": "str_concat"
+    },
+    "args": [
+      {
+        "kind": "var",
+        "name": "label"
+      },
+      {
+        "kind": "app",
+        "fn": {
+          "kind": "var",
+          "name": "str_concat"
+        },
+        "args": [
+          {
+            "kind": "lit",
+            "value": {
+              "kind": "string",
+              "value": "="
+            }
+          },
+          {
+            "kind": "app",
+            "fn": {
+              "kind": "var",
+              "name": "to_string"
+            },
+            "args": [
+              {
+                "kind": "var",
+                "name": "v"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

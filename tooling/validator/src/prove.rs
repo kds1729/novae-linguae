@@ -517,6 +517,10 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
             // str_lower stays OUT of the fragment: SMT-LIB has no case-conversion function and
             // encoding the Unicode mapping would be unsound-by-approximation. str_lt is IN (str.<).
             | "str_lower"
+            // to_float is OUT: the fragment's arithmetic is Int; a widening into IEEE floats has
+            // no sound Int-theory encoding (and the record-level float guard refuses float
+            // domains wholesale — see `type_mentions_float`).
+            | "to_float"
             | "map_put" | "map_get" | "map_del" | "map_size" | "map_keys" | "parse_json" | "render_json") {
             bail!("predicate uses list/structural operator `{op}` (out of fragment)");
         }
@@ -760,6 +764,29 @@ pub fn prove_property(prop_expr: &J, body: Option<&J>, solver: &str) -> (ProofOu
     }
 }
 
+/// Does a type-expression AST mention the `float` builtin anywhere (params, result, nested)?
+///
+/// **The float-domain guard (GW5).** The proof fragment's arithmetic is the solver's *Int*
+/// theory; sorts are inferred from body usage with an Int default and the declared type was
+/// never consulted — so a float-typed record carrying an arithmetic law (e.g. associativity:
+/// true over ℤ, false over IEEE floats) would be "PROVED" over the wrong domain. Callers that
+/// hold the record (`prove`, `check-refinement`, `cluster`) check this and report
+/// UNSUPPORTED / UNVERIFIABLE / a singleton class instead — honest, never mis-proved.
+pub fn type_mentions_float(ty: &J) -> bool {
+    match ty {
+        J::Object(map) => {
+            if map.get("kind").and_then(|k| k.as_str()) == Some("builtin")
+                && map.get("name").and_then(|n| n.as_str()) == Some("float")
+            {
+                return true;
+            }
+            map.values().any(type_mentions_float)
+        }
+        J::Array(items) => items.iter().any(type_mentions_float),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -768,6 +795,22 @@ mod tests {
     fn double_body() -> J {
         json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": {
             "kind": "app", "op": "add", "args": [{ "kind": "var", "name": "n" }, { "kind": "var", "name": "n" }] } })
+    }
+
+    #[test]
+    fn float_domain_guard_detects_float_types() {
+        // The GW5 guard: a float anywhere in the declared type (param, result, nested List) trips it.
+        let direct = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "float" }],
+                             "result": { "kind": "builtin", "name": "float" } });
+        assert!(type_mentions_float(&direct));
+        let nested = json!({ "kind": "fn",
+            "params": [{ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" },
+                         "args": [{ "kind": "builtin", "name": "float" }] }],
+            "result": { "kind": "builtin", "name": "string" } });
+        assert!(type_mentions_float(&nested));
+        let intfn = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
+                            "result": { "kind": "builtin", "name": "int" } });
+        assert!(!type_mentions_float(&intfn));
     }
 
     #[test]

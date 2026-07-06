@@ -66,6 +66,10 @@ def bool_lit(b):
     return {"kind": "lit", "value": {"kind": "bool", "value": b}}
 
 
+def float_lit(x):
+    return {"kind": "lit", "value": {"kind": "float", "value": x}}
+
+
 def str_lit(s):
     return {"kind": "lit", "value": {"kind": "string", "value": s}}
 
@@ -648,6 +652,47 @@ def float_funcs():
          "body_ast": lam(["x"], bapp("mul", x, bapp("mul", x, x))),
          "examples": [{"args": [2.0], "result": 8.0}, {"args": [-1.5], "result": -3.375}],
          "properties": [], "prove": False},
+        # --- GW5 rows (the numeric-report pull: to_float, numeric div, numeric to_string). Floats
+        # are outside the prover fragment (the float-domain guard), so these verify by
+        # validate + typecheck + run.
+        {"name": "to_float", "intent": "Widen an integer to a float.",
+         "summary": "to_float n — total; IEEE nearest-even beyond 2^53.", "tags": ["arithmetic", "float", "convert"],
+         "type_ast": fn([INT], FLOAT), "body_ast": lam(["n"], bapp("to_float", var("n"))),
+         "examples": [{"args": [3], "result": 3.0}, {"args": [-2], "result": -2.0},
+                      {"args": [0], "result": 0.0}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "show_float", "intent": "Render a float as its canonical decimal string.",
+         "summary": 'to_string x — the JCS/ECMAScript rendering: to_string 3.0 = "3".',
+         "tags": ["string", "format", "float"], "type_ast": fn([FLOAT], STRING),
+         "body_ast": lam(["x"], bapp("to_string", x)),
+         "examples": [{"args": [3.0], "result": "3"}, {"args": [3.25], "result": "3.25"},
+                      {"args": [-0.5], "result": "-0.5"}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "half_of", "intent": "Half of a float.", "summary": "div x 2.0 — float division.",
+         "tags": ["arithmetic", "float"], "type_ast": fn([FLOAT], FLOAT),
+         "body_ast": lam(["x"], bapp("div", x, float_lit(2.0))),
+         "examples": [{"args": [5.0], "result": 2.5}, {"args": [-3.0], "result": -1.5},
+                      {"args": [0.0], "result": 0.0}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "mean_of", "intent": "The mean of a list of floats, if the list is non-empty.",
+         "summary": "case null xs of true => None; false => Just(div (foldl add 0.0 xs) (to_float (length xs))) "
+                    "— totality via Maybe: the empty series has no mean.",
+         "tags": ["aggregate", "float", "maybe", "case"], "type_ast": fn([list_of(FLOAT)], maybe_t(FLOAT)),
+         "body_ast": lam(["xs"], case_null("xs", variant_expr("None"), variant_expr("Just",
+             bapp("div", bapp("foldl", var("add"), float_lit(0.0), var("xs")),
+                  bapp("to_float", bapp("length", var("xs"))))))),
+         "examples": [{"args": [[1.5, 2.5]], "result": V("Just", 2.0)}, {"args": [[]], "result": V("None")},
+                      {"args": [[1.0, 2.0, 6.0]], "result": V("Just", 3.0)}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "stat_line", "intent": "Render a labeled statistic as a label=value line.",
+         "summary": 'str_concat label (str_concat "=" (to_string v)).',
+         "tags": ["string", "format", "float"], "type_ast": fn([STRING, FLOAT], STRING),
+         "body_ast": lam(["label", "v"], bapp("str_concat", var("label"),
+                                              bapp("str_concat", str_lit("="), bapp("to_string", var("v"))))),
+         "examples": [{"args": ["mean", 2.5], "result": "mean=2.5"},
+                      {"args": ["count", 3.0], "result": "count=3"},
+                      {"args": ["max", -0.5], "result": "max=-0.5"}],
+         "properties": [], "prove": False, "terminates": "always"},
     ]
 
 
@@ -3368,6 +3413,59 @@ def combinatorial_specs(exclude_names=()):
                    _rev_walk(head_expr),
                    [{"args": [lst], "result": [tf(v) for v in reversed(lst)]} for lst in _RW_IN],
                    terminates="unknown"))
+
+    def _fshow(x):
+        # The JCS rendering of the simple floats used here: integral values drop the fraction.
+        return str(int(x)) if x == int(x) else repr(x)
+
+    # 45. FLOAT REPORT SHAPES — the GW5 pull (to_float, numeric div/mod, numeric to_string) gets
+    # training shapes on day one (the every-builtin-needs-a-shape lesson, like #43): near-bare
+    # widening/rendering/division multiplied over constants, the label=value render, the
+    # guarded float mean/max reduce (transformed variants of the curated/commons golds).
+    _FL_IN = [[1.5, 2.5], [], [4.0], [2.0, 4.0, 6.0]]
+    for k in (0, 1, 10):
+        add(_cspec(f"widen_plus_{k}", f"Add {k} to an integer, then widen it to a float.",
+                   f"to_float (n + {k})", ["arithmetic", "float", "convert"], fn([INT], FLOAT),
+                   lam(["n"], bapp("to_float", bapp("add", var("n"), int_lit(k)))),
+                   [{"args": [v], "result": float(v + k)} for v in (3, -2, 0)], terminates="always"))
+    for k in (2, 4, 10):
+        add(_cspec(f"div_by_{k}f", f"Divide a float by {k}.",
+                   f"div x {k}.0", ["arithmetic", "float"], fn([FLOAT], FLOAT),
+                   lam(["x"], bapp("div", var("x"), float_lit(float(k)))),
+                   [{"args": [v], "result": v / k} for v in (5.0, -3.0, 0.5)], terminates="always"))
+    for k in (2, 5):
+        add(_cspec(f"show_over_{k}", f"Render a float divided by {k} as its canonical string.",
+                   f"to_string (div x {k}.0)", ["string", "format", "float"], fn([FLOAT], STRING),
+                   lam(["x"], bapp("to_string", bapp("div", var("x"), float_lit(float(k))))),
+                   [{"args": [5.0], "result": _fshow(5.0 / k)}, {"args": [-1.0], "result": _fshow(-1.0 / k)},
+                    {"args": [0.0], "result": "0"}], terminates="always"))
+    for w in ("count", "mean", "max", "total"):
+        add(_cspec(f"label_{w}", f'Render a float as a "{w}=value" line.',
+                   f'str_concat "{w}=" (to_string v)', ["string", "format", "float"], fn([FLOAT], STRING),
+                   lam(["v"], bapp("str_concat", str_lit(f"{w}="), bapp("to_string", var("v")))),
+                   [{"args": [2.5], "result": f"{w}=2.5"}, {"args": [3.0], "result": f"{w}=3"},
+                    {"args": [-0.5], "result": f"{w}=-0.5"}], terminates="always"))
+    add(_cspec("mean2", "The mean of two floats.", "div (add a b) 2.0",
+               ["arithmetic", "float"], fn([FLOAT, FLOAT], FLOAT),
+               lam(["a", "b"], bapp("div", bapp("add", var("a"), var("b")), float_lit(2.0))),
+               [{"args": [1.5, 2.5], "result": 2.0}, {"args": [-1.0, 1.0], "result": 0.0},
+                {"args": [3.0, 4.0], "result": 3.5}], terminates="always"))
+    add(_cspec("total_of", "The sum of a list of floats.", "foldl add 0.0 xs",
+               ["aggregate", "float", "fold"], fn([list_of(FLOAT)], FLOAT),
+               lam(["xs"], bapp("foldl", var("add"), float_lit(0.0), var("xs"))),
+               [{"args": [lst], "result": float(sum(lst))} for lst in _FL_IN], terminates="always"))
+    add(_cspec("count_f", "How many elements a list has, as a float.",
+               "to_float (length xs)", ["aggregate", "float", "convert"],
+               fn([list_of(FLOAT)], FLOAT),
+               lam(["xs"], bapp("to_float", bapp("length", var("xs")))),
+               [{"args": [lst], "result": float(len(lst))} for lst in _FL_IN], terminates="always"))
+    add(_cspec("max_of", "The largest float in a list, if the list is non-empty.",
+               "case null xs of true => None; false => Just(foldl max (head xs) (tail xs))",
+               ["aggregate", "float", "maybe", "case"], fn([list_of(FLOAT)], maybe_t(FLOAT)),
+               lam(["xs"], case_null("xs", variant_expr("None"), variant_expr("Just",
+                   bapp("foldl", var("max"), bapp("head", var("xs")), bapp("tail", var("xs")))))),
+               [{"args": [lst], "result": V("Just", max(lst)) if lst else V("None")} for lst in _FL_IN],
+               terminates="always"))
 
     return out
 

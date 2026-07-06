@@ -75,6 +75,13 @@ pub fn cluster(items: &[(String, J, Option<J>)], solver: &str) -> Vec<Vec<String
 
     let mut by_shape: HashMap<String, Vec<usize>> = HashMap::new();
     for (i, (_, rec, _)) in items.iter().enumerate() {
+        // The float-domain guard (GW5, see prove::type_mentions_float): both the solver path
+        // (Int theory) and the polynomial normal form reason over ℤ — laws they'd merge on
+        // (associativity, distribution) are false over IEEE floats. A float-typed record is
+        // never pairwise-compared: it stays a singleton class.
+        if rec.pointer("/signature/type").map(crate::prove::type_mentions_float).unwrap_or(false) {
+            continue;
+        }
         by_shape.entry(record_shape(rec)).or_default().push(i);
     }
     for group in by_shape.values() {

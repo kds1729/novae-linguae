@@ -129,6 +129,15 @@ fn check_post(
 pub fn check_refinements(sig_type: &J, refinements: &[J], body: &J, solver: &str) -> Vec<RefinementReport> {
     let one = |label: String, outcome: RefinementOutcome| vec![RefinementReport { label, outcome }];
 
+    // The float-domain guard (GW5, see prove::type_mentions_float): obligations are discharged
+    // over the solver's Int theory, so a float-typed signature can't be soundly checked here.
+    if crate::prove::type_mentions_float(sig_type) {
+        return one(
+            "signature".into(),
+            RefinementOutcome::Unverifiable("float domain (obligations are discharged over Int semantics)".into()),
+        );
+    }
+
     let fn_ty = unwrap_forall(sig_type);
     if fn_ty.get("kind").and_then(|k| k.as_str()) != Some("fn") {
         return one("signature".into(), RefinementOutcome::Unverifiable("signature type is not a function".into()));
@@ -277,6 +286,24 @@ mod tests {
     }
     fn nat_outcome(ty: &J, body: &J, s: &str) -> RefinementOutcome {
         check_nat_refinement(ty, body, s)
+    }
+
+    // ---- the float-domain guard (GW5) ----
+
+    #[test]
+    fn float_signature_is_unverifiable_not_misproved() {
+        // Obligations discharge over Int semantics; a float-typed signature must be refused
+        // honestly (UNVERIFIABLE), never proved over the wrong domain. No solver needed.
+        let fl = json!({ "kind": "builtin", "name": "float" });
+        let ty = fn_ty(vec![fl.clone()], fl);
+        let body = lambda(&["x"], app("add", vec![var("x"), var("x")]));
+        let post = refinement("post", app("ge", vec![var("result"), int_lit(0)]));
+        let reports = check_refinements(&ty, &[post], &body, "z3");
+        assert_eq!(reports.len(), 1);
+        match &reports[0].outcome {
+            RefinementOutcome::Unverifiable(why) => assert!(why.contains("float"), "reason names the float domain"),
+            other => panic!("expected UNVERIFIABLE for a float signature, got {other:?}"),
+        }
     }
 
     // ---- the type-implied nat refinement (unchanged behavior) ----

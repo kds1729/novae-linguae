@@ -1,0 +1,88 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_8bee93447e8bfa1d63ac97b20f1fe76a90af2f0217194b83b79a9712ffaa94af",
+  "name_hints": [
+    "stat_line"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "string"
+        },
+        {
+          "kind": "builtin",
+          "name": "float"
+        }
+      ],
+      "result": {
+        "kind": "builtin",
+        "name": "string"
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "mean"
+        },
+        {
+          "kind": "float",
+          "value": 2.5
+        }
+      ],
+      "result": {
+        "kind": "string",
+        "value": "mean=2.5"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "count"
+        },
+        {
+          "kind": "float",
+          "value": 3.0
+        }
+      ],
+      "result": {
+        "kind": "string",
+        "value": "count=3"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "max"
+        },
+        {
+          "kind": "float",
+          "value": -0.5
+        }
+      ],
+      "result": {
+        "kind": "string",
+        "value": "max=-0.5"
+      }
+    }
+  ],
+  "intent_tags": [
+    "string",
+    "format",
+    "float"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_de6eed5f51d4d44d40cac84fdfae5436896fbcfb68f7a55bda56285cf597802f"
+}
