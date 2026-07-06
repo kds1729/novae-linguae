@@ -155,7 +155,8 @@ fn head_op(node: &J) -> Option<String> {
 fn op_result_sort(op: &str) -> Option<Sort> {
     Some(match op {
         "add" | "sub" | "mul" | "neg" | "abs" | "min" | "max" | "mod" | "div" | "str_length" => Sort::Int,
-        "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and" | "or" | "xor" | "not" | "str_contains" => Sort::Bool,
+        "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and" | "or" | "xor" | "not" | "str_contains"
+        | "str_lt" => Sort::Bool,
         "str_concat" => Sort::Str,
         _ => return None,
     })
@@ -424,6 +425,9 @@ fn lower_app(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfD
         "str_concat" => Ok(format!("(str.++ {} {})", lower(args[0], env, self_def)?, lower(args[1], env, self_def)?)),
         "str_length" => Ok(format!("(str.len {})", lower(args[0], env, self_def)?)),
         "str_contains" => Ok(format!("(str.contains {} {})", lower(args[1], env, self_def)?, lower(args[0], env, self_def)?)),
+        // GW4 tier-2: SMT-LIB `str.<` is strict lexicographic order over code points — exactly our
+        // `str_lt` semantics (the canonical-map-key order). Argument order agrees (no swap).
+        "str_lt" => Ok(format!("(str.< {} {})", lower(args[0], env, self_def)?, lower(args[1], env, self_def)?)),
         other => bail!("unsupported operator `{other}` (out of fragment)"),
     }
 }
@@ -485,7 +489,7 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
         let operand_sort = match op.as_str() {
             "add" | "sub" | "mul" | "neg" | "abs" | "min" | "max" | "mod" | "div" | "lt" | "le" | "gt" | "ge" => Some(Sort::Int),
             "and" | "or" | "xor" | "not" => Some(Sort::Bool),
-            "str_concat" | "str_length" | "str_contains" => Some(Sort::Str),
+            "str_concat" | "str_length" | "str_contains" | "str_lt" | "str_lower" => Some(Sort::Str),
             _ => None, // eq/neq/apply/self/id: don't constrain directly
         };
         if let Some(s) = operand_sort {
@@ -510,6 +514,9 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
         // stay out (no theory counterpart / unsound mapping).
         if matches!(op.as_str(), "length" | "head" | "tail" | "last" | "init" | "reverse" | "map" | "filter" | "foldl" | "foldr" | "cons" | "append" | "concat" | "null" | "fst" | "snd"
             | "str_split" | "str_join" | "to_string" | "parse_int"
+            // str_lower stays OUT of the fragment: SMT-LIB has no case-conversion function and
+            // encoding the Unicode mapping would be unsound-by-approximation. str_lt is IN (str.<).
+            | "str_lower"
             | "map_put" | "map_get" | "map_del" | "map_size" | "map_keys" | "parse_json" | "render_json") {
             bail!("predicate uses list/structural operator `{op}` (out of fragment)");
         }
@@ -834,6 +841,35 @@ mod tests {
                 { "kind": "lit", "value": { "kind": "int", "value": 0 } }] } });
         let cert = build_certificate(&prop, None).unwrap();
         assert!(matches!(run_smt(&cert.smt, "z3").unwrap(), SatAnswer::Sat(_)), "\n{}", cert.smt);
+    }
+
+    #[test]
+    fn str_lt_laws_prove_and_refute() {
+        // GW4 tier-2: str_lt maps to SMT `str.<` (strict lexicographic over code points, same arg
+        // order). Irreflexivity proves; totality-of-< (forall a b. str_lt(a,b)) refutes (a = b).
+        let irrefl = json!({ "kind": "forall", "vars": ["s"], "body": {
+            "kind": "app", "op": "not", "args": [
+                { "kind": "app", "op": "str_lt", "args": [
+                    { "kind": "var", "name": "s" }, { "kind": "var", "name": "s" }] }] } });
+        let cert = build_certificate(&irrefl, None).unwrap();
+        assert!(cert.smt.contains("(str.< s s)"), "\n{}", cert.smt);
+        assert_eq!(run_smt(&cert.smt, "z3").unwrap(), SatAnswer::Unsat, "\n{}", cert.smt);
+
+        let all_lt = json!({ "kind": "forall", "vars": ["a", "b"], "body": {
+            "kind": "app", "op": "str_lt", "args": [
+                { "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] } });
+        let cert = build_certificate(&all_lt, None).unwrap();
+        assert!(matches!(run_smt(&cert.smt, "z3").unwrap(), SatAnswer::Sat(_)));
+    }
+
+    #[test]
+    fn str_lower_is_out_of_fragment() {
+        // No SMT case-conversion counterpart — a law over str_lower reads UNSUPPORTED, never mis-typed.
+        let prop = json!({ "kind": "forall", "vars": ["s"], "body": {
+            "kind": "app", "op": "eq", "args": [
+                { "kind": "app", "op": "str_lower", "args": [{ "kind": "var", "name": "s" }] },
+                { "kind": "var", "name": "s" }] } });
+        assert!(build_certificate(&prop, None).is_err());
     }
 
     #[test]

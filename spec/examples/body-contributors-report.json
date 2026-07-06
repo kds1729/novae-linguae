@@ -1,0 +1,119 @@
+{
+  "body": {
+    "arms": [
+      {
+        "body": {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "kind": "var",
+                          "name": "xs"
+                        }
+                      ],
+                      "fn": {
+                        "kind": "lit",
+                        "value": {
+                          "kind": "fn_ref",
+                          "target": "fn_5328454a025d60bb36ba015cb4f1e03dc43a8680dd898ce3c47061c21f7da902"
+                        }
+                      },
+                      "kind": "app"
+                    }
+                  ],
+                  "fn": {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "str_lower"
+                      }
+                    ],
+                    "fn": {
+                      "kind": "var",
+                      "name": "map"
+                    },
+                    "kind": "app"
+                  },
+                  "kind": "app"
+                }
+              ],
+              "fn": {
+                "kind": "lit",
+                "value": {
+                  "kind": "fn_ref",
+                  "target": "fn_97f7c3fede51bb84e8d42a8821c4d5fd27790271e161a7864b50929d193b927c"
+                }
+              },
+              "kind": "app"
+            }
+          ],
+          "fn": {
+            "args": [
+              {
+                "kind": "lit",
+                "value": {
+                  "kind": "string",
+                  "value": ", "
+                }
+              }
+            ],
+            "fn": {
+              "kind": "var",
+              "name": "str_join"
+            },
+            "kind": "app"
+          },
+          "kind": "app"
+        },
+        "pattern": {
+          "kind": "variant",
+          "payload": {
+            "kind": "variant",
+            "payload": {
+              "kind": "bind",
+              "name": "xs"
+            },
+            "tag": "JList"
+          },
+          "tag": "Just"
+        }
+      },
+      {
+        "body": {
+          "kind": "lit",
+          "value": {
+            "kind": "string",
+            "value": ""
+          }
+        },
+        "pattern": {
+          "kind": "wildcard"
+        }
+      }
+    ],
+    "kind": "case",
+    "scrutinee": {
+      "args": [
+        {
+          "kind": "var",
+          "name": "body"
+        }
+      ],
+      "fn": {
+        "kind": "var",
+        "name": "parse_json"
+      },
+      "kind": "app"
+    }
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "body"
+    }
+  ]
+}

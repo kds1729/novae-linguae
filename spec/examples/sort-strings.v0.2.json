@@ -1,0 +1,137 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_97f7c3fede51bb84e8d42a8821c4d5fd27790271e161a7864b50929d193b927c",
+  "name_hints": [
+    "sort_strings",
+    "sort"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "args": [
+            {
+              "kind": "builtin",
+              "name": "string"
+            }
+          ],
+          "ctor": {
+            "kind": "builtin",
+            "name": "List"
+          },
+          "kind": "apply"
+        }
+      ],
+      "result": {
+        "args": [
+          {
+            "kind": "builtin",
+            "name": "string"
+          }
+        ],
+        "ctor": {
+          "kind": "builtin",
+          "name": "List"
+        },
+        "kind": "apply"
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n^2)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "elems": [
+            {
+              "kind": "string",
+              "value": "banana"
+            },
+            {
+              "kind": "string",
+              "value": "Apple"
+            },
+            {
+              "kind": "string",
+              "value": "cherry"
+            }
+          ],
+          "kind": "list"
+        }
+      ],
+      "result": {
+        "elems": [
+          {
+            "kind": "string",
+            "value": "Apple"
+          },
+          {
+            "kind": "string",
+            "value": "banana"
+          },
+          {
+            "kind": "string",
+            "value": "cherry"
+          }
+        ],
+        "kind": "list"
+      }
+    },
+    {
+      "args": [
+        {
+          "elems": [
+            {
+              "kind": "string",
+              "value": "b"
+            },
+            {
+              "kind": "string",
+              "value": "a"
+            }
+          ],
+          "kind": "list"
+        }
+      ],
+      "result": {
+        "elems": [
+          {
+            "kind": "string",
+            "value": "a"
+          },
+          {
+            "kind": "string",
+            "value": "b"
+          }
+        ],
+        "kind": "list"
+      }
+    },
+    {
+      "args": [
+        {
+          "elems": [],
+          "kind": "list"
+        }
+      ],
+      "result": {
+        "elems": [],
+        "kind": "list"
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "transform",
+    "coll",
+    "string"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_eee6a2acb535d693e80566e774c43f85f9b82a141f0235f7870e0e1caf6c4a6f"
+}

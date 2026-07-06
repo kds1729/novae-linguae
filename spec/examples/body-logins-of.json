@@ -1,0 +1,257 @@
+{
+  "body": {
+    "arms": [
+      {
+        "body": {
+          "kind": "var",
+          "name": "nil"
+        },
+        "pattern": {
+          "kind": "lit",
+          "value": {
+            "kind": "bool",
+            "value": true
+          }
+        }
+      },
+      {
+        "body": {
+          "arms": [
+            {
+              "body": {
+                "arms": [
+                  {
+                    "body": {
+                      "arms": [
+                        {
+                          "body": {
+                            "args": [
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      {
+                                        "kind": "var",
+                                        "name": "xs"
+                                      }
+                                    ],
+                                    "fn": {
+                                      "kind": "var",
+                                      "name": "tail"
+                                    },
+                                    "kind": "app"
+                                  }
+                                ],
+                                "fn": {
+                                  "kind": "var",
+                                  "name": "self"
+                                },
+                                "kind": "app"
+                              }
+                            ],
+                            "fn": {
+                              "args": [
+                                {
+                                  "kind": "var",
+                                  "name": "s"
+                                }
+                              ],
+                              "fn": {
+                                "kind": "var",
+                                "name": "cons"
+                              },
+                              "kind": "app"
+                            },
+                            "kind": "app"
+                          },
+                          "pattern": {
+                            "kind": "variant",
+                            "payload": {
+                              "kind": "bind",
+                              "name": "s"
+                            },
+                            "tag": "JStr"
+                          }
+                        },
+                        {
+                          "body": {
+                            "args": [
+                              {
+                                "args": [
+                                  {
+                                    "kind": "var",
+                                    "name": "xs"
+                                  }
+                                ],
+                                "fn": {
+                                  "kind": "var",
+                                  "name": "tail"
+                                },
+                                "kind": "app"
+                              }
+                            ],
+                            "fn": {
+                              "kind": "var",
+                              "name": "self"
+                            },
+                            "kind": "app"
+                          },
+                          "pattern": {
+                            "kind": "wildcard"
+                          }
+                        }
+                      ],
+                      "kind": "case",
+                      "scrutinee": {
+                        "kind": "var",
+                        "name": "v"
+                      }
+                    },
+                    "pattern": {
+                      "kind": "variant",
+                      "payload": {
+                        "kind": "bind",
+                        "name": "v"
+                      },
+                      "tag": "Just"
+                    }
+                  },
+                  {
+                    "body": {
+                      "args": [
+                        {
+                          "args": [
+                            {
+                              "kind": "var",
+                              "name": "xs"
+                            }
+                          ],
+                          "fn": {
+                            "kind": "var",
+                            "name": "tail"
+                          },
+                          "kind": "app"
+                        }
+                      ],
+                      "fn": {
+                        "kind": "var",
+                        "name": "self"
+                      },
+                      "kind": "app"
+                    },
+                    "pattern": {
+                      "kind": "variant",
+                      "tag": "None"
+                    }
+                  }
+                ],
+                "kind": "case",
+                "scrutinee": {
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "m"
+                    }
+                  ],
+                  "fn": {
+                    "args": [
+                      {
+                        "kind": "lit",
+                        "value": {
+                          "kind": "string",
+                          "value": "login"
+                        }
+                      }
+                    ],
+                    "fn": {
+                      "kind": "var",
+                      "name": "map_get"
+                    },
+                    "kind": "app"
+                  },
+                  "kind": "app"
+                }
+              },
+              "pattern": {
+                "kind": "variant",
+                "payload": {
+                  "kind": "bind",
+                  "name": "m"
+                },
+                "tag": "JObj"
+              }
+            },
+            {
+              "body": {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "xs"
+                      }
+                    ],
+                    "fn": {
+                      "kind": "var",
+                      "name": "tail"
+                    },
+                    "kind": "app"
+                  }
+                ],
+                "fn": {
+                  "kind": "var",
+                  "name": "self"
+                },
+                "kind": "app"
+              },
+              "pattern": {
+                "kind": "wildcard"
+              }
+            }
+          ],
+          "kind": "case",
+          "scrutinee": {
+            "args": [
+              {
+                "kind": "var",
+                "name": "xs"
+              }
+            ],
+            "fn": {
+              "kind": "var",
+              "name": "head"
+            },
+            "kind": "app"
+          }
+        },
+        "pattern": {
+          "kind": "lit",
+          "value": {
+            "kind": "bool",
+            "value": false
+          }
+        }
+      }
+    ],
+    "kind": "case",
+    "scrutinee": {
+      "args": [
+        {
+          "kind": "var",
+          "name": "xs"
+        }
+      ],
+      "fn": {
+        "kind": "var",
+        "name": "null"
+      },
+      "kind": "app"
+    }
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "xs"
+    }
+  ]
+}

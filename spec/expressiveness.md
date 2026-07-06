@@ -90,6 +90,9 @@ Deliberately excluded from phase 1 (each waits for a workflow to pull it): strin
 (`lt` on strings — locale/collation rabbit hole; `eq`/`neq` already work structurally),
 case conversion (Unicode tailoring), regex (determinism is satisfiable but the vocabulary is
 huge), slicing/indexing (partial or Maybe-heavy; split covers the workflows), float formatting.
+*(GW4 — the sorted-report workflow, below — later pulled exactly two: `str_lt`, code-point
+order sidestepping collation entirely, and `str_lower`, the untailored default mapping. The
+rest remain excluded.)*
 
 **The tax, itemized** (template: the `last`/`init` commit `6a5cbc3`):
 
@@ -219,6 +222,31 @@ discovers both, disambiguates **by signature** (the coarse argument-fit filter l
 string/float/Map/Json sorts en route — before that it proposed the wrong candidate and the
 responder rejected at apply time), certifies, applies, publishes the assert, and an
 independent `verify-claim` re-confirms it from the address alone.
+
+**GW4 — the sorted report (2026-07-05): the first tier-2 pull.** A real workflow — *fetch a
+contributors endpoint, case-fold the logins, sort them, render a report* — pulled exactly two of
+the deliberately-excluded phase-1 builtins and no more: **`str_lt : (string, string) → bool`**
+(strict lexicographic order over Unicode scalar values — **the same order canonical map keys
+already use**, so the core has one ordering; explicitly not a collation; maps onto SMT-LIB
+`str.<`, so ordering laws prove) and **`str_lower : string → string`** (the Unicode *default*,
+untailored lowercase — deterministic, locale-independent; out of the prover fragment, no theory
+counterpart). Regex, slicing, and float formatting stay unpulled — the workflow didn't need them.
+Everything above the two builtins is **in-language certified records**
+([`examples/insert-sorted.v0.2.json`](examples/insert-sorted.v0.2.json) — the one genuinely
+recursive piece; [`examples/sort-strings.v0.2.json`](examples/sort-strings.v0.2.json) —
+insertion sort as a `foldr` over `insert_sorted` by `fn_ref`, *assemble don't write*;
+[`examples/logins-of.v0.2.json`](examples/logins-of.v0.2.json);
+[`examples/contributors-report.v0.2.json`](examples/contributors-report.v0.2.json) — the pure
+parse→project→lower→sort→join pipeline; and the one effectful leg
+[`examples/fetch-contributors-report.v0.2.json`](examples/fetch-contributors-report.v0.2.json),
+declared `net.read`). All five **certify** and are published to Arca with signed certifications.
+The end-to-end run exercised the whole recent arc at once: the responder **refused** the
+effectful function without a grant (`effect not granted: [net.read]`), fulfilled it under
+`--grant net.read` against the live GitHub API, a grantless `verify-claim` correctly reported
+the claim **undecidable** (an effectful assert is testimony) while a granted one re-fetched and
+**CONFIRMED**, and the remote loop
+(`orchestrate --node … --intent io --grant net.read --verify --require-certified --publish`)
+discovered, certified, applied, and published the live sorted report.
 
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.

@@ -1,0 +1,52 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_4dc25d7405900f67e643366ee4349a428c66eb706bf88c7b463844d3ddb1b627",
+  "name_hints": [
+    "fetch_contributors_report"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "string"
+        }
+      ],
+      "result": {
+        "kind": "builtin",
+        "name": "string"
+      }
+    },
+    "refinements": [],
+    "effects": [
+      "net.read"
+    ],
+    "capabilities": [],
+    "complexity": "O(n^2)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "http://127.0.0.1:8877/contributors"
+        }
+      ],
+      "result": {
+        "kind": "string",
+        "value": "alice, bob, carol"
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "io",
+    "parse",
+    "string"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_7bb36a4753f98ab25aea2c8e98930e68d83b757b6da321c13a373bb1655153a9"
+}

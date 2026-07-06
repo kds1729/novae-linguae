@@ -71,6 +71,12 @@ empty separator → one singleton per scalar value); `str_join : (sep, List stri
 decimal); `parse_int : string → Maybe int` — accepts exactly canonical decimal (optional leading `-`,
 no leading zeros / `-0` / whitespace / `+`; overflow → `None`): **totality via `Maybe`**, the pattern
 that replaces `error`, with the round-trip `parse_int(to_string(n)) = Just(n)`.
+Tier-2, pulled by GW4 (the sorted-report workflow): `str_lt : (string, string) → bool` — strict
+lexicographic order over Unicode scalar values, **the same order canonical map keys use**
+(`map_keys`/check-value), deliberately not a locale collation; and `str_lower : string → string` —
+the Unicode **default (untailored)** lowercase mapping, deterministic and locale-independent (no
+Turkish-i tailoring). `str_lt` maps into the prover's string fragment (SMT-LIB `str.<` has exactly
+these semantics); `str_lower` stays out (no theory counterpart).
 
 **Composition.** Applying a `fn_ref` value resolves its target (a function content-address, or a
 body's own `expr_` address) against a link map and runs the referenced body — so records assemble and

@@ -1,0 +1,188 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_3440afd0f7135c6a55693cb9b8005aae6b2f9e675488866bf1a9270f8e7eab26",
+  "name_hints": [
+    "insert_sorted",
+    "sorted_insert"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "string"
+        },
+        {
+          "args": [
+            {
+              "kind": "builtin",
+              "name": "string"
+            }
+          ],
+          "ctor": {
+            "kind": "builtin",
+            "name": "List"
+          },
+          "kind": "apply"
+        }
+      ],
+      "result": {
+        "args": [
+          {
+            "kind": "builtin",
+            "name": "string"
+          }
+        ],
+        "ctor": {
+          "kind": "builtin",
+          "name": "List"
+        },
+        "kind": "apply"
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "b"
+        },
+        {
+          "elems": [
+            {
+              "kind": "string",
+              "value": "a"
+            },
+            {
+              "kind": "string",
+              "value": "c"
+            }
+          ],
+          "kind": "list"
+        }
+      ],
+      "result": {
+        "elems": [
+          {
+            "kind": "string",
+            "value": "a"
+          },
+          {
+            "kind": "string",
+            "value": "b"
+          },
+          {
+            "kind": "string",
+            "value": "c"
+          }
+        ],
+        "kind": "list"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "a"
+        },
+        {
+          "elems": [],
+          "kind": "list"
+        }
+      ],
+      "result": {
+        "elems": [
+          {
+            "kind": "string",
+            "value": "a"
+          }
+        ],
+        "kind": "list"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "z"
+        },
+        {
+          "elems": [
+            {
+              "kind": "string",
+              "value": "a"
+            },
+            {
+              "kind": "string",
+              "value": "z"
+            }
+          ],
+          "kind": "list"
+        }
+      ],
+      "result": {
+        "elems": [
+          {
+            "kind": "string",
+            "value": "a"
+          },
+          {
+            "kind": "string",
+            "value": "z"
+          },
+          {
+            "kind": "string",
+            "value": "z"
+          }
+        ],
+        "kind": "list"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "Z"
+        },
+        {
+          "elems": [
+            {
+              "kind": "string",
+              "value": "a"
+            }
+          ],
+          "kind": "list"
+        }
+      ],
+      "result": {
+        "elems": [
+          {
+            "kind": "string",
+            "value": "Z"
+          },
+          {
+            "kind": "string",
+            "value": "a"
+          }
+        ],
+        "kind": "list"
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "transform",
+    "coll",
+    "string"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_16f63c06c6233faf75e65047ac91f6e53b3c484984f1749fe552fa7c29b7ce84"
+}

@@ -1,0 +1,87 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_4634ca1b209fcc407fccb3990303f62e2d13e0b06aac5e42127f38cab3c76421",
+  "name_hints": [
+    "contributors_report",
+    "sorted_login_report"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "string"
+        }
+      ],
+      "result": {
+        "kind": "builtin",
+        "name": "string"
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n^2)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "[{\"login\": \"Bob\"}, {\"login\": \"alice\"}, {\"login\": \"CAROL\"}]"
+        }
+      ],
+      "result": {
+        "kind": "string",
+        "value": "alice, bob, carol"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "not json"
+        }
+      ],
+      "result": {
+        "kind": "string",
+        "value": ""
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "{\"login\": \"solo\"}"
+        }
+      ],
+      "result": {
+        "kind": "string",
+        "value": ""
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "[]"
+        }
+      ],
+      "result": {
+        "kind": "string",
+        "value": ""
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "parse",
+    "string",
+    "serialize"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_162f5680cf864b03e319bc3ae193c233ab61422caa72241cf896e4ad9a689737"
+}

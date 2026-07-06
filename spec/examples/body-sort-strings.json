@@ -1,0 +1,42 @@
+{
+  "body": {
+    "args": [
+      {
+        "kind": "var",
+        "name": "xs"
+      }
+    ],
+    "fn": {
+      "args": [
+        {
+          "kind": "var",
+          "name": "nil"
+        }
+      ],
+      "fn": {
+        "args": [
+          {
+            "kind": "lit",
+            "value": {
+              "kind": "fn_ref",
+              "target": "fn_3440afd0f7135c6a55693cb9b8005aae6b2f9e675488866bf1a9270f8e7eab26"
+            }
+          }
+        ],
+        "fn": {
+          "kind": "var",
+          "name": "foldr"
+        },
+        "kind": "app"
+      },
+      "kind": "app"
+    },
+    "kind": "app"
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "xs"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "body": {
+    "args": [
+      {
+        "args": [
+          {
+            "kind": "var",
+            "name": "u"
+          }
+        ],
+        "fn": {
+          "kind": "var",
+          "name": "http_get"
+        },
+        "kind": "app"
+      }
+    ],
+    "fn": {
+      "kind": "lit",
+      "value": {
+        "kind": "fn_ref",
+        "target": "fn_4634ca1b209fcc407fccb3990303f62e2d13e0b06aac5e42127f38cab3c76421"
+      }
+    },
+    "kind": "app"
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "u"
+    }
+  ]
+}

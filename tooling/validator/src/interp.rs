@@ -611,12 +611,12 @@ fn val_to_json(v: &Val) -> Result<J> {
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
         "neg" | "abs" | "not" | "id" | "head" | "tail" | "last" | "init" | "length" | "null"
-        | "reverse" | "fst" | "snd" | "str_length" | "to_string" | "parse_int"
+        | "reverse" | "fst" | "snd" | "str_length" | "str_lower" | "to_string" | "parse_int"
         | "map_size" | "map_keys" | "parse_json" | "render_json" | "print" | "rand"
         | "now" | "panic" | "read_file" | "http_get" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
-        | "str_concat" | "str_contains" | "str_split" | "str_join"
+        | "str_concat" | "str_contains" | "str_lt" | "str_split" | "str_join"
         | "map_get" | "map_del"
         | "apply" | "write_file" | "http_post" | "spawn" | "replicate" => 2,
         "foldl" | "foldr" | "compose" | "map_put" => 3,
@@ -928,6 +928,13 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             let needle = as_str(&a[0])?;
             Val::Bool(as_str(&a[1])?.contains(needle.as_str()))
         }
+        // Strict lexicographic order over Unicode scalar values — the SAME order canonical map keys
+        // use (map_keys / check-value), so sorting with str_lt agrees with the core's one ordering.
+        // Deliberately NOT a collation (locale-free, deterministic); Rust's str < is exactly this.
+        "str_lt" => Val::Bool(as_str(&a[0])? < as_str(&a[1])?),
+        // Unicode DEFAULT (untailored) lowercase mapping — deterministic and locale-independent
+        // (no Turkish-i tailoring). GW4 pulled it for case-insensitive grouping/sorting.
+        "str_lower" => Val::Str(as_str(&a[0])?.to_lowercase()),
         "str_split" => {
             let sep = as_str(&a[0])?;
             let s = as_str(&a[1])?;
@@ -1388,6 +1395,17 @@ mod tests {
         let joined = run2("str_join", s(", "),
             json!({ "kind": "list", "elems": [s("a"), s("b"), s("c")] }));
         assert_eq!(joined, encode_value(&Val::Str("a, b, c".into())));
+        // str_lt is strict lexicographic order over Unicode scalar values — the canonical map-key
+        // order: "Z" < "a" (0x5A < 0x61), "a" < "ab" (prefix), irreflexive.
+        assert_eq!(run2("str_lt", s("Z"), s("a")), encode_value(&Val::Bool(true)));
+        assert_eq!(run2("str_lt", s("a"), s("ab")), encode_value(&Val::Bool(true)));
+        assert_eq!(run2("str_lt", s("b"), s("ab")), encode_value(&Val::Bool(false)));
+        assert_eq!(run2("str_lt", s("x"), s("x")), encode_value(&Val::Bool(false)));
+        // str_lower is the Unicode default (untailored) lowercase mapping — deterministic, and the
+        // full mapping (İ lowers to i + combining dot, two scalar values).
+        assert_eq!(run1("str_lower", s("Nova LINGUA")), encode_value(&Val::Str("nova lingua".into())));
+        assert_eq!(run1("str_lower", s("HÉLLO")), encode_value(&Val::Str("héllo".into())));
+        assert_eq!(run1("str_lower", s("\u{130}")), encode_value(&Val::Str("i\u{307}".into())));
     }
 
     #[test]

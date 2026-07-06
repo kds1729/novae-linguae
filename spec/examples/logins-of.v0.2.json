@@ -1,0 +1,171 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_5328454a025d60bb36ba015cb4f1e03dc43a8680dd898ce3c47061c21f7da902",
+  "name_hints": [
+    "logins_of",
+    "json_logins"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "args": [
+            {
+              "kind": "builtin",
+              "name": "Json"
+            }
+          ],
+          "ctor": {
+            "kind": "builtin",
+            "name": "List"
+          },
+          "kind": "apply"
+        }
+      ],
+      "result": {
+        "args": [
+          {
+            "kind": "builtin",
+            "name": "string"
+          }
+        ],
+        "ctor": {
+          "kind": "builtin",
+          "name": "List"
+        },
+        "kind": "apply"
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n^2)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "elems": [
+            {
+              "kind": "variant",
+              "payload": {
+                "entries": [
+                  {
+                    "key": "login",
+                    "value": {
+                      "kind": "variant",
+                      "payload": {
+                        "kind": "string",
+                        "value": "alice"
+                      },
+                      "tag": "JStr"
+                    }
+                  }
+                ],
+                "kind": "map"
+              },
+              "tag": "JObj"
+            },
+            {
+              "kind": "variant",
+              "payload": {
+                "entries": [
+                  {
+                    "key": "login",
+                    "value": {
+                      "kind": "variant",
+                      "payload": {
+                        "kind": "string",
+                        "value": "Bob"
+                      },
+                      "tag": "JStr"
+                    }
+                  }
+                ],
+                "kind": "map"
+              },
+              "tag": "JObj"
+            },
+            {
+              "kind": "variant",
+              "payload": {
+                "kind": "nat",
+                "value": 5
+              },
+              "tag": "JNum"
+            }
+          ],
+          "kind": "list"
+        }
+      ],
+      "result": {
+        "elems": [
+          {
+            "kind": "string",
+            "value": "alice"
+          },
+          {
+            "kind": "string",
+            "value": "Bob"
+          }
+        ],
+        "kind": "list"
+      }
+    },
+    {
+      "args": [
+        {
+          "elems": [],
+          "kind": "list"
+        }
+      ],
+      "result": {
+        "elems": [],
+        "kind": "list"
+      }
+    },
+    {
+      "args": [
+        {
+          "elems": [
+            {
+              "kind": "variant",
+              "payload": {
+                "entries": [
+                  {
+                    "key": "id",
+                    "value": {
+                      "kind": "variant",
+                      "payload": {
+                        "kind": "nat",
+                        "value": 1
+                      },
+                      "tag": "JNum"
+                    }
+                  }
+                ],
+                "kind": "map"
+              },
+              "tag": "JObj"
+            }
+          ],
+          "kind": "list"
+        }
+      ],
+      "result": {
+        "elems": [],
+        "kind": "list"
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "query",
+    "json"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_882ec2f6f506ff27760e1ac10f9b51c4d49a8b05cc8aff2e7b3880e815c2a72c"
+}

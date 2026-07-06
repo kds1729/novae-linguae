@@ -364,6 +364,9 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
         "str_concat" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("string"))),
         "str_length" => Ty::Fun(vec![con("string")], Box::new(con("int"))),
         "str_contains" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("bool"))),
+        // GW4 tier-2 pulls: code-point order + untailored lowercase (spec/expressiveness.md).
+        "str_lt" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("bool"))),
+        "str_lower" => Ty::Fun(vec![con("string")], Box::new(con("string"))),
         "str_split" => Ty::Fun(vec![con("string"), con("string")], Box::new(list(con("string")))),
         "str_join" => Ty::Fun(vec![con("string"), list(con("string"))], Box::new(con("string"))),
         "to_string" => Ty::Fun(vec![con("int")], Box::new(con("string"))),
