@@ -1664,6 +1664,63 @@ def string_funcs():
          "examples": [{"args": [[1, 2, 3]], "result": "1,2,3"}, {"args": [[]], "result": ""},
                       {"args": [[-4]], "result": "-4"}],
          "properties": [], "prove": False},
+        # --- sort/case rows (the GW4 tier-2 pull: str_lt + str_lower). str_lt is strict lexicographic
+        # code-point order — the SAME order canonical map keys (map_keys) use — and maps onto SMT-LIB
+        # `str.<`, so its ordering laws prove; str_lower (Unicode default lowercase) has no theory
+        # counterpart, so those rows verify by validate + typecheck + run.
+        {"name": "sorts_before", "intent": "Test whether one string sorts before another.",
+         "summary": 'str_lt a b — strict lexicographic code-point order (the canonical map-key order), '
+                    'so "Z" sorts before "a".', "tags": ["string", "predicate", "order"],
+         "type_ast": fn([STRING, STRING], BOOL),
+         "body_ast": lam(["a", "b"], bapp("str_lt", var("a"), var("b"))),
+         "examples": [{"args": ["apple", "banana"], "result": True},
+                      {"args": ["b", "apple"], "result": False},
+                      {"args": ["Z", "a"], "result": True}, {"args": ["x", "x"], "result": False}],
+         # Irreflexivity — PROVED over every string via the solver's native `str.<`.
+         "properties": [{"name": "irreflexive",
+                         "expr": forall(["s"], op("not", self_app(var("s"), var("s"))))}],
+         "prove": True, "terminates": "always"},
+        {"name": "min_string", "intent": "The earlier of two strings in code-point order.",
+         "summary": "case str_lt a b of true => a; false => b.",
+         "tags": ["string", "order", "case"], "type_ast": fn([STRING, STRING], STRING),
+         "body_ast": lam(["a", "b"], case_bool(bapp("str_lt", var("a"), var("b")), var("a"), var("b"))),
+         "examples": [{"args": ["pear", "fig"], "result": "fig"}, {"args": ["a", "b"], "result": "a"},
+                      {"args": ["kiwi", "kiwi"], "result": "kiwi"},
+                      {"args": ["a", "Z"], "result": "Z"}],
+         # Commutative because the order is total: str_lt + boolean case are both in the SMT fragment.
+         "properties": [{"name": "commutative",
+                         "expr": forall(["a", "b"], op("eq", self_app(var("a"), var("b")),
+                                                       self_app(var("b"), var("a"))))}],
+         "prove": True, "terminates": "always"},
+        {"name": "lowercase", "intent": "Lowercase a string.",
+         "summary": "str_lower s — the Unicode default (untailored) lowercase mapping.",
+         "tags": ["string", "case"], "type_ast": fn([STRING], STRING),
+         "body_ast": lam(["s"], bapp("str_lower", s)),
+         "examples": [{"args": ["Nova LINGUA"], "result": "nova lingua"},
+                      {"args": [""], "result": ""}, {"args": ["abc"], "result": "abc"}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "ci_equal", "intent": "Case-insensitive string equality.",
+         "summary": "eq (str_lower a) (str_lower b) — compare after case-folding both sides.",
+         "tags": ["string", "predicate", "case"], "type_ast": fn([STRING, STRING], BOOL),
+         "body_ast": lam(["a", "b"], bapp("eq", bapp("str_lower", var("a")), bapp("str_lower", var("b")))),
+         "examples": [{"args": ["Yes", "yes"], "result": True}, {"args": ["Yes", "no"], "result": False},
+                      {"args": ["OK", "ok"], "result": True}, {"args": ["", ""], "result": True}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "insert_sorted", "intent": "Insert a string into an ascending sorted list, keeping it sorted.",
+         "summary": "case null ys of true => cons x nil; false => case str_lt x (head ys) of "
+                    "true => cons x ys; false => cons (head ys) (self x (tail ys)) — code-point order.",
+         "tags": ["string", "list", "recursion", "sort"],
+         "type_ast": fn([STRING, list_of(STRING)], list_of(STRING)),
+         "body_ast": lam(["x", "ys"], case_null(
+             "ys", bapp("cons", var("x"), var("nil")),
+             case_bool(bapp("str_lt", var("x"), bapp("head", var("ys"))),
+                       bapp("cons", var("x"), var("ys")),
+                       bapp("cons", bapp("head", var("ys")), bself(var("x"), bapp("tail", var("ys"))))))),
+         "examples": [{"args": ["b", ["a", "c"]], "result": ["a", "b", "c"]},
+                      {"args": ["a", []], "result": ["a"]},
+                      {"args": ["z", ["a", "z"]], "result": ["a", "z", "z"]},
+                      {"args": ["Z", ["a"]], "result": ["Z", "a"]}],
+         "properties": [], "prove": False, "terminates": "always"},
     ]
 
 
@@ -3162,6 +3219,155 @@ def combinatorial_specs(exclude_names=()):
                    [{"args": ["{ \"b\" : 2 , \"a\": 1 }"], "result": "{\"a\":1,\"b\":2}"},
                     {"args": ["[1,  2]"], "result": "[1,2]"},
                     {"args": ["nope"], "result": dflt}], terminates="always"))
+
+    # 43. SORT/CASE SHAPES — GW4 (the sorted report) pulled str_lt (strict code-point order, the
+    # canonical map-key order) and str_lower (Unicode default lowercase) into the language, and
+    # insert_sorted/sort_strings/logins_of are certified commons records — but neither builtin had
+    # ANY training shape. The corpus10 lesson ("an operation is taught only if it appears in some
+    # training shape"), applied preemptively rather than after a measured residual: near-bare
+    # comparisons and case-folds multiplied over constants, the case-select (min-vs-constant) and
+    # filter shapes, and the insert-into-sorted recursion in TRANSFORMED variants (int / descending /
+    # case-folded) so the curated golds (sorts_before / min_string / lowercase / ci_equal /
+    # insert_sorted) still leakage-drop at export.
+    _W43 = ["banana", "kiwi", "Zoo"]  # incl. an uppercase word: code-point order puts "Zoo" < "apple"
+    _S43_IN = ["apple", "melon", "Zeb", "kiwi"]
+    _SL43_IN = [["pear", "Fig", "apple"], [], ["zed", "ant"]]
+    for w in _W43:
+        wl = w.lower()
+        add(_cspec(f"before_{wl}", f'Whether a string sorts before "{w}" in code-point order.',
+                   f'str_lt s "{w}"', ["string", "predicate", "order"], fn([STRING], BOOL),
+                   lam(["s"], bapp("str_lt", var("s"), str_lit(w))),
+                   [{"args": [v], "result": v < w} for v in _S43_IN], terminates="always"))
+        add(_cspec(f"after_{wl}", f'Whether a string sorts after "{w}" in code-point order.',
+                   f'str_lt "{w}" s', ["string", "predicate", "order"], fn([STRING], BOOL),
+                   lam(["s"], bapp("str_lt", str_lit(w), var("s"))),
+                   [{"args": [v], "result": w < v} for v in _S43_IN], terminates="always"))
+        add(_cspec(f"min_vs_{wl}", f'The earlier of a string and "{w}" in code-point order.',
+                   f'case str_lt s "{w}" of true => s; false => "{w}"',
+                   ["string", "order", "case"], fn([STRING], STRING),
+                   lam(["s"], case_bool(bapp("str_lt", var("s"), str_lit(w)), var("s"), str_lit(w))),
+                   [{"args": [v], "result": min(v, w)} for v in _S43_IN], terminates="always"))
+        add(_cspec(f"keep_before_{wl}", f'Keep the strings that sort before "{w}".',
+                   f'filter (\\s -> str_lt s "{w}") xs', ["string", "list", "filter", "order"],
+                   fn([list_of(STRING)], list_of(STRING)),
+                   lam(["xs"], bapp("filter", lam(["s"], bapp("str_lt", var("s"), str_lit(w))), var("xs"))),
+                   [{"args": [lst], "result": [v for v in lst if v < w]} for lst in _SL43_IN],
+                   terminates="always"))
+    _CI43 = ["yes", "ok", "error"]
+    for w in _CI43:
+        add(_cspec(f"ci_is_{w}", f'Whether a string equals "{w}" ignoring case.',
+                   f'eq (str_lower s) "{w}"', ["string", "predicate", "case"], fn([STRING], BOOL),
+                   lam(["s"], bapp("eq", bapp("str_lower", var("s")), str_lit(w))),
+                   [{"args": [w.upper()], "result": True}, {"args": [w.capitalize()], "result": True},
+                    {"args": ["nope"], "result": False}, {"args": [w + "!"], "result": False}],
+                   terminates="always"))
+        add(_cspec(f"lower_has_{w}", f'Whether a string contains "{w}" ignoring case.',
+                   f'str_contains "{w}" (str_lower s)', ["string", "predicate", "case"], fn([STRING], BOOL),
+                   lam(["s"], bapp("str_contains", str_lit(w), bapp("str_lower", var("s")))),
+                   [{"args": [f"say {w.upper()} twice"], "result": True},
+                    {"args": [w.capitalize()], "result": True}, {"args": ["nothing"], "result": False},
+                    {"args": [""], "result": False}], terminates="always"))
+    add(_cspec("lower_each", "Lowercase every string in a list.",
+               "map str_lower xs", ["string", "list", "map", "case"],
+               fn([list_of(STRING)], list_of(STRING)),
+               lam(["xs"], bapp("map", var("str_lower"), var("xs"))),
+               [{"args": [["Ab", "CD"]], "result": ["ab", "cd"]}, {"args": [[]], "result": []},
+                {"args": [["x", "Y"]], "result": ["x", "y"]}], terminates="always"))
+    for sep, nm in ((",", "comma"), (" ", "space")):
+        add(_cspec(f"lower_join_{nm}", f"Lowercase the strings and join them with {'commas' if sep == ',' else 'spaces'}.",
+                   f'str_join "{sep}" (map str_lower xs)', ["string", "list", "format", "case"],
+                   fn([list_of(STRING)], STRING),
+                   lam(["xs"], bapp("str_join", str_lit(sep), bapp("map", var("str_lower"), var("xs")))),
+                   [{"args": [["Ab", "CD"]], "result": f"ab{sep}cd"}, {"args": [[]], "result": ""},
+                    {"args": [["One"]], "result": "one"}], terminates="always"))
+    # The insert-into-sorted recursion (the GW4 insert_sorted shape) in transformed variants — the
+    # exact curated/commons gold (ascending string by plain str_lt) is deliberately NOT emitted.
+    def _insert_walk(cmp_expr):
+        return lam(["x", "ys"], case_null(
+            "ys", bapp("cons", var("x"), var("nil")),
+            case_bool(cmp_expr,
+                      bapp("cons", var("x"), var("ys")),
+                      bapp("cons", bapp("head", var("ys")), bself(var("x"), bapp("tail", var("ys")))))))
+    _INS43 = "case null ys of true => cons x nil; false => case {cmp} of true => cons x ys; false => cons (head ys) (self x (tail ys))"
+    _INS_INT_IN = [(3, [1, 4, 6]), (0, []), (5, [5, 5]), (9, [1, 2])]
+    add(_cspec("insert_sorted_int", "Insert a number into an ascending sorted list, keeping it sorted.",
+               _INS43.format(cmp="lt x (head ys)"), ["recursion", "list", "sort"],
+               fn([INT, list_of(INT)], list_of(INT)),
+               _insert_walk(bapp("lt", var("x"), bapp("head", var("ys")))),
+               [{"args": [x, lst], "result": sorted(lst + [x])} for x, lst in _INS_INT_IN],
+               terminates="always"))
+    add(_cspec("insert_sorted_desc", "Insert a number into a descending sorted list, keeping it sorted.",
+               _INS43.format(cmp="lt (head ys) x"), ["recursion", "list", "sort"],
+               fn([INT, list_of(INT)], list_of(INT)),
+               _insert_walk(bapp("lt", bapp("head", var("ys")), var("x"))),
+               [{"args": [x, lst], "result": sorted(lst + [x], reverse=True)}
+                for x, lst in [(7, [9, 4, 1]), (0, []), (5, [5]), (2, [8, 3])]],
+               terminates="always"))
+    add(_cspec("insert_desc_str", "Insert a string into a descending sorted list (code-point order).",
+               _INS43.format(cmp="str_lt (head ys) x"), ["string", "recursion", "list", "sort"],
+               fn([STRING, list_of(STRING)], list_of(STRING)),
+               _insert_walk(bapp("str_lt", bapp("head", var("ys")), var("x"))),
+               [{"args": ["m", ["z", "a"]], "result": ["z", "m", "a"]},
+                {"args": ["a", []], "result": ["a"]},
+                {"args": ["z", ["z", "b"]], "result": ["z", "z", "b"]}], terminates="always"))
+    add(_cspec("insert_sorted_ci", "Insert a string into a case-insensitively sorted list (compare lowercased).",
+               _INS43.format(cmp="str_lt (str_lower x) (str_lower (head ys))"),
+               ["string", "recursion", "list", "sort", "case"],
+               fn([STRING, list_of(STRING)], list_of(STRING)),
+               _insert_walk(bapp("str_lt", bapp("str_lower", var("x")),
+                                 bapp("str_lower", bapp("head", var("ys"))))),
+               [{"args": ["Beta", ["alpha", "Gamma"]], "result": ["alpha", "Beta", "Gamma"]},
+                {"args": ["ant", []], "result": ["ant"]},
+                {"args": ["ZEB", ["ant", "yak"]], "result": ["ant", "yak", "ZEB"]}],
+               terminates="always"))
+
+    # 44. BARE-REVERSE REINFORCEMENT — the corpus12 watch item: write/reverse regressed at 7B on
+    # both seeds (the wrong-cons-order dilution symptom corpus10 induced and family #41's near-bare
+    # shapes fixed once; 3B holds it). The known lever, applied: more shapes whose gold uses the
+    # `reverse` builtin nearly bare, multiplied over constants (the curated bare gold itself still
+    # leakage-drops), plus the reverse-shaped last/init walk in TRANSFORMED variants (the #42 trick)
+    # so the correct cons order of a reverse-producing recursion gets direct training mass.
+    for k in (0, 2, 7):
+        add(_cspec(f"snoc_{k}", f"Append {k} at the end of a list.",
+                   f"reverse (cons {k} (reverse xs))", ["list", "transform"],
+                   fn([list_of(INT)], list_of(INT)),
+                   lam(["xs"], bapp("reverse", bapp("cons", int_lit(k), bapp("reverse", var("xs"))))),
+                   [{"args": [lst], "result": lst + [k]} for lst in _LIST_IN[:3]], terminates="always"))
+    add(_cspec("rev_rest", "All but the first element, in reverse order.",
+               "reverse (tail xs)", ["list", "transform"], fn([list_of(INT)], list_of(INT)),
+               lam(["xs"], bapp("reverse", bapp("tail", var("xs")))),
+               [{"args": [[1, 2, 3]], "result": [3, 2]}, {"args": [[5]], "result": []},
+                {"args": [[4, 9, 2, 8]], "result": [8, 2, 9]}], terminates="always"))
+    add(_cspec("rest_rev", "The reversed list without its first element (all but the last, reversed).",
+               "tail (reverse xs)", ["list", "transform"], fn([list_of(INT)], list_of(INT)),
+               lam(["xs"], bapp("tail", bapp("reverse", var("xs")))),
+               [{"args": [[1, 2, 3]], "result": [2, 1]}, {"args": [[5]], "result": []},
+                {"args": [[4, 9, 2, 8]], "result": [2, 9, 4]}], terminates="always"))
+    for opn, k in (("add", 1), ("add", 10), ("mul", 2)):
+        pf = _AOP[opn]
+        add(_cspec(f"rev_map_{opn}_{k}", f"{_OPWORD[opn].capitalize()} {k} over every element, then reverse.",
+                   f"reverse (map (\\x -> {opn} x {k}) xs)", ["list", "map", "transform"],
+                   fn([list_of(INT)], list_of(INT)),
+                   lam(["xs"], bapp("reverse", bapp("map", lam(["x"], bapp(opn, var("x"), int_lit(k))), var("xs")))),
+                   [{"args": [lst], "result": [pf(v, k) for v in reversed(lst)]} for lst in _LIST_IN[:3]],
+                   terminates="always"))
+    # The reverse-shaped walk: cons (f (last xs)) onto self (init xs) — the transform keeps any bare
+    # gold leakage-dropped while teaching the cons order that makes the recursion a reversal.
+    def _rev_walk(head_expr):
+        return lam(["xs"], case_null("xs", var("nil"),
+                                     bapp("cons", head_expr, bself(bapp("init", var("xs"))))))
+    _RW_IN = [[3, 1, 4], [], [7], [2, 5]]
+    for nm, head_expr, tf in (
+        ("rev_double", bapp("mul", int_lit(2), bapp("last", var("xs"))), lambda v: 2 * v),
+        ("rev_neg", bapp("neg", bapp("last", var("xs"))), lambda v: -v),
+        ("rev_add_5", bapp("add", bapp("last", var("xs")), int_lit(5)), lambda v: v + 5),
+    ):
+        add(_cspec(nm, f"The list reversed with each element {'doubled' if nm == 'rev_double' else 'negated' if nm == 'rev_neg' else 'increased by 5'}.",
+                   "reverse walk: nil when empty; else cons (f (last xs)) (self (init xs))",
+                   ["recursion", "list", "transform"], fn([list_of(INT)], list_of(INT)),
+                   _rev_walk(head_expr),
+                   [{"args": [lst], "result": [tf(v) for v in reversed(lst)]} for lst in _RW_IN],
+                   terminates="unknown"))
 
     return out
 
