@@ -14,9 +14,11 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 
 | Endpoint | Status |
 |----------|--------|
-| `POST /v0/records` — publish (verify-then-store, idempotent) — records, messages, **and signed certifications** | ✅ |
+| `POST /v0/records` — publish (verify-then-store, idempotent) — records, messages, signed certifications, **weights pointers + eval attestations** | ✅ |
 | `GET /v0/records/{hash}` — resolve · `HEAD` — exists | ✅ |
 | `GET /v0/records/{hash}/certifications` — the signed certifications about a function | ✅ |
+| `GET /v0/records/{hash}/attestations` — the signed eval attestations about a weights record | ✅ |
+| `GET /v0/blobs/{sha256}` — content-addressed binary blobs (gate-free; the weights manifest hash is the boundary) | ✅ |
 | `POST /v0/query` — typed (exact) discovery | ✅ |
 | `GET /v0/sync` — replication feed (cursor) | ✅ |
 | `GET /v0/info` — node metadata | ✅ |
@@ -209,6 +211,23 @@ which runs automatically on web start, and the new route; no Caddy change — th
 `/v0/` paths); confirm with `curl -s https://nl.1105software.com/v0/info` showing `"certification"` in
 `kinds`. (2) run `seed_certifications.py` against it. The whole flow is exercised end to end by the test
 suite and was verified against a live local node over HTTP.
+
+## Model weights (`wgt_` pointers, `evl_` eval attestations, `GET /v0/blobs/{sha256}`)
+
+The node hosts model weights per [`spec/weights.md`](../../spec/weights.md), in two cleanly separated
+halves. The **records** — a `wgt_` **pointer** (base model, per-file sha256 blob manifest, the
+deterministic training recipe over content-addressed corpus data, advisory `urls[]`) and the signed
+`evl_` **eval attestations** about it (`nl-validator attest-weights --sign`, the weights analogue of a
+certification) — go through the ordinary verify-then-store gate and are served like any record;
+`GET /v0/records/{wgt-hash}/attestations` returns the attestations about a weights record (the
+counterpart of `…/certifications` — the node stores, the consumer judges under its own policy via
+`nl-validator certified --subject wgt_…`). The **bytes** live in a gate-free, content-addressed **blob
+store**: `manage.py addblob <file>` stores a file under its sha256 in `COMMONS_BLOB_DIR` (the prod stack
+mounts the `commons_blobs` volume at `/blobs`), and `GET /v0/blobs/{sha256}` serves it immutable-cacheable.
+There is deliberately no gate on blobs: the pointer's `files[].sha256` is the security boundary — a client
+hashes the download and rejects a mismatch, so any host (including a hostile mirror or a plain CDN) is safe
+to fetch from. The pinned reference adapters (`tooling/eval/REFERENCE_CHECKPOINT.md`) are published this
+way on Arca.
 
 ## Seed bundles (`.nlb`)
 
