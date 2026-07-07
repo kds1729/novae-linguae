@@ -280,6 +280,37 @@ to Arca with signed certifications; the corpus grows curated rows + combinatoria
 the new operations have training shapes from day one (the pinned every-builtin-needs-a-shape
 lesson, applied preemptively like #43).
 
+**GW3 — dispatch on message content (2026-07-07): the zero-pull workflow.** The last of the
+three original golden workflows — *split a command string, compare its head against known
+commands, apply the matching function* — pulled **no new builtins at all**: `str_split` (phase
+1), string equality as a `case` over **string-literal patterns** (the `lit` pattern kind the
+schema always had), `parse_int`'s `Maybe` for the argument, and direct **application of an
+`fn_ref` literal** (the assemble-don't-write primitive that `sort_strings` passes to `foldr`,
+here in function position). [`examples/dispatch-command.v0.2.json`](examples/dispatch-command.v0.2.json)
+(`dispatch_command : string → Maybe int`) routes `"double 21"` / `"negate 7"` / `"square 6"` to
+the commons functions [`double`](examples/double.v0.2.json), [`negate`](examples/negate.v0.2.json),
+and [`square`](examples/square.v0.2.json) **by content-address**, and is total: an unknown
+command, a missing argument, or an unparseable argument is `None`, never an error. It
+**certifies** (typecheck/effects sound; termination/complexity conservatively UNVERIFIABLE
+through the opaque `fn_ref` callees, exactly like `sort_strings`) and is published to Arca with
+a signed certification. The intent-tag vocabulary gained a blessed **`dispatch/<…>`** category
+(`dispatch/command`, `dispatch/variant`) so routers stay discoverable by intent. Demonstrated
+end to end against the live node: `orchestrate --node … --intent dispatch --verify
+--require-certified --publish` discovered the router, hash-verified the four-record closure
+(router + all three callees + bodies), certified it, applied it to `"square 6"` → `Just 36`,
+published the assert, and an independent `verify-claim` re-confirmed the claim from the message
+address alone. This is the bridge the workflow was designed to be: the dispatch table is
+ordinary data (a `case` over strings) and the dispatched-to behavior is ordinary commons
+content — the shape a Nova Locutio payload router takes when the payload itself picks the
+function. The corpus follow-through landed the same day (curated rows `toggle_on` /
+`signal_step` / `cmd_of` / `arg_of` / `run_command` — eval 380 → 390, oracle 390/390 — plus
+combinatorial family #46, the string-scrutinee/literal-pattern shapes nothing else taught), and
+**paid down a latent round-trip hole as its tax line item**: the pretty-printer emits a
+non-negative `int`-kind literal *pattern* as `int(N)`, but the pattern parser rejected that
+form (the expression-position twin was fixed long ago), so any `case` over typed int literals
+unparsed to a surface its own parser refused — caught by the oracle gate on the new rows, fixed
+in the parser with a regression test.
+
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.
 - **Ingestion**: map source-language string/dict idioms onto the new builtins in

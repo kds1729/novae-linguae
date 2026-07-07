@@ -1,0 +1,134 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_8137f147423d0f74672473cc3e4f43193ce90710ab9145f78a310d78fecbb7c4",
+  "name_hints": [
+    "dispatch_command",
+    "route_command"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "string"
+        }
+      ],
+      "result": {
+        "kind": "sum",
+        "variants": [
+          {
+            "tag": "Just",
+            "type": {
+              "kind": "builtin",
+              "name": "int"
+            }
+          },
+          {
+            "tag": "None"
+          }
+        ]
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "double 21"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "Just",
+        "payload": {
+          "kind": "int",
+          "value": 42
+        }
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "negate 7"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "Just",
+        "payload": {
+          "kind": "int",
+          "value": -7
+        }
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "square 6"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "Just",
+        "payload": {
+          "kind": "int",
+          "value": 36
+        }
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "launch 9"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "None"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "double"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "None"
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "double x"
+        }
+      ],
+      "result": {
+        "kind": "variant",
+        "tag": "None"
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "dispatch",
+    "dispatch/command",
+    "string"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_f69d45be91c04fb60128a35de9f4e17cc663b54ce6372253e410230bbb7819a1"
+}

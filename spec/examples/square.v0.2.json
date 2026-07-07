@@ -1,0 +1,108 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_c3a9a05c4ca430469db494a719283e99873cd540bf74b8dd8d58581af60560f8",
+  "name_hints": [
+    "square"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "int"
+        }
+      ],
+      "result": {
+        "kind": "builtin",
+        "name": "int"
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "int",
+          "value": 0
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 0
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "int",
+          "value": 5
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 25
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "int",
+          "value": -3
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 9
+      }
+    }
+  ],
+  "intent_tags": [
+    "arithmetic"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_0d03b132893a8a1feb8dfc697bc4e2bab342bcd51ef83b24fb1eea6116339e41",
+  "properties": [
+    {
+      "name": "nonnegative",
+      "expr": {
+        "kind": "forall",
+        "vars": [
+          "n"
+        ],
+        "body": {
+          "kind": "app",
+          "op": "ge",
+          "args": [
+            {
+              "kind": "app",
+              "op": "apply",
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "self"
+                },
+                {
+                  "kind": "var",
+                  "name": "n"
+                }
+              ]
+            },
+            {
+              "kind": "lit",
+              "value": {
+                "kind": "int",
+                "value": 0
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -157,6 +157,12 @@ Temporal operations. MUST declare the `time` effect as applicable.
 - `time/parse`
 - `time/sleep`
 
+### `dispatch/<…>`
+Routing: selecting which function to apply by inspecting input content, then applying it.
+
+- `dispatch/command` — route on the leading token of a command string (e.g. split, match the head, apply the matching `fn_ref`)
+- `dispatch/variant` — route on a sum-type variant tag
+
 ### `coll/<…>`
 Generic collection operations not covered by transform / filter / aggregate.
 

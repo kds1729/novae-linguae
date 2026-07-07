@@ -1,0 +1,25 @@
+{
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "n"
+    }
+  ],
+  "body": {
+    "kind": "app",
+    "fn": {
+      "kind": "var",
+      "name": "mul"
+    },
+    "args": [
+      {
+        "kind": "var",
+        "name": "n"
+      },
+      {
+        "kind": "var",
+        "name": "n"
+      }
+    ]
+  }
+}

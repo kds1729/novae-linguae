@@ -1,0 +1,118 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_a8aace26a5ef7d9f078b0ccc49702655aefaf1156985a60ffe74ec07430d8f2e",
+  "name_hints": [
+    "negate"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "int"
+        }
+      ],
+      "result": {
+        "kind": "builtin",
+        "name": "int"
+      }
+    },
+    "refinements": [],
+    "effects": [],
+    "capabilities": [],
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "int",
+          "value": 0
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 0
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "int",
+          "value": 7
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": -7
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "int",
+          "value": -4
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 4
+      }
+    }
+  ],
+  "intent_tags": [
+    "arithmetic"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_ba8b5252707b3c1eadac783e04f9eb4116dd0859e97fbbcc6caba3ff4395a935",
+  "properties": [
+    {
+      "name": "sums_to_zero",
+      "expr": {
+        "kind": "forall",
+        "vars": [
+          "n"
+        ],
+        "body": {
+          "kind": "app",
+          "op": "eq",
+          "args": [
+            {
+              "kind": "app",
+              "op": "add",
+              "args": [
+                {
+                  "kind": "app",
+                  "op": "apply",
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "self"
+                    },
+                    {
+                      "kind": "var",
+                      "name": "n"
+                    }
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "n"
+                }
+              ]
+            },
+            {
+              "kind": "lit",
+              "value": {
+                "kind": "int",
+                "value": 0
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
