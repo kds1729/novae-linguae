@@ -1,16 +1,16 @@
 {
   "corpus": "corpus.jsonl",
-  "examples": 236,
+  "examples": 241,
   "by_modality": {
-    "nova_lingua": 214,
+    "nova_lingua": 219,
     "nova_locutio": 22
   },
   "by_polarity": {
-    "positive": 222,
+    "positive": 227,
     "negative": 14
   },
   "by_category": {
-    "function": 199,
+    "function": 204,
     "exchange": 20,
     "transcript": 2,
     "composition": 15
@@ -43,6 +43,9 @@
     "more_recursion": 3,
     "variant_consuming_funcs": 7,
     "nested_hof_funcs": 6,
+    "string_funcs": 18,
+    "dispatch_funcs": 5,
+    "map_json_funcs": 9,
     "higher_order_funcs": 4,
     "higher_order_more": 6,
     "provenance_funcs": 2

@@ -108,8 +108,8 @@ of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **param
 comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
-parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,139 generated
-function records (3,375 examples total with the curated set)** across forty-five template families
+parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,160 generated
+function records (3,401 examples total with the curated set)** across forty-six template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
 teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — #39, **strings as data**
 (`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
@@ -132,7 +132,12 @@ watch item (7B `write/reverse` dilution regression), fixed with near-bare `rever
 double reverse, reverse-of-tail, map-then-reverse) plus the `last`/`init` reverse walk in transformed
 variants — and #45, **float report shapes**: the GW5 pull (`to_float`, numeric `div`/`mod`, numeric
 `to_string`) taught on day one (near-bare widen/divide/render over constants, `label=value` lines,
-guarded float mean/max reduces)), every one through the same validate →
+guarded float mean/max reduces) — and #46, **dispatch shapes**: the GW3 zero-pull workflow's day-one
+mass; the string-scrutinee/literal-pattern `case` no other family emitted (every other scrutinee is a
+bool, an int, or a variant), taught near-bare (two-word selects, single-command predicates), composed
+(head-token routing over `str_split`, apply-the-named-operation over int, its `Maybe` twin), and as
+token idioms (`first_int`, `tok_count`); the curated golds (`toggle_on`/`signal_step`/`cmd_of`/
+`arg_of`/`run_command`) leakage-drop at export), every one through the same validate →
 typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,
@@ -166,9 +171,9 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
 
 ## Scope and where it grows
 
-226 examples today (212 positive, 14 negative), in four `category`s:
+241 examples today (227 positive, 14 negative), in four `category`s:
 
-- **function** (189) — Nova Lingua function records across **thirty-two families**: unary integer (8, incl.
+- **function** (204) — Nova Lingua function records across **thirty-three families**: unary integer (8, incl.
   `double` / `quadruple` / `decrement` / `abs_val`), binary integer (6, incl. `maximum` / `minimum` /
   `abs_diff`), boolean/predicate (8, incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` /
   `is_even`), list builtins (3: `sum` / `reverse` / `length`), list-transform (6: `map`/`filter`/`append`
@@ -184,7 +189,8 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   against its body by `check-complexity`** in the gate, a structural no-solver cost analysis; `reverse_naive`
   is the showcase that time and output size are independent — `O(n^2)` time yet size-*preserving* output —
   which is what `compose` threads through a pipeline and, until now, trusted without proof),
-  float (4), Maybe (3) / Result (2), scalar `self`-recursion (5: `length_rec` /
+  float (9, incl. the GW5 numeric-report rows `to_float` / `show_float` / `half_of` / `mean_of` —
+  totality via `Maybe`, the empty series has no mean — / `stat_line`), Maybe (3) / Result (2), scalar `self`-recursion (5: `length_rec` /
   `sum_rec` / `product_rec` / `factorial` / `triangular`), list-building recursion (6: `double_all_rec` …
   `countdown_rec`), integer algebraic laws (7: associativity / distributivity over `+` *and* `−` / identity
   / annihilation / involution / idempotence), boolean laws (7: associativity, De Morgan for AND and OR,
@@ -213,12 +219,17 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   `apply_to` / `twice` / `compose2` / `all_with` / `any_with` / `count_with` — records whose
   *type* takes a function argument, run end to end with the function supplied as an `fn_ref` to a helper
   record resolved from the run directory; the grader can render the fn_ref argument by the helper's name),
-  **strings** (13, `spec/expressiveness.md` phase 1 — the first records over string *data*:
-  `str_len` (Unicode scalar count) / `wrap_parens` / `contains_comma` (needle-first) /
+  **strings** (18, `spec/expressiveness.md` phase 1 + the GW4 sort/case tier — the first records over
+  string *data*: `str_len` (Unicode scalar count) / `wrap_parens` / `contains_comma` (needle-first) /
   `count_fields` / `second_field` / `split_words` (split keeps empties) / `comma_join` / `show_int` /
-  `render_ints` (`str_join`∘`map to_string`) and the parse quartet `parse_int_maybe` /
+  `render_ints` (`str_join`∘`map to_string`), the parse quartet `parse_int_maybe` /
   `parse_or_zero` / `is_int_string` / `parse_and_double` — `parse_int`'s `Maybe` constructed AND
-  consumed by `case`, the totality idiom that replaces `error`),
+  consumed by `case`, the totality idiom that replaces `error` — and the sort/case rows
+  `sorts_before` / `min_string` (both with properties PROVED via the solver's native `str.<`) /
+  `lowercase` / `ci_equal` / `insert_sorted`),
+  **dispatch on text** (5, GW3 — the zero-pull workflow's curated rows: `toggle_on` / `signal_step`
+  string-literal `case` routing, `cmd_of` / `arg_of` command and argument token extraction, and the
+  total `Maybe` dispatch `run_command`),
   **maps + JSON** (9, `spec/expressiveness.md` phases 2–3 — the first records over dynamic key-value
   data and JSON-as-data: `lookup_int` / `port_or_default` (the config-lookup idiom) / `key_count` /
   `key_list` (sorted, deterministic) / `store_one` (build from `map_empty`) / `drop_key` (absent key
@@ -226,7 +237,7 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
   JCS canonicalization) / `json_port` (the GW1 practical form — nested `case` over `Just(JObj(m))`
   then `Just(JNum(p))`) over JSON; examples carry real `map` values),
   and **provenance** (2: `quadruple_derived` `derived_from`
-  doubling, `negate_v2` `supersedes` a `0 − n` implementation). **58 properties are proved over the
+  doubling, `negate_v2` `supersedes` a `0 − n` implementation). **60 properties are proved over the
   unbounded domain**, including the `filter`/`reverse` commutation and the `reverse`-over-`append`
   antihomomorphism (both via lemma discovery), `filter` idempotence (direct induction), and the recursion
   families' laws by induction over the supplied body. Sum-typed (Maybe/Result) functions construct their

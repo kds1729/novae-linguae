@@ -1769,6 +1769,91 @@ def string_funcs():
     ]
 
 
+def dispatch_funcs():
+    # GW3 rows (spec/expressiveness.md — dispatch on message content, the zero-pull workflow):
+    # route on a command string with string-literal case patterns, split "cmd n" text into head
+    # and argument tokens, and the total Maybe dispatch that answers None for an unknown command,
+    # a missing argument, or an unparseable one — never an error. No builtin was pulled; the new
+    # ground is the shapes themselves (every case scrutinee elsewhere is a bool, an int, or a
+    # variant — here it is a STRING over literal patterns). The commons router applies fn_refs;
+    # these rows keep the routing table inline so the bodies stay self-contained.
+    s = var("s")
+
+    def spat(w):
+        return {"kind": "lit", "value": {"kind": "string", "value": w}}
+
+    def ipat(k):
+        return {"kind": "lit", "value": {"kind": "int", "value": k}}
+
+    parts = var("parts")
+    split_s = bapp("str_split", str_lit(" "), s)
+    second_tok = bapp("head", bapp("tail", parts))
+    return [
+        {"name": "toggle_on", "intent": 'Whether a command string is exactly "on".',
+         "summary": 'case s of "on" => true; _ => false — string-literal patterns, case-sensitive.',
+         "tags": ["dispatch", "string", "predicate", "case"], "type_ast": fn([STRING], BOOL),
+         "body_ast": lam(["s"], _case_of(s, (spat("on"), bool_lit(True)),
+                                         (WILDCARD_PAT, bool_lit(False)))),
+         "examples": [{"args": ["on"], "result": True}, {"args": ["off"], "result": False},
+                      {"args": ["ON"], "result": False}, {"args": [""], "result": False}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "signal_step", "intent": "Map an up/down command to a step of +1/-1 (0 otherwise).",
+         "summary": 'case s of "up" => 1; "down" => -1; _ => 0.',
+         "tags": ["dispatch", "string", "case"], "type_ast": fn([STRING], INT),
+         "body_ast": lam(["s"], _case_of(s, (spat("up"), int_lit(1)), (spat("down"), int_lit(-1)),
+                                         (WILDCARD_PAT, int_lit(0)))),
+         "examples": [{"args": ["up"], "result": 1}, {"args": ["down"], "result": -1},
+                      {"args": ["hold"], "result": 0}, {"args": [""], "result": 0}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "cmd_of", "intent": "The command word of a space-separated command string.",
+         "summary": 'head (str_split " " s) — total: splitting "" yields [""], so head is safe.',
+         "tags": ["dispatch", "string", "split"], "type_ast": fn([STRING], STRING),
+         "body_ast": lam(["s"], bapp("head", split_s)),
+         "examples": [{"args": ["double 21"], "result": "double"}, {"args": ["ping"], "result": "ping"},
+                      {"args": ["square 6 9"], "result": "square"}, {"args": [""], "result": ""}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "arg_of", "intent": "The integer argument of a two-token command string, if any.",
+         "summary": 'let parts = str_split " " s in case length parts of 2 => parse_int (head (tail '
+                    "parts)); _ => None — missing or extra tokens are None, and parse_int makes a "
+                    "malformed argument None too.",
+         "tags": ["dispatch", "string", "split", "maybe", "case"],
+         "type_ast": fn([STRING], maybe_t(INT)),
+         "body_ast": lam(["s"], blet("parts", split_s,
+                                     _case_of(bapp("length", parts),
+                                              (ipat(2), bapp("parse_int", second_tok)),
+                                              (WILDCARD_PAT, variant_expr("None"))))),
+         "examples": [{"args": ["double 21"], "result": V("Just", 21)},
+                      {"args": ["double"], "result": V("None")},
+                      {"args": ["double x"], "result": V("None")},
+                      {"args": ["square -5"], "result": V("Just", -5)}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "run_command", "intent": "Run a one-argument arithmetic command like \"double 21\".",
+         "summary": 'split "cmd n"; case the command word over string-literal patterns ("double" / '
+                    '"negate" / "square"), apply the matching operation to the parsed argument; an '
+                    "unknown command, a missing argument, or an unparseable argument is None.",
+         "tags": ["dispatch", "string", "split", "maybe", "case"],
+         "type_ast": fn([STRING], maybe_t(INT)),
+         "body_ast": lam(["s"], blet("parts", split_s,
+             _case_of(bapp("length", parts),
+                      (ipat(2), _case_of(bapp("parse_int", second_tok),
+                                         (_vpat("Just", "n"),
+                                          _case_of(bapp("head", parts),
+                                                   (spat("double"), variant_expr("Just", bapp("add", var("n"), var("n")))),
+                                                   (spat("negate"), variant_expr("Just", bapp("neg", var("n")))),
+                                                   (spat("square"), variant_expr("Just", bapp("mul", var("n"), var("n")))),
+                                                   (WILDCARD_PAT, variant_expr("None")))),
+                                         (_vpat("None"), variant_expr("None")))),
+                      (WILDCARD_PAT, variant_expr("None"))))),
+         "examples": [{"args": ["double 21"], "result": V("Just", 42)},
+                      {"args": ["negate 7"], "result": V("Just", -7)},
+                      {"args": ["square 6"], "result": V("Just", 36)},
+                      {"args": ["launch 9"], "result": V("None")},
+                      {"args": ["double"], "result": V("None")},
+                      {"args": ["double x"], "result": V("None")}],
+         "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
 def map_json_funcs():
     # MAP + JSON functions (spec/expressiveness.md phases 2-3): dynamic key-value data and the
     # language's own canonical form as a manipulable value. map_get/parse_json are total via Maybe,
@@ -3274,8 +3359,11 @@ def combinatorial_specs(exclude_names=()):
     # filter shapes, and the insert-into-sorted recursion in TRANSFORMED variants (int / descending /
     # case-folded) so the curated golds (sorts_before / min_string / lowercase / ci_equal /
     # insert_sorted) still leakage-drop at export.
+    # NB the round14 read diagnosis: models answer str_lt reads with human alphabetical intuition
+    # ("Z" after "a"), and the read task is built from examples[-1] — so the mixed-case input sits
+    # LAST, putting a counterintuitive code-point comparison in read position for every anchor.
     _W43 = ["banana", "kiwi", "Zoo"]  # incl. an uppercase word: code-point order puts "Zoo" < "apple"
-    _S43_IN = ["apple", "melon", "Zeb", "kiwi"]
+    _S43_IN = ["apple", "melon", "kiwi", "Zeb"]
     _SL43_IN = [["pear", "Fig", "apple"], [], ["zed", "ant"]]
     for w in _W43:
         wl = w.lower()
@@ -3292,6 +3380,11 @@ def combinatorial_specs(exclude_names=()):
                    ["string", "order", "case"], fn([STRING], STRING),
                    lam(["s"], case_bool(bapp("str_lt", var("s"), str_lit(w)), var("s"), str_lit(w))),
                    [{"args": [v], "result": min(v, w)} for v in _S43_IN], terminates="always"))
+        add(_cspec(f"max_vs_{wl}", f'The later of a string and "{w}" in code-point order.',
+                   f'case str_lt s "{w}" of true => "{w}"; false => s',
+                   ["string", "order", "case"], fn([STRING], STRING),
+                   lam(["s"], case_bool(bapp("str_lt", var("s"), str_lit(w)), str_lit(w), var("s"))),
+                   [{"args": [v], "result": max(v, w)} for v in _S43_IN], terminates="always"))
         add(_cspec(f"keep_before_{wl}", f'Keep the strings that sort before "{w}".',
                    f'filter (\\s -> str_lt s "{w}") xs', ["string", "list", "filter", "order"],
                    fn([list_of(STRING)], list_of(STRING)),
@@ -3334,7 +3427,10 @@ def combinatorial_specs(exclude_names=()):
                       bapp("cons", var("x"), var("ys")),
                       bapp("cons", bapp("head", var("ys")), bself(var("x"), bapp("tail", var("ys")))))))
     _INS43 = "case null ys of true => cons x nil; false => case {cmp} of true => cons x ys; false => cons (head ys) (self x (tail ys))"
-    _INS_INT_IN = [(3, [1, 4, 6]), (0, []), (5, [5, 5]), (9, [1, 2])]
+    # examples[-1] is the read-exposed one (build_read_tasks) — the round14 diagnosis found all
+    # insert-walk read pairs were TAIL inserts (teaching "append at end"), so each variant's last
+    # example now takes the head/middle branch.
+    _INS_INT_IN = [(9, [1, 2]), (0, []), (5, [5, 5]), (1, [4, 6])]
     add(_cspec("insert_sorted_int", "Insert a number into an ascending sorted list, keeping it sorted.",
                _INS43.format(cmp="lt x (head ys)"), ["recursion", "list", "sort"],
                fn([INT, list_of(INT)], list_of(INT)),
@@ -3346,24 +3442,25 @@ def combinatorial_specs(exclude_names=()):
                fn([INT, list_of(INT)], list_of(INT)),
                _insert_walk(bapp("lt", bapp("head", var("ys")), var("x"))),
                [{"args": [x, lst], "result": sorted(lst + [x], reverse=True)}
-                for x, lst in [(7, [9, 4, 1]), (0, []), (5, [5]), (2, [8, 3])]],
+                for x, lst in [(2, [8, 3]), (0, []), (5, [5]), (7, [9, 4, 1])]],
                terminates="always"))
     add(_cspec("insert_desc_str", "Insert a string into a descending sorted list (code-point order).",
                _INS43.format(cmp="str_lt (head ys) x"), ["string", "recursion", "list", "sort"],
                fn([STRING, list_of(STRING)], list_of(STRING)),
                _insert_walk(bapp("str_lt", bapp("head", var("ys")), var("x"))),
-               [{"args": ["m", ["z", "a"]], "result": ["z", "m", "a"]},
+               [{"args": ["z", ["z", "b"]], "result": ["z", "z", "b"]},
                 {"args": ["a", []], "result": ["a"]},
-                {"args": ["z", ["z", "b"]], "result": ["z", "z", "b"]}], terminates="always"))
+                {"args": ["a", ["z", "B"]], "result": ["z", "a", "B"]}], terminates="always"))
     add(_cspec("insert_sorted_ci", "Insert a string into a case-insensitively sorted list (compare lowercased).",
                _INS43.format(cmp="str_lt (str_lower x) (str_lower (head ys))"),
                ["string", "recursion", "list", "sort", "case"],
                fn([STRING, list_of(STRING)], list_of(STRING)),
                _insert_walk(bapp("str_lt", bapp("str_lower", var("x")),
                                  bapp("str_lower", bapp("head", var("ys"))))),
-               [{"args": ["Beta", ["alpha", "Gamma"]], "result": ["alpha", "Beta", "Gamma"]},
+               [{"args": ["ZEB", ["ant", "yak"]], "result": ["ant", "yak", "ZEB"]},
                 {"args": ["ant", []], "result": ["ant"]},
-                {"args": ["ZEB", ["ant", "yak"]], "result": ["ant", "yak", "ZEB"]}],
+                {"args": ["Beta", ["alpha", "Gamma"]], "result": ["alpha", "Beta", "Gamma"]},
+                {"args": ["Alpha", ["beta", "GAMMA"]], "result": ["Alpha", "beta", "GAMMA"]}],
                terminates="always"))
 
     # 44. BARE-REVERSE REINFORCEMENT — the corpus12 watch item: write/reverse regressed at 7B on
@@ -3413,6 +3510,30 @@ def combinatorial_specs(exclude_names=()):
                    _rev_walk(head_expr),
                    [{"args": [lst], "result": [tf(v) for v in reversed(lst)]} for lst in _RW_IN],
                    terminates="unknown"))
+    # Two-list reverse+append shapes — the round14 read diagnosis found ZERO training pairs
+    # combining reverse with a two-list append (read/reverse_concat churned at 7B; write at 3B
+    # emitted the block-swap `append ys xs` with no element reversal). The curated gold
+    # `reverse (append xs ys)` still leakage-drops; these teach the swap and the distributed
+    # form (with its inner reversals) directly.
+    _RA_IN = [([1, 2], [3, 4]), ([], [5]), ([7], [])]
+    add(_cspec("rev_app_swap", "Append the lists in swapped order, then reverse the result.",
+               "reverse (append ys xs)", ["list", "transform", "two-list"],
+               fn([list_of(INT), list_of(INT)], list_of(INT)),
+               lam(["xs", "ys"], bapp("reverse", bapp("append", var("ys"), var("xs")))),
+               [{"args": [a, b], "result": list(reversed(b + a))} for a, b in _RA_IN],
+               terminates="always"))
+    add(_cspec("rev_both_app", "The reversal of both lists appended, second first — equal to reversing their concatenation.",
+               "append (reverse ys) (reverse xs)", ["list", "transform", "two-list"],
+               fn([list_of(INT), list_of(INT)], list_of(INT)),
+               lam(["xs", "ys"], bapp("append", bapp("reverse", var("ys")), bapp("reverse", var("xs")))),
+               [{"args": [a, b], "result": list(reversed(a + b))} for a, b in _RA_IN],
+               terminates="always"))
+    add(_cspec("rev_first_app", "Reverse the first list, then append the second unchanged.",
+               "append (reverse xs) ys", ["list", "transform", "two-list"],
+               fn([list_of(INT), list_of(INT)], list_of(INT)),
+               lam(["xs", "ys"], bapp("append", bapp("reverse", var("xs")), var("ys"))),
+               [{"args": [a, b], "result": list(reversed(a)) + b} for a, b in _RA_IN],
+               terminates="always"))
 
     def _fshow(x):
         # The JCS rendering of the simple floats used here: integral values drop the fraction.
@@ -3467,6 +3588,80 @@ def combinatorial_specs(exclude_names=()):
                [{"args": [lst], "result": V("Just", max(lst)) if lst else V("None")} for lst in _FL_IN],
                terminates="always"))
 
+    # 46. DISPATCH SHAPES — GW3 (dispatch on message content) pulled NO builtins: routing is a
+    # case over STRING-LITERAL patterns plus str_split/head token extraction plus parse_int's
+    # Maybe. Every case scrutinee elsewhere in the corpus is a bool, an int, or a variant, so the
+    # string-scrutinee/literal-pattern shape had zero training mass (the every-shape-needs-mass
+    # lesson, applied preemptively); the curated golds (toggle_on / signal_step / cmd_of / arg_of
+    # / run_command) leakage-drop at export.
+    def _spat46(w):
+        return {"kind": "lit", "value": {"kind": "string", "value": w}}
+
+    _W46 = [("start", "stop"), ("open", "close"), ("push", "pull")]
+    _K46 = [(1, 2), (3, 7), (10, 0)]
+    _S46_IN = lambda w1, w2: [w1, w2, "other", ""]
+    for (w1, w2), (k1, k2) in zip(_W46, _K46):
+        add(_cspec(f"strsel_{w1}_{w2}", f'Map "{w1}"/"{w2}" to {k1}/{k2} (0 otherwise).',
+                   f'case s of "{w1}" => {k1}; "{w2}" => {k2}; _ => 0',
+                   ["dispatch", "string", "case"], fn([STRING], INT),
+                   lam(["s"], _case_of(var("s"), (_spat46(w1), int_lit(k1)), (_spat46(w2), int_lit(k2)),
+                                       (WILDCARD_PAT, int_lit(0)))),
+                   [{"args": [v], "result": k1 if v == w1 else k2 if v == w2 else 0}
+                    for v in _S46_IN(w1, w2)], terminates="always"))
+        add(_cspec(f"is_cmd_{w1}", f'Whether a string is exactly the command "{w1}".',
+                   f'case s of "{w1}" => true; _ => false', ["dispatch", "string", "predicate", "case"],
+                   fn([STRING], BOOL),
+                   lam(["s"], _case_of(var("s"), (_spat46(w1), bool_lit(True)),
+                                       (WILDCARD_PAT, bool_lit(False)))),
+                   [{"args": [v], "result": v == w1} for v in (w1, w2, w1.upper(), "")],
+                   terminates="always"))
+        add(_cspec(f"headtok_{w1}", f'Whether a command string starts with the "{w1}" command word.',
+                   f'case head (str_split " " s) of "{w1}" => true; _ => false',
+                   ["dispatch", "string", "split", "case"], fn([STRING], BOOL),
+                   lam(["s"], _case_of(bapp("head", bapp("str_split", str_lit(" "), var("s"))),
+                                       (_spat46(w1), bool_lit(True)), (WILDCARD_PAT, bool_lit(False)))),
+                   [{"args": [f"{w1} 4"], "result": True}, {"args": [w1], "result": True},
+                    {"args": [f"{w2} {w1}"], "result": False}, {"args": [""], "result": False}],
+                   terminates="always"))
+    _DOP46 = [("inc", "dec", lambda n: bapp("add", var("n"), int_lit(1)),
+               lambda n: bapp("sub", var("n"), int_lit(1)), lambda v: v + 1, lambda v: v - 1),
+              ("twice", "flip", lambda n: bapp("add", var("n"), var("n")),
+               lambda n: bapp("neg", var("n")), lambda v: v + v, lambda v: -v),
+              ("cube", "keep", lambda n: bapp("mul", var("n"), bapp("mul", var("n"), var("n"))),
+               lambda n: var("n"), lambda v: v ** 3, lambda v: v)]
+    for w1, w2, e1, e2, f1, f2 in _DOP46:
+        add(_cspec(f"apply_{w1}_{w2}", f'Apply the operation a command names — "{w1}" or "{w2}" — to a number.',
+                   f'case s of "{w1}" => …; "{w2}" => …; _ => n',
+                   ["dispatch", "string", "case", "arithmetic"], fn([STRING, INT], INT),
+                   lam(["s", "n"], _case_of(var("s"), (_spat46(w1), e1(var("n"))), (_spat46(w2), e2(var("n"))),
+                                            (WILDCARD_PAT, var("n")))),
+                   [{"args": [w1, 3], "result": f1(3)}, {"args": [w2, 3], "result": f2(3)},
+                    {"args": ["skip", 5], "result": 5}, {"args": [w1, -2], "result": f1(-2)}],
+                   terminates="always"))
+        add(_cspec(f"try_{w1}_{w2}", f'Apply "{w1}"/"{w2}" to a number if the command is known, else None.',
+                   f'case s of "{w1}" => Just(…); "{w2}" => Just(…); _ => None',
+                   ["dispatch", "string", "case", "maybe"], fn([STRING, INT], maybe_t(INT)),
+                   lam(["s", "n"], _case_of(var("s"),
+                                            (_spat46(w1), variant_expr("Just", e1(var("n")))),
+                                            (_spat46(w2), variant_expr("Just", e2(var("n")))),
+                                            (WILDCARD_PAT, variant_expr("None")))),
+                   [{"args": [w1, 4], "result": V("Just", f1(4))}, {"args": [w2, 4], "result": V("Just", f2(4))},
+                    {"args": ["nope", 4], "result": V("None")}, {"args": [w1.upper(), 4], "result": V("None")}],
+                   terminates="always"))
+    add(_cspec("first_int", "Parse the first space-separated token of a string as an integer, if it is one.",
+               'parse_int (head (str_split " " s))', ["dispatch", "string", "split", "maybe"],
+               fn([STRING], maybe_t(INT)),
+               lam(["s"], bapp("parse_int", bapp("head", bapp("str_split", str_lit(" "), var("s"))))),
+               [{"args": ["21 go"], "result": V("Just", 21)}, {"args": ["x 21"], "result": V("None")},
+                {"args": ["-4"], "result": V("Just", -4)}, {"args": [""], "result": V("None")}],
+               terminates="always"))
+    add(_cspec("tok_count", "How many space-separated tokens a command string has.",
+               'length (str_split " " s)', ["dispatch", "string", "split"], fn([STRING], INT),
+               lam(["s"], bapp("length", bapp("str_split", str_lit(" "), var("s")))),
+               [{"args": ["double 21"], "result": 2}, {"args": ["ping"], "result": 1},
+                {"args": ["a b c"], "result": 3}, {"args": [""], "result": 1}],
+               terminates="always"))
+
     return out
 
 
@@ -3477,7 +3672,8 @@ def all_specs():
             + arith_laws() + bool_laws() + order_laws()
             + more_arith() + more_laws() + bool_more() + recursive_more()
             + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion()
-            + variant_consuming_funcs() + nested_hof_funcs() + string_funcs() + map_json_funcs())
+            + variant_consuming_funcs() + nested_hof_funcs() + string_funcs() + dispatch_funcs()
+            + map_json_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -4370,6 +4566,9 @@ def main():
                 "more_recursion": len(more_recursion()),
                 "variant_consuming_funcs": len(variant_consuming_funcs()),
                 "nested_hof_funcs": len(nested_hof_funcs()),
+                "string_funcs": len(string_funcs()),
+                "dispatch_funcs": len(dispatch_funcs()),
+                "map_json_funcs": len(map_json_funcs()),
                 "higher_order_funcs": len(higher_order_funcs()),
                 "higher_order_more": len(higher_order_more()),
                 "provenance_funcs": len(provenance_funcs())}
