@@ -280,6 +280,45 @@ to Arca with signed certifications; the corpus grows curated rows + combinatoria
 the new operations have training shapes from day one (the pinned every-builtin-needs-a-shape
 lesson, applied preemptively like #43).
 
+**GW6 — the authed mutating call (2026-07-07): the general HTTP core.** A real workflow —
+*create a resource on an authenticated service, verify it exists, delete it, verify it's gone* —
+pulled **one builtin and two effect-boundary mechanisms**, and no more. The builtin is
+**`http : (string, string, Map string string, string) → {status: int, body: string}`**
+(method, url, headers, body): one general request covering the whole verb surface, whose
+**effect is decided by the method** — `net.read` for GET/HEAD, `net.write` for every other verb —
+so a mutating call is gated by the mutating grant even through the one builtin (the effects
+walker refines a literal method to exactly the side performed; a dynamic method is
+conservatively both), and whose **record result carries the status** — the thing the workflow
+verifies against, which `http_get`'s body-only result could never express. The two mechanisms:
+**host-scoped grants** (`--grant net.write@api.example.com` — enforced at the effect boundary
+where the URL is known; a bare grant still means any host, a scoped grant refuses every other
+host by name) and **secret placeholders** (`{{secret:NAME}}` in a header value, substituted from
+operator-supplied `--secret NAME=VALUE` only inside the live effect — records, asserts, and
+traces are public content-addressed artifacts, so a credential never exists as a language value:
+the wire sees it, the trace keeps the placeholder, and **replay needs no secrets at all**; a
+verifier re-running an authenticated claim authenticates with its *own* secrets). The exit gate
+runs against an in-repo **reference fake service**
+([`tooling/fake-service/fake_service.py`](../tooling/fake-service/fake_service.py) — stdlib-only,
+in-memory, client-chosen names so nothing is server-assigned, Bearer-auth required so the gate
+exercises the secret path). Everything above the builtin is in-language certified records:
+[`examples/put-item.v0.2.json`](examples/put-item.v0.2.json) /
+[`examples/item-status.v0.2.json`](examples/item-status.v0.2.json) /
+[`examples/delete-item.v0.2.json`](examples/delete-item.v0.2.json) (the three verbs, each
+declaring exactly its side of the net split — certify shows `effects SOUND` per-verb), and
+[`examples/item-roundtrip.v0.2.json`](examples/item-roundtrip.v0.2.json) (`(string, string,
+string) → bool` — the whole create→verify→delete→verify-gone cycle as one **total, self-cleaning
+predicate**, which is what makes an effectful claim about it re-runnable at all). All four
+certify and are published with signed certifications. Demonstrated end to end: the responder
+**refused** the roundtrip without grants; the remote loop (`orchestrate --node … --intent
+predicate --verify --require-certified --publish --grant net.read@127.0.0.1 --grant
+net.write@127.0.0.1 --secret api_token=…`) discovered it among twenty candidates, disambiguated
+by signature, certified, applied it live → `true`, published the assert; a grantless
+`verify-claim` correctly reported the claim **undecidable** (an effectful assert is testimony);
+and a granted one **re-ran the whole cycle live and CONFIRMED**. `run` needed no new grant flag —
+it already grants exactly the record's declared effects (its examples are its own tests) — only
+`--secret`. Wire-format details deliberately unpulled: response headers, redirects,
+query-parameter encoding, multipart bodies — no workflow has needed them.
+
 **GW3 — dispatch on message content (2026-07-07): the zero-pull workflow.** The last of the
 three original golden workflows — *split a command string, compare its head against known
 commands, apply the matching function* — pulled **no new builtins at all**: `str_split` (phase

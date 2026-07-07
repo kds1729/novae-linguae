@@ -1,0 +1,88 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_0fc670822f913770e5750bc15bb5d0b99202c7b3495b0fa0c27f6121ed06368a",
+  "name_hints": [
+    "put_item",
+    "create_item"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "string"
+        },
+        {
+          "kind": "builtin",
+          "name": "string"
+        },
+        {
+          "kind": "builtin",
+          "name": "string"
+        }
+      ],
+      "result": {
+        "kind": "builtin",
+        "name": "int"
+      }
+    },
+    "refinements": [],
+    "effects": [
+      "net.write"
+    ],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "http://127.0.0.1:8878"
+        },
+        {
+          "kind": "string",
+          "value": "gw6-a"
+        },
+        {
+          "kind": "string",
+          "value": "{\"v\":1}"
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 201
+      }
+    },
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "http://127.0.0.1:8878"
+        },
+        {
+          "kind": "string",
+          "value": "gw6-a"
+        },
+        {
+          "kind": "string",
+          "value": "{\"v\":2}"
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 200
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "io",
+    "io/network/http"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_e5167a180b4ac91c59078323a1d8563b20c90effd88de01d701576f6eb362dd1"
+}

@@ -191,9 +191,24 @@ implemented until a real workload makes the 1.5 s substantial.
   policy from breakage. **The caveat that matters:** the risk in an effect rides in the *arguments*,
   which the remote sender chooses — granting `net.read` means this machine fetches URLs picked by
   remote input (SSRF-shaped); an operator who cares fronts the responder with ordinary network egress
-  controls. Designed-but-not-built, waiting for a workflow to pull them: per-function trust-gated
-  grants (they discriminate on the wrong variable — the function, not the arguments), per-effect
-  constraints (host/path allowlists on a grant), and trace-conditioned `observed` claims (below).
+  controls. **Host-scoped net grants are now built (pulled by GW6, the mutating-call workflow):**
+  a grant may name its host — `--grant net.write@api.example.com` — and the sandbox enforces the
+  scope at the effect boundary, where the URL is actually known (the static gate reads a scoped
+  grant as its base effect). A bare `net.write` still means any host; a scoped grant alone refuses
+  every other host by name. Still designed-but-not-built, waiting for a workflow to pull them:
+  per-function trust-gated grants (they discriminate on the wrong variable — the function, not the
+  arguments), path-level constraints, and trace-conditioned `observed` claims (below).
+- **Credentials are effect-boundary configuration, not data (pulled by GW6).** An authenticated
+  workflow needs a secret the commons must never see: records, asserts, and traces are public,
+  content-addressed artifacts. So a secret never exists as a language value at all — an `http`
+  header value carries a symbolic `{{secret:NAME}}` placeholder, the operator supplies the value
+  out of band (`--secret NAME=VALUE` on `run`/`eval`/`respond`/`orchestrate`/`verify-claim`), and
+  substitution happens only inside the live effect: the wire sees the credential, the trace keeps
+  the placeholder, and replay needs no secrets at all (recorded responses replay verbatim). A
+  placeholder naming an unsupplied secret is refused by name — sending placeholder text as a
+  credential would be a silent auth failure. A verifier re-running an authenticated claim under
+  grants authenticates with its OWN `--secret` values — the claim names *what* to authenticate as
+  (symbolically), never the credential itself.
   **Effectful asserts are observations.** `eq(fetch(url), result)` is not a stably re-runnable
   equation: `verify-claim` without matching grants reports it undecidable — the honest verdict.
   *CONFIRMED-by-re-execution is the pure-claim guarantee; an effectful claim is the signer's

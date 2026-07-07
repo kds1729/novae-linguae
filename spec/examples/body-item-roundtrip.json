@@ -1,0 +1,457 @@
+{
+  "body": {
+    "body": {
+      "body": {
+        "body": {
+          "body": {
+            "body": {
+              "body": {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "kind": "lit",
+                            "value": {
+                              "kind": "nat",
+                              "value": 404
+                            }
+                          }
+                        ],
+                        "fn": {
+                          "args": [
+                            {
+                              "kind": "var",
+                              "name": "gone"
+                            }
+                          ],
+                          "fn": {
+                            "kind": "var",
+                            "name": "eq"
+                          },
+                          "kind": "app"
+                        },
+                        "kind": "app"
+                      }
+                    ],
+                    "fn": {
+                      "args": [
+                        {
+                          "args": [
+                            {
+                              "kind": "lit",
+                              "value": {
+                                "kind": "nat",
+                                "value": 204
+                              }
+                            }
+                          ],
+                          "fn": {
+                            "args": [
+                              {
+                                "kind": "var",
+                                "name": "deleted"
+                              }
+                            ],
+                            "fn": {
+                              "kind": "var",
+                              "name": "eq"
+                            },
+                            "kind": "app"
+                          },
+                          "kind": "app"
+                        }
+                      ],
+                      "fn": {
+                        "kind": "var",
+                        "name": "and"
+                      },
+                      "kind": "app"
+                    },
+                    "kind": "app"
+                  }
+                ],
+                "fn": {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            {
+                              "kind": "lit",
+                              "value": {
+                                "kind": "nat",
+                                "value": 200
+                              }
+                            }
+                          ],
+                          "fn": {
+                            "args": [
+                              {
+                                "kind": "var",
+                                "name": "seen"
+                              }
+                            ],
+                            "fn": {
+                              "kind": "var",
+                              "name": "eq"
+                            },
+                            "kind": "app"
+                          },
+                          "kind": "app"
+                        }
+                      ],
+                      "fn": {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "kind": "lit",
+                                "value": {
+                                  "kind": "nat",
+                                  "value": 300
+                                }
+                              }
+                            ],
+                            "fn": {
+                              "args": [
+                                {
+                                  "kind": "var",
+                                  "name": "created"
+                                }
+                              ],
+                              "fn": {
+                                "kind": "var",
+                                "name": "lt"
+                              },
+                              "kind": "app"
+                            },
+                            "kind": "app"
+                          }
+                        ],
+                        "fn": {
+                          "kind": "var",
+                          "name": "and"
+                        },
+                        "kind": "app"
+                      },
+                      "kind": "app"
+                    }
+                  ],
+                  "fn": {
+                    "kind": "var",
+                    "name": "and"
+                  },
+                  "kind": "app"
+                },
+                "kind": "app"
+              },
+              "kind": "let",
+              "name": "gone",
+              "value": {
+                "kind": "field",
+                "name": "status",
+                "record": {
+                  "args": [
+                    {
+                      "kind": "lit",
+                      "value": {
+                        "kind": "string",
+                        "value": ""
+                      }
+                    }
+                  ],
+                  "fn": {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "auth"
+                      }
+                    ],
+                    "fn": {
+                      "args": [
+                        {
+                          "kind": "var",
+                          "name": "url"
+                        }
+                      ],
+                      "fn": {
+                        "args": [
+                          {
+                            "kind": "lit",
+                            "value": {
+                              "kind": "string",
+                              "value": "GET"
+                            }
+                          }
+                        ],
+                        "fn": {
+                          "kind": "var",
+                          "name": "http"
+                        },
+                        "kind": "app"
+                      },
+                      "kind": "app"
+                    },
+                    "kind": "app"
+                  },
+                  "kind": "app"
+                }
+              }
+            },
+            "kind": "let",
+            "name": "deleted",
+            "value": {
+              "kind": "field",
+              "name": "status",
+              "record": {
+                "args": [
+                  {
+                    "kind": "lit",
+                    "value": {
+                      "kind": "string",
+                      "value": ""
+                    }
+                  }
+                ],
+                "fn": {
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "auth"
+                    }
+                  ],
+                  "fn": {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "url"
+                      }
+                    ],
+                    "fn": {
+                      "args": [
+                        {
+                          "kind": "lit",
+                          "value": {
+                            "kind": "string",
+                            "value": "DELETE"
+                          }
+                        }
+                      ],
+                      "fn": {
+                        "kind": "var",
+                        "name": "http"
+                      },
+                      "kind": "app"
+                    },
+                    "kind": "app"
+                  },
+                  "kind": "app"
+                },
+                "kind": "app"
+              }
+            }
+          },
+          "kind": "let",
+          "name": "seen",
+          "value": {
+            "kind": "field",
+            "name": "status",
+            "record": {
+              "args": [
+                {
+                  "kind": "lit",
+                  "value": {
+                    "kind": "string",
+                    "value": ""
+                  }
+                }
+              ],
+              "fn": {
+                "args": [
+                  {
+                    "kind": "var",
+                    "name": "auth"
+                  }
+                ],
+                "fn": {
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "url"
+                    }
+                  ],
+                  "fn": {
+                    "args": [
+                      {
+                        "kind": "lit",
+                        "value": {
+                          "kind": "string",
+                          "value": "GET"
+                        }
+                      }
+                    ],
+                    "fn": {
+                      "kind": "var",
+                      "name": "http"
+                    },
+                    "kind": "app"
+                  },
+                  "kind": "app"
+                },
+                "kind": "app"
+              },
+              "kind": "app"
+            }
+          }
+        },
+        "kind": "let",
+        "name": "created",
+        "value": {
+          "kind": "field",
+          "name": "status",
+          "record": {
+            "args": [
+              {
+                "kind": "var",
+                "name": "v"
+              }
+            ],
+            "fn": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "auth"
+                }
+              ],
+              "fn": {
+                "args": [
+                  {
+                    "kind": "var",
+                    "name": "url"
+                  }
+                ],
+                "fn": {
+                  "args": [
+                    {
+                      "kind": "lit",
+                      "value": {
+                        "kind": "string",
+                        "value": "PUT"
+                      }
+                    }
+                  ],
+                  "fn": {
+                    "kind": "var",
+                    "name": "http"
+                  },
+                  "kind": "app"
+                },
+                "kind": "app"
+              },
+              "kind": "app"
+            },
+            "kind": "app"
+          }
+        }
+      },
+      "kind": "let",
+      "name": "url",
+      "value": {
+        "args": [
+          {
+            "args": [
+              {
+                "kind": "var",
+                "name": "name"
+              }
+            ],
+            "fn": {
+              "args": [
+                {
+                  "kind": "lit",
+                  "value": {
+                    "kind": "string",
+                    "value": "/items/"
+                  }
+                }
+              ],
+              "fn": {
+                "kind": "var",
+                "name": "str_concat"
+              },
+              "kind": "app"
+            },
+            "kind": "app"
+          }
+        ],
+        "fn": {
+          "args": [
+            {
+              "kind": "var",
+              "name": "base"
+            }
+          ],
+          "fn": {
+            "kind": "var",
+            "name": "str_concat"
+          },
+          "kind": "app"
+        },
+        "kind": "app"
+      }
+    },
+    "kind": "let",
+    "name": "auth",
+    "value": {
+      "args": [
+        {
+          "kind": "var",
+          "name": "map_empty"
+        }
+      ],
+      "fn": {
+        "args": [
+          {
+            "kind": "lit",
+            "value": {
+              "kind": "string",
+              "value": "Bearer {{secret:api_token}}"
+            }
+          }
+        ],
+        "fn": {
+          "args": [
+            {
+              "kind": "lit",
+              "value": {
+                "kind": "string",
+                "value": "Authorization"
+              }
+            }
+          ],
+          "fn": {
+            "kind": "var",
+            "name": "map_put"
+          },
+          "kind": "app"
+        },
+        "kind": "app"
+      },
+      "kind": "app"
+    }
+  },
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "base"
+    },
+    {
+      "name": "name"
+    },
+    {
+      "name": "v"
+    }
+  ]
+}

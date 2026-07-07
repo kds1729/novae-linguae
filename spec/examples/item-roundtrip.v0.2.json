@@ -1,0 +1,70 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_e387649d167565db8e69657374ab733a8ffa765abc5dad52de96e3fa7bcbfaf8",
+  "name_hints": [
+    "item_roundtrip",
+    "provision_check"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "string"
+        },
+        {
+          "kind": "builtin",
+          "name": "string"
+        },
+        {
+          "kind": "builtin",
+          "name": "string"
+        }
+      ],
+      "result": {
+        "kind": "builtin",
+        "name": "bool"
+      }
+    },
+    "refinements": [],
+    "effects": [
+      "net.read",
+      "net.write"
+    ],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "http://127.0.0.1:8878"
+        },
+        {
+          "kind": "string",
+          "value": "gw6-rt"
+        },
+        {
+          "kind": "string",
+          "value": "{\"size\": 3}"
+        }
+      ],
+      "result": {
+        "kind": "bool",
+        "value": true
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "io",
+    "io/network/http",
+    "predicate"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_8b400fd299fad6db966f176d4f04023d3d478442febf590aee97d7bec516d6a3"
+}

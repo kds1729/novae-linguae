@@ -1,0 +1,61 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_075f29a6e6191bdfd6e299b2c08b6e81cbd4424dd909383ad212af329769a73d",
+  "name_hints": [
+    "item_status",
+    "get_item_status"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "string"
+        },
+        {
+          "kind": "builtin",
+          "name": "string"
+        }
+      ],
+      "result": {
+        "kind": "builtin",
+        "name": "int"
+      }
+    },
+    "refinements": [],
+    "effects": [
+      "net.read"
+    ],
+    "capabilities": [],
+    "complexity": "O(n)",
+    "terminates": "always"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "http://127.0.0.1:8878"
+        },
+        {
+          "kind": "string",
+          "value": "gw6-never-created"
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 404
+      }
+    }
+  ],
+  "properties": [],
+  "intent_tags": [
+    "io",
+    "io/network/http",
+    "query/lookup"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_19ea0b5ff7b5a1f436c2967386ff23feb6cc6f1a0192b8e0cb916b5665c1de0d"
+}

@@ -565,11 +565,21 @@ A function record *declares* its effects (`signature.effects`, the closed ten-ef
 metadata. The evaluator runs against a *granted* effect set; the effectful builtins — `print`
 (`io.console`), `rand` (`random`), `now` (`time`), `panic` (`panic`), and the **real-I/O** ones
 `read_file`/`write_file` (`fs.read`/`fs.write`), `http_get`/`http_post` (`net.read`/`net.write`; both
-`http://` and `https://`, the latter over TLS), `spawn` (`process.spawn`), and `replicate` (`alloc` — allocate a list of
+`http://` and `https://`, the latter over TLS), the general **`http`** (`http(method, url, headers,
+body) → {status, body}` — the effect is decided by the METHOD, `net.read` for GET/HEAD and
+`net.write` for every other verb, so one builtin covers the whole verb surface without widening the
+read-only grant; the effects walker refines a literal method to the side actually performed and
+treats a dynamic one as both; the `{status, body}` record result is what a mutating workflow
+verifies against), `spawn` (`process.spawn`), and `replicate` (`alloc` — allocate a list of
 `n` copies, the heap-allocating builtin with no external I/O) — gate on it, and each performed effect is
 appended to a structured **trace** (principle 9: an AI-ingestible record of what the body did). Adding
 an effect kind is just an entry in `builtin_effect`; enforcement, tracing, and inference follow
-automatically.
+automatically. Two GW6 additions on top of the grant set: a **net grant may be host-scoped**
+(`net.write@api.example.com` — enforced at the effect boundary where the URL is known; the bare
+grant still means any host), and an `http` header value may carry a **`{{secret:NAME}}`
+placeholder** substituted from operator-supplied `--secret NAME=VALUE` values only inside the live
+effect — the trace records the placeholder, never the credential, so replay needs no secrets
+(spec/agent-loop.md §Scope has the doctrine).
 
 **Record / replay (principle 5).** Every trace entry records its `result` (what the builtin
 returned), so a run is **replayable**: `nl-validator eval … --replay <trace>` makes the effectful
