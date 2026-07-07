@@ -44,8 +44,16 @@ class ToValueAstTests(unittest.TestCase):
         self.assertEqual(to_value_ast({"x": 1}),
                          {"kind": "record", "fields": [{"name": "x", "value": {"kind": "int", "value": 1}}]})
 
+    def test_non_identifier_key_dict_is_a_map(self):
+        # A dict whose keys aren't identifier-shaped encodes as a `map` value (the 2026-07-04
+        # dict-as-map rule) — a hyphenated key is a valid map key, not unrepresentable.
+        self.assertEqual(to_value_ast({"Bad-Key": 1}),
+                         {"kind": "map", "entries": [{"key": "Bad-Key", "value": {"kind": "int", "value": 1}}]})
+
     def test_unrepresentable_raise(self):
-        for bad in ({1, 2}, {"Bad-Key": 1}, {3: 4}, object(), float("inf")):
+        # A set, an int-keyed dict (not string keys), an arbitrary object, and a non-finite float
+        # are all genuinely unrepresentable.
+        for bad in ({1, 2}, {3: 4}, object(), float("inf")):
             with self.assertRaises(ValueEncodeError):
                 to_value_ast(bad)
 
