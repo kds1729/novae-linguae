@@ -108,8 +108,8 @@ of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **param
 comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
-parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,160 generated
-function records (3,401 examples total with the curated set)** across forty-six template families
+parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,168 generated
+function records (3,409 examples total with the curated set)** across forty-seven template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
 teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — #39, **strings as data**
 (`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
@@ -137,7 +137,13 @@ mass; the string-scrutinee/literal-pattern `case` no other family emitted (every
 bool, an int, or a variant), taught near-bare (two-word selects, single-command predicates), composed
 (head-token routing over `str_split`, apply-the-named-operation over int, its `Maybe` twin), and as
 token idioms (`first_int`, `tok_count`); the curated golds (`toggle_on`/`signal_step`/`cmd_of`/
-`arg_of`/`run_command`) leakage-drop at export), every one through the same validate →
+`arg_of`/`run_command`) leakage-drop at export) — and #47, **HTTP response shapes**: the GW6
+mutating-call pull's pure surrounding idioms; the general `http` builtin returns a
+`{status, body}` RECORD, so the caller must project `.status`/`.body` (the `field` body node no
+other combinatorial family emitted) and classify the code (`resp_ok` 2xx / `resp_created` 201 /
+`resp_missing` 404 / `resp_client_error` 4xx) and build the request's auth-header map — the
+effectful call itself stays a spec/examples record (it can't run in the gate without a live
+server), like the GW4/GW5 effectful legs, every one through the same validate →
 typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,

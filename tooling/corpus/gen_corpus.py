@@ -200,6 +200,25 @@ class FnRef:
         self.name = name
 
 
+class Rec:
+    """A record value for worked examples: `Rec(status=201, body="ok")`. Encodes to a `record` value
+    AST with fields sorted by name (the canonical form)."""
+
+    def __init__(self, **fields):
+        self.fields = fields
+
+
+def rec_t(**fields):
+    """A record TYPE: `rec_t(status=INT, body=STRING)`."""
+    return {"kind": "record",
+            "fields": [{"name": k, "type": v} for k, v in sorted(fields.items())]}
+
+
+def bfield(record_expr, name):
+    """A field-projection BODY expression: `record_expr.name`."""
+    return {"kind": "field", "record": record_expr, "name": name}
+
+
 def to_value_ast(pyval):
     if isinstance(pyval, bool):
         return {"kind": "bool", "value": pyval}
@@ -220,6 +239,9 @@ def to_value_ast(pyval):
         if pyval.payload is not _NO_PAYLOAD:
             out["payload"] = to_value_ast(pyval.payload)
         return out
+    if isinstance(pyval, Rec):
+        return {"kind": "record", "fields": [{"name": k, "value": to_value_ast(v)}
+                                             for k, v in sorted(pyval.fields.items())]}
     raise ValueError(f"unsupported example value {pyval!r}")
 
 
@@ -3661,6 +3683,59 @@ def combinatorial_specs(exclude_names=()):
                [{"args": ["double 21"], "result": 2}, {"args": ["ping"], "result": 1},
                 {"args": ["a b c"], "result": 3}, {"args": [""], "result": 1}],
                terminates="always"))
+
+    # 47. HTTP RESPONSE SHAPES — GW6 (the authed mutating call) pulled the general `http` builtin,
+    # whose result is a `{status: int, body: string}` RECORD. The effectful call itself can't run
+    # in the verify gate (no live server), so — like the GW4/GW5 effectful legs — it stays a
+    # spec/examples record, NOT a combinatorial family. But the PURE surrounding idioms a caller
+    # needs are new to the corpus and teachable: projecting `.status` / `.body` off the response
+    # record (the `field` body node no combinatorial family emitted), status-code classification,
+    # and building the request header map. Response values are supplied as literal records.
+    _RESP = rec_t(status=INT, body=STRING)
+    _RESP_IN = [Rec(status=200, body="ok"), Rec(status=201, body="made"),
+                Rec(status=404, body="gone"), Rec(status=500, body="boom")]
+    add(_cspec("resp_status", "The status code of an HTTP response.",
+               "r.status", ["http", "record", "field"], fn([_RESP], INT),
+               lam(["r"], bfield(var("r"), "status")),
+               [{"args": [r], "result": r.fields["status"]} for r in _RESP_IN], terminates="always"))
+    add(_cspec("resp_body", "The body of an HTTP response.",
+               "r.body", ["http", "record", "field"], fn([_RESP], STRING),
+               lam(["r"], bfield(var("r"), "body")),
+               [{"args": [r], "result": r.fields["body"]} for r in _RESP_IN], terminates="always"))
+    add(_cspec("resp_ok", "Whether an HTTP response has a 2xx success status.",
+               "and (ge r.status 200) (lt r.status 300)", ["http", "record", "predicate"],
+               fn([_RESP], BOOL),
+               lam(["r"], bapp("and", bapp("ge", bfield(var("r"), "status"), int_lit(200)),
+                               bapp("lt", bfield(var("r"), "status"), int_lit(300)))),
+               [{"args": [r], "result": 200 <= r.fields["status"] < 300} for r in _RESP_IN],
+               terminates="always"))
+    add(_cspec("resp_created", "Whether an HTTP response reports a resource was created (201).",
+               "eq r.status 201", ["http", "record", "predicate"], fn([_RESP], BOOL),
+               lam(["r"], bapp("eq", bfield(var("r"), "status"), int_lit(201))),
+               [{"args": [r], "result": r.fields["status"] == 201} for r in _RESP_IN],
+               terminates="always"))
+    add(_cspec("resp_missing", "Whether an HTTP response reports the resource is absent (404).",
+               "eq r.status 404", ["http", "record", "predicate"], fn([_RESP], BOOL),
+               lam(["r"], bapp("eq", bfield(var("r"), "status"), int_lit(404))),
+               [{"args": [r], "result": r.fields["status"] == 404} for r in _RESP_IN],
+               terminates="always"))
+    add(_cspec("resp_client_error", "Whether an HTTP response is a 4xx client error.",
+               "and (ge r.status 400) (lt r.status 500)", ["http", "record", "predicate"],
+               fn([_RESP], BOOL),
+               lam(["r"], bapp("and", bapp("ge", bfield(var("r"), "status"), int_lit(400)),
+                               bapp("lt", bfield(var("r"), "status"), int_lit(500)))),
+               [{"args": [r], "result": 400 <= r.fields["status"] < 500} for r in _RESP_IN],
+               terminates="always"))
+    # The auth-header map a request carries (a pure map construction — the effectful call that
+    # consumes it stays in spec/examples).
+    for scheme in ("Bearer", "Token"):
+        add(_cspec(f"auth_header_{scheme.lower()}", f'Build an "{scheme}" Authorization header map from a credential.',
+                   f'map_put "Authorization" (str_concat "{scheme} " tok) map_empty',
+                   ["http", "map", "auth"], fn([STRING], map_of(STRING)),
+                   lam(["tok"], bapp("map_put", str_lit("Authorization"),
+                                     bapp("str_concat", str_lit(f"{scheme} "), var("tok")), var("map_empty"))),
+                   [{"args": ["abc"], "result": {"Authorization": f"{scheme} abc"}},
+                    {"args": [""], "result": {"Authorization": f"{scheme} "}}], terminates="always"))
 
     return out
 
