@@ -319,6 +319,34 @@ it already grants exactly the record's declared effects (its examples are its ow
 `--secret`. Wire-format details deliberately unpulled: response headers, redirects,
 query-parameter encoding, multipart bodies — no workflow has needed them.
 
+**GW7 — records from an API description (2026-07-07): ingestion at the description layer.** With
+the general `http` core in place, a **machine-readable API description is an ingestion source**:
+each operation (a path × method) has a well-defined surface — base URL, verb, path parameters,
+request body, auth scheme, documented statuses — which is exactly the semantic content of a
+client function, so it compiles to a record over `http` with no hand-authoring. The new adapter
+[`tooling/nl-ingest-openapi`](../tooling/nl-ingest-openapi/) reads an OpenAPI 3 description (the
+neutral exemplar) and emits one **verified** record per operation: `operationId → name_hints`,
+verb → the method literal and the effect, `servers[0].url → base` parameter, the path template →
+a `str_concat` URL builder, path params → string parameters, `requestBody` → a `body` parameter,
+Bearer `security` → an `{{secret:NAME}}` auth header, documented `responses` → the status the
+worked example asserts. Each record returns the response `.status` (the deterministic part;
+body projection waits for observed-claims). Every one is gated through `certify`, and with
+`--verify-against <base-url>` its examples are **run** against a live service (the "gate =
+examples vs an emulator" step) — verified-by-default exactly like a hand-authored record. The
+exit gate runs against the in-repo reference fake service, whose description is
+[`examples/item-store.openapi.json`](../tooling/nl-ingest-openapi/examples/item-store.openapi.json).
+**The faithfulness result:** the generated `getItemStatus` and `deleteItem` bodies are
+**byte-identical** (same `expr_` address) to the hand-authored GW6 `item_status` / `delete_item`
+records — the description contains their full semantic content, so machine generation reproduces
+what a human wrote. The net-new `health_check` (an unauthenticated liveness probe, the no-auth /
+no-params / no-body case) certifies, is published to Arca, and closes the remote loop:
+`orchestrate --node … --intent io/network/http --verify --require-certified --publish --grant
+net.read@127.0.0.1` discovered it among five candidates, disambiguated **by signature** (the only
+arity-1 one), applied it live → status 200, published the assert; a grantless `verify-claim`
+reported it undecidable (testimony) and a granted one re-ran it live and CONFIRMED. Wire-format
+depth (response headers, `$ref` schema resolution, query/multipart encoding, non-Bearer auth)
+stays unpulled — the description-to-record path, not full OpenAPI coverage, is the pull.
+
 **GW3 — dispatch on message content (2026-07-07): the zero-pull workflow.** The last of the
 three original golden workflows — *split a command string, compare its head against known
 commands, apply the matching function* — pulled **no new builtins at all**: `str_split` (phase

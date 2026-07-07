@@ -1,0 +1,52 @@
+{
+  "schema_version": "0.2.0",
+  "hash": "fn_a9503ef062c49a8318d95b0210d878a9e49ad2197fc15c7a53519082d012f043",
+  "name_hints": [
+    "healthcheck",
+    "health_check"
+  ],
+  "signature": {
+    "type": {
+      "kind": "fn",
+      "params": [
+        {
+          "kind": "builtin",
+          "name": "string"
+        }
+      ],
+      "result": {
+        "kind": "builtin",
+        "name": "int"
+      }
+    },
+    "refinements": [],
+    "effects": [
+      "net.read"
+    ],
+    "capabilities": [],
+    "terminates": "always",
+    "complexity": "O(n)"
+  },
+  "examples": [
+    {
+      "args": [
+        {
+          "kind": "string",
+          "value": "http://127.0.0.1:8878"
+        }
+      ],
+      "result": {
+        "kind": "int",
+        "value": 200
+      }
+    }
+  ],
+  "intent_tags": [
+    "io",
+    "io/network/http",
+    "query/lookup"
+  ],
+  "derived_from": null,
+  "supersedes": null,
+  "body_hash": "expr_5d6811bef1244a2eccde2c85b8f62a69eeb8eb4d3c3715daa97af9f58661782d"
+}

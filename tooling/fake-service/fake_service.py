@@ -57,6 +57,11 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(200 if existed else 201, body)
 
     def do_GET(self):
+        # /health is an UNAUTHENTICATED liveness probe (no Bearer token, no params) — the
+        # smallest operation, and the one an API-description generator emits with no auth header.
+        if self.path == "/health":
+            self._reply(200, b'{"status":"ok"}')
+            return
         if not self._authed():
             return
         name = self._name()

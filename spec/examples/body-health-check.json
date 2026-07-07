@@ -1,0 +1,79 @@
+{
+  "kind": "lambda",
+  "params": [
+    {
+      "name": "base"
+    }
+  ],
+  "body": {
+    "kind": "field",
+    "record": {
+      "kind": "app",
+      "fn": {
+        "kind": "app",
+        "fn": {
+          "kind": "app",
+          "fn": {
+            "kind": "app",
+            "fn": {
+              "kind": "var",
+              "name": "http"
+            },
+            "args": [
+              {
+                "kind": "lit",
+                "value": {
+                  "kind": "string",
+                  "value": "GET"
+                }
+              }
+            ]
+          },
+          "args": [
+            {
+              "kind": "app",
+              "fn": {
+                "kind": "app",
+                "fn": {
+                  "kind": "var",
+                  "name": "str_concat"
+                },
+                "args": [
+                  {
+                    "kind": "var",
+                    "name": "base"
+                  }
+                ]
+              },
+              "args": [
+                {
+                  "kind": "lit",
+                  "value": {
+                    "kind": "string",
+                    "value": "/health"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "args": [
+          {
+            "kind": "var",
+            "name": "map_empty"
+          }
+        ]
+      },
+      "args": [
+        {
+          "kind": "lit",
+          "value": {
+            "kind": "string",
+            "value": ""
+          }
+        }
+      ]
+    },
+    "name": "status"
+  }
+}
