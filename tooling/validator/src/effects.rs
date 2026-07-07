@@ -52,6 +52,11 @@ fn walk(node: &J, records: &HashMap<String, J>, bound: &[String], inf: &mut Effe
                 if let Some(e) = builtin_effect(name) {
                     inf.effects.insert(e.to_string());
                 }
+                // A bare reference to the general `http` builtin (passed as a value, method
+                // unknown): either side of the read/write split may be performed.
+                if name == "http" {
+                    inf.effects.insert("net.read".to_string());
+                }
             }
         }
         "lit" => {
@@ -84,6 +89,33 @@ fn walk(node: &J, records: &HashMap<String, J>, bound: &[String], inf: &mut Effe
                     let n = f.get("name").and_then(|n| n.as_str()).unwrap_or_default();
                     if !is_builtin(n) && n != "self" && !bound.iter().any(|b| b == n) {
                         inf.opaque = true;
+                    }
+                    // The general `http` builtin's effect depends on its METHOD: a literal method
+                    // refines the inference to the side actually performed (net.read for GET/HEAD,
+                    // net.write otherwise); a non-literal method is conservatively both.
+                    if n == "http" {
+                        let method = node
+                            .pointer("/args/0/value/kind")
+                            .and_then(|k| k.as_str())
+                            .filter(|k| *k == "string")
+                            .and_then(|_| node.pointer("/args/0/value/value"))
+                            .and_then(|m| m.as_str());
+                        match method {
+                            Some(m) if m.eq_ignore_ascii_case("GET") || m.eq_ignore_ascii_case("HEAD") => {
+                                inf.effects.insert("net.read".to_string());
+                            }
+                            Some(_) => {
+                                inf.effects.insert("net.write".to_string());
+                            }
+                            None => {
+                                inf.effects.insert("net.read".to_string());
+                                inf.effects.insert("net.write".to_string());
+                            }
+                        }
+                        for a in node.get("args").and_then(|a| a.as_array()).into_iter().flatten() {
+                            walk(a, records, bound, inf);
+                        }
+                        return;
                     }
                 }
                 walk(f, records, bound, inf);
@@ -220,6 +252,32 @@ mod tests {
                       "args": [{ "kind": "app", "fn": { "kind": "var", "name": "tail" }, "args": [{ "kind": "var", "name": "xs" }] }] } });
         let inf = infer_effects(&body, &no_records());
         assert!(!inf.opaque && inf.effects.is_empty(), "a pure recursive body is SOUND, not UNVERIFIABLE");
+    }
+
+    #[test]
+    fn http_method_literal_refines_the_effect() {
+        let call = |method: serde_json::Value| {
+            json!({ "kind": "lambda", "params": [{ "name": "u" }, { "name": "h" }, { "name": "b" }],
+                "body": { "kind": "app", "fn": { "kind": "var", "name": "http" },
+                          "args": [method, { "kind": "var", "name": "u" },
+                                   { "kind": "var", "name": "h" }, { "kind": "var", "name": "b" }] } })
+        };
+        let lit = |m: &str| json!({ "kind": "lit", "value": { "kind": "string", "value": m } });
+        let effects = |body: &serde_json::Value| infer_effects(body, &no_records()).effects;
+
+        // A literal GET/HEAD is read-only; a literal mutating verb is write-only.
+        assert_eq!(effects(&call(lit("GET"))).into_iter().collect::<Vec<_>>(), vec!["net.read"]);
+        assert_eq!(effects(&call(lit("head"))).into_iter().collect::<Vec<_>>(), vec!["net.read"]);
+        assert_eq!(effects(&call(lit("DELETE"))).into_iter().collect::<Vec<_>>(), vec!["net.write"]);
+
+        // A variable method is conservatively both — and so is a bare `http` reference.
+        let dynamic = json!({ "kind": "lambda", "params": [{ "name": "m" }, { "name": "u" }, { "name": "h" }, { "name": "b" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "http" },
+                      "args": [{ "kind": "var", "name": "m" }, { "kind": "var", "name": "u" },
+                               { "kind": "var", "name": "h" }, { "kind": "var", "name": "b" }] } });
+        assert_eq!(effects(&dynamic).into_iter().collect::<Vec<_>>(), vec!["net.read", "net.write"]);
+        let bare = json!({ "kind": "var", "name": "http" });
+        assert_eq!(effects(&bare).into_iter().collect::<Vec<_>>(), vec!["net.read", "net.write"]);
     }
 
     #[test]

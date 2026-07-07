@@ -63,6 +63,10 @@ struct EffectState {
     /// of performing real I/O, so a run reproduces deterministically (principle 5). `None` = live.
     replay: Option<std::collections::VecDeque<J>>,
     rng: u64,
+    /// Operator-supplied named secrets. A `{{secret:NAME}}` placeholder in an `http` header value is
+    /// substituted from here at the effect boundary — the secret value never exists as a language
+    /// value, never enters a record, and never enters the trace (the trace keeps the placeholder).
+    secrets: std::collections::HashMap<String, String>,
 }
 
 impl EffectState {
@@ -72,6 +76,7 @@ impl EffectState {
             trace: Vec::new(),
             replay: None,
             rng: 0x1234_5678_9abc_def0,
+            secrets: std::collections::HashMap::new(),
         }
     }
 }
@@ -101,6 +106,43 @@ pub fn set_effect_replay(entries: Vec<J>) {
     EFFECTS.with(|e| e.borrow_mut().replay = Some(entries.into_iter().collect()));
 }
 
+/// Install the operator's named secrets (`--secret NAME=VALUE`). Credentials are effect-boundary
+/// configuration, not data: an `http` header value may carry a `{{secret:NAME}}` placeholder, and
+/// the substitution happens only inside the live effect — symbolic form in the trace, real value on
+/// the wire.
+pub fn set_effect_secrets<I: IntoIterator<Item = (String, String)>>(secrets: I) {
+    EFFECTS.with(|e| e.borrow_mut().secrets = secrets.into_iter().collect());
+}
+
+/// Substitute every `{{secret:NAME}}` placeholder in `value` from the installed secrets. A
+/// placeholder naming a secret the operator did not supply is an error (the honest refusal —
+/// sending the placeholder text as a credential would be a silent auth failure).
+fn substitute_secrets(value: &str) -> Result<String> {
+    if !value.contains("{{secret:") {
+        return Ok(value.to_string());
+    }
+    EFFECTS.with(|e| {
+        let e = e.borrow();
+        let mut out = String::new();
+        let mut rest = value;
+        while let Some(start) = rest.find("{{secret:") {
+            out.push_str(&rest[..start]);
+            let after = &rest[start + "{{secret:".len()..];
+            let Some(end) = after.find("}}") else {
+                bail!("unterminated {{{{secret:...}}}} placeholder in header value");
+            };
+            let name = &after[..end];
+            match e.secrets.get(name) {
+                Some(v) => out.push_str(v),
+                None => bail!("secret `{name}` is not supplied (pass --secret {name}=...)"),
+            }
+            rest = &after[end + 2..];
+        }
+        out.push_str(rest);
+        Ok(out)
+    })
+}
+
 /// Reset the effect sandbox (empty grant, empty trace, live mode).
 pub fn clear_effects() {
     EFFECTS.with(|e| *e.borrow_mut() = EffectState::new());
@@ -118,6 +160,13 @@ pub fn take_effect_trace() -> Vec<J> {
 /// The sandbox borrow is released before `live` runs, so `live` may itself touch the sandbox (e.g.
 /// the rand PRNG).
 fn effect_op(effect: &str, detail: J, live: impl FnOnce() -> Result<Val>) -> Result<Val> {
+    effect_op_at(effect, None, detail, live)
+}
+
+/// `effect_op` with an optional SCOPE (today: the URL host of a net effect). A scoped effect is
+/// permitted by the bare grant (`net.write` — any host) or by a matching host-scoped grant
+/// (`net.write@api.example.com`); a host-scoped grant alone does NOT satisfy a different host.
+fn effect_op_at(effect: &str, scope: Option<&str>, detail: J, live: impl FnOnce() -> Result<Val>) -> Result<Val> {
     enum Mode {
         Replay(J),
         ReplayExhausted,
@@ -128,8 +177,13 @@ fn effect_op(effect: &str, detail: J, live: impl FnOnce() -> Result<Val>) -> Res
         if let Some(q) = e.replay.as_mut() {
             return Ok(q.pop_front().map_or(Mode::ReplayExhausted, Mode::Replay));
         }
-        if !e.granted.contains(effect) {
-            bail!("ungranted effect `{effect}`: the body performed it, but it is not in the granted capability set (declare it in signature.effects or pass --grant {effect})");
+        let allowed = e.granted.contains(effect)
+            || scope.is_some_and(|s| e.granted.contains(&format!("{effect}@{s}")));
+        if !allowed {
+            match scope {
+                Some(s) => bail!("ungranted effect `{effect}` on host `{s}`: the body performed it, but neither `{effect}` nor `{effect}@{s}` is in the granted capability set (pass --grant {effect} or --grant {effect}@{s})"),
+                None => bail!("ungranted effect `{effect}`: the body performed it, but it is not in the granted capability set (declare it in signature.effects or pass --grant {effect})"),
+            }
         }
         Ok(Mode::Live)
     })?;
@@ -370,10 +424,29 @@ fn as_str_list(v: &Val) -> Result<Vec<String>> {
     }
 }
 
-/// A minimal, dependency-free HTTP/1.1 request over a raw TCP socket — `http://` only (no TLS).
-/// Returns the response body (after the header block). Backs `http_get` (net.read) / `http_post`
-/// (net.write); the gating + record/replay live in `effect_op`.
-pub(crate) fn http_request(method: &str, url: &str, body: Option<&str>) -> Result<String> {
+/// The host component of an `http://` / `https://` URL — the scope a host-scoped net grant
+/// (`net.write@host`) is checked against.
+pub(crate) fn url_host(url: &str) -> Result<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .ok_or_else(|| anyhow!("only http:// and https:// URLs are supported: {url}"))?;
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let host = authority.rsplit_once(':').map_or(authority, |(h, _)| h);
+    Ok(host.to_string())
+}
+
+/// A minimal, dependency-free HTTP/1.1 request over a raw TCP socket — `https://` via
+/// rustls, `http://` plaintext. Returns `(status, body)`; `extra_headers` are emitted after the
+/// standard ones. Backs `http_get`/`http_post` (which drop the status, their historical shape)
+/// and the general `http` builtin (which surfaces it as `{status, body}` — the piece a mutating
+/// workflow verifies against). The gating + record/replay live in `effect_op`.
+pub(crate) fn http_roundtrip(
+    method: &str,
+    url: &str,
+    extra_headers: &[(String, String)],
+    body: Option<&str>,
+) -> Result<(i128, String)> {
     use std::net::TcpStream;
     use std::time::Duration;
 
@@ -398,8 +471,15 @@ pub(crate) fn http_request(method: &str, url: &str, body: Option<&str>) -> Resul
     let _ = tcp.set_read_timeout(Some(Duration::from_secs(15)));
     let _ = tcp.set_write_timeout(Some(Duration::from_secs(15)));
     let payload = body.unwrap_or("");
+    let mut extras = String::new();
+    for (name, value) in extra_headers {
+        if name.contains(['\r', '\n', ':']) || value.contains(['\r', '\n']) {
+            bail!("invalid header {name:?} (control characters / colon in name are not allowed)");
+        }
+        extras.push_str(&format!("{name}: {value}\r\n"));
+    }
     let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: nl-validator\r\nAccept: */*\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{payload}",
+        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: nl-validator\r\nAccept: */*\r\nConnection: close\r\n{extras}Content-Length: {}\r\n\r\n{payload}",
         payload.len()
     );
 
@@ -408,7 +488,12 @@ pub(crate) fn http_request(method: &str, url: &str, body: Option<&str>) -> Resul
     } else {
         plain_roundtrip(tcp, req.as_bytes())?
     };
-    decode_http_response(&raw)
+    decode_http_response_full(&raw)
+}
+
+/// The historical body-only client behind `http_get`/`http_post`.
+pub(crate) fn http_request(method: &str, url: &str, body: Option<&str>) -> Result<String> {
+    http_roundtrip(method, url, &[], body).map(|(_, b)| b)
 }
 
 /// Read a stream to EOF, tolerating an unclean close (a server that drops the connection without a
@@ -446,13 +531,19 @@ fn tls_roundtrip(host: &str, tcp: std::net::TcpStream, req: &[u8]) -> Result<Vec
     read_to_close(stream)
 }
 
-/// Split an HTTP/1.1 response into its body, de-chunking a `Transfer-Encoding: chunked` payload so the
-/// caller never sees chunk-size markers. Returns the body as a (lossy) UTF-8 string.
-fn decode_http_response(raw: &[u8]) -> Result<String> {
+/// Split an HTTP/1.1 response into its status code and body, de-chunking a `Transfer-Encoding:
+/// chunked` payload so the caller never sees chunk-size markers. Body as a (lossy) UTF-8 string.
+fn decode_http_response_full(raw: &[u8]) -> Result<(i128, String)> {
+    let status = {
+        let line_end = raw.windows(2).position(|w| w == b"\r\n").unwrap_or(raw.len());
+        let line = String::from_utf8_lossy(&raw[..line_end]);
+        // "HTTP/1.1 200 OK" — the second token is the status code; 0 if unparseable.
+        line.split_whitespace().nth(1).and_then(|s| s.parse::<i128>().ok()).unwrap_or(0)
+    };
     let idx = raw.windows(4).position(|w| w == b"\r\n\r\n");
     let (headers, mut body): (&[u8], &[u8]) = match idx {
         Some(i) => (&raw[..i], &raw[i + 4..]),
-        None => return Ok(String::from_utf8_lossy(raw).into_owned()),
+        None => return Ok((status, String::from_utf8_lossy(raw).into_owned())),
     };
     let chunked = String::from_utf8_lossy(headers).lines().any(|l| {
         let l = l.to_ascii_lowercase();
@@ -460,13 +551,13 @@ fn decode_http_response(raw: &[u8]) -> Result<String> {
     });
     if chunked {
         let decoded = dechunk(body)?;
-        return Ok(String::from_utf8_lossy(&decoded).into_owned());
+        return Ok((status, String::from_utf8_lossy(&decoded).into_owned()));
     }
     // A defensive nicety: some servers still emit a stray trailing CRLF.
     if body.ends_with(b"\r\n") {
         body = &body[..body.len() - 2];
     }
-    Ok(String::from_utf8_lossy(body).into_owned())
+    Ok((status, String::from_utf8_lossy(body).into_owned()))
 }
 
 /// Decode an HTTP/1.1 chunked transfer body: a sequence of `<hex-size>[;ext]CRLF<data>CRLF`, ending at a
@@ -621,6 +712,7 @@ fn builtin_arity(name: &str) -> Option<usize> {
         | "map_get" | "map_del"
         | "apply" | "write_file" | "http_post" | "spawn" | "replicate" => 2,
         "foldl" | "foldr" | "compose" | "map_put" => 3,
+        "http" => 4,
         _ => return None,
     })
 }
@@ -636,6 +728,10 @@ pub fn builtin_effect(name: &str) -> Option<&'static str> {
         "write_file" => Some("fs.write"),
         "http_get" => Some("net.read"),
         "http_post" => Some("net.write"),
+        // The general request's effect depends on its METHOD argument at runtime (net.read for
+        // GET/HEAD, net.write otherwise); net.write is the conservative static answer here, and the
+        // effects walker refines it when the method is a literal (see effects.rs).
+        "http" => Some("net.write"),
         "spawn" => Some("process.spawn"),
         "replicate" => Some("alloc"),
         _ => None,
@@ -1113,6 +1209,42 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             let body = as_str(&a[1])?;
             effect_op("net.write", json!({ "url": url.as_str() }), move || {
                 http_request("POST", &url, Some(&body)).map(Val::Str)
+            })?
+        }
+        "http" => {
+            // The general request (GW6): http(method, url, headers, body) -> {status, body}.
+            // net.read for GET/HEAD, net.write for every other method — decided by the METHOD, so a
+            // mutating call is gated by the mutating grant even through this one builtin. The grant
+            // check is HOST-scoped (net.write@host). Header values may carry {{secret:NAME}}
+            // placeholders, substituted from the operator's secrets only inside the live effect —
+            // the trace detail records the SYMBOLIC headers, so a credential never enters the trace
+            // (and replay needs no secrets at all: the response is replayed from the record).
+            let method = as_str(&a[0])?.to_ascii_uppercase();
+            let url = as_str(&a[1])?;
+            let headers = as_map(&a[2])?;
+            let body = as_str(&a[3])?;
+            let effect = if method == "GET" || method == "HEAD" { "net.read" } else { "net.write" };
+            let host = url_host(&url)?;
+            let mut symbolic: Vec<(String, String)> = Vec::new();
+            for (k, v) in &headers {
+                symbolic.push((k.clone(), as_str(v)?));
+            }
+            let detail = json!({
+                "method": method,
+                "url": url.as_str(),
+                "headers": symbolic.iter().map(|(k, v)| json!({ "name": k, "value": v })).collect::<Vec<_>>(),
+                "body": body.as_str(),
+            });
+            effect_op_at(effect, Some(&host), detail, move || {
+                let mut real = Vec::with_capacity(symbolic.len());
+                for (k, v) in &symbolic {
+                    real.push((k.clone(), substitute_secrets(v)?));
+                }
+                let (status, resp_body) = http_roundtrip(&method, &url, &real, Some(&body))?;
+                let mut rec = BTreeMap::new();
+                rec.insert("status".to_string(), Val::Int(status));
+                rec.insert("body".to_string(), Val::Str(resp_body));
+                Ok(Val::Record(rec))
             })?
         }
         "spawn" => {
@@ -1965,22 +2097,127 @@ mod tests {
 
     #[test]
     fn http_response_decoding_dechunks() {
-        // A plain (non-chunked) response: body returned verbatim past the header separator.
+        // A plain (non-chunked) response: status parsed off the status line, body returned
+        // verbatim past the header separator.
         let plain = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello";
-        assert_eq!(super::decode_http_response(plain).unwrap(), "hello");
+        assert_eq!(super::decode_http_response_full(plain).unwrap(), (200, "hello".to_string()));
 
         // A chunked response: "Wiki" + "pedia" + " in chunks." across three chunks, then a 0-chunk.
         let chunked = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n\
                         4\r\nWiki\r\n5\r\npedia\r\nE\r\n in\r\n\r\nchunks.\r\n0\r\n\r\n";
-        assert_eq!(super::decode_http_response(chunked).unwrap(), "Wikipedia in\r\n\r\nchunks.");
+        assert_eq!(super::decode_http_response_full(chunked).unwrap(), (200, "Wikipedia in\r\n\r\nchunks.".to_string()));
 
         // Chunk-size extensions (after ';') are ignored; the size still governs.
         let ext = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3;foo=bar\r\nabc\r\n0\r\n\r\n";
-        assert_eq!(super::decode_http_response(ext).unwrap(), "abc");
+        assert_eq!(super::decode_http_response_full(ext).unwrap(), (200, "abc".to_string()));
 
         // Header match is case-insensitive (HTTP header names/values are not case-sensitive here).
         let mixed = b"HTTP/1.1 200 OK\r\ntransfer-encoding: Chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n";
-        assert_eq!(super::decode_http_response(mixed).unwrap(), "hi");
+        assert_eq!(super::decode_http_response_full(mixed).unwrap(), (200, "hi".to_string()));
+
+        // Non-200 statuses come through — the piece a mutating workflow verifies against.
+        let created = b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
+        assert_eq!(super::decode_http_response_full(created).unwrap(), (201, String::new()));
+        let missing = b"HTTP/1.1 404 Not Found\r\n\r\ngone";
+        assert_eq!(super::decode_http_response_full(missing).unwrap(), (404, "gone".to_string()));
+    }
+
+    #[test]
+    fn general_http_builtin_gates_by_method_and_host_and_replays() {
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+        // \m u h b -> http m u h b
+        let http_body = json!({ "kind": "lambda",
+            "params": [{ "name": "m" }, { "name": "u" }, { "name": "h" }, { "name": "b" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "http" },
+                      "args": [{ "kind": "var", "name": "m" }, { "kind": "var", "name": "u" },
+                               { "kind": "var", "name": "h" }, { "kind": "var", "name": "b" }] } });
+        let no_headers = json!({ "kind": "map", "entries": [] });
+
+        // A mutating method under a net.read-only grant is rejected BEFORE any I/O — the method,
+        // not the builtin name, decides the effect.
+        set_effect_grants(vec!["net.read".to_string()]);
+        let err = eval_body(&http_body, &[s("DELETE"), s("http://h.example/x"), no_headers.clone(), s("")])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("net.write"), "method decides the effect: {err}");
+        clear_effects();
+
+        // A host-scoped grant permits its host's effect check but not another host's. (Both die at
+        // connect time for the granted host — the gate is what's under test, so assert the failure
+        // is NOT the gate for the matching host and IS the gate for the other.)
+        set_effect_grants(vec!["net.write@h.example".to_string()]);
+        let gate_err = eval_body(&http_body, &[s("PUT"), s("http://other.example/x"), no_headers.clone(), s("")])
+            .unwrap_err()
+            .to_string();
+        assert!(gate_err.contains("ungranted effect"), "other host must be gated: {gate_err}");
+        assert!(gate_err.contains("other.example"), "gate names the offending host: {gate_err}");
+        clear_effects();
+
+        // Replay: the recorded response reproduces without any network or grants; the recorded
+        // result is the {status, body} record.
+        let resp = json!({ "kind": "record", "fields": [
+            { "name": "body", "value": { "kind": "string", "value": "made" } },
+            { "name": "status", "value": { "kind": "int", "value": 201 } }] });
+        set_effect_replay(vec![json!({ "effect": "net.write", "detail": {}, "result": resp })]);
+        let out = eval_body(&http_body, &[s("PUT"), s("http://h.example/x"), no_headers, s("{}")]).unwrap();
+        assert_eq!(out, resp);
+        clear_effects();
+    }
+
+    #[test]
+    fn http_secret_placeholders_substitute_at_the_boundary_only() {
+        // Substitution succeeds only for supplied secrets, and composes around literal text.
+        super::set_effect_secrets(vec![("tok".to_string(), "s3cr3t".to_string())]);
+        assert_eq!(super::substitute_secrets("Bearer {{secret:tok}}").unwrap(), "Bearer s3cr3t");
+        assert_eq!(super::substitute_secrets("no placeholders").unwrap(), "no placeholders");
+        let missing = super::substitute_secrets("{{secret:absent}}").unwrap_err().to_string();
+        assert!(missing.contains("absent"), "{missing}");
+        clear_effects();
+
+        // The trace records the SYMBOLIC header value — a live `http` call's detail is built from
+        // the pre-substitution headers, so the secret value never enters the trace. Exercised
+        // against a real local listener that answers 204 with no body.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let mut req = Vec::new();
+            loop {
+                let n = std::io::Read::read(&mut conn, &mut buf).unwrap();
+                req.extend_from_slice(&buf[..n]);
+                if req.windows(4).any(|w| w == b"\r\n\r\n") || n == 0 {
+                    break;
+                }
+            }
+            std::io::Write::write_all(&mut conn, b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n").unwrap();
+            String::from_utf8_lossy(&req).into_owned()
+        });
+
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+        let http_body = json!({ "kind": "lambda",
+            "params": [{ "name": "m" }, { "name": "u" }, { "name": "h" }, { "name": "b" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "http" },
+                      "args": [{ "kind": "var", "name": "m" }, { "kind": "var", "name": "u" },
+                               { "kind": "var", "name": "h" }, { "kind": "var", "name": "b" }] } });
+        let headers = json!({ "kind": "map", "entries": [
+            { "key": "Authorization", "value": { "kind": "string", "value": "Bearer {{secret:tok}}" } }] });
+        set_effect_grants(vec!["net.write".to_string()]);
+        super::set_effect_secrets(vec![("tok".to_string(), "s3cr3t".to_string())]);
+        let url = format!("http://127.0.0.1:{}/x", addr.port());
+        let out = eval_body(&http_body, &[s("POST"), s(&url), headers, s("payload")]).unwrap();
+        assert_eq!(out.pointer("/fields/1/value/value").and_then(|v| v.as_i64()), Some(204));
+
+        let trace = take_effect_trace();
+        clear_effects();
+        let trace_text = trace[0].to_string();
+        assert!(trace_text.contains("{{secret:tok}}"), "trace keeps the placeholder: {trace_text}");
+        assert!(!trace_text.contains("s3cr3t"), "the secret value must NOT enter the trace");
+
+        // The wire saw the real value (the substitution happened inside the live effect).
+        let wire = server.join().unwrap();
+        assert!(wire.contains("Authorization: Bearer s3cr3t"), "wire request: {wire}");
+        assert!(wire.contains("POST /x"), "wire request: {wire}");
     }
 
     #[test]

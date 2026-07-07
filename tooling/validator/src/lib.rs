@@ -73,8 +73,8 @@ pub use effects::{check_effects, infer_effects};
 pub mod interp;
 pub use interp::{
     clear_effects, clear_resolver, current_effect_grants, eval_body, run_examples, runtime_verdict,
-    self_fn_from_body, set_effect_grants, set_effect_replay, set_resolver, take_effect_trace,
-    ExampleRun,
+    self_fn_from_body, set_effect_grants, set_effect_replay, set_effect_secrets, set_resolver,
+    take_effect_trace, ExampleRun,
 };
 
 pub mod typecheck;

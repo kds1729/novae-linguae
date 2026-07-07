@@ -319,6 +319,17 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
         "write_file" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("unit"))),
         "http_get" => Ty::Fun(vec![con("string")], Box::new(con("string"))),
         "http_post" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("string"))),
+        // The general request (GW6): http(method, url, headers, body) -> {status, body}. The
+        // record result is what a mutating workflow verifies against (`.status`).
+        "http" => {
+            let mut resp = BTreeMap::new();
+            resp.insert("status".to_string(), con("int"));
+            resp.insert("body".to_string(), con("string"));
+            Ty::Fun(
+                vec![con("string"), con("string"), Ty::Con("Map".into(), vec![con("string"), con("string")]), con("string")],
+                Box::new(Ty::Rec(resp)),
+            )
+        }
         "spawn" => Ty::Fun(vec![con("string"), list(con("string"))], Box::new(con("string"))),
         // `replicate : forall a. int -> a -> List a` — the heap-allocating builtin (effect `alloc`).
         "replicate" => {

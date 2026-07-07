@@ -1,6 +1,6 @@
 //! `nl-validator`: reference CLI for validating Novae Linguae artifacts.
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -169,11 +169,17 @@ enum Commands {
         /// Argument value (a value-expression JSON file). Repeatable, positional order.
         #[arg(long = "arg")]
         args: Vec<PathBuf>,
-        /// Grant an effect the body may perform (e.g. `io.console`, `random`, `fs.read`, `fs.write`).
+        /// Grant an effect the body may perform (e.g. `io.console`, `random`, `fs.read`, `fs.write`,
+        /// `net.write@api.example.com` — a net grant may be HOST-scoped with `@host`).
         /// Repeatable. An effectful builtin whose effect is not granted is rejected at eval time;
         /// pure bodies need no grants. The performed effects are printed as a trace.
         #[arg(long = "grant")]
         grants: Vec<String>,
+        /// Supply a named secret (`NAME=VALUE`) for `{{secret:NAME}}` placeholders in `http` header
+        /// values. Substituted only at the effect boundary: the value never enters the trace (the
+        /// trace keeps the placeholder) and replay needs no secrets at all. Repeatable.
+        #[arg(long = "secret")]
+        secrets: Vec<String>,
         /// Replay a recorded effect trace (a JSON array from --trace-out): effectful builtins return
         /// their recorded results instead of performing real I/O — deterministic re-execution (P5).
         #[arg(long)]
@@ -204,6 +210,12 @@ enum Commands {
         /// Directory of records/bodies to link `body_hash` and `fn_ref`s against.
         #[arg(long)]
         records: Option<PathBuf>,
+        /// Supply a named secret (`NAME=VALUE`) for `{{secret:NAME}}` placeholders in `http`
+        /// header values, so an authenticated record's examples can run. (Effect GRANTS need no
+        /// flag here: `run` grants exactly the record's declared `signature.effects` — its
+        /// examples are its own tests, and an under-declaring record fails them.) Repeatable.
+        #[arg(long = "secret")]
+        secrets: Vec<String>,
     },
     /// Statically infer a function record's effects from its `body` and check them against the
     /// declared `signature.effects` — the verification counterpart to runtime enforcement (no
@@ -434,9 +446,14 @@ enum Commands {
         /// refused with a signed `reject` (`effect not granted: …`). Grants are measured against the
         /// target's *verified* effect declaration and enforced by the runtime sandbox at perform time.
         /// Granting `net.read` means this machine fetches URLs chosen by remote input — front with
-        /// egress controls if that matters (spec/agent-loop.md §Scope).
+        /// egress controls if that matters (spec/agent-loop.md §Scope). A net grant may be
+        /// HOST-scoped (`net.write@api.example.com`), enforced at the effect boundary.
         #[arg(long)]
         grant: Vec<String>,
+        /// Supply a named secret (`NAME=VALUE`) for `{{secret:NAME}}` placeholders in `http` header
+        /// values — effect-boundary configuration, never a language value, never in the trace.
+        #[arg(long = "secret")]
+        secret: Vec<String>,
     },
     /// Autonomous orchestration (spec/agent-loop.md): drive a full `query → propose → commit →
     /// assert → verify` conversation. The orchestrator discovers a commons function by `--intent`,
@@ -492,9 +509,14 @@ enum Commands {
         /// Grant an effect the responder half of this loop will perform (e.g. `net.read`). Repeatable.
         /// Default NONE (pure-only). The orchestrator's own verify step re-runs under the same grants.
         /// Granting `net.read` means this machine fetches URLs chosen by the discovered function's
-        /// arguments — see spec/agent-loop.md §Scope.
+        /// arguments — see spec/agent-loop.md §Scope. A net grant may be HOST-scoped
+        /// (`net.write@api.example.com`), enforced at the effect boundary.
         #[arg(long)]
         grant: Vec<String>,
+        /// Supply a named secret (`NAME=VALUE`) for `{{secret:NAME}}` placeholders in `http` header
+        /// values — effect-boundary configuration, never a language value, never in the trace.
+        #[arg(long = "secret")]
+        secret: Vec<String>,
     },
     /// Verify a Nova Locutio `assert` by RE-RUNNING its `predicate` claim against the commons:
     /// resolve the claim's content-addressed function(s) from `--records` and evaluate it. The
@@ -517,6 +539,10 @@ enum Commands {
         /// verifier can CONFIRM by re-execution (spec/agent-loop.md §Scope).
         #[arg(long)]
         grant: Vec<String>,
+        /// Supply a named secret (`NAME=VALUE`) for `{{secret:NAME}}` placeholders in `http` header
+        /// values, so a granted re-run can authenticate with the verifier's OWN credentials.
+        #[arg(long = "secret")]
+        secret: Vec<String>,
     },
     /// Verify a delegation chain (spec/trust-model.md): can `--grantee` wield `--capability` by a chain
     /// of signed `delegate` tokens back to a recognized `--root`? Checks every token's signature,
@@ -681,6 +707,17 @@ enum Commands {
     },
 }
 
+/// Parse repeated `--secret NAME=VALUE` flags. The value may itself contain `=`.
+fn parse_secrets(raw: &[String]) -> Result<Vec<(String, String)>> {
+    raw.iter()
+        .map(|s| {
+            s.split_once('=')
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .ok_or_else(|| anyhow!("--secret expects NAME=VALUE, got `{s}`"))
+        })
+        .collect()
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let (result, print_ok) = match cli.command {
@@ -700,10 +737,24 @@ fn main() -> ExitCode {
         Commands::CheckProperties { record, body, generate, cases } => {
             (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases)), true)
         }
-        Commands::Eval { body, args, grants, replay, trace_out } => {
-            (cmd_eval(&body, &args, &grants, replay.as_ref(), trace_out.as_ref()), false)
+        Commands::Eval { body, args, grants, secrets, replay, trace_out } => {
+            match parse_secrets(&secrets) {
+                Ok(s) => {
+                    nl_validator::set_effect_secrets(s);
+                    (cmd_eval(&body, &args, &grants, replay.as_ref(), trace_out.as_ref()), false)
+                }
+                Err(e) => (Err(e), false),
+            }
         }
-        Commands::Run { record, body, records } => (cmd_run(&record, body.as_ref(), records.as_ref()), false),
+        Commands::Run { record, body, records, secrets } => {
+            match parse_secrets(&secrets) {
+                Ok(s) => {
+                    nl_validator::set_effect_secrets(s);
+                    (cmd_run(&record, body.as_ref(), records.as_ref()), false)
+                }
+                Err(e) => (Err(e), false),
+            }
+        }
         Commands::CheckEffects { record, body, records } => {
             (cmd_check_effects(&record, &body, records.as_ref()), false)
         }
@@ -717,9 +768,15 @@ fn main() -> ExitCode {
         Commands::AttestWeights { record, eval, results, sign, timestamp } => {
             (cmd_attest_weights(&record, &eval, &results, &sign, timestamp.as_deref()), false)
         }
-        Commands::Respond { request, records, seed, timestamp, grant } => {
+        Commands::Respond { request, records, seed, timestamp, grant, secret } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
-            (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
+            match parse_secrets(&secret) {
+                Ok(s) => {
+                    nl_validator::set_effect_secrets(s);
+                    (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
+                }
+                Err(e) => (Err(e), false),
+            }
         }
         Commands::Prove { record, body, smt_out, solver } => {
             (cmd_prove(&record, body.as_ref(), smt_out.as_ref(), &solver), false)
@@ -728,9 +785,15 @@ fn main() -> ExitCode {
         Commands::Compose { records } => (cmd_compose(&records), false),
         Commands::Cluster { records, solver } => (cmd_cluster(&records, &solver), false),
         Commands::Normalize { body, hash } => (cmd_normalize(&body, hash), false),
-        Commands::VerifyClaim { assert, records, node, grant } => {
+        Commands::VerifyClaim { assert, records, node, grant, secret } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
-            (cmd_verify_claim(&assert, records.as_ref(), node.as_deref()), false)
+            match parse_secrets(&secret) {
+                Ok(s) => {
+                    nl_validator::set_effect_secrets(s);
+                    (cmd_verify_claim(&assert, records.as_ref(), node.as_deref()), false)
+                }
+                Err(e) => (Err(e), false),
+            }
         }
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
             (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
@@ -744,12 +807,18 @@ fn main() -> ExitCode {
         Commands::Authorize { policy, capability, grantee, delegations, at } => {
             (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
-        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, grant } => {
+        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, grant, secret } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
-            if verify {
-                (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified), false)
-            } else {
-                (cmd_orchestrate(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
+            match parse_secrets(&secret) {
+                Err(e) => (Err(e), false),
+                Ok(s) => {
+                    nl_validator::set_effect_secrets(s);
+                    if verify {
+                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified), false)
+                    } else {
+                        (cmd_orchestrate(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
+                    }
+                }
             }
         }
         #[cfg(feature = "surface")]
