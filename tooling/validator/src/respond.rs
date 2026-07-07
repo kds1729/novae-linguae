@@ -359,7 +359,12 @@ fn effect_refusal(
         }
     }
     let granted = crate::interp::current_effect_grants();
-    let ungranted: Vec<&String> = inf.effects.iter().filter(|e| !granted.contains(*e)).collect();
+    // A host-scoped grant (`net.write@api.example.com`) satisfies the static gate for its BASE
+    // effect — which host a call actually targets is only known at the effect boundary, where
+    // the sandbox enforces the scope (interp::effect_op_at).
+    let granted_bases: std::collections::BTreeSet<String> =
+        granted.iter().map(|g| g.split('@').next().unwrap_or(g).to_string()).collect();
+    let ungranted: Vec<&String> = inf.effects.iter().filter(|e| !granted_bases.contains(*e)).collect();
     if ungranted.is_empty() {
         return None;
     }
