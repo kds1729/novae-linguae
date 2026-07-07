@@ -349,6 +349,15 @@ def _expr_from_py(node, strs=frozenset(), dicts=frozenset()):
         return b_var(node.id)
     if isinstance(node, ast.Constant):
         return b_lit(_value(node.value))
+    if isinstance(node, ast.List):
+        # A list literal: `[]` -> nil; `[a, b, …]` -> cons(a, cons(b, …, nil)). The empty case is
+        # what makes an accumulator `result = []` before a build-loop expressible.
+        if any(isinstance(e, ast.Starred) for e in node.elts):
+            raise BodyError("starred list elements are out of subset")
+        expr = b_var("nil")
+        for e in reversed(node.elts):
+            expr = b_app(b_var("cons"), [_expr_from_py(e, strs, dicts), expr])
+        return expr
     raise BodyError(f"unsupported expression {type(node).__name__}")
 
 
@@ -402,34 +411,69 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
         else_expr = _block_from_py(head.orelse if head.orelse else tail, strs, dicts)
         return b_if(_expr_from_py(head.test, strs, dicts), then_expr, else_expr)
     if isinstance(head, ast.For):
-        # An accumulator loop `for <x> in <src>: <acc> = <update>` is a left fold over `src`. `acc`
-        # must already be bound (a preceding `acc = init` -> let), and the fold re-binds it:
-        #   acc = foldl(\acc x -> update, acc, src) ; <rest>
+        # An accumulator loop over `src` re-binds an accumulator that must already be bound (a
+        # preceding `acc = init` -> let). Three body shapes, each optionally wrapped in one guard
+        # `if cond: …` (no else):
+        #   acc = update / acc <op>= e   -> acc = foldl(\acc x -> update, acc, src)   (a guard makes
+        #                                    the step `case cond of true => update; false => acc`)
+        #   acc.append(e)                -> acc = append(acc, map(\x -> e, [filter(\x->cond,] src)))
         if head.orelse or not isinstance(head.target, ast.Name):
             raise BodyError("only `for <name> in <src>:` accumulator loops are in subset")
-        if len(head.body) != 1 or not isinstance(head.body[0], (ast.Assign, ast.AugAssign)):
-            raise BodyError("loop body must be a single accumulator assignment")
-        asg = head.body[0]
-        loop_strs = strs - {head.target.id}
-        loop_dicts = dicts - {head.target.id}
-        if isinstance(asg, ast.AugAssign):
-            # `for x in src: acc += f(x)` -> foldl(\acc x -> acc <op> f(x), acc, src) — the common
-            # sum/product/count idiom, equivalent to the explicit `acc = acc <op> f(x)` form below.
-            if not isinstance(asg.target, ast.Name):
+        x = head.target.id
+        loop_strs, loop_dicts = strs - {x}, dicts - {x}
+        src = _expr_from_py(head.iter, strs, dicts)
+
+        # Peel one optional guard `if cond: <body>` (no else) off the loop body.
+        body = head.body
+        guard = None
+        if len(body) == 1 and isinstance(body[0], ast.If) and not body[0].orelse:
+            if not _is_boolish(body[0].test):
+                raise BodyError("non-boolean loop guard (Python truthiness is not representable)")
+            guard = body[0].test
+            body = body[0].body
+        if len(body) != 1:
+            raise BodyError("loop body must be a single (optionally guarded) accumulator statement")
+        stmt = body[0]
+
+        # Shape: list-building via `acc.append(e)`.
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) \
+                and isinstance(stmt.value.func, ast.Attribute) and stmt.value.func.attr == "append" \
+                and isinstance(stmt.value.func.value, ast.Name) and len(stmt.value.args) == 1 \
+                and not stmt.value.keywords:
+            acc = stmt.value.func.value.id
+            src2 = src
+            if guard is not None:
+                src2 = b_app(b_var("filter"),
+                             [b_lambda([x], _expr_from_py(guard, loop_strs, loop_dicts)), src2])
+            elt = _expr_from_py(stmt.value.args[0], loop_strs, loop_dicts)
+            mapped = src2 if elt == b_var(x) else b_app(b_var("map"), [b_lambda([x], elt), src2])
+            # append onto the accumulator's prior value; `append(nil, L) = L`, so a `[]`-seeded
+            # build is just the mapped/filtered list, and a non-empty seed is honored.
+            rebind = b_app(b_var("append"), [b_var(acc), mapped])
+            return b_let(acc, rebind, _block_from_py(tail, strs - {acc}, dicts - {acc}))
+
+        # Shape: numeric/string/structural accumulator `acc = update` or `acc <op>= e`.
+        if isinstance(stmt, ast.AugAssign):
+            if not isinstance(stmt.target, ast.Name):
                 raise BodyError("accumulator assignment must target a single name")
-            acc, x = asg.target.id, head.target.id
-            if isinstance(asg.op, ast.Add) and (acc in strs or _is_stringish(asg.value, loop_strs)):
-                update = b_app(b_var("str_concat"), [b_var(acc), _expr_from_py(asg.value, loop_strs, loop_dicts)])
-            elif type(asg.op) not in _PY_BIN:
+            acc = stmt.target.id
+            if isinstance(stmt.op, ast.Add) and (acc in strs or _is_stringish(stmt.value, loop_strs)):
+                update = b_app(b_var("str_concat"), [b_var(acc), _expr_from_py(stmt.value, loop_strs, loop_dicts)])
+            elif type(stmt.op) not in _PY_BIN:
                 raise BodyError("unsupported augmented-assignment operator")
             else:
-                update = _op_app(_PY_BIN[type(asg.op)], [b_var(acc), _expr_from_py(asg.value, loop_strs, loop_dicts)])
-        else:
-            if len(asg.targets) != 1 or not isinstance(asg.targets[0], ast.Name):
+                update = _op_app(_PY_BIN[type(stmt.op)], [b_var(acc), _expr_from_py(stmt.value, loop_strs, loop_dicts)])
+        elif isinstance(stmt, ast.Assign):
+            if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
                 raise BodyError("accumulator assignment must target a single name")
-            acc, x = asg.targets[0].id, head.target.id
-            update = _expr_from_py(asg.value, loop_strs, loop_dicts)
-        fold = b_app(b_var("foldl"), [b_lambda([acc, x], update), b_var(acc), _expr_from_py(head.iter, strs, dicts)])
+            acc = stmt.targets[0].id
+            update = _expr_from_py(stmt.value, loop_strs, loop_dicts)
+        else:
+            raise BodyError("loop body must be an accumulator assignment or an `.append(…)`")
+        # A guarded step keeps the accumulator unchanged on the false branch.
+        if guard is not None:
+            update = b_if(_expr_from_py(guard, loop_strs, loop_dicts), update, b_var(acc))
+        fold = b_app(b_var("foldl"), [b_lambda([acc, x], update), b_var(acc), src])
         return b_let(acc, fold, _block_from_py(tail, strs, dicts))
     raise BodyError(f"unsupported statement {type(head).__name__}")
 

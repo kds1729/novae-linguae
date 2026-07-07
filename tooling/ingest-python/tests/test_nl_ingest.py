@@ -319,8 +319,11 @@ class TestExecutableCorpus(unittest.TestCase):
         src = (Path(__file__).resolve().parent / "sample_executable.py").read_text(encoding="utf-8")
         records = n.records_from_source(src, "sample", include_private=False, v2=True)
         bodies = n.bodies_from_source(src, include_private=False)
-        self.assertEqual(len(records), 5)               # clamp / sign / abs_diff / squares / total
-        self.assertEqual(len(bodies), 5)                # every body is in the executable subset
+        # clamp / sign / abs_diff / squares / total, plus the statement-subset extensions
+        # sum_positives / count_evens (guarded folds) and doubled / keep_positive /
+        # squares_of_evens (list-building append loops -> map/filter).
+        self.assertEqual(len(records), 10)
+        self.assertEqual(len(bodies), 10)               # every body is in the executable subset
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)

@@ -414,6 +414,20 @@ in the parser with a regression test.
   the identity on an already-string receiver). `format!` (a macro) and iterator-returning
   `.split()` stay out of subset. Verified by hash equality: four doc-tested Rust functions emit
   exactly the expected translated body addresses, and the lifted bodies evaluate correctly.
+  *Statement subset widened (2026-07-07):* the honest 9/57-stdlib finding is a control-flow gap
+  (real library code is multi-statement, not single-expression), and the two most common loop
+  shapes the single-statement translator couldn't reach are now in: a **guarded accumulator**
+  `for x in xs: if c: acc <op>= e` → a `foldl` whose step is `case c of true => acc <op> e; false
+  => acc` (sum-of-positives, count-matching), and a **list-building loop** `out = []; for x in
+  src: out.append(e)` → `out = map(\x -> e, src)` (with a guard, `map` over `filter`; append onto
+  the prior accumulator, so `append(nil, L) = L` makes a `[]`-seed collapse cleanly), plus **list
+  literals** (`[]` → `nil`) as the seed. All reuse existing builtins (`foldl`/`map`/`filter`/
+  `append`/`cons`), no evaluator change, and — a load-bearing invariant — the unguarded
+  single-statement fold's output is unchanged, so no previously-ingested hash moves. Ten sample
+  functions (the original five + `sum_positives`/`count_evens`/`doubled`/`keep_positive`/
+  `squares_of_evens`) ingest and run against their doctests. Honest residuals still out of subset:
+  multi-accumulator loops (a tuple accumulator), early-`return`-in-a-loop (search/`any` — a fold
+  can't short-circuit), `while`, tuple-unpacking `for`, nested loops.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

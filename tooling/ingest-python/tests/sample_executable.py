@@ -73,3 +73,77 @@ def total(xs):
     for x in xs:
         acc = acc + x
     return acc
+
+
+def sum_positives(xs):
+    """Sum the positive elements (guarded accumulator loop -> foldl with a case step).
+
+    >>> sum_positives([1, -2, 3, -4, 5])
+    9
+    >>> sum_positives([-1, -2])
+    0
+    """
+    total = 0
+    for x in xs:
+        if x > 0:
+            total += x
+    return total
+
+
+def count_evens(xs):
+    """Count the even elements (guarded count loop -> foldl).
+
+    >>> count_evens([1, 2, 3, 4, 6])
+    3
+    >>> count_evens([1, 3])
+    0
+    """
+    c = 0
+    for x in xs:
+        if x % 2 == 0:
+            c += 1
+    return c
+
+
+def doubled(xs):
+    """Double each element by building a list (append loop -> map).
+
+    >>> doubled([1, 2, 3])
+    [2, 4, 6]
+    >>> doubled([])
+    []
+    """
+    out = []
+    for x in xs:
+        out.append(x + x)
+    return out
+
+
+def keep_positive(xs):
+    """Keep the positive elements (guarded append loop -> filter).
+
+    >>> keep_positive([1, -2, 3, -4])
+    [1, 3]
+    >>> keep_positive([-1])
+    []
+    """
+    out = []
+    for x in xs:
+        if x > 0:
+            out.append(x)
+    return out
+
+
+def squares_of_evens(xs):
+    """Square the even elements (guarded append loop -> map over filter).
+
+    >>> squares_of_evens([1, 2, 3, 4])
+    [4, 16]
+    >>> squares_of_evens([1, 3])
+    []
+    """
+    out = []
+    for x in xs:
+        if x % 2 == 0:
+            out.append(x * x)
+    return out
