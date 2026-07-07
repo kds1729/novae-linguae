@@ -214,6 +214,15 @@ impl Parser {
                     "false" => {
                         Ok(json!({ "kind": "lit", "value": { "kind": "bool", "value": false } }))
                     }
+                    // `int(N)` is the typed non-negative-`int` literal (§ expression atoms); the
+                    // pretty-printer emits `int`-kind literal PATTERNS the same way, so patterns
+                    // must parse it back too or the body surface doesn't round-trip.
+                    "int" if self.at(&TokKind::Lparen) => {
+                        self.bump(); // `(`
+                        let n = self.expect(TokKind::Int, "an integer literal inside `int(...)`")?;
+                        self.expect(TokKind::Rparen, "`)` to close `int(...)`")?;
+                        Ok(json!({ "kind": "lit", "value": { "kind": "int", "value": values::int_from_text(&n.text) } }))
+                    }
                     _ => Ok(json!({ "kind": "bind", "name": t.text })),
                 }
             }
@@ -744,6 +753,32 @@ mod tests {
             json!({"kind": "app", "fn": {"kind": "var", "name": "add"}, "args": [
                 {"kind": "var", "name": "n"},
                 {"kind": "lit", "value": {"kind": "int", "value": 1}},
+            ]}),
+        );
+    }
+
+    #[test]
+    fn parse_int_typed_literal_pattern() {
+        // The pattern-position twin of the `int(N)` expression atom: the printer emits an
+        // `int`-kind literal PATTERN as `int(N)` too, so the parser must read it back or a
+        // case over int literals doesn't round-trip.
+        parses_to(
+            "case n of { int(2) => true; _ => false }",
+            json!({"kind": "case", "scrutinee": {"kind": "var", "name": "n"}, "arms": [
+                {"pattern": {"kind": "lit", "value": {"kind": "int", "value": 2}},
+                 "body": {"kind": "lit", "value": {"kind": "bool", "value": true}}},
+                {"pattern": {"kind": "wildcard"},
+                 "body": {"kind": "lit", "value": {"kind": "bool", "value": false}}},
+            ]}),
+        );
+        // A bare `int` (no parenthesis) in pattern position stays an ordinary binder.
+        parses_to(
+            "case n of { int => int; _ => n }",
+            json!({"kind": "case", "scrutinee": {"kind": "var", "name": "n"}, "arms": [
+                {"pattern": {"kind": "bind", "name": "int"},
+                 "body": {"kind": "var", "name": "int"}},
+                {"pattern": {"kind": "wildcard"},
+                 "body": {"kind": "var", "name": "n"}},
             ]}),
         );
     }
