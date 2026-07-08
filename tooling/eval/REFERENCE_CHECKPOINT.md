@@ -82,6 +82,59 @@ rows); **all three tiers are on `corpus14`** (the first time every pin shares on
 > tier/seed (the model mis-evaluates the insert walk and the case-select on strings), and
 > `read/reverse_concat` dipped at 7B/14B this round; `write/reverse_concat` churns at 3B only.
 
+> **The corpus16 round (2026-07-08, 3B/7B 2-seed + 14B-s1, RTX PRO 6000 Blackwell) — a diagnostic
+> round, NOT a re-pin: the read-side fixes work but cost write mean, so c14 stays the pin.** corpus16
+> folded the round14 read-diagnosis fixes into training (insert-walk examples reordered off tail-only to
+> head/middle branches, mixed-case `str_lt` comparisons in *read* position, two-list reverse+append
+> shapes) plus families #46 (dispatch) / #47 (HTTP response). The eval grew 380→390 (the 10 GW3 dispatch
+> tasks, 5 write + 5 read; no HTTP tasks landed in the eval). **The read watch items closed:**
+> `read/insert_sorted` flipped **0/5 (every c14 run) → 4/5** (only 3b-s1 still misses) — the
+> head/middle-branch read examples were the fix; `read/reverse_concat` passes **5/5**; `read/min_string`
+> passes at **14B only** (still 3B/7B-resistant — the code-point-vs-alphabetical str_lt error is
+> capacity-bound below 14B, unmoved by the mixed-case read rows). **But write regressed on the
+> line-comparable old-380 subset:** 7B best 179/189 (mean 177) vs c14's 185/189 (mean 180.5); 3B best
+> 174/189 (mean 173.5) vs c14's 181 (mean 177); 14B 179 vs 181 — a **~3–4-pt write-mean drop at every
+> tier**. Part of the gap is that c14's pins caught lucky high-variance seeds (7B s1=185 vs s0=176;
+> round16's seeds are *tighter*, 175–179, but don't reach the peak), but the mean is genuinely down: the
+> read-focused corpus edits diluted the write signal at fixed training budget. Full-390 semantic totals:
+> 14b-s1 366/390 (93.8%, best), 7b-s0 363, 7b-s1 361, 3b-s0 358, 3b-s1 354. **Decision: keep the c14
+> pins; do NOT republish to Arca.** The read/insert_sorted fix is real and worth keeping — the open work
+> (next round, when pulled) is to re-derive it *without* the write cost (diff corpus14→16 training rows
+> for the write-perturbing change; or add epochs/steps so the read rows are absorbed without diluting
+> write). New named residual: **`read/min_string` is 14B-only** (capacity-bound below 14B). Adapters +
+> evals pulled to `/var/tmp/claude/round16/`.
+
+> **Fix #1 STAGED for round17 (2026-07-08, corpus17/ftdata17) — the write-preserving read decouple.**
+> Root-caused the corpus16 write regression in the code: `export_finetune` builds both the write and
+> read training pairs from the same corpus rows, and `build_write_tasks` renders the *full* example
+> list — so the round14 read fix, done by REORDERING each insert-walk / `_S43_IN` row's examples to put
+> a branch-diverse case at `examples[-1]`, silently rewrote those rows' WRITE pairs. Fix: restore the 5
+> mutated rows (`insert_sorted_int` / `insert_sorted_desc` / `insert_desc_str` / `insert_sorted_ci` and
+> the `_S43_IN`-driven `before_`/`after_`/`min_vs_` rows) to their c14 examples — **proven byte-identical,
+> `CHANGED(shared)=0` across all 3142 shared combinatorial rows** — and move the read fix to an explicit
+> `read_example` index (sidecar in `views`, not in the hashed record; `build_read_tasks` honors it,
+> default `-1`). The read pair now holds out a middle-branch insert / counterintuitive code-point compare
+> (`min("Zeb","zoo")="Zeb"`, `str_lt "Zeb" "banana"=true`) with ZERO write perturbation. corpus17 = 3,409
+> rows (0 gate drops), oracle 390/390, ftdata17 = 5,940 train (438 leakage-excluded). Retrain
+> `/var/tmp/claude/round17_{stage,driver}.sh` (3B/7B 2-seed + 14B-s1); pod = user decision. Hypothesis:
+> write recovers to c14, read/insert_sorted stays 4/5, read/min_string stays 14B-only.
+>
+> **RESULT (2026-07-08, RTX PRO 6000, 5 cycles) — hypothesis REFUTED on write, read fix HELD, 14B is
+> the best ever.** Old-380 write: 3B 168/176 (mean 172), 7B 175/178 (mean 176.5), **14B 182** — i.e.
+> round17 ≈ round16 at 3B/7B (round16 was 173.5 / 177), NOT recovered to c14 (177 / 180.5). Since
+> corpus17's write pairs are provably c14-identical yet write still trained to round16 level, **the
+> ~3-4pt write regression is NOT the 5-row example mutation** — it is corpus-growth dilution (the
+> #46/#47/reverse families added on top of c14, at a fixed 2-epoch budget) and/or c14's pins being the
+> lucky seeds (its true means were 177/180.5). The read fix held cleanly via `read_example`:
+> read/reverse_concat 5/5, read/insert_sorted 3/5, read/min_string 14B-only (all comparable to round16,
+> now with ZERO write-pair rewrite); write/insert_sorted even ticked to 4/5. **14B-c17-s1: write 186/194
+> (95.9%), total 373/390 = 95.6% sem; old-380 total ≈ 96.0% sem, write 182** — i.e. it TIES c14's 14B
+> (95.8% sem, write 181) and clearly beats round16's 14B (+5 write / +7 total). Adapters+evals in
+> `/var/tmp/claude/round17/`. **Fix #1 is a keeper (carries the read fix correctly + isolated the cause by
+> elimination). The indicated write lever is now TRAINING BUDGET — 3 epochs or upsample write shapes —
+> not the corpus edit (round18).** All pins STAY c14 for now (14B-c17 only ties c14, so a re-pin +
+> Arca republish is marginal and deferred); weights are local at `/var/tmp/claude/round17/`.
+
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
 `adapter-coder7b-c14-s1`, sha256 `91d8940345630806…`, seed 1; the 14B read-champion weights are

@@ -355,7 +355,10 @@ def build_read_tasks(corpus, n_shots=3, conventions=True):
     tasks = []
     for e in fns[n_shots:]:
         v = e["views"]
-        ex = v["examples"][-1]  # use the last worked example as the held-out input
+        # Hold out the row's designated read example if it names one (gen_corpus `read_example`) —
+        # exposes a branch-diverse / counterintuitive example in read position WITHOUT reordering the
+        # example list (which would perturb the write pair). Default: the last worked example.
+        ex = v["examples"][v.get("read_example", -1)]
         args = ", ".join(canonical_value(a) or "?" for a in ex["args"])
         gold = canonical_value(ex["result"])
         if gold is None:

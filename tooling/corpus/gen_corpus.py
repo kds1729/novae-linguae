@@ -3382,31 +3382,37 @@ def combinatorial_specs(exclude_names=()):
     # case-folded) so the curated golds (sorts_before / min_string / lowercase / ci_equal /
     # insert_sorted) still leakage-drop at export.
     # NB the round14 read diagnosis: models answer str_lt reads with human alphabetical intuition
-    # ("Z" after "a"), and the read task is built from examples[-1] — so the mixed-case input sits
-    # LAST, putting a counterintuitive code-point comparison in read position for every anchor.
+    # ("Z" after "a"). The fix exposes the mixed-case "Zeb" (index 2) in READ position via the
+    # `read_example` selector below — NOT by reordering the example list, which would perturb the
+    # write pair (build_write_tasks renders every example in order). So the read pair teaches the
+    # counterintuitive code-point comparison while the write pair stays byte-identical to c14.
     _W43 = ["banana", "kiwi", "Zoo"]  # incl. an uppercase word: code-point order puts "Zoo" < "apple"
-    _S43_IN = ["apple", "melon", "kiwi", "Zeb"]
+    _S43_IN = ["apple", "melon", "Zeb", "kiwi"]  # "Zeb" at index 2 = the counterintuitive read example
     _SL43_IN = [["pear", "Fig", "apple"], [], ["zed", "ant"]]
     for w in _W43:
         wl = w.lower()
         add(_cspec(f"before_{wl}", f'Whether a string sorts before "{w}" in code-point order.',
                    f'str_lt s "{w}"', ["string", "predicate", "order"], fn([STRING], BOOL),
                    lam(["s"], bapp("str_lt", var("s"), str_lit(w))),
-                   [{"args": [v], "result": v < w} for v in _S43_IN], terminates="always"))
+                   [{"args": [v], "result": v < w} for v in _S43_IN],
+                   read_example=2, terminates="always"))
         add(_cspec(f"after_{wl}", f'Whether a string sorts after "{w}" in code-point order.',
                    f'str_lt "{w}" s', ["string", "predicate", "order"], fn([STRING], BOOL),
                    lam(["s"], bapp("str_lt", str_lit(w), var("s"))),
-                   [{"args": [v], "result": w < v} for v in _S43_IN], terminates="always"))
+                   [{"args": [v], "result": w < v} for v in _S43_IN],
+                   read_example=2, terminates="always"))
         add(_cspec(f"min_vs_{wl}", f'The earlier of a string and "{w}" in code-point order.',
                    f'case str_lt s "{w}" of true => s; false => "{w}"',
                    ["string", "order", "case"], fn([STRING], STRING),
                    lam(["s"], case_bool(bapp("str_lt", var("s"), str_lit(w)), var("s"), str_lit(w))),
-                   [{"args": [v], "result": min(v, w)} for v in _S43_IN], terminates="always"))
+                   [{"args": [v], "result": min(v, w)} for v in _S43_IN],
+                   read_example=2, terminates="always"))
         add(_cspec(f"max_vs_{wl}", f'The later of a string and "{w}" in code-point order.',
                    f'case str_lt s "{w}" of true => "{w}"; false => s',
                    ["string", "order", "case"], fn([STRING], STRING),
                    lam(["s"], case_bool(bapp("str_lt", var("s"), str_lit(w)), str_lit(w), var("s"))),
-                   [{"args": [v], "result": max(v, w)} for v in _S43_IN], terminates="always"))
+                   [{"args": [v], "result": max(v, w)} for v in _S43_IN],
+                   read_example=2, terminates="always"))
         add(_cspec(f"keep_before_{wl}", f'Keep the strings that sort before "{w}".',
                    f'filter (\\s -> str_lt s "{w}") xs', ["string", "list", "filter", "order"],
                    fn([list_of(STRING)], list_of(STRING)),
@@ -3449,41 +3455,43 @@ def combinatorial_specs(exclude_names=()):
                       bapp("cons", var("x"), var("ys")),
                       bapp("cons", bapp("head", var("ys")), bself(var("x"), bapp("tail", var("ys")))))))
     _INS43 = "case null ys of true => cons x nil; false => case {cmp} of true => cons x ys; false => cons (head ys) (self x (tail ys))"
-    # examples[-1] is the read-exposed one (build_read_tasks) — the round14 diagnosis found all
-    # insert-walk read pairs were TAIL inserts (teaching "append at end"), so each variant's last
-    # example now takes the head/middle branch.
-    _INS_INT_IN = [(9, [1, 2]), (0, []), (5, [5, 5]), (1, [4, 6])]
+    # The round14 diagnosis: every insert-walk READ pair was a TAIL insert (teaching "append at
+    # end"), because build_read_tasks holds out examples[-1] and each variant's last example was a
+    # tail insert. The fix: keep the c14 example list (so the write pair is byte-identical) and use
+    # `read_example` to hold out a HEAD/MIDDLE-branch example instead. Here index 0 = insert 3 into
+    # [1,4,6] -> [1,3,4,6] (a middle insert), not the index-3 tail insert 9 into [1,2].
+    _INS_INT_IN = [(3, [1, 4, 6]), (0, []), (5, [5, 5]), (9, [1, 2])]
     add(_cspec("insert_sorted_int", "Insert a number into an ascending sorted list, keeping it sorted.",
                _INS43.format(cmp="lt x (head ys)"), ["recursion", "list", "sort"],
                fn([INT, list_of(INT)], list_of(INT)),
                _insert_walk(bapp("lt", var("x"), bapp("head", var("ys")))),
                [{"args": [x, lst], "result": sorted(lst + [x])} for x, lst in _INS_INT_IN],
-               terminates="always"))
+               read_example=0, terminates="always"))
     add(_cspec("insert_sorted_desc", "Insert a number into a descending sorted list, keeping it sorted.",
                _INS43.format(cmp="lt (head ys) x"), ["recursion", "list", "sort"],
                fn([INT, list_of(INT)], list_of(INT)),
                _insert_walk(bapp("lt", bapp("head", var("ys")), var("x"))),
                [{"args": [x, lst], "result": sorted(lst + [x], reverse=True)}
-                for x, lst in [(2, [8, 3]), (0, []), (5, [5]), (7, [9, 4, 1])]],
-               terminates="always"))
+                for x, lst in [(7, [9, 4, 1]), (0, []), (5, [5]), (2, [8, 3])]],
+               read_example=0, terminates="always"))
     add(_cspec("insert_desc_str", "Insert a string into a descending sorted list (code-point order).",
                _INS43.format(cmp="str_lt (head ys) x"), ["string", "recursion", "list", "sort"],
                fn([STRING, list_of(STRING)], list_of(STRING)),
                _insert_walk(bapp("str_lt", bapp("head", var("ys")), var("x"))),
-               [{"args": ["z", ["z", "b"]], "result": ["z", "z", "b"]},
+               [{"args": ["m", ["z", "a"]], "result": ["z", "m", "a"]},
                 {"args": ["a", []], "result": ["a"]},
-                {"args": ["a", ["z", "B"]], "result": ["z", "a", "B"]}], terminates="always"))
+                {"args": ["z", ["z", "b"]], "result": ["z", "z", "b"]}],
+               read_example=0, terminates="always"))
     add(_cspec("insert_sorted_ci", "Insert a string into a case-insensitively sorted list (compare lowercased).",
                _INS43.format(cmp="str_lt (str_lower x) (str_lower (head ys))"),
                ["string", "recursion", "list", "sort", "case"],
                fn([STRING, list_of(STRING)], list_of(STRING)),
                _insert_walk(bapp("str_lt", bapp("str_lower", var("x")),
                                  bapp("str_lower", bapp("head", var("ys"))))),
-               [{"args": ["ZEB", ["ant", "yak"]], "result": ["ant", "yak", "ZEB"]},
+               [{"args": ["Beta", ["alpha", "Gamma"]], "result": ["alpha", "Beta", "Gamma"]},
                 {"args": ["ant", []], "result": ["ant"]},
-                {"args": ["Beta", ["alpha", "Gamma"]], "result": ["alpha", "Beta", "Gamma"]},
-                {"args": ["Alpha", ["beta", "GAMMA"]], "result": ["Alpha", "beta", "GAMMA"]}],
-               terminates="always"))
+                {"args": ["ZEB", ["ant", "yak"]], "result": ["ant", "yak", "ZEB"]}],
+               read_example=0, terminates="always"))
 
     # 44. BARE-REVERSE REINFORCEMENT — the corpus12 watch item: write/reverse regressed at 7B on
     # both seeds (the wrong-cons-order dilution symptom corpus10 induced and family #41's near-bare
@@ -3879,6 +3887,11 @@ def build_and_verify(spec, workdir):
             "body": body,
             "examples": record["examples"],
             "properties": spec.get("properties") or [],
+            # `read_example` designates WHICH worked example build_read_tasks holds out as the read
+            # input (default: the last). It lets a spec expose a branch-diverse / counterintuitive
+            # example in read position WITHOUT reordering the example list — so the write pair (which
+            # renders every example in order) stays byte-identical. Sidecar only; not in the hashed record.
+            **({"read_example": spec["read_example"]} if "read_example" in spec else {}),
             **({"helpers": helpers} if helpers else {}),
         },
         "verification": {
