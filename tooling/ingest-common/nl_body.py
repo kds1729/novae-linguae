@@ -417,6 +417,15 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
             expr = _expr_from_py(head.value, strs, dicts)
             return expr if _is_maybeish(head.value, maybes, dicts) else b_variant("Just", expr)
         return _expr_from_py(head.value, strs, dicts)
+    if isinstance(head, ast.Raise):
+        # Raise-totalization (the None<->Maybe boundary, producing side): in a Maybe-returning
+        # translation a `raise` IS the None outcome — the guard shape `if c: raise ValueError(…)`
+        # becomes the None arm of the boolean case, and the record's declared result is `Maybe T`
+        # (the adapter wraps it), so partiality turns into the total Maybe the language prefers
+        # over `error`. Outside a Maybe-returning translation, `raise` stays out of subset.
+        if ret_maybe:
+            return b_variant("None")  # statements after a raise are dead
+        raise BodyError("unsupported statement Raise")
     if isinstance(head, ast.Assign):
         if len(head.targets) != 1 or not isinstance(head.targets[0], ast.Name):
             raise BodyError("only single-name assignment targets are in subset")
@@ -723,9 +732,20 @@ def _dict_annotated_params(func):
                      if is_dict_ann(p.annotation))
 
 
+def function_raises(func):
+    """Whether the function's own body contains a `raise` — the trigger for raise-totalization
+    (the lifted body returns `Maybe T` with raise-branches as `None`, and the adapter wraps the
+    declared result type to match)."""
+    return any(isinstance(n, ast.Raise) for n in ast.walk(func))
+
+
 def body_ast_from_py(func):
     """An *executable* body AST for a Python function whose body is in the supported subset (a
-    `lambda` over its parameters; a bare expression for a 0-parameter function), or None otherwise."""
+    `lambda` over its parameters; a bare expression for a 0-parameter function), or None otherwise.
+    A function that raises is TOTALIZED: its translation returns `Maybe T` (raise -> the None
+    variant, returns Just-wrapped), and the adapter wraps the declared result type to match —
+    unless it is already `-> Optional[…]`, where collapsing a raise and a None return into one
+    Maybe would silently merge two distinct outcomes, so the combination stays out of subset."""
     body = func.body
     start = 1 if (body and isinstance(body[0], ast.Expr)
                   and isinstance(body[0].value, ast.Constant)
@@ -733,9 +753,13 @@ def body_ast_from_py(func):
     stmts = body[start:]
     if not stmts:
         return None
+    raises = function_raises(func)
+    ret_opt = _is_optional_ann(func.returns)
+    if raises and ret_opt:
+        return None
     try:
         expr = _block_from_py(stmts, _str_annotated_params(func), _dict_annotated_params(func),
-                              _optional_annotated_params(func), _is_optional_ann(func.returns))
+                              _optional_annotated_params(func), ret_opt or raises)
         params = _fixed_param_names(func)
         # A 0-arg function is its bare result (applying it to [] still evaluates); else wrap in a
         # lambda so `run` can apply the example's arguments.

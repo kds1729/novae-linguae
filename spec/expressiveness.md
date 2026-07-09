@@ -522,6 +522,24 @@ only real ingested records could surface.
   Note the surveyed stdlib set does NOT move: its `is None` uses sit in unannotated,
   raise-partial functions — the boundary unlocks *annotated* real code; `raise`-partiality
   totalization is the remaining (bigger) design frontier.
+  *Raise-totalization (2026-07-09, same day):* that frontier is now taken too, on the producing
+  side of the same boundary. A function that `raise`s ingests as a **derived-total record**:
+  the lifted body treats `raise` as the `None` outcome (the guard shape `if c: raise
+  ValueError(…)` becomes the None arm), returns Just-wrap, and the adapter wraps the declared
+  result in `Maybe` — the type IS the transform — and drops the now-untrue inferred `panic`
+  effect. `Maybe` over `Result T string` deliberately: an error *message* is rarely actionable
+  for an agent, would put prose inside canonical equality, and `parse_int`/`safe_div` set the
+  no-reason-payload precedent. Two honest refusals: an `-> Optional[T]` function that ALSO
+  raises (collapsing a returned `None` and a raise into one Maybe would silently merge two
+  distinct outcomes) and `raise` inside a loop body (not a supported loop shape). The missing
+  doctest form falls out for free: **a `Traceback` doctest IS the None-case example** —
+  under a Maybe-wrapped result it encodes as the `None` variant and runs like any other
+  example. `per_unit` (guard-raise integer division; twenty-two-function executable corpus)
+  ingests with declared `Maybe int`, effects `[]`, a Just(3) example AND a runnable None
+  example from its traceback doctest — and **certifies**. The surveyed stdlib set still does
+  not move (its raising functions also use truthiness / kwargs / tuple targets / `try`), so
+  the measured boundary is unchanged in aggregate: totalization serves clean, annotated
+  guard-raise code — the kind agents and modern libraries write.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

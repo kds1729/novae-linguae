@@ -67,6 +67,11 @@ def _example(func_name, source, want, param_types, result_type):
     want = want.strip()
     if not want:
         return None
+    # A `Traceback` doctest is exactly the missing doctest form for a None result: under a
+    # Maybe-typed result (a raise-totalized function — the adapter wrapped its result type),
+    # the raising example IS the None-case example, runnable like any other.
+    if want.startswith("Traceback") and _is_maybe_type(result_type):
+        return {"args": args, "result": {"kind": "variant", "tag": "None"}}
     try:
         result_py = ast.literal_eval(want)
     except (ValueError, SyntaxError, TypeError):
@@ -76,6 +81,11 @@ def _example(func_name, source, want, param_types, result_type):
     except ValueEncodeError:
         return None
     return {"args": args, "result": result}
+
+
+def _is_maybe_type(t):
+    return (isinstance(t, dict) and t.get("kind") == "apply"
+            and (t.get("ctor") or {}).get("name") == "Maybe")
 
 
 def module_examples(path):

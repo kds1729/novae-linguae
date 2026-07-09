@@ -44,7 +44,7 @@ from pathlib import Path
 # Higher-fidelity (v0.2) helpers live in the shared ingest-common dir: structured type ASTs and real
 # examples extracted from doctests. Imported only for --v2; the v0.1 path stays self-contained.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest-common"))
-from nl_body import body_ast_from_py  # noqa: E402
+from nl_body import body_ast_from_py, function_raises  # noqa: E402
 from nl_examples import examples_from_docstring  # noqa: E402
 from nl_effects import effects_from_py, terminates_from_py  # noqa: E402
 from property_catalog import match_catalog  # noqa: E402
@@ -621,6 +621,16 @@ def build_v2_record(func, module_name: str | None, imports=None, with_properties
     pair (see nl_effects) used to classify qualified calls when inferring effects. When
     ``with_properties`` is set, well-known functions get curated algebraic laws from the catalog."""
     type_ast = python_function_type(func)
+    # Raise-totalization (the None<->Maybe boundary): when the lifted body totalizes a raising
+    # function (raise -> the None variant, returns Just-wrapped), the record's declared result is
+    # `Maybe T` — the type IS the transform — and the body no longer panics, so the inferred
+    # `panic` effect is dropped. Only when the body actually lifts: a fallback source-hash body
+    # keeps the plain type it had.
+    totalized = body_ast_from_py(func) is not None and function_raises(func)
+    if totalized:
+        t = type_ast["body"] if type_ast.get("kind") == "forall" else type_ast
+        t["result"] = {"kind": "apply", "ctor": {"kind": "builtin", "name": "Maybe"},
+                       "args": [t["result"]]}
     param_types, result_type = _fn_param_result_types(type_ast)
     examples = examples_from_docstring(func.name, ast.get_docstring(func), param_types, result_type)
     if not examples:
@@ -628,6 +638,9 @@ def build_v2_record(func, module_name: str | None, imports=None, with_properties
     alias, fromimp = imports if imports else ({}, {})
     hints = _name_hints(func.name, module_name)
     properties, tags = match_catalog(hints, len(param_types)) if with_properties else ([], [])
+    effects = effects_from_py(func, alias, fromimp)
+    if totalized:
+        effects = [e for e in effects if e != "panic"]
     record = {
         "schema_version": "0.2.0",
         "hash": "fn_" + "0" * 64,
@@ -635,7 +648,7 @@ def build_v2_record(func, module_name: str | None, imports=None, with_properties
         "signature": {
             "type": type_ast,
             "refinements": _preconditions(func),
-            "effects": effects_from_py(func, alias, fromimp),
+            "effects": effects,
             "capabilities": [],
             "terminates": terminates_from_py(func),
         },

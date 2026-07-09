@@ -302,3 +302,20 @@ def find_big(xs, cutoff) -> int | None:
         if x > cutoff:
             return x
     return None
+
+
+def per_unit(total: int, count: int) -> int:
+    """Units per box, refusing an empty box count (raise-totalization: the record's result is
+    `Maybe int`, the guard-raise is its None arm — and the Traceback doctest IS the runnable
+    None-case example).
+
+    >>> per_unit(12, 4)
+    3
+    >>> per_unit(5, 0)
+    Traceback (most recent call last):
+        ...
+    ValueError: no boxes
+    """
+    if count == 0:
+        raise ValueError("no boxes")
+    return total // count

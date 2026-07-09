@@ -211,6 +211,27 @@ class PythonBodyTests(unittest.TestCase):
         plain = py_body("def f(n):\n    return n + 1")
         self.assertNotIn('"variant"', json.dumps(plain))
 
+    def test_raise_totalizes_to_maybe(self):
+        # `if c: raise ...` in a plain-typed function -> the body totalizes: raise is the None
+        # arm, the return Just-wraps (the adapter wraps the declared result type to match).
+        b = py_body("def f(a, b):\n    if b == 0:\n        raise ValueError('zero')\n    return a // b")
+        s = json.dumps(b)
+        self.assertIn('{"kind": "variant", "tag": "None"}', s)
+        self.assertIn('"tag": "Just"', s)
+        # An -> Optional RETURN + raise would collapse two distinct outcomes (returned None vs
+        # raised) into one Maybe; refused.
+        self.assertIsNone(py_body(
+            "def f(x) -> int | None:\n    if x == 0:\n        raise ValueError('x')\n    return x"))
+        # But an Optional PARAM with a raise composes fine: narrowing + totalization together.
+        composed = py_body(
+            "def f(x: int | None):\n    if x is None:\n        raise ValueError('x')\n    return x")
+        arms = composed["body"]["arms"]
+        self.assertEqual(next(a["body"] for a in arms if a["pattern"].get("tag") == "None"),
+                         {"kind": "variant", "tag": "None"})
+        # A raise inside a loop body is not a supported loop shape.
+        self.assertIsNone(py_body(
+            "def f(xs):\n    for x in xs:\n        if x < 0:\n            raise ValueError('neg')\n    return 1"))
+
     def test_maybe_returning_search_loop(self):
         # The flagship composition: a search loop in an Optional function — the hit wraps in
         # Just, the not-found `return None` is the None variant.
