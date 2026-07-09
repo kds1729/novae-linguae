@@ -324,9 +324,11 @@ class TestExecutableCorpus(unittest.TestCase):
         # squares_of_evens (list-building append loops -> map/filter), first_negative /
         # contains / double_first_even (early-return search loops -> filter/head), and
         # sum_minus_count / even_sum_and_count (independent multi-accumulator loops -> N folds),
-        # and flatten / evens_of_rows (nested list-building loops -> a foldl of appends).
-        self.assertEqual(len(records), 17)
-        self.assertEqual(len(bodies), 17)               # every body is in the executable subset
+        # flatten / evens_of_rows (nested list-building loops -> a foldl of appends), and
+        # or_default / bump / lookup_qty / find_big (the None<->Maybe boundary: narrowing,
+        # Just-wrapped returns, bare get, Maybe-returning search).
+        self.assertEqual(len(records), 21)
+        self.assertEqual(len(bodies), 21)               # every body is in the executable subset
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
@@ -429,9 +431,10 @@ class TestStringIdiomBodies(unittest.TestCase):
         self.assertIn('"map_size"', b3)
         b4 = self._body('def f(d: dict[str, int]):\n    return sorted(d.keys())\n')
         self.assertIn('"map_keys"', b4)
-        # The bare 1-arg get (an Optional boundary) and subscript (raises) stay out of subset.
+        # The bare 1-arg get IS the Maybe (the None<->Maybe boundary, decided 2026-07-09);
+        # subscript (raises) stays out of subset.
         func = pyast.parse('def f(d: dict):\n    return d.get("k")\n').body[0]
-        self.assertIsNone(nl_body.body_ast_from_py(func))
+        self.assertIn('"map_get"', json.dumps(nl_body.body_ast_from_py(func)))
         func2 = pyast.parse('def f(d: dict):\n    return d["k"]\n').body[0]
         self.assertIsNone(nl_body.body_ast_from_py(func2))
         # Unannotated receivers keep the untyped reading (no map_get).

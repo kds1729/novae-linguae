@@ -178,6 +178,49 @@ class PythonBodyTests(unittest.TestCase):
         self.assertIsNone(py_body("def f(xs):\n    s = 0\n    for x in xs:\n        s += x\n    return x"))
         self.assertIsNone(py_body("def f(xs):\n    out = []\n    for x in xs:\n        out.append(x)\n    return x"))
 
+    def test_is_none_narrowing_becomes_case(self):
+        # `if x is None:` over an Optional param -> a case on the Maybe; the non-None branch
+        # REBINDS x to the Just payload (Python's narrowing made explicit).
+        body = py_body("def f(x: int | None, d):\n    if x is None:\n        return d\n    return x")
+        case = body["body"]
+        self.assertEqual(case["kind"], "case")
+        self.assertEqual(case["scrutinee"], {"kind": "var", "name": "x"})
+        just = next(a for a in case["arms"] if a["pattern"].get("tag") == "Just")
+        self.assertEqual(just["pattern"]["payload"], {"kind": "bind", "name": "x"})
+        self.assertEqual(just["body"], {"kind": "var", "name": "x"})
+        # `is not None` narrows symmetrically.
+        b2 = py_body("def f(x: int | None):\n    if x is not None:\n        return x + 1\n    return 0")
+        just2 = next(a for a in b2["body"]["arms"] if a["pattern"].get("tag") == "Just")
+        self.assertEqual(just2["body"]["fn"], {"kind": "var", "name": "add"})
+
+    def test_none_branch_reading_narrowed_name_is_refused(self):
+        self.assertIsNone(py_body(
+            "def f(x: int | None):\n    if x is None:\n        return x\n    return x"))
+
+    def test_optional_return_wraps(self):
+        # In an `-> Optional[T]` function: `return None` -> the None variant, a plain value ->
+        # Just(...), an already-Maybe expression (bare 1-arg get) passes through unwrapped.
+        b = py_body("def f(x: int | None) -> int | None:\n"
+                    "    if x is None:\n        return None\n    return x + 1")
+        s = json.dumps(b)
+        self.assertIn('{"kind": "variant", "tag": "None"}', s)
+        self.assertIn('"tag": "Just"', s)
+        passthrough = py_body('def f(d: dict, k) -> int | None:\n    return d.get(k)')
+        self.assertEqual(passthrough["body"]["fn"], {"kind": "var", "name": "map_get"})
+        # Without the return annotation nothing wraps (hash stability for plain functions).
+        plain = py_body("def f(n):\n    return n + 1")
+        self.assertNotIn('"variant"', json.dumps(plain))
+
+    def test_maybe_returning_search_loop(self):
+        # The flagship composition: a search loop in an Optional function — the hit wraps in
+        # Just, the not-found `return None` is the None variant.
+        b = py_body("def f(xs, c) -> int | None:\n"
+                    "    for x in xs:\n        if x > c:\n            return x\n    return None")
+        s = json.dumps(b)
+        self.assertIn('"filter"', s)
+        self.assertIn('"tag": "Just"', s)
+        self.assertIn('{"kind": "variant", "tag": "None"}', s)
+
     def test_search_loop_becomes_filter_head(self):
         # `for i in x: return i` was the old subset boundary; it is now the degenerate search —
         # head-or-default — and the guarded form filters first (exact in a pure total language).

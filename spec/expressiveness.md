@@ -404,8 +404,9 @@ in the parser with a regression test.
   keys aren't identifier-shaped); identifier-keyed dicts without a Map expectation keep the
   historical record encoding, so existing ingested hashes are stable. Demonstrated: a 4-function
   config module runs 8/8 doctest examples over real map values. **Deliberately out of subset:**
-  the bare 1-arg `d.get(k)` — an `Optional` at the record boundary whose `None`↔`Maybe` example
-  mapping is a design decision not yet taken — and `d[k]` (raises). The Haskell body subset
+  `d[k]` (raises). *(The bare 1-arg `d.get(k)` was originally excluded pending the `None`↔`Maybe`
+  example-mapping decision; that decision was taken 2026-07-09 — see the boundary entry below —
+  and the bare get is now in subset as `map_get`'s Maybe.)* The Haskell body subset
   (flat token applications, no method calls) has no string/dict surface to map yet.
   *Rust too (2026-07-05):* the Rust adapter's own lifter roots a known-string inference in
   `&str`/`String` parameter types — `+` → `str_concat`, `s.len()` → `str_length` (bytes vs
@@ -473,6 +474,32 @@ in the parser with a regression test.
   its honest boundary** — textbook loop idioms are fully covered (seventeen-function executable
   corpus), and the remaining stdlib gap is not control flow but partiality and the `Maybe`
   boundary, i.e. language-design decisions, not translator work.
+  *The `None`↔`Maybe` boundary — DECIDED and implemented (2026-07-09).* The design decision the
+  dict phase deferred is now taken, rooted (like the string/dict inferences) in **annotations**:
+  - **Values.** Under a `Maybe T` expectation (an `Optional[T]` / `T | None` / `Union[…, None]`
+    annotation, which the type mapper already sends to `Maybe T`), the Python value `None`
+    encodes as the nullary `None` variant and any other value as `Just(<encoded at T>)` — Python
+    never wraps its optionals, so the wrapping is exactly what the annotation declares. Without
+    a Maybe expectation `None` keeps its historical `unit` encoding (hash stability).
+  - **Consuming.** Optional-annotated parameters root a known-Maybe inference (threaded through
+    `let`s like strs/dicts, including a `let` bound to a bare `d.get(k)`). The Python narrowing
+    idiom `if x is None: …` / `if x is not None: …` becomes a `case` on the Maybe whose
+    non-None arm **rebinds x to the Just payload** — Python's type narrowing made explicit —
+    and a None arm that *reads* x (it IS None there; the translation has no binding for it) is
+    refused rather than silently wrong. `is`-tests outside the narrowing shape stay out.
+  - **Producing.** In a function annotated `-> Optional[T]`, every returned value is wrapped at
+    the boundary: `return None` → the `None` variant, an already-Maybe expression (a known-Maybe
+    name, a bare `d.get(k)`) passes through unwrapped, anything else → `Just(…)`. This composes
+    with the loop shapes: a **search loop returning a Maybe** (`for x in xs: if c: return x` /
+    `return None`) is the find-idiom in its total form, and the bare 1-arg `d.get(k)` (→
+    `map_get`) is now in subset, flowing to Maybe positions.
+  Four sample functions (`or_default`/`bump`/`lookup_qty`/`find_big`, twenty-one total) ingest
+  and run against their doctests — variant-encoded `None` arguments and `Just`-wrapped results
+  execute end to end. (A `None` *result* honestly has no doctest form — the REPL prints nothing —
+  so None-return arms are exercised by variant-`None` arguments and the unit tests instead.)
+  Note the surveyed stdlib set does NOT move: its `is None` uses sit in unannotated,
+  raise-partial functions — the boundary unlocks *annotated* real code; `raise`-partiality
+  totalization is the remaining (bigger) design frontier.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

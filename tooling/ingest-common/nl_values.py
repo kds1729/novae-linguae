@@ -48,6 +48,15 @@ def to_value_ast(value, expected=None):
     only to disambiguate int vs nat (a non-negative int under a `nat` type encodes as nat) and to pass
     element-type hints into lists. Raises ValueEncodeError for values with no value-AST representation.
     """
+    # The None<->Maybe boundary (spec/expressiveness.md): under a `Maybe T` expectation, Python's
+    # None is the nullary None variant and anything else is Just(<encoded at T>) — Python never
+    # wraps its optionals, so the wrapping is exactly what the annotation declares. Without a
+    # Maybe expectation, None keeps its historical `unit` encoding (hash stability).
+    maybe_inner = _ctor_arg(expected, "Maybe")
+    if maybe_inner is not None:
+        if value is None:
+            return {"kind": "variant", "tag": "None"}
+        return {"kind": "variant", "tag": "Just", "payload": to_value_ast(value, maybe_inner)}
     # bool must precede int — bool is a subclass of int in Python.
     if isinstance(value, bool):
         return {"kind": "bool", "value": value}

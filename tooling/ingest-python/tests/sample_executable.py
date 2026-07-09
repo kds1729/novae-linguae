@@ -253,3 +253,52 @@ def evens_of_rows(xss):
             if i % 2 == 0:
                 out.append(i)
     return out
+
+
+def or_default(x: int | None, d):
+    """The value unless missing (`is None` narrowing -> case on the Maybe; a None argument
+    encodes as the None variant at the example boundary).
+
+    >>> or_default(5, 0)
+    5
+    >>> or_default(None, 7)
+    7
+    """
+    if x is None:
+        return d
+    return x
+
+
+def bump(x: int | None) -> int | None:
+    """One more than x, if present (narrowing + a Just-wrapped return; returns None for None —
+    which a doctest honestly cannot show, so only the present case carries an example).
+
+    >>> bump(4)
+    5
+    """
+    if x is None:
+        return None
+    return x + 1
+
+
+def lookup_qty(d: dict, k) -> int | None:
+    """The quantity stored under k, if any (bare 1-arg get -> map_get's Maybe, passed through
+    the Optional return unwrapped).
+
+    >>> lookup_qty({"apples": 3}, "apples")
+    3
+    """
+    return d.get(k)
+
+
+def find_big(xs, cutoff) -> int | None:
+    """The first element above cutoff, if any (search loop returning a Maybe: the hit wraps in
+    Just, the not-found default is the None variant).
+
+    >>> find_big([1, 8, 3], 2)
+    8
+    """
+    for x in xs:
+        if x > cutoff:
+            return x
+    return None

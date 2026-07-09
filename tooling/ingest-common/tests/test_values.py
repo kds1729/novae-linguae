@@ -50,6 +50,18 @@ class ToValueAstTests(unittest.TestCase):
         self.assertEqual(to_value_ast({"Bad-Key": 1}),
                          {"kind": "map", "entries": [{"key": "Bad-Key", "value": {"kind": "int", "value": 1}}]})
 
+    def test_maybe_expectation_wraps(self):
+        # The None<->Maybe boundary (2026-07-09): under a Maybe expectation None is the nullary
+        # None variant and anything else is Just(<encoded at the payload type>); WITHOUT the
+        # expectation None keeps its historical unit encoding (hash stability).
+        maybe_int = {"kind": "apply", "ctor": {"kind": "builtin", "name": "Maybe"},
+                     "args": [{"kind": "builtin", "name": "int"}]}
+        self.assertEqual(to_value_ast(None, maybe_int), {"kind": "variant", "tag": "None"})
+        self.assertEqual(to_value_ast(5, maybe_int),
+                         {"kind": "variant", "tag": "Just",
+                          "payload": {"kind": "int", "value": 5}})
+        self.assertEqual(to_value_ast(None), {"kind": "unit"})
+
     def test_unrepresentable_raise(self):
         # A set, an int-keyed dict (not string keys), an arbitrary object, and a non-finite float
         # are all genuinely unrepresentable.

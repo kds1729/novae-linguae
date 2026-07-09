@@ -113,6 +113,13 @@ def b_if(test, then_expr, else_expr):
     }
 
 
+def b_variant(tag, payload=None):
+    v = {"kind": "variant", "tag": tag}
+    if payload is not None:
+        v["payload"] = payload
+    return v
+
+
 def _op_app(op, args):
     return b_app(b_var(op), args)
 
@@ -166,6 +173,29 @@ def _is_dictish(node, dicts):
     `sorted(d.keys())`); anything unproven keeps its untyped reading, and a wrong guess fails the
     example gate rather than shipping wrong."""
     return isinstance(node, ast.Name) and node.id in dicts
+
+
+def _is_maybeish(node, maybes, dicts):
+    """Whether `node` is syntactically known to produce a MAYBE: an `Optional`-annotated parameter
+    (or a `let` name bound to one), or the bare 1-arg `d.get(k)` over a known dict (map_get's
+    Maybe). Drives the None<->Maybe boundary translations — narrowing `if x is None:` and the
+    Just-wrapping of returns in an `-> Optional[T]` function."""
+    if isinstance(node, ast.Name):
+        return node.id in maybes
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get" and len(node.args) == 1 and not node.keywords
+            and _is_dictish(node.func.value, dicts))
+
+
+def _none_test(test, maybes):
+    """`(name, narrows_on_none)` when `test` is `x is None` / `x is not None` over a known-Maybe
+    name — the Python narrowing idiom that becomes a `case` on the Maybe — else None."""
+    if isinstance(test, ast.Compare) and len(test.ops) == 1 \
+            and type(test.ops[0]) in (ast.Is, ast.IsNot) \
+            and isinstance(test.comparators[0], ast.Constant) and test.comparators[0].value is None \
+            and isinstance(test.left, ast.Name) and test.left.id in maybes:
+        return test.left.id, isinstance(test.ops[0], ast.Is)
+    return None
 
 
 def _maybe_case(scrutinee, just_body_of, none_body):
@@ -311,8 +341,7 @@ def _expr_from_py(node, strs=frozenset(), dicts=frozenset()):
                 return b_app(b_var("str_contains"),
                              [_expr_from_py(node.args[0], strs, dicts), _expr_from_py(fn.value, strs, dicts)])
         # Dict idioms (spec/expressiveness.md phase 4): only the TOTAL forms translate. The bare
-        # 1-arg `d.get(k)` (an Optional at the record boundary — needs the None<->Maybe example
-        # value-mapping design) stays out of subset; `d[k]` raises, so it stays out too.
+        # `d[k]` raises, so it stays out of subset.
         if isinstance(fn, ast.Attribute) and _is_dictish(fn.value, dicts):
             if fn.attr == "get" and len(node.args) == 2:
                 # d.get(k, default) -> case map_get(k, d) of { Just(v) => v; None => default }.
@@ -321,10 +350,12 @@ def _expr_from_py(node, strs=frozenset(), dicts=frozenset()):
                                              _expr_from_py(fn.value, strs, dicts)]),
                     lambda v: v, _expr_from_py(node.args[1], strs, dicts))
             if fn.attr == "get" and len(node.args) == 1:
-                # The bare 1-arg get returns an Optional at the record boundary — out of subset
-                # until the None<->Maybe example value-mapping is designed. Refuse explicitly
-                # rather than emitting an unrunnable projection.
-                raise BodyError("1-arg dict.get (Optional boundary) is out of subset")
+                # The bare 1-arg get IS the Maybe now the None<->Maybe boundary is decided:
+                # map_get(k, d), flowing to a Maybe position (a return in an `-> Optional[T]`
+                # function, `is None` narrowing via a `let`). Misuse as a bare value fails the
+                # type/example gate rather than shipping wrong.
+                return b_app(b_var("map_get"), [_expr_from_py(node.args[0], strs, dicts),
+                                                _expr_from_py(fn.value, strs, dicts)])
         if isinstance(fn, ast.Name):
             # `len` of a known string is str_length (Unicode scalars — matches Python's len); of a
             # known dict, map_size.
@@ -365,25 +396,36 @@ def _expr_from_py(node, strs=frozenset(), dicts=frozenset()):
     raise BodyError(f"unsupported expression {type(node).__name__}")
 
 
-def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
+def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(), ret_maybe=False):
     """Translate a statement sequence that must produce a value into an expression: `return r` is the
     result; `x = e; …` becomes `let x = e in …`; `if c: …`/`else`/early-return becomes `case`.
-    `strs`/`dicts` carry the names known to hold STRINGS / DICTS (annotation-rooted, threaded through
-    `let`s with shadowing)."""
+    `strs`/`dicts`/`maybes` carry the names known to hold STRINGS / DICTS / MAYBEs
+    (annotation-rooted, threaded through `let`s with shadowing). `ret_maybe` marks an
+    `-> Optional[T]` function: every returned value is wrapped at the None<->Maybe boundary
+    (`return None` -> the None variant; an already-Maybe expression passes through; anything else
+    -> Just(...)) — Python never wraps its optionals, so the wrapping is the annotation's."""
     if not stmts:
         raise BodyError("block falls off the end without returning a value")
     head, tail = stmts[0], stmts[1:]
     if isinstance(head, ast.Return):
         if head.value is None:
             raise BodyError("bare `return` (no value)")
-        return _expr_from_py(head.value, strs, dicts)  # statements after a return are dead
+        # statements after a return are dead
+        if ret_maybe:
+            if isinstance(head.value, ast.Constant) and head.value.value is None:
+                return b_variant("None")
+            expr = _expr_from_py(head.value, strs, dicts)
+            return expr if _is_maybeish(head.value, maybes, dicts) else b_variant("Just", expr)
+        return _expr_from_py(head.value, strs, dicts)
     if isinstance(head, ast.Assign):
         if len(head.targets) != 1 or not isinstance(head.targets[0], ast.Name):
             raise BodyError("only single-name assignment targets are in subset")
         name = head.targets[0].id
         inner = (strs | {name}) if _is_stringish(head.value, strs) else (strs - {name})
         inner_d = (dicts | {name}) if _is_dictish(head.value, dicts) else (dicts - {name})
-        return b_let(name, _expr_from_py(head.value, strs, dicts), _block_from_py(tail, inner, inner_d))
+        inner_m = (maybes | {name}) if _is_maybeish(head.value, maybes, dicts) else (maybes - {name})
+        return b_let(name, _expr_from_py(head.value, strs, dicts),
+                     _block_from_py(tail, inner, inner_d, inner_m, ret_maybe))
     if isinstance(head, ast.AnnAssign):
         if not isinstance(head.target, ast.Name) or head.value is None:
             raise BodyError("annotated assignment must be `name: T = value`")
@@ -392,7 +434,10 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
         annotated_dict = isinstance(head.annotation, ast.Name) and head.annotation.id in _DICT_ANNOTATIONS
         inner = (strs | {name}) if (annotated_str or _is_stringish(head.value, strs)) else (strs - {name})
         inner_d = (dicts | {name}) if (annotated_dict or _is_dictish(head.value, dicts)) else (dicts - {name})
-        return b_let(name, _expr_from_py(head.value, strs, dicts), _block_from_py(tail, inner, inner_d))
+        inner_m = (maybes | {name}) if (_is_optional_ann(head.annotation)
+                                        or _is_maybeish(head.value, maybes, dicts)) else (maybes - {name})
+        return b_let(name, _expr_from_py(head.value, strs, dicts),
+                     _block_from_py(tail, inner, inner_d, inner_m, ret_maybe))
     if isinstance(head, ast.AugAssign):
         # `acc += e` (or -=, *=, /=, %=) re-binds `acc` to `acc <op> e` — a `let` over the rest. `acc`
         # must already be bound (a parameter or a preceding assignment). `s += t` over a known string
@@ -402,17 +447,44 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
         name = head.target.id
         if isinstance(head.op, ast.Add) and (name in strs or _is_stringish(head.value, strs)):
             update = b_app(b_var("str_concat"), [b_var(name), _expr_from_py(head.value, strs, dicts)])
-            return b_let(name, update, _block_from_py(tail, strs | {name}, dicts - {name}))
+            return b_let(name, update, _block_from_py(tail, strs | {name}, dicts - {name},
+                                                      maybes - {name}, ret_maybe))
         if type(head.op) not in _PY_BIN:
             raise BodyError("unsupported augmented-assignment operator")
         update = _op_app(_PY_BIN[type(head.op)], [b_var(name), _expr_from_py(head.value, strs, dicts)])
-        return b_let(name, update, _block_from_py(tail, strs - {name}, dicts - {name}))
+        return b_let(name, update, _block_from_py(tail, strs - {name}, dicts - {name},
+                                                  maybes - {name}, ret_maybe))
     if isinstance(head, ast.If):
+        # Narrowing: `if x is None:` / `if x is not None:` over a known Maybe becomes a `case` on
+        # it — the non-None branch REBINDS x to the Just payload (Python's type narrowing made
+        # explicit), and the None branch reading x (it IS None there; the translation has no
+        # binding for it) is refused rather than silently wrong.
+        nt = _none_test(head.test, maybes)
+        if nt is not None:
+            name, narrows_on_none = nt
+            none_stmts = head.body if narrows_on_none else (head.orelse if head.orelse else tail)
+            just_stmts = (head.orelse if head.orelse else tail) if narrows_on_none else head.body
+            for s in none_stmts:
+                if any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load)
+                       for n in ast.walk(s)):
+                    raise BodyError("narrowed-to-None name read in the None branch")
+            narrowed = maybes - {name}
+            return {
+                "kind": "case",
+                "scrutinee": b_var(name),
+                "arms": [
+                    {"pattern": {"kind": "variant", "tag": "Just",
+                                 "payload": {"kind": "bind", "name": name}},
+                     "body": _block_from_py(just_stmts, strs, dicts, narrowed, ret_maybe)},
+                    {"pattern": {"kind": "variant", "tag": "None"},
+                     "body": _block_from_py(none_stmts, strs, dicts, narrowed, ret_maybe)},
+                ],
+            }
         if not _is_boolish(head.test):
             raise BodyError("non-boolean `if` test (Python truthiness is not representable)")
-        then_expr = _block_from_py(head.body, strs, dicts)
+        then_expr = _block_from_py(head.body, strs, dicts, maybes, ret_maybe)
         # An `else`/`elif` block is the false branch; without one, the rest of the function is.
-        else_expr = _block_from_py(head.orelse if head.orelse else tail, strs, dicts)
+        else_expr = _block_from_py(head.orelse if head.orelse else tail, strs, dicts, maybes, ret_maybe)
         return b_if(_expr_from_py(head.test, strs, dicts), then_expr, else_expr)
     if isinstance(head, ast.For):
         # A loop over `src`, its body optionally wrapped in one guard `if cond: …` (no else).
@@ -436,7 +508,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
             if any(isinstance(n, ast.Name) and n.id == x and isinstance(n.ctx, ast.Load)
                    for n in ast.walk(s)):
                 raise BodyError("loop variable read after a loop")
-        loop_strs, loop_dicts = strs - {x}, dicts - {x}
+        loop_strs, loop_dicts, loop_maybes = strs - {x}, dicts - {x}, maybes - {x}
         src = _expr_from_py(head.iter, strs, dicts)
 
         # Peel one optional guard `if cond: <body>` (no else) off the loop body.
@@ -461,16 +533,21 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
             if guard is not None:
                 hits_src = b_app(b_var("filter"),
                                  [b_lambda([x], _expr_from_py(guard, loop_strs, loop_dicts)), hits_src])
-            found = _expr_from_py(stmt.value, loop_strs, loop_dicts)
             used = {x} | {n.id for s in stmts for n in ast.walk(s) if isinstance(n, ast.Name)}
             hits = "hits"
             while hits in used:
                 hits += "_"
             hit = b_app(b_var("head"), [b_var(hits)])
-            found_branch = hit if found == b_var(x) else b_let(x, hit, found)
+            if ret_maybe and isinstance(stmt.value, ast.Constant) and stmt.value.value is None:
+                found_branch = b_variant("None")
+            else:
+                found = _expr_from_py(stmt.value, loop_strs, loop_dicts)
+                found_branch = hit if found == b_var(x) else b_let(x, hit, found)
+                if ret_maybe and not _is_maybeish(stmt.value, loop_maybes, loop_dicts):
+                    found_branch = b_variant("Just", found_branch)
             return b_let(hits, hits_src,
                          b_if(b_app(b_var("null"), [b_var(hits)]),
-                              _block_from_py(tail, strs, dicts),
+                              _block_from_py(tail, strs, dicts, maybes, ret_maybe),
                               found_branch))
 
         # Shape: list-building via `acc.append(e)`.
@@ -488,7 +565,8 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
             # append onto the accumulator's prior value; `append(nil, L) = L`, so a `[]`-seeded
             # build is just the mapped/filtered list, and a non-empty seed is honored.
             rebind = b_app(b_var("append"), [b_var(acc), mapped])
-            return b_let(acc, rebind, _block_from_py(tail, strs - {acc}, dicts - {acc}))
+            return b_let(acc, rebind, _block_from_py(tail, strs - {acc}, dicts - {acc},
+                                                     maybes - {acc}, ret_maybe))
 
         # Shape: nested list-building loop `for x in xss: for i in <inner(x)>: acc.append(e)` —
         # flatten / flatMap. The sequential appends are a left fold over the outer source, each
@@ -536,7 +614,8 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
                                   [b_lambda([x], _expr_from_py(guard, loop_strs, loop_dicts)), outer_src])
             step = b_lambda([acc, x], b_app(b_var("append"), [b_var(acc), batch]))
             fold = b_app(b_var("foldl"), [step, b_var(acc), outer_src])
-            return b_let(acc, fold, _block_from_py(tail, strs - {acc}, dicts - {acc}))
+            return b_let(acc, fold, _block_from_py(tail, strs - {acc}, dicts - {acc},
+                                                   maybes - {acc}, ret_maybe))
 
         # Shape: numeric/string/structural accumulator statements `acc = update` / `acc <op>= e` —
         # one, or SEVERAL over distinct accumulators. Each becomes its own foldl over `src`;
@@ -576,7 +655,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
                 if guard is not None \
                         and any(isinstance(n, ast.Name) and n.id in set(accs) for n in ast.walk(guard)):
                     raise BodyError("loop guard reads an accumulator in a multi-accumulator loop")
-            result = _block_from_py(tail, strs, dicts)
+            result = _block_from_py(tail, strs, dicts, maybes - set(accs), ret_maybe)
             for acc, update in reversed(list(zip(accs, updates))):
                 # A guarded step keeps the accumulator unchanged on the false branch.
                 if guard is not None:
@@ -604,6 +683,32 @@ def _str_annotated_params(func):
                      if isinstance(p.annotation, ast.Name) and p.annotation.id == "str")
 
 
+def _is_optional_ann(ann):
+    """Whether an annotation AST is an optional type — `Optional[T]`, `T | None`, `None | T`, or
+    `Union[..., None, ...]` — the roots of the known-Maybe inference."""
+    if isinstance(ann, ast.Subscript):
+        base = ann.value.attr if isinstance(ann.value, ast.Attribute) else getattr(ann.value, "id", None)
+        if base == "Optional":
+            return True
+        if base == "Union":
+            members = ann.slice.elts if isinstance(ann.slice, ast.Tuple) else [ann.slice]
+            return any(isinstance(m, ast.Constant) and m.value is None for m in members)
+        return False
+    if isinstance(ann, ast.BinOp) and isinstance(ann.op, ast.BitOr):
+        return any(isinstance(side, ast.Constant) and side.value is None
+                   for side in (ann.left, ann.right)) \
+            or _is_optional_ann(ann.left) or _is_optional_ann(ann.right)
+    return False
+
+
+def _optional_annotated_params(func):
+    """The parameter names annotated optional — the roots of the known-Maybe inference behind the
+    None<->Maybe boundary translations (`is None` narrowing, Just-wrapped returns)."""
+    a = func.args
+    return frozenset(p.arg for p in (list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs))
+                     if _is_optional_ann(p.annotation))
+
+
 def _dict_annotated_params(func):
     """The parameter names annotated as dicts (`dict`, `dict[...]`, `Dict[...]`, `Mapping[...]`) —
     the roots of the known-dict inference behind the map-idiom translations."""
@@ -629,7 +734,8 @@ def body_ast_from_py(func):
     if not stmts:
         return None
     try:
-        expr = _block_from_py(stmts, _str_annotated_params(func), _dict_annotated_params(func))
+        expr = _block_from_py(stmts, _str_annotated_params(func), _dict_annotated_params(func),
+                              _optional_annotated_params(func), _is_optional_ann(func.returns))
         params = _fixed_param_names(func)
         # A 0-arg function is its bare result (applying it to [] still evaluates); else wrap in a
         # lambda so `run` can apply the example's arguments.
