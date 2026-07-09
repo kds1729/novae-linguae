@@ -378,6 +378,28 @@ form (the expression-position twin was fixed long ago), so any `case` over typed
 unparsed to a surface its own parser refused — caught by the oracle gate on the new rows, fixed
 in the parser with a regression test.
 
+**GW8 — real code into the commons (2026-07-09): ingestion is the workflow.** GW1–7 exercised
+hand-authored or description-generated records; GW8 closes the remaining gap — **ordinary
+source code** becoming certified, discoverable, trusted commons artifacts with no authoring
+step. The target is [`examples/inventory.py`](examples/inventory.py): a small, fully-annotated,
+doctested Python inventory module written in exactly the idioms the statement subset now covers
+— the bare `d.get(k)` Maybe, `is None` narrowing, a Maybe-returning search loop, plain/guarded
+accumulator loops, and a nested flatten. `nl-ingest-py --v2 --emit-dir` lifts all six functions
+to records with **nominal `Maybe int` signatures and variant-encoded examples** (a `None`
+argument arrives as the `None` variant; a present result as `Just(…)`), **all six certify**,
+and `seed_certifications.py` publishes records + signed certifications to Arca. Confirmed
+end to end against the live node: semantic search ranks an inventory record first for a
+stock-level query; `GET /v0/records/{fn}/certifications` serves the cert; a consumer's own
+`nl-validator certified` verdict under a policy trusting the certifier returns **CERTIFIED**;
+and the record resolved by hash runs its examples against the ingested body. **The workflow
+paid for itself immediately (the GW3 pattern):** the first certify run exposed a typechecker
+asymmetry — a *declared* structural-sum result unified with variant-constructing bodies, but
+the **nominal `apply(Maybe, [int])`** the adapters emit did not (it never erased to the opaque
+`Sum`), so Maybe-*producing* ingested records were ill-typed while Maybe-*consuming* ones
+passed. Fixed in `ast_to_ty` (nominal `Maybe`/`Result` applications now erase to `Sum`, the
+same rule as `Json` and the structural `sum` kind) with a regression test — the kind of hole
+only real ingested records could surface.
+
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.
 - **Ingestion**: map source-language string/dict idioms onto the new builtins in

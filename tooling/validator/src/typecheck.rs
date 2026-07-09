@@ -208,6 +208,15 @@ fn ast_to_ty(t: &J) -> Result<Ty> {
         }
         "apply" => {
             let ctor = t["ctor"].as_str_name().unwrap_or_else(|| "App".to_string());
+            // A nominal `Maybe T` / `Result T E` application IS a sum type, and sum types are
+            // opaque `Sum` at the HM level throughout (like `Json` and the structural `sum`
+            // kind above) — so a declared `-> Maybe int` unifies with variant construction and
+            // the Maybe-producing builtins (`map_get`, `parse_int`), exactly as the equivalent
+            // structural-sum declaration already did. Payload checking stays the example /
+            // refinement gates' job, as for every other sum-typed declaration.
+            if ctor == "Maybe" || ctor == "Result" {
+                return Ok(con("Sum"));
+            }
             let args = t["args"].as_array().ok_or_else(|| anyhow!("apply args"))?.iter().map(ast_to_ty).collect::<Result<Vec<_>>>()?;
             Ty::Con(ctor, args)
         }
@@ -871,6 +880,32 @@ mod tests {
                     { "kind": "app", "fn": { "kind": "var", "name": "not" }, "args": [{ "kind": "var", "name": "a" }] }] } } });
         let bad_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }], "result": sum });
         assert!(typecheck(&bad_ty, &bad).is_err(), "a payload type error is not hidden by the opaque Sum");
+    }
+
+    #[test]
+    fn nominal_maybe_application_erases_to_sum() {
+        // GW8 (real ingested code): the adapters declare optional results NOMINALLY —
+        // `apply(Maybe, [int])`, from a Python `-> int | None` — not as a structural sum. The
+        // nominal application must erase to the same opaque `Sum`, so a search loop's
+        // Just/None-constructing body and a bare map_get body both check against it.
+        let maybe_int = json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "Maybe" },
+                                "args": [{ "kind": "builtin", "name": "int" }] });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "q" }], "body": {
+            "kind": "case", "scrutinee": { "kind": "var", "name": "q" },
+            "arms": [
+                { "pattern": { "kind": "variant", "tag": "Just", "payload": { "kind": "bind", "name": "n" } },
+                  "body": { "kind": "variant", "tag": "Just",
+                    "payload": { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                        "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 1 } }] } } },
+                { "pattern": { "kind": "variant", "tag": "None" }, "body": { "kind": "variant", "tag": "None" } }] } });
+        let ty = json!({ "kind": "fn", "params": [maybe_int], "result": maybe_int });
+        assert!(typecheck(&ty, &body).is_ok(), "bump : Maybe int -> Maybe int (nominal Maybe)");
+        // The erasure is to Sum, not to a free var: a Maybe-typed value is still not an int.
+        let misuse = json!({ "kind": "lambda", "params": [{ "name": "q" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                      "args": [{ "kind": "var", "name": "q" }, { "kind": "lit", "value": { "kind": "int", "value": 1 } }] } });
+        let misuse_ty = json!({ "kind": "fn", "params": [maybe_int], "result": { "kind": "builtin", "name": "int" } });
+        assert!(typecheck(&misuse_ty, &misuse).is_err(), "Maybe int is not int");
     }
 
     #[test]
