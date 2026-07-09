@@ -121,6 +121,28 @@ class PythonBodyTests(unittest.TestCase):
         # Loop variable read AFTER a search loop (Python: last element; the translation: unbound).
         self.assertIsNone(py_body("def f(x):\n    for i in x:\n        if i > 0:\n            return i\n    return i"))
 
+    def test_multi_accumulator_loop_splits_into_folds(self):
+        # Independent accumulator statements split into one fold each — exact in a pure total
+        # language (re-walking the list is unobservable), like the search loop's short-circuit.
+        body = py_body("def f(xs):\n    s = 0\n    c = 0\n"
+                       "    for x in xs:\n        s += x\n        c += 1\n    return s - c")
+        s = json.dumps(body)
+        self.assertEqual(s.count('"foldl"'), 2)
+        # Source order of the accumulators is kept: s's fold binds outermost.
+        self.assertLess(s.index('"name": "s"'), s.index('"name": "c"'))
+
+    def test_dependent_accumulators_are_out_of_subset(self):
+        # `c += s` reads s's MID-LOOP value — a separate fold can't reproduce it; refused.
+        self.assertIsNone(py_body("def f(xs):\n    s = 0\n    c = 0\n"
+                                  "    for x in xs:\n        s += x\n        c += s\n    return c"))
+        # A guard reading an accumulator has the same mid-loop problem.
+        self.assertIsNone(py_body("def f(xs):\n    s = 0\n    c = 0\n"
+                                  "    for x in xs:\n        if x > c:\n            s += x\n"
+                                  "            c += 1\n    return s"))
+        # The same accumulator twice is sequential by construction.
+        self.assertIsNone(py_body("def f(xs):\n    s = 0\n"
+                                  "    for x in xs:\n        s += x\n        s += 1\n    return s"))
+
     def test_search_loop_becomes_filter_head(self):
         # `for i in x: return i` was the old subset boundary; it is now the degenerate search —
         # head-or-default — and the guarded form filters first (exact in a pure total language).

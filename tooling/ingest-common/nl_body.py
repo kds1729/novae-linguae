@@ -411,10 +411,12 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
         else_expr = _block_from_py(head.orelse if head.orelse else tail, strs, dicts)
         return b_if(_expr_from_py(head.test, strs, dicts), then_expr, else_expr)
     if isinstance(head, ast.For):
-        # A loop over `src`, its single-statement body optionally wrapped in one guard
-        # `if cond: …` (no else). Three shapes:
+        # A loop over `src`, its body optionally wrapped in one guard `if cond: …` (no else).
+        # Three shapes:
         #   acc = update / acc <op>= e   -> acc = foldl(\acc x -> update, acc, src)   (a guard makes
-        #                                    the step `case cond of true => update; false => acc`)
+        #                                    the step `case cond of true => update; false => acc`;
+        #                                    SEVERAL such statements -> one fold per accumulator,
+        #                                    exact only when independent)
         #   acc.append(e)                -> acc = append(acc, map(\x -> e, [filter(\x->cond,] src)))
         #   return e                     -> early-return search: head of the filtered sublist, with
         #                                    the statements after the loop as the not-found branch
@@ -434,9 +436,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
                 raise BodyError("non-boolean loop guard (Python truthiness is not representable)")
             guard = body[0].test
             body = body[0].body
-        if len(body) != 1:
-            raise BodyError("loop body must be a single (optionally guarded) accumulator statement")
-        stmt = body[0]
+        stmt = body[0] if len(body) == 1 else None
 
         # Shape: early-return search `for x in src: if cond: return e` with the block after the
         # loop as the not-found default. A fold can't short-circuit, but in a pure total language
@@ -484,29 +484,53 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
             rebind = b_app(b_var("append"), [b_var(acc), mapped])
             return b_let(acc, rebind, _block_from_py(tail, strs - {acc}, dicts - {acc}))
 
-        # Shape: numeric/string/structural accumulator `acc = update` or `acc <op>= e`.
-        if isinstance(stmt, ast.AugAssign):
-            if not isinstance(stmt.target, ast.Name):
-                raise BodyError("accumulator assignment must target a single name")
-            acc = stmt.target.id
-            if isinstance(stmt.op, ast.Add) and (acc in strs or _is_stringish(stmt.value, loop_strs)):
-                update = b_app(b_var("str_concat"), [b_var(acc), _expr_from_py(stmt.value, loop_strs, loop_dicts)])
-            elif type(stmt.op) not in _PY_BIN:
-                raise BodyError("unsupported augmented-assignment operator")
-            else:
-                update = _op_app(_PY_BIN[type(stmt.op)], [b_var(acc), _expr_from_py(stmt.value, loop_strs, loop_dicts)])
-        elif isinstance(stmt, ast.Assign):
-            if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
-                raise BodyError("accumulator assignment must target a single name")
-            acc = stmt.targets[0].id
-            update = _expr_from_py(stmt.value, loop_strs, loop_dicts)
-        else:
-            raise BodyError("loop body must be an accumulator assignment or an `.append(…)`")
-        # A guarded step keeps the accumulator unchanged on the false branch.
-        if guard is not None:
-            update = b_if(_expr_from_py(guard, loop_strs, loop_dicts), update, b_var(acc))
-        fold = b_app(b_var("foldl"), [b_lambda([acc, x], update), b_var(acc), src])
-        return b_let(acc, fold, _block_from_py(tail, strs, dicts))
+        # Shape: numeric/string/structural accumulator statements `acc = update` / `acc <op>= e` —
+        # one, or SEVERAL over distinct accumulators. Each becomes its own foldl over `src`;
+        # splitting one pass into N is exact only when the statements are independent (an update or
+        # the guard reading ANOTHER accumulator sees a mid-loop value a separate fold can't
+        # reproduce), so dependence is refused rather than silently mistranslated. Re-walking the
+        # list N times is unobservable in a pure total language, like the search loop's skipped
+        # short-circuit.
+        if body and all(isinstance(s, (ast.Assign, ast.AugAssign)) for s in body):
+            accs, updates = [], []
+            for stmt in body:
+                if isinstance(stmt, ast.AugAssign):
+                    if not isinstance(stmt.target, ast.Name):
+                        raise BodyError("accumulator assignment must target a single name")
+                    acc = stmt.target.id
+                    if isinstance(stmt.op, ast.Add) and (acc in strs or _is_stringish(stmt.value, loop_strs)):
+                        update = b_app(b_var("str_concat"), [b_var(acc), _expr_from_py(stmt.value, loop_strs, loop_dicts)])
+                    elif type(stmt.op) not in _PY_BIN:
+                        raise BodyError("unsupported augmented-assignment operator")
+                    else:
+                        update = _op_app(_PY_BIN[type(stmt.op)], [b_var(acc), _expr_from_py(stmt.value, loop_strs, loop_dicts)])
+                else:
+                    if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+                        raise BodyError("accumulator assignment must target a single name")
+                    acc = stmt.targets[0].id
+                    update = _expr_from_py(stmt.value, loop_strs, loop_dicts)
+                accs.append(acc)
+                updates.append(update)
+            if len(accs) > 1:
+                if len(set(accs)) != len(accs):
+                    raise BodyError("duplicate accumulator in a multi-accumulator loop")
+                for stmt in body:
+                    target = stmt.target if isinstance(stmt, ast.AugAssign) else stmt.targets[0]
+                    others = set(accs) - {target.id}
+                    if any(isinstance(n, ast.Name) and n.id in others for n in ast.walk(stmt.value)):
+                        raise BodyError("sequentially dependent accumulators (an update reads another)")
+                if guard is not None \
+                        and any(isinstance(n, ast.Name) and n.id in set(accs) for n in ast.walk(guard)):
+                    raise BodyError("loop guard reads an accumulator in a multi-accumulator loop")
+            result = _block_from_py(tail, strs, dicts)
+            for acc, update in reversed(list(zip(accs, updates))):
+                # A guarded step keeps the accumulator unchanged on the false branch.
+                if guard is not None:
+                    update = b_if(_expr_from_py(guard, loop_strs, loop_dicts), update, b_var(acc))
+                fold = b_app(b_var("foldl"), [b_lambda([acc, x], update), b_var(acc), src])
+                result = b_let(acc, fold, result)
+            return result
+        raise BodyError("loop body must be an accumulator assignment or an `.append(…)`")
     raise BodyError(f"unsupported statement {type(head).__name__}")
 
 

@@ -439,6 +439,16 @@ in the parser with a regression test.
   sample functions (`first_negative`/`contains`/`double_first_even`, thirteen total) ingest and
   run against their doctests. Residuals now: multi-accumulator loops (a tuple accumulator),
   `while` (non-structural), tuple-unpacking `for`, nested loops.
+  *Multi-accumulator loops (2026-07-09):* the "needs a tuple accumulator" residual falls to the
+  same purity argument — the body language has no record/tuple *construction*, but **independent**
+  accumulator statements don't need one: `for x in xs: s += e1; c += e2` → one `foldl` per
+  accumulator (`let s = foldl(…s…) in let c = foldl(…c…) in …`), since re-walking the list N
+  times is unobservable in a pure total language. Exactness is guarded, not assumed: an update or
+  the loop guard reading *another* accumulator (which in Python sees a mid-loop value no separate
+  fold reproduces), or the same accumulator twice, is refused. Two more sample functions
+  (`sum_minus_count`/`even_sum_and_count`, fifteen total) ingest and run against their doctests.
+  Residuals now: *dependent* multi-accumulator loops (those genuinely need in-language record
+  construction), `while` (non-structural), tuple-unpacking `for`, nested loops.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

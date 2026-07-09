@@ -189,3 +189,36 @@ def double_first_even(xs):
         if x % 2 == 0:
             return x * 2
     return -1
+
+
+def sum_minus_count(xs):
+    """Sum of the elements minus how many there are (independent two-accumulator loop -> two folds).
+
+    >>> sum_minus_count([5, 6])
+    9
+    >>> sum_minus_count([])
+    0
+    """
+    s = 0
+    c = 0
+    for x in xs:
+        s += x
+        c += 1
+    return s - c
+
+
+def even_sum_and_count(xs):
+    """Sum plus count of the even elements (guarded two-accumulator loop).
+
+    >>> even_sum_and_count([1, 2, 3, 4])
+    8
+    >>> even_sum_and_count([1, 3])
+    0
+    """
+    s = 0
+    c = 0
+    for x in xs:
+        if x % 2 == 0:
+            s += x
+            c += 1
+    return s + c

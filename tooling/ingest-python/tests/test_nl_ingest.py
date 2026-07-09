@@ -321,10 +321,11 @@ class TestExecutableCorpus(unittest.TestCase):
         bodies = n.bodies_from_source(src, include_private=False)
         # clamp / sign / abs_diff / squares / total, plus the statement-subset extensions
         # sum_positives / count_evens (guarded folds), doubled / keep_positive /
-        # squares_of_evens (list-building append loops -> map/filter), and first_negative /
-        # contains / double_first_even (early-return search loops -> filter/head).
-        self.assertEqual(len(records), 13)
-        self.assertEqual(len(bodies), 13)               # every body is in the executable subset
+        # squares_of_evens (list-building append loops -> map/filter), first_negative /
+        # contains / double_first_even (early-return search loops -> filter/head), and
+        # sum_minus_count / even_sum_and_count (independent multi-accumulator loops -> N folds).
+        self.assertEqual(len(records), 15)
+        self.assertEqual(len(bodies), 15)               # every body is in the executable subset
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
