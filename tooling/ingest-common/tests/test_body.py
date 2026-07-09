@@ -117,7 +117,20 @@ class PythonBodyTests(unittest.TestCase):
         self.assertIsNone(py_body("def f(x):\n    if x:\n        return 1\n    return 0"))  # truthy non-bool test
         self.assertIsNone(py_body("def f(x):\n    return [i for r in x for i in r]"))  # multi-generator comp
         self.assertIsNone(py_body("def f(x):\n    return"))  # bare return
-        self.assertIsNone(py_body("def f(x):\n    for i in x:\n        return i\n    return 0"))  # non-accumulator loop
+        self.assertIsNone(py_body("def f(x):\n    while x > 0:\n        x -= 1\n    return x"))  # while (non-structural)
+        # Loop variable read AFTER a search loop (Python: last element; the translation: unbound).
+        self.assertIsNone(py_body("def f(x):\n    for i in x:\n        if i > 0:\n            return i\n    return i"))
+
+    def test_search_loop_becomes_filter_head(self):
+        # `for i in x: return i` was the old subset boundary; it is now the degenerate search —
+        # head-or-default — and the guarded form filters first (exact in a pure total language).
+        body = py_body("def f(x):\n    for i in x:\n        return i\n    return 0")
+        let = body["body"]  # lambda -> let hits = x in case null(hits) of ...
+        self.assertEqual(let["kind"], "let")
+        self.assertEqual(let["value"], {"kind": "var", "name": "x"})
+        self.assertEqual(let["body"]["scrutinee"]["fn"], {"kind": "var", "name": "null"})
+        guarded = py_body("def f(x):\n    for i in x:\n        if i > 0:\n            return i\n    return 0")
+        self.assertEqual(guarded["body"]["value"]["fn"], {"kind": "var", "name": "filter"})
 
 
 class TokenBodyTests(unittest.TestCase):

@@ -147,3 +147,45 @@ def squares_of_evens(xs):
         if x % 2 == 0:
             out.append(x * x)
     return out
+
+
+def first_negative(xs):
+    """The first negative element, or 0 if none (early-return search loop -> filter/head).
+
+    >>> first_negative([3, -4, 5, -6])
+    -4
+    >>> first_negative([1, 2])
+    0
+    """
+    for x in xs:
+        if x < 0:
+            return x
+    return 0
+
+
+def contains(xs, target):
+    """Whether target occurs in xs (early-return any loop).
+
+    >>> contains([1, 2, 3], 2)
+    True
+    >>> contains([1, 2, 3], 5)
+    False
+    """
+    for x in xs:
+        if x == target:
+            return True
+    return False
+
+
+def double_first_even(xs):
+    """Twice the first even element, or -1 if none (search with a transformed hit).
+
+    >>> double_first_even([3, 4, 5])
+    8
+    >>> double_first_even([1, 3])
+    -1
+    """
+    for x in xs:
+        if x % 2 == 0:
+            return x * 2
+    return -1

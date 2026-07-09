@@ -320,10 +320,11 @@ class TestExecutableCorpus(unittest.TestCase):
         records = n.records_from_source(src, "sample", include_private=False, v2=True)
         bodies = n.bodies_from_source(src, include_private=False)
         # clamp / sign / abs_diff / squares / total, plus the statement-subset extensions
-        # sum_positives / count_evens (guarded folds) and doubled / keep_positive /
-        # squares_of_evens (list-building append loops -> map/filter).
-        self.assertEqual(len(records), 10)
-        self.assertEqual(len(bodies), 10)               # every body is in the executable subset
+        # sum_positives / count_evens (guarded folds), doubled / keep_positive /
+        # squares_of_evens (list-building append loops -> map/filter), and first_negative /
+        # contains / double_first_even (early-return search loops -> filter/head).
+        self.assertEqual(len(records), 13)
+        self.assertEqual(len(bodies), 13)               # every body is in the executable subset
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
@@ -463,6 +464,70 @@ class TestStringIdiomBodies(unittest.TestCase):
         import nl_body
         func = pyast.parse("def f(x, xs):\n    return x in xs\n").body[0]
         self.assertIsNone(nl_body.body_ast_from_py(func))
+
+
+class TestSearchLoopBodies(unittest.TestCase):
+    """The early-return search-loop translation: `for x in xs: if c: return e` + a default return
+    becomes `let hits = filter(\\x -> c, xs) in case null(hits) of true => default; false =>
+    let x = head(hits) in e` — exact in a pure total language (the skipped short-circuit is
+    unobservable), reusing existing builtins."""
+
+    def _body(self, src):
+        import ast as pyast
+        import nl_body
+        func = pyast.parse(src).body[0]
+        return nl_body.body_ast_from_py(func)
+
+    def test_guarded_search_translates(self):
+        src = ("def f(xs):\n"
+               "    for x in xs:\n"
+               "        if x < 0:\n"
+               "            return x\n"
+               "    return 0\n")
+        s = json.dumps(self._body(src))
+        for builtin in ("filter", "null", "head"):
+            self.assertIn(f'"{builtin}"', s, src)
+
+    def test_transformed_hit_rebinds_loop_var(self):
+        src = ("def f(xs):\n"
+               "    for x in xs:\n"
+               "        if x % 2 == 0:\n"
+               "            return x * 2\n"
+               "    return -1\n")
+        b = self._body(src)
+        self.assertIsNotNone(b)
+
+        # The found branch binds the loop name to head(hits) so the return expression reads it.
+        def lets(node):
+            if isinstance(node, dict):
+                if node.get("kind") == "let":
+                    yield node
+                for v in node.values():
+                    yield from lets(v)
+            elif isinstance(node, list):
+                for v in node:
+                    yield from lets(v)
+        x_lets = [l for l in lets(b) if l["name"] == "x"]
+        self.assertTrue(any(l["value"].get("fn", {}).get("name") == "head" for l in x_lets), x_lets)
+
+    def test_fresh_hits_name_avoids_collision(self):
+        src = ("def f(xs, hits):\n"
+               "    for x in xs:\n"
+               "        if x > hits:\n"
+               "            return x\n"
+               "    return hits\n")
+        s = json.dumps(self._body(src))
+        self.assertIn('"hits_"', s)  # the binder stepped past the parameter's name
+
+    def test_loop_var_after_loop_is_out_of_subset(self):
+        # Python leaves x bound to the LAST element after the loop; the translation would not,
+        # so reading it afterwards must be refused rather than silently mistranslated.
+        src = ("def f(xs):\n"
+               "    for x in xs:\n"
+               "        if x < 0:\n"
+               "            return x\n"
+               "    return x\n")
+        self.assertIsNone(self._body(src))
 
 
 if __name__ == "__main__":

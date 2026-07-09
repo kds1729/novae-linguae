@@ -428,6 +428,17 @@ in the parser with a regression test.
   `squares_of_evens`) ingest and run against their doctests. Honest residuals still out of subset:
   multi-accumulator loops (a tuple accumulator), early-`return`-in-a-loop (search/`any` — a fold
   can't short-circuit), `while`, tuple-unpacking `for`, nested loops.
+  *Search loops (2026-07-09):* early-`return`-in-a-loop — the top residual, and the ubiquitous
+  find/`any` idiom — is now in. A fold indeed can't short-circuit, but in a **pure total**
+  language the short-circuit is unobservable, so find-first *is* `head` of the guarded sublist:
+  `for x in xs: if c: return e` (+ the block after the loop as the not-found branch) →
+  `let hits = filter(\x -> c, xs) in case null(hits) of true => <after-loop>; false =>
+  let x = head(hits) in e`. Existing builtins only; the `hits` binder is freshened past any
+  colliding name; a tail that *reads* the loop variable after the loop (bound to the last
+  element in Python, unbound here) is refused rather than silently mistranslated. Three more
+  sample functions (`first_negative`/`contains`/`double_first_even`, thirteen total) ingest and
+  run against their doctests. Residuals now: multi-accumulator loops (a tuple accumulator),
+  `while` (non-structural), tuple-unpacking `for`, nested loops.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

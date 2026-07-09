@@ -411,12 +411,15 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
         else_expr = _block_from_py(head.orelse if head.orelse else tail, strs, dicts)
         return b_if(_expr_from_py(head.test, strs, dicts), then_expr, else_expr)
     if isinstance(head, ast.For):
-        # An accumulator loop over `src` re-binds an accumulator that must already be bound (a
-        # preceding `acc = init` -> let). Three body shapes, each optionally wrapped in one guard
-        # `if cond: …` (no else):
+        # A loop over `src`, its single-statement body optionally wrapped in one guard
+        # `if cond: …` (no else). Three shapes:
         #   acc = update / acc <op>= e   -> acc = foldl(\acc x -> update, acc, src)   (a guard makes
         #                                    the step `case cond of true => update; false => acc`)
         #   acc.append(e)                -> acc = append(acc, map(\x -> e, [filter(\x->cond,] src)))
+        #   return e                     -> early-return search: head of the filtered sublist, with
+        #                                    the statements after the loop as the not-found branch
+        # The accumulator shapes re-bind an `acc` that must already be bound (a preceding
+        # `acc = init` -> let).
         if head.orelse or not isinstance(head.target, ast.Name):
             raise BodyError("only `for <name> in <src>:` accumulator loops are in subset")
         x = head.target.id
@@ -434,6 +437,35 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
         if len(body) != 1:
             raise BodyError("loop body must be a single (optionally guarded) accumulator statement")
         stmt = body[0]
+
+        # Shape: early-return search `for x in src: if cond: return e` with the block after the
+        # loop as the not-found default. A fold can't short-circuit, but in a pure total language
+        # the short-circuit is unobservable — find-first IS `head` of the guarded sublist:
+        #   let hits = filter(\x -> cond, src) in
+        #     case null(hits) of true => <rest of the function>; false => let x = head(hits) in e
+        if isinstance(stmt, ast.Return):
+            if stmt.value is None:
+                raise BodyError("bare `return` in a loop (no value)")
+            # After the loop Python leaves x bound to the last element; the translation does not,
+            # so a tail that reads the loop variable is out of subset rather than silently wrong.
+            for s in tail:
+                if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(s)):
+                    raise BodyError("loop variable read after a search loop")
+            hits_src = src
+            if guard is not None:
+                hits_src = b_app(b_var("filter"),
+                                 [b_lambda([x], _expr_from_py(guard, loop_strs, loop_dicts)), hits_src])
+            found = _expr_from_py(stmt.value, loop_strs, loop_dicts)
+            used = {x} | {n.id for s in stmts for n in ast.walk(s) if isinstance(n, ast.Name)}
+            hits = "hits"
+            while hits in used:
+                hits += "_"
+            hit = b_app(b_var("head"), [b_var(hits)])
+            found_branch = hit if found == b_var(x) else b_let(x, hit, found)
+            return b_let(hits, hits_src,
+                         b_if(b_app(b_var("null"), [b_var(hits)]),
+                              _block_from_py(tail, strs, dicts),
+                              found_branch))
 
         # Shape: list-building via `acc.append(e)`.
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) \
