@@ -449,6 +449,18 @@ in the parser with a regression test.
   (`sum_minus_count`/`even_sum_and_count`, fifteen total) ingest and run against their doctests.
   Residuals now: *dependent* multi-accumulator loops (those genuinely need in-language record
   construction), `while` (non-structural), tuple-unpacking `for`, nested loops.
+  *Nested list-building loops (2026-07-09):* the flatten/flatMap idiom
+  `for x in xss: for i in <inner(x)>: out.append(e)` → a `foldl` of per-row appends,
+  `out = foldl(\out x -> append(out, map(\i -> e, [filter] inner)), out, xss)` — inner guard
+  filters the row's batch, outer guard filters the outer source, seed is the accumulator's prior
+  value so the `[]` seed still collapses. Refused: the element/guards *reading* the accumulator
+  mid-loop (a fold step sees only its own batch, not Python's growing list). The
+  read-the-loop-variable-after-the-loop honesty guard was also hoisted to cover **all** loop
+  shapes (previously only the search loop refused it; the accumulator/append shapes silently
+  dropped Python's last-element binding). Two more sample functions (`flatten`/`evens_of_rows`,
+  seventeen total) ingest and run against their doctests. Residuals now: *dependent*
+  multi-accumulator loops, `while` (non-structural), tuple-unpacking `for`, deeper loop nesting
+  (three levels) and nested loops whose inner statement is not an append.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

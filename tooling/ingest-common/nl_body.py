@@ -412,12 +412,13 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
         return b_if(_expr_from_py(head.test, strs, dicts), then_expr, else_expr)
     if isinstance(head, ast.For):
         # A loop over `src`, its body optionally wrapped in one guard `if cond: …` (no else).
-        # Three shapes:
+        # Four shapes:
         #   acc = update / acc <op>= e   -> acc = foldl(\acc x -> update, acc, src)   (a guard makes
         #                                    the step `case cond of true => update; false => acc`;
         #                                    SEVERAL such statements -> one fold per accumulator,
         #                                    exact only when independent)
         #   acc.append(e)                -> acc = append(acc, map(\x -> e, [filter(\x->cond,] src)))
+        #   for i in inner: acc.append(e)-> nested list-building: a foldl of per-row appends
         #   return e                     -> early-return search: head of the filtered sublist, with
         #                                    the statements after the loop as the not-found branch
         # The accumulator shapes re-bind an `acc` that must already be bound (a preceding
@@ -425,6 +426,12 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
         if head.orelse or not isinstance(head.target, ast.Name):
             raise BodyError("only `for <name> in <src>:` accumulator loops are in subset")
         x = head.target.id
+        # After the loop Python leaves x bound to the last element; none of the translations do,
+        # so a tail that reads the loop variable is out of subset rather than silently wrong.
+        for s in tail:
+            if any(isinstance(n, ast.Name) and n.id == x and isinstance(n.ctx, ast.Load)
+                   for n in ast.walk(s)):
+                raise BodyError("loop variable read after a loop")
         loop_strs, loop_dicts = strs - {x}, dicts - {x}
         src = _expr_from_py(head.iter, strs, dicts)
 
@@ -446,11 +453,6 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
         if isinstance(stmt, ast.Return):
             if stmt.value is None:
                 raise BodyError("bare `return` in a loop (no value)")
-            # After the loop Python leaves x bound to the last element; the translation does not,
-            # so a tail that reads the loop variable is out of subset rather than silently wrong.
-            for s in tail:
-                if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(s)):
-                    raise BodyError("loop variable read after a search loop")
             hits_src = src
             if guard is not None:
                 hits_src = b_app(b_var("filter"),
@@ -483,6 +485,54 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset()):
             # build is just the mapped/filtered list, and a non-empty seed is honored.
             rebind = b_app(b_var("append"), [b_var(acc), mapped])
             return b_let(acc, rebind, _block_from_py(tail, strs - {acc}, dicts - {acc}))
+
+        # Shape: nested list-building loop `for x in xss: for i in <inner(x)>: acc.append(e)` —
+        # flatten / flatMap. The sequential appends are a left fold over the outer source, each
+        # step appending that row's (mapped/filtered) batch onto the accumulator so far:
+        #   acc = foldl(\acc x -> append(acc, map(\i -> e, [filter(\i -> ic,] inner)), acc, xss)
+        # (outer guard -> filter over xss; seeded with acc's prior value, so `[]` collapses as
+        # above). The element/guards reading the accumulator mid-loop is refused — a fold step
+        # sees only its own batch's `acc`, not Python's growing list.
+        if isinstance(stmt, ast.For):
+            if stmt.orelse or not isinstance(stmt.target, ast.Name):
+                raise BodyError("only `for <name> in <src>:` loops are in subset")
+            i = stmt.target.id
+            in_strs, in_dicts = loop_strs - {i}, loop_dicts - {i}
+            inner_src = _expr_from_py(stmt.iter, loop_strs, loop_dicts)
+            ibody = stmt.body
+            iguard = None
+            if len(ibody) == 1 and isinstance(ibody[0], ast.If) and not ibody[0].orelse:
+                if not _is_boolish(ibody[0].test):
+                    raise BodyError("non-boolean loop guard (Python truthiness is not representable)")
+                iguard = ibody[0].test
+                ibody = ibody[0].body
+            if not (len(ibody) == 1 and isinstance(ibody[0], ast.Expr)
+                    and isinstance(ibody[0].value, ast.Call)
+                    and isinstance(ibody[0].value.func, ast.Attribute)
+                    and ibody[0].value.func.attr == "append"
+                    and isinstance(ibody[0].value.func.value, ast.Name)
+                    and len(ibody[0].value.args) == 1 and not ibody[0].value.keywords):
+                raise BodyError("nested loop body must be a single (optionally guarded) `.append(…)`")
+            receiver = ibody[0].value.func.value
+            acc = receiver.id
+            for n in ast.walk(head):
+                if isinstance(n, ast.Name) and n.id == acc and isinstance(n.ctx, ast.Load) \
+                        and n is not receiver:
+                    raise BodyError("nested loop reads its accumulator mid-loop")
+            batch = inner_src
+            if iguard is not None:
+                batch = b_app(b_var("filter"),
+                              [b_lambda([i], _expr_from_py(iguard, in_strs, in_dicts)), batch])
+            elt = _expr_from_py(ibody[0].value.args[0], in_strs, in_dicts)
+            if elt != b_var(i):
+                batch = b_app(b_var("map"), [b_lambda([i], elt), batch])
+            outer_src = src
+            if guard is not None:
+                outer_src = b_app(b_var("filter"),
+                                  [b_lambda([x], _expr_from_py(guard, loop_strs, loop_dicts)), outer_src])
+            step = b_lambda([acc, x], b_app(b_var("append"), [b_var(acc), batch]))
+            fold = b_app(b_var("foldl"), [step, b_var(acc), outer_src])
+            return b_let(acc, fold, _block_from_py(tail, strs - {acc}, dicts - {acc}))
 
         # Shape: numeric/string/structural accumulator statements `acc = update` / `acc <op>= e` —
         # one, or SEVERAL over distinct accumulators. Each becomes its own foldl over `src`;

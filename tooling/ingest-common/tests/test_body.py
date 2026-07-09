@@ -143,6 +143,34 @@ class PythonBodyTests(unittest.TestCase):
         self.assertIsNone(py_body("def f(xs):\n    s = 0\n"
                                   "    for x in xs:\n        s += x\n        s += 1\n    return s"))
 
+    def test_nested_list_building_loop_becomes_fold_of_appends(self):
+        # flatten: `for row in xss: for i in row: out.append(i)` -> foldl of per-row appends,
+        # seeded with out's prior value.
+        body = py_body("def f(xss):\n    out = []\n"
+                       "    for row in xss:\n        for i in row:\n            out.append(i)\n"
+                       "    return out")
+        s = json.dumps(body)
+        self.assertIn('"foldl"', s)
+        self.assertIn('"append"', s)
+        # An inner guard filters the row's batch.
+        guarded = py_body("def f(xss):\n    out = []\n"
+                          "    for row in xss:\n        for i in row:\n"
+                          "            if i > 0:\n                out.append(i)\n    return out")
+        self.assertIn('"filter"', json.dumps(guarded))
+
+    def test_nested_loop_reading_accumulator_is_out_of_subset(self):
+        # The element expression reading `out` mid-loop sees Python's growing list — a fold step
+        # can't reproduce that; refused.
+        self.assertIsNone(py_body("def f(xss):\n    out = []\n"
+                                  "    for row in xss:\n        for i in row:\n"
+                                  "            out.append(len(out))\n    return out"))
+
+    def test_loop_var_read_after_any_loop_is_out_of_subset(self):
+        # The read-after-loop honesty guard covers the accumulator/append shapes too (Python
+        # leaves the loop variable bound to the last element; the translations do not).
+        self.assertIsNone(py_body("def f(xs):\n    s = 0\n    for x in xs:\n        s += x\n    return x"))
+        self.assertIsNone(py_body("def f(xs):\n    out = []\n    for x in xs:\n        out.append(x)\n    return x"))
+
     def test_search_loop_becomes_filter_head(self):
         # `for i in x: return i` was the old subset boundary; it is now the degenerate search —
         # head-or-default — and the guarded form filters first (exact in a pure total language).

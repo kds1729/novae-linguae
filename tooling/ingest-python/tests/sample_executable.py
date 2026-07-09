@@ -222,3 +222,34 @@ def even_sum_and_count(xs):
             s += x
             c += 1
     return s + c
+
+
+def flatten(xss):
+    """Concatenate a list of lists (nested list-building loop -> a foldl of appends).
+
+    >>> flatten([[1, 2], [3]])
+    [1, 2, 3]
+    >>> flatten([])
+    []
+    """
+    out = []
+    for row in xss:
+        for i in row:
+            out.append(i)
+    return out
+
+
+def evens_of_rows(xss):
+    """The even elements of every row, in order (nested loop with an inner guard).
+
+    >>> evens_of_rows([[1, 2], [3, 4]])
+    [2, 4]
+    >>> evens_of_rows([[1]])
+    []
+    """
+    out = []
+    for row in xss:
+        for i in row:
+            if i % 2 == 0:
+                out.append(i)
+    return out

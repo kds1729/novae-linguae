@@ -323,9 +323,10 @@ class TestExecutableCorpus(unittest.TestCase):
         # sum_positives / count_evens (guarded folds), doubled / keep_positive /
         # squares_of_evens (list-building append loops -> map/filter), first_negative /
         # contains / double_first_even (early-return search loops -> filter/head), and
-        # sum_minus_count / even_sum_and_count (independent multi-accumulator loops -> N folds).
-        self.assertEqual(len(records), 15)
-        self.assertEqual(len(bodies), 15)               # every body is in the executable subset
+        # sum_minus_count / even_sum_and_count (independent multi-accumulator loops -> N folds),
+        # and flatten / evens_of_rows (nested list-building loops -> a foldl of appends).
+        self.assertEqual(len(records), 17)
+        self.assertEqual(len(bodies), 17)               # every body is in the executable subset
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
