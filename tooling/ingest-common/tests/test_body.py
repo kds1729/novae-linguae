@@ -121,6 +121,13 @@ class PythonBodyTests(unittest.TestCase):
         # Loop variable read AFTER a search loop (Python: last element; the translation: unbound).
         self.assertIsNone(py_body("def f(x):\n    for i in x:\n        if i > 0:\n            return i\n    return i"))
 
+    def test_floordiv_maps_to_div(self):
+        # `//` -> the same Euclidean `div` as `/` (they agree for positive divisors; a wrong
+        # guess fails the example gate — the `%` -> mod contract).
+        self.assertIn('"div"', json.dumps(py_body("def f(a, b):\n    return a // b")))
+        aug = py_body("def f(n):\n    n //= 2\n    return n")
+        self.assertIn('"div"', json.dumps(aug))
+
     def test_multi_accumulator_loop_splits_into_folds(self):
         # Independent accumulator statements split into one fold each — exact in a pure total
         # language (re-walking the list is unobservable), like the search loop's short-circuit.

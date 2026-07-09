@@ -48,9 +48,13 @@ from nl_values import ValueEncodeError, to_value_ast
 _VAR = re.compile(r"^[a-z_][a-zA-Z0-9_']*$")
 _FIELD = re.compile(r"^[a-z][a-zA-Z0-9_]*$")
 
-# Python operator -> Nova builtin op name (shared with the predicate vocabulary).
+# Python operator -> Nova builtin op name (shared with the predicate vocabulary). `//` maps to the
+# same `div` as `/`: Nova div on ints is Euclidean, Python `//` floors — they agree whenever the
+# divisor is positive (the common case) and a wrong guess fails the example gate, the same honesty
+# contract the existing `%` -> floored-vs-Euclidean `mod` mapping already carries.
 _PY_CMP = {ast.Lt: "lt", ast.LtE: "le", ast.Gt: "gt", ast.GtE: "ge", ast.Eq: "eq", ast.NotEq: "neq"}
-_PY_BIN = {ast.Add: "add", ast.Sub: "sub", ast.Mult: "mul", ast.Div: "div", ast.Mod: "mod"}
+_PY_BIN = {ast.Add: "add", ast.Sub: "sub", ast.Mult: "mul", ast.Div: "div", ast.Mod: "mod",
+           ast.FloorDiv: "div"}
 _PY_BOOL = {ast.And: "and", ast.Or: "or"}
 # Python builtin call -> Nova builtin (unary, unambiguous; arity-ambiguous ones like min/max excluded).
 # `str` (and TS's `String`) map to the canonical-decimal `to_string`; a semantic mismatch (e.g. str of

@@ -461,6 +461,18 @@ in the parser with a regression test.
   seventeen total) ingest and run against their doctests. Residuals now: *dependent*
   multi-accumulator loops, `while` (non-structural), tuple-unpacking `for`, deeper loop nesting
   (three levels) and nested loops whose inner statement is not an append.
+  *Where the boundary actually is (2026-07-09, measured):* a survey over six pure-leaning stdlib
+  modules (87 public functions: statistics/bisect/heapq/textwrap/string/operator) found the loop
+  widenings unlock **zero** stdlib functions — real stdlib bodies fall out of subset *earlier*, on
+  partiality (`raise`, ~9), truthiness `if`s (~7), `is None` (~23 uses — the `None`↔`Maybe`
+  boundary decision, still not taken), tuple assignment, subscripting, and `while`. The one
+  operator gap worth closing was Python `//` (14 uses): it now maps to the same Euclidean `div` as
+  `/` — floored and Euclidean division agree whenever the divisor is positive, and a wrong guess
+  fails the example gate, the contract the `%` → `mod` mapping already carries (lifts
+  `operator.floordiv`/`ifloordiv`, 20→22 of 87). **Conclusion: the statement-subset thread is at
+  its honest boundary** — textbook loop idioms are fully covered (seventeen-function executable
+  corpus), and the remaining stdlib gap is not control flow but partiality and the `Maybe`
+  boundary, i.e. language-design decisions, not translator work.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 
