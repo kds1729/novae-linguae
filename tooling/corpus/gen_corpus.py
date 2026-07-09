@@ -3745,6 +3745,53 @@ def combinatorial_specs(exclude_names=()):
                    [{"args": ["abc"], "result": {"Authorization": f"{scheme} abc"}},
                     {"args": [""], "result": {"Authorization": f"{scheme} "}}], terminates="always"))
 
+    # 48. GUARDED-MAYBE SHAPES — the raise-totalization / Optional-boundary body (spec/expressiveness.md,
+    # 2026-07-09 ingestion pull). A raising function ingests as `case <guard> of true => None; false =>
+    # Just(<body>)` (the guard is the raise condition — the refused case is None), and an `-> Optional[T]`
+    # function Just-wraps its valid return. This guard->Maybe shape had only THREE curated instances in
+    # the whole corpus (safe_div / safe_mod / first) — exactly the single-example under-teaching the loop
+    # keeps hitting (family #43/#45's lesson). This family mass-produces it, parameterized over the guard
+    # comparison + constant and the body operation, in both the one- and two-argument forms. Structurally
+    # distinct golds from safe_div/safe_mod/first (varied cmp/constants/ops), which leakage-drop at export.
+    # One-arg checked op: refuse (None) when `cmp n k` holds, else Just(op n k2).
+    _G48_1 = [("lt", 0, "add", 1), ("le", 0, "mul", 2), ("gt", 100, "sub", 1),
+              ("eq", 0, "add", 10), ("ge", 50, "mul", 2)]
+    for cmp, k, op, k2 in _G48_1:
+        cf, of = _CMP[cmp], _AOP[op]
+        add(_cspec(f"checked_{op}_{cmp}_{k}".replace("-", "m"),
+                   f"{_OPWORD[op].capitalize()} {k2}, but only when the input is not {_CMPWORD[cmp]} {k}.",
+                   f"case {cmp} n {k} of true => None; false => Just({op} n {k2})",
+                   ["maybe", "variant", "case", "guard", "partial"], fn([INT], maybe_t(INT)),
+                   lam(["n"], case_bool(bapp(cmp, var("n"), int_lit(k)),
+                                        variant_expr("None"), variant_expr("Just", bapp(op, var("n"), int_lit(k2))))),
+                   [{"args": [v], "result": V("None") if cf(v, k) else V("Just", of(v, k2))}
+                    for v in (k, k - 1, k + 1, 7)], terminates="always"))
+    # Two-arg checked op: refuse when `cmp a b` holds, else Just(op a b) — the safe_div/checked_sub family.
+    _G48_2 = [("eq", "mul", lambda a, b: a * b), ("gt", "sub", lambda a, b: a - b),
+              ("lt", "add", lambda a, b: a + b), ("ge", "sub", lambda a, b: a - b)]
+    for cmp, op, of in _G48_2:
+        cf = _CMP[cmp]
+        add(_cspec(f"guard2_{op}_{cmp}",
+                   f"{_OPWORD[op].capitalize()} the second from the first, unless the first is {_CMPWORD[cmp]} the second.",
+                   f"case {cmp} a b of true => None; false => Just({op} a b)",
+                   ["maybe", "variant", "case", "guard", "partial"], fn([INT, INT], maybe_t(INT)),
+                   lam(["a", "b"], case_bool(bapp(cmp, var("a"), var("b")),
+                                             variant_expr("None"), variant_expr("Just", bapp(op, var("a"), var("b"))))),
+                   [{"args": [ab[0], ab[1]], "result": V("None") if cf(*ab) else V("Just", of(*ab))}
+                    for ab in ((3, 5), (5, 3), (4, 4), (7, 2))], terminates="always"))
+    # Just-wrap the OK branch instead (the Optional-return direction: valid => Just, refused => None).
+    _G48_3 = [("ge", 0, "add", 2), ("gt", 0, "mul", 3), ("le", 100, "sub", 1)]
+    for cmp, k, op, k2 in _G48_3:
+        cf, of = _CMP[cmp], _AOP[op]
+        add(_cspec(f"whenvalid_{op}_{cmp}_{k}".replace("-", "m"),
+                   f"When the input is {_CMPWORD[cmp]} {k}, {_OPWORD[op]} {k2}; otherwise nothing.",
+                   f"case {cmp} n {k} of true => Just({op} n {k2}); false => None",
+                   ["maybe", "variant", "case", "guard", "partial"], fn([INT], maybe_t(INT)),
+                   lam(["n"], case_bool(bapp(cmp, var("n"), int_lit(k)),
+                                        variant_expr("Just", bapp(op, var("n"), int_lit(k2))), variant_expr("None"))),
+                   [{"args": [v], "result": V("Just", of(v, k2)) if cf(v, k) else V("None")}
+                    for v in (k, k - 1, k + 1, 4)], terminates="always"))
+
     return out
 
 

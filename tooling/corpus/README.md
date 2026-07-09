@@ -108,8 +108,8 @@ of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **param
 comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
-parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,168 generated
-function records (3,409 examples total with the curated set)** across forty-seven template families
+parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,180 generated
+function records (3,421 examples total with the curated set)** across forty-eight template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
 teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — #39, **strings as data**
 (`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
@@ -143,7 +143,14 @@ mutating-call pull's pure surrounding idioms; the general `http` builtin returns
 other combinatorial family emitted) and classify the code (`resp_ok` 2xx / `resp_created` 201 /
 `resp_missing` 404 / `resp_client_error` 4xx) and build the request's auth-header map — the
 effectful call itself stays a spec/examples record (it can't run in the gate without a live
-server), like the GW4/GW5 effectful legs, every one through the same validate →
+server), like the GW4/GW5 effectful legs — and #48, **guarded-`Maybe` shapes**: the
+2026-07-09 ingestion pull (raise-totalization + the `-> Optional` boundary) emits the body
+`case <guard> of true => None; false => Just(<op>)` — a precondition failure becomes `None`,
+the valid case `Just`-wraps — a shape that had only three curated instances in the whole corpus
+(`safe_div`/`safe_mod`/`first`), the single-example under-teaching the loop keeps hitting; #48
+mass-produces it (one- and two-argument checked ops over guard-comparison/constant/operation
+sets, plus the `Just`-on-valid mirror), structurally distinct golds so the curated ones
+leakage-drop, every one through the same validate →
 typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,
