@@ -148,6 +148,24 @@ rows); **all three tiers are on `corpus14`** (the first time every pin shares on
 > high seeds atop a real but small dilution cost from the #46/#47/reverse families. Write is at 93-98%
 > across tiers; further crank-turning is diminishing returns. Park until a new capability pull adds
 > tasks worth training on.** Adapters+evals in `/var/tmp/claude/round18/`.
+>
+> **The round18c measurement (2026-07-09, RTX 5090, 3B/7B 2-seed, corpus18/ftdata18, 2 epochs —
+> line-comparable to round17) — family #48 is a NULL RESULT: its target shape was already solved, so
+> it moved nothing, but it caused no dilution. c14 pins stay; no re-pin, no republish.** Family #48
+> mass-produced the guard→`Maybe` body (`case <guard> of true => None; false => Just(<op>)`) on the
+> hypothesis that its three curated instances (safe_div/safe_mod/first) under-taught it. The
+> measurement **refuted that hypothesis**: those six eval tasks (read+write) pass at ALL c18 tiers/seeds
+> — but they *also* passed at c14 and c17, so #48 flipped nothing. Old-380 write: 3B 175/180 (mean
+> 177.5), 7B 179/177 (mean 178) — at c14 level (176 / 179.5), *above* the round17 dip (172 / 176.5), so
+> the 12-spec add did **not** dilute (the round16/17 dilution concern did not reproduce for a small
+> targeted family). Best full-390: 3B-s1 write 184/194 (94.8%) total 365 (93.6% sem); 7B-s0 write
+> 183/194 (94.3%). Read watch (Fix #1) behaves as before: read/reverse_concat mostly passes,
+> read/insert_sorted flickers (7B-s0 only), read/min_string 14B-only. **Verdict: #48 stays in the corpus
+> (harmless, defensively covers a real shape at mass, and a harder future eval task in that shape would
+> benefit), but it is not a re-pin — the shape had no eval-level gap to close. c14 pins stand.** The
+> broader lesson reinforces round18: at 93–98% write, a new family only moves the headline if it targets
+> a shape the model is actually *failing* — and the ingestion pulls, while real language capabilities,
+> landed on shapes the model already writes. Adapters+evals in `/var/tmp/claude/round18c/`.
 
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
