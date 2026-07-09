@@ -134,6 +134,20 @@ rows); **all three tiers are on `corpus14`** (the first time every pin shares on
 > elimination). The indicated write lever is now TRAINING BUDGET — 3 epochs or upsample write shapes —
 > not the corpus edit (round18).** All pins STAY c14 for now (14B-c17 only ties c14, so a re-pin +
 > Arca republish is marginal and deferred); weights are local at `/var/tmp/claude/round17/`.
+>
+> **The round18 training-budget test (2026-07-09, RTX 4090, 3B/7B 2-seed, same corpus17/ftdata17,
+> 3 EPOCHS) — FLAT: the third epoch does NOT recover write, and it costs the read fix. The loop is
+> PARKED; all pins stay c14.** Old-380 write: 3B 174/173 (mean 173.5 vs round17's 172, c14's ~176-177),
+> 7B 176/178 (mean 177 vs round17's 176.5, c14's ~179.5-180.5) — the epoch bought +0.5-1.5 write mean,
+> well inside the ±10 noise floor. Full-390: 7B-s1 write 182/194 (93.8%), total 362/390 = 92.8% sem
+> (round's best; still below 14B-c17's 95.6%). What the epoch *did* do: tightened seed spread (3B 8→1)
+> — and **eroded the read fix: read/insert_sorted fell 3/4 → 0/4 at 3B/7B** (the single `read_example`
+> held-out pair overfits away at 3 epochs; read/reverse_concat still 4/4, read/min_string still
+> 14B-only). **Conclusion: the ~3-pt write-mean gap vs c14 is corpus-composition-bound at these tiers —
+> neither the corpus edit (round17) nor training budget (round18) closes it, and c14's pins sit on lucky
+> high seeds atop a real but small dilution cost from the #46/#47/reverse families. Write is at 93-98%
+> across tiers; further crank-turning is diminishing returns. Park until a new capability pull adds
+> tasks worth training on.** Adapters+evals in `/var/tmp/claude/round18/`.
 
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
