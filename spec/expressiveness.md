@@ -445,6 +445,15 @@ only real ingested records could surface.
   a doctest `Some(3)` as a `Some`-tagged variant, which no Nova `Maybe` operation ever produces —
   now `Just(3)`. So `add_sub` (`-> (i64, i64)`) and `bump` (`-> Option<i64>`) ingest to records with
   a `(int, int)` / `Maybe int` type and a tuple / `Just` example.
+  *Rust statement subset (2026-07-10):* the Rust lifter left single-expression bodies behind — a
+  `block_to_body` statement translator (mirroring the Python adapter's) brings it to `if`/`else`
+  (→ `case` on the bool; Rust conditions are statically boolean, so no truthiness guard is needed),
+  `let` bindings (plain, annotated `let x: T = e`, and tuple-unpacking `let (x, y) = e` → a one-arm
+  `case`), and `match` (→ `case`, with `Some`→`Just`/`None`/`Ok`/`Err`/literal/wildcard/binder/tuple
+  patterns; arm guards and or-patterns stay out). Verified by execution: `sign` (nested if/else),
+  `abs_diff` (let + if), and `unwrap_or` (match on an `Option`) lift, wrap in a lambda over their
+  parameters, and evaluate correctly against their doctest values. Still single-body per function —
+  loops (`for`/`while`) are the remaining Rust gap the Python translator already covers.
   *Statement subset widened (2026-07-07):* the honest 9/57-stdlib finding is a control-flow gap
   (real library code is multi-statement, not single-expression), and the two most common loop
   shapes the single-statement translator couldn't reach are now in: a **guarded accumulator**

@@ -1129,6 +1129,63 @@ fn is_stringish(expr: &syn::Expr, strs: &HashSet<String>) -> bool {
     }
 }
 
+/// A Rust `match`-arm pattern -> a Nova `case` pattern. `Some`->`Just` (canonical Maybe),
+/// `Ok`/`Err` shared; `_`/binders/tuples/literals map across. Ref/mut/rest/or-patterns are out.
+fn syn_pat_to_pattern(pat: &syn::Pat) -> Option<Value> {
+    match pat {
+        syn::Pat::Wild(_) => Some(json!({ "kind": "wildcard" })),
+        syn::Pat::Paren(p) => syn_pat_to_pattern(&p.pat),
+        syn::Pat::Lit(pl) => {
+            let e = syn::Expr::Lit(syn::ExprLit { attrs: vec![], lit: pl.lit.clone() });
+            value_ast(&e, None).map(|v| json!({ "kind": "lit", "value": v }))
+        }
+        // A bare path: `None` -> the nullary Maybe constructor; another uppercase tag -> a nullary
+        // variant; a lowercase single ident -> a binder.
+        syn::Pat::Ident(pi) if pi.by_ref.is_none() && pi.subpat.is_none() => {
+            let name = pi.ident.to_string();
+            if name == "None" {
+                Some(json!({ "kind": "variant", "tag": "None" }))
+            } else if name.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false) {
+                Some(json!({ "kind": "variant", "tag": name }))
+            } else {
+                p_var(&name).map(|_| json!({ "kind": "bind", "name": name }))
+            }
+        }
+        syn::Pat::Path(p) => {
+            let name = p.path.segments.last()?.ident.to_string();
+            if name == "None" {
+                Some(json!({ "kind": "variant", "tag": "None" }))
+            } else if name.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false) {
+                Some(json!({ "kind": "variant", "tag": name }))
+            } else {
+                None
+            }
+        }
+        // `Some(p)` / `Ok(p)` / `Err(p)` -> a variant pattern with an inner payload pattern.
+        syn::Pat::TupleStruct(ts) => {
+            let name = ts.path.segments.last()?.ident.to_string();
+            if ts.elems.len() != 1 {
+                return None;
+            }
+            let tag = if name == "Some" { "Just".to_string() } else { name };
+            let payload = syn_pat_to_pattern(ts.elems.first()?)?;
+            Some(json!({ "kind": "variant", "tag": tag, "payload": payload }))
+        }
+        // `(a, b)` -> a tuple pattern (>=2 elements).
+        syn::Pat::Tuple(pt) => {
+            if pt.elems.len() < 2 {
+                return None;
+            }
+            let mut elems = Vec::new();
+            for e in &pt.elems {
+                elems.push(syn_pat_to_pattern(e)?);
+            }
+            Some(json!({ "kind": "tuple", "elems": elems }))
+        }
+        _ => None,
+    }
+}
+
 fn expr_to_body(expr: &syn::Expr, strs: &HashSet<String>) -> Option<Value> {
     match expr {
         syn::Expr::Paren(p) => expr_to_body(&p.expr, strs),
@@ -1189,6 +1246,39 @@ fn expr_to_body(expr: &syn::Expr, strs: &HashSet<String>) -> Option<Value> {
         // `n.to_string()` on a non-string is the canonical decimal rendering.
         syn::Expr::MethodCall(m) if m.method == "to_string" && m.args.is_empty() => {
             body_op_app("to_string", vec![expr_to_body(&m.receiver, strs)?])
+        }
+        // `if c { a } else { b }` -> `case c of { true => a; false => b }`. Rust conditions are
+        // statically `bool` (no truthiness), so any if-cond is a safe boolean scrutinee. An `if`
+        // without an `else` doesn't produce a value in every branch, so it stays out of subset.
+        syn::Expr::If(e) => {
+            let else_branch = e.else_branch.as_ref()?;
+            let cond = expr_to_body(&e.cond, strs)?;
+            let then = block_to_body(&e.then_branch.stmts, strs)?;
+            let els = expr_to_body(&else_branch.1, strs)?;
+            Some(json!({ "kind": "case", "scrutinee": cond, "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": then },
+                { "pattern": { "kind": "wildcard" }, "body": els }] }))
+        }
+        // A block `{ … }` in expression position (e.g. an `else { let y = …; y }` branch) is its
+        // statement sequence translated as a value.
+        syn::Expr::Block(b) => block_to_body(&b.block.stmts, strs),
+        // `match s { pat => body, … }` -> `case s of { <pat> => <body>; … }`. Arm guards
+        // (`pat if cond =>`) and or-patterns (`a | b =>`) stay out of subset.
+        syn::Expr::Match(m) => {
+            let scrutinee = expr_to_body(&m.expr, strs)?;
+            let mut arms = Vec::new();
+            for arm in &m.arms {
+                if arm.guard.is_some() {
+                    return None;
+                }
+                let pattern = syn_pat_to_pattern(&arm.pat)?;
+                let body = expr_to_body(&arm.body, strs)?;
+                arms.push(json!({ "pattern": pattern, "body": body }));
+            }
+            if arms.is_empty() {
+                return None;
+            }
+            Some(json!({ "kind": "case", "scrutinee": scrutinee, "arms": arms }))
         }
         // Tuple construction `(a, b, …)` -> the `tuple` body node (>=2 elements; a 1-tuple is its
         // element, `()` is unit — matching the value layer and the Python adapter).
@@ -1269,19 +1359,81 @@ fn str_typed_params(func: &syn::ItemFn) -> HashSet<String> {
     out
 }
 
-/// A body AST for an expression-bodied fn — a block with a single trailing expression (or a single
-/// `return <expr>;`). None for anything else.
-fn body_ast(func: &syn::ItemFn) -> Option<Value> {
-    let stmts = &func.block.stmts;
-    if stmts.len() != 1 {
-        return None;
+/// Translate a statement sequence that must produce a value into a body expression: a `let PAT = e;`
+/// becomes a `let` binding over the rest (a tuple pattern destructures via a one-arm `case`), and the
+/// final statement (a trailing expression, or a `return <expr>;`) is the result. `None` for anything
+/// outside the subset. Mirrors the Python adapter's `_block_from_py`.
+fn block_to_body(stmts: &[syn::Stmt], strs: &HashSet<String>) -> Option<Value> {
+    let (head, tail) = stmts.split_first()?;
+    match head {
+        // The result position: a trailing expression, or `return <expr>;` (statements after a
+        // return/trailing expr are dead).
+        syn::Stmt::Expr(syn::Expr::Return(r), _) => expr_to_body(r.expr.as_deref()?, strs),
+        syn::Stmt::Expr(e, None) => expr_to_body(e, strs),
+        // `let x = e;` -> `let x = <e> in <rest>`. Only a plain single-name binding with an
+        // initializer (no `let x;`, no `let-else`, no type-only) is in subset here; a tuple pattern
+        // binding is handled below.
+        syn::Stmt::Local(local) => {
+            let init = local.init.as_ref()?;
+            if init.diverge.is_some() {
+                return None; // `let … else { … }`
+            }
+            let value = expr_to_body(&init.expr, strs)?;
+            // `let x: T = e` (Pat::Type) unwraps to its inner pattern — the annotation is redundant
+            // for the untyped body AST (types are checked against the record signature).
+            let pat = match &local.pat {
+                syn::Pat::Type(pt) => &*pt.pat,
+                other => other,
+            };
+            match pat {
+                syn::Pat::Ident(pi) if pi.by_ref.is_none() && pi.subpat.is_none() => {
+                    let name = pi.ident.to_string();
+                    if p_var(&name).is_none() {
+                        return None;
+                    }
+                    let inner_strs = if is_stringish(&init.expr, strs) {
+                        let mut s = strs.clone();
+                        s.insert(name.clone());
+                        s
+                    } else {
+                        let mut s = strs.clone();
+                        s.remove(&name);
+                        s
+                    };
+                    let rest = block_to_body(tail, &inner_strs)?;
+                    Some(json!({ "kind": "let", "name": name, "value": value, "body": rest }))
+                }
+                // `let (x, y) = e;` -> `case e of { (x, y) => <rest> }` — tuple-unpacking binding.
+                syn::Pat::Tuple(pt) => {
+                    let mut binds = Vec::new();
+                    for p in &pt.elems {
+                        match p {
+                            syn::Pat::Ident(pi) if pi.by_ref.is_none() && pi.subpat.is_none()
+                                && p_var(&pi.ident.to_string()).is_some() =>
+                            {
+                                binds.push(json!({ "kind": "bind", "name": pi.ident.to_string() }));
+                            }
+                            _ => return None,
+                        }
+                    }
+                    if binds.len() < 2 {
+                        return None;
+                    }
+                    let rest = block_to_body(tail, strs)?;
+                    Some(json!({ "kind": "case", "scrutinee": value, "arms": [
+                        { "pattern": { "kind": "tuple", "elems": binds }, "body": rest }] }))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
     }
-    let expr = match &stmts[0] {
-        syn::Stmt::Expr(e, None) => e,
-        syn::Stmt::Expr(syn::Expr::Return(r), Some(_)) => r.expr.as_deref()?,
-        _ => return None,
-    };
-    expr_to_body(expr, &str_typed_params(func))
+}
+
+/// A body AST for a function whose block is in the statement subset (`let` bindings, `if`/`match`,
+/// tuple/variant construction, and a value-producing tail). None for anything else.
+fn body_ast(func: &syn::ItemFn) -> Option<Value> {
+    block_to_body(&func.block.stmts, &str_typed_params(func))
 }
 
 // --- v0.2: curated algebraic-law catalog (opt-in --properties) ---------------------------------
@@ -1807,9 +1959,11 @@ mod tests {
 
     #[test]
     fn non_subset_body_falls_back_to_synthetic_hash() {
-        // A body with a local binding is out of subset -> body_ast None, synthetic hash unchanged.
+        // A body still outside the subset (a `while` loop) -> body_ast None, synthetic hash
+        // unchanged. (`let y = n; y` used to be the example here, but `let` bindings are now in
+        // subset — see `body_if_and_let_lift_and_execute`.)
         let f = item_fn(
-            "/// ```\n/// assert_eq!(g(5), 5);\n/// ```\npub fn g(n: u64) -> u64 { let y = n; y }",
+            "/// ```\n/// assert_eq!(g(5), 0);\n/// ```\npub fn g(n: u64) -> u64 { let mut x = n; while x > 0 { x -= 1; } x }",
         );
         assert!(body_ast(&f).is_none());
         let rec = build_v2_record(&f, None, false, false).unwrap().expect("a v0.2 record");
@@ -1859,6 +2013,62 @@ mod tests {
         let ok: syn::Expr = syn::parse_str("Ok(x)").unwrap();
         assert_eq!(expr_to_body(&ok, &HashSet::new()).unwrap(),
                    json!({ "kind": "variant", "tag": "Ok", "payload": { "kind": "var", "name": "x" } }));
+    }
+
+    #[test]
+    fn body_if_and_let_lift_and_execute() {
+        // if/else-if/else -> nested case; let -> let binding. Lift the body, wrap it in a lambda
+        // over the parameters, and EXECUTE it against the doctest values.
+        let int = |n: i64| json!({ "kind": "int", "value": n });
+        let run = |src: &str, params: &[&str], cases: &[(Vec<i64>, i64)]| {
+            let f = item_fn(src);
+            let bare = body_ast(&f).expect("an in-subset statement body");
+            let lam = json!({ "kind": "lambda",
+                "params": params.iter().map(|p| json!({ "name": p })).collect::<Vec<_>>(),
+                "body": bare });
+            for (args, want) in cases {
+                let av: Vec<Value> = args.iter().map(|n| int(*n)).collect();
+                assert_eq!(nl_validator::eval_body(&lam, &av).unwrap(), int(*want),
+                           "{src} on {args:?}");
+            }
+        };
+        run("pub fn sign(n: i64) -> i64 { if n > 0 { 1 } else if n < 0 { -1 } else { 0 } }",
+            &["n"], &[(vec![5], 1), (vec![-3], -1), (vec![0], 0)]);
+        run("pub fn abs_diff(a: i64, b: i64) -> i64 { let d = a - b; if d < 0 { -d } else { d } }",
+            &["a", "b"], &[(vec![3, 7], 4), (vec![7, 3], 4)]);
+        // An annotated `let x: T = e` binding (Pat::Type) unwraps to the same binding.
+        run("pub fn twice_plus(n: i64) -> i64 { let d: i64 = n + n; d + 1 }",
+            &["n"], &[(vec![3], 7), (vec![0], 1)]);
+        // A tuple-unpacking `let` destructures via a one-arm case.
+        run("pub fn f(a: i64, b: i64) -> i64 { let (x, y) = (b, a); x - y }",
+            &["a", "b"], &[(vec![3, 10], 7), (vec![10, 3], -7)]);
+        // An `if` with no `else` does not produce a value in every branch -> out of subset.
+        let noelse = item_fn("pub fn g(n: i64) -> i64 { if n > 0 { return 1; } 0 }");
+        assert!(body_ast(&noelse).is_none());
+    }
+
+    #[test]
+    fn body_match_lifts_and_executes() {
+        let int = |n: i64| json!({ "kind": "int", "value": n });
+        // A match on an Option: Some(x) => x ; None => d — the Just/None reader side.
+        let f = item_fn("pub fn unwrap_or(o: Option<i64>, d: i64) -> i64 { match o { Some(x) => x, None => d } }");
+        let bare = body_ast(&f).expect("match body in subset");
+        assert_eq!(bare["kind"], "case");
+        let just_arm = &bare["arms"][0];
+        assert_eq!(just_arm["pattern"]["tag"], "Just"); // Some -> Just
+        let lam = json!({ "kind": "lambda", "params": [{ "name": "o" }, { "name": "d" }], "body": bare });
+        let some7 = json!({ "kind": "variant", "tag": "Just", "payload": int(7) });
+        let none = json!({ "kind": "variant", "tag": "None" });
+        assert_eq!(nl_validator::eval_body(&lam, &[some7, int(0)]).unwrap(), int(7));
+        assert_eq!(nl_validator::eval_body(&lam, &[none, int(0)]).unwrap(), int(0));
+        // A match on a literal with a wildcard default.
+        let g = item_fn("pub fn label(n: i64) -> i64 { match n { 0 => 0, _ => 1 } }");
+        let lam2 = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": body_ast(&g).unwrap() });
+        assert_eq!(nl_validator::eval_body(&lam2, &[int(0)]).unwrap(), int(0));
+        assert_eq!(nl_validator::eval_body(&lam2, &[int(4)]).unwrap(), int(1));
+        // A guarded arm is out of subset.
+        let guarded = item_fn("pub fn h(n: i64) -> i64 { match n { x if x > 0 => 1, _ => 0 } }");
+        assert!(body_ast(&guarded).is_none());
     }
 
     #[test]
