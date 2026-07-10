@@ -2314,9 +2314,13 @@ mod tests {
                     .unwrap_or_else(|e| panic!("{name}: eval failed: {e}"));
                 assert_eq!(got, ex["result"], "{name}: on {:?}", ex["args"]);
             }
+            // …and it CERTIFIES: the full verified-by-default gate (typecheck / effects /
+            // termination / complexity) passes, so the record can enter the commons.
+            let cert = nl_validator::certify_record(&rec, &body, &std::collections::HashMap::new(), "z3");
+            assert!(cert.certified, "{name}: certifies");
             ran += 1;
         }
-        assert_eq!(ran, 9, "all nine sample functions ingest, lift, and run");
+        assert_eq!(ran, 9, "all nine sample functions ingest, lift, run, and certify");
     }
 
     #[test]
