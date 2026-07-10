@@ -166,6 +166,25 @@ rows); **all three tiers are on `corpus14`** (the first time every pin shares on
 > broader lesson reinforces round18: at 93–98% write, a new family only moves the headline if it targets
 > a shape the model is actually *failing* — and the ingestion pulls, while real language capabilities,
 > landed on shapes the model already writes. Adapters+evals in `/var/tmp/claude/round18c/`.
+>
+> **The round19 measurement (2026-07-10, RTX 4090, 3B/7B 2-seed, corpus19/ftdata19, 2 epochs — the
+> GW10 `url_encode` pull's retrain, the parked loop's resume trigger) — FIRST-CONTACT CONFIRMED for
+> the new capability, no re-pin: c14 pins stand and the loop goes back to PARKED.** The eval grew
+> 390 → 400 (shots-0; five curated url rows). The pull's question — does family #49 supply the
+> day-one mass — answers **yes**: of the ten new url tasks (write+read × 5), 7B passes 9/10 (s0) and
+> 8/10 (s1), 3B 7/10 both seeds; every *query-building* shape (`query_of`/`search_url`/`param_pair`/
+> `encode_all`) writes correctly at 7B, and the sole recurring miss (`write/encode_term`, the
+> near-bare row) is a **near-miss, not an untaught builtin** — 7B reaches for `url_encode s` but
+> decorates it (`str_concat "%" (url_encode s)`); only 3B invents a nonexistent helper. So the
+> #41 failure mode (builtin never seen in training) did **not** recur — the family taught the
+> operation. Stability: on the tasks shared with round18, write is 1–4 below round18's means
+> (3B 176/172 vs 177/176; 7B 177/177 vs 179/181) with the usual ±10 churn and read level-to-+3 —
+> i.e. the +15-spec add cost nothing real but recovered nothing either, reconfirming round18's
+> conclusion that the write mean is corpus-composition-bound at 93–98%. Best runs (400-task):
+> 7B-s1 write 182/199 (91.5%), total 369/400 = 92.2% sem; 7B-s0 within 1. **Verdict: family #49
+> stays (it demonstrably taught the new builtin's idioms at first contact — the reason the loop
+> re-armed); no adapter beats the c14 pins on shared tasks, so no re-pin, no republish. The loop
+> re-parks until the next capability pull.** Adapters+evals in `/var/tmp/claude/round19/`.
 
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
