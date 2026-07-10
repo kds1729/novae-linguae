@@ -102,6 +102,9 @@ pub use orchestrate::{
     orchestrate, orchestrate_verified, orchestrate_verified_with_maps, orchestrate_with_maps, Run, Step, VerifiedRun,
 };
 
+pub mod assemble;
+pub use assemble::{assemble, Assembled, Stage};
+
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {
     let text = std::fs::read_to_string(path)

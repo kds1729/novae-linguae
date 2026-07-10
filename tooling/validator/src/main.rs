@@ -393,6 +393,35 @@ enum Commands {
         #[arg(required = true)]
         records: Vec<PathBuf>,
     },
+    /// Goal-directed **assembly** from the commons (spec/agent-loop.md — "assemble, don't write"):
+    /// given a GOAL of input→output examples, SEARCH the commons for a pipeline of functions whose
+    /// composition reproduces every example (breadth-first, so the shortest pipeline wins; pruned by
+    /// `compose`'s type-composability), then VERIFY it — it must `compose`, its synthesized composite
+    /// body must run every example through the resolved stages, and with `--require-certified` every
+    /// stage must certify. Emits the discovered pipeline and a derived composite record whose body
+    /// chains the stages by content-address. Exit 1 if no pipeline within `--max-stages` fits.
+    Assemble {
+        /// Directory of records + bodies (the commons view) to assemble from.
+        #[arg(long, required = true)]
+        records: PathBuf,
+        /// Goal file: `{"examples":[{"input":<value-AST>,"output":<value-AST>}, …]}`.
+        #[arg(long, required = true)]
+        goal: PathBuf,
+        /// Maximum pipeline length to search.
+        #[arg(long, default_value_t = 3)]
+        max_stages: usize,
+        /// Certify every stage before assembling ("assemble only from verified parts"); abort if any
+        /// stage isn't certified.
+        #[arg(long)]
+        require_certified: bool,
+        /// SMT solver for the certify step.
+        #[arg(long, default_value = "z3")]
+        solver: String,
+        /// Write the derived composite record here (its `body_hash` addresses the composite body,
+        /// written alongside as `<expr_…>.json` so the pipeline runs via `run --records`).
+        #[arg(long)]
+        emit: Option<PathBuf>,
+    },
     /// **Cluster** a directory of function records into behavioral-equivalence classes (the rung above
     /// hash equality), proving `∀x. f(x) = g(x)` pairwise within each signature-shape bucket. Prints each
     /// class of ≥ 2 members with its canonical representative (smallest content-address). Follows
@@ -783,6 +812,9 @@ fn main() -> ExitCode {
         }
         Commands::Equiv { body_f, body_g, solver } => (cmd_equiv(&body_f, &body_g, &solver), false),
         Commands::Compose { records } => (cmd_compose(&records), false),
+        Commands::Assemble { records, goal, max_stages, require_certified, solver, emit } => {
+            (cmd_assemble(&records, &goal, max_stages, require_certified, &solver, emit.as_deref()), false)
+        }
         Commands::Cluster { records, solver } => (cmd_cluster(&records, &solver), false),
         Commands::Normalize { body, hash } => (cmd_normalize(&body, hash), false),
         Commands::VerifyClaim { assert, records, node, grant, secret } => {
@@ -1446,6 +1478,68 @@ fn cmd_compose(records: &[PathBuf]) -> Result<()> {
     } else {
         Err(anyhow::anyhow!("NOT-COMPOSABLE  {}", m.reason))
     }
+}
+
+fn cmd_assemble(
+    records_dir: &Path,
+    goal: &Path,
+    max_stages: usize,
+    require_certified: bool,
+    solver: &str,
+    emit: Option<&Path>,
+) -> Result<()> {
+    let records = nl_validator::build_record_map(records_dir)?;
+    let bodies = nl_validator::build_link_map(records_dir)?;
+    let goal_v = nl_validator::read_json(goal)?;
+    let examples: Vec<(serde_json::Value, serde_json::Value)> = goal_v
+        .get("examples")
+        .and_then(|e| e.as_array())
+        .ok_or_else(|| anyhow::anyhow!("goal must have an `examples` array"))?
+        .iter()
+        .map(|ex| {
+            let input = ex.get("input").cloned().ok_or_else(|| anyhow::anyhow!("example missing `input`"))?;
+            let output = ex.get("output").cloned().ok_or_else(|| anyhow::anyhow!("example missing `output`"))?;
+            Ok((input, output))
+        })
+        .collect::<Result<_>>()?;
+
+    let assembled = nl_validator::assemble(&records, &bodies, &examples, max_stages, require_certified, solver)?;
+    let Some(a) = assembled else {
+        return Err(anyhow::anyhow!(
+            "NO PIPELINE  no composition of ≤{max_stages} commons functions reproduces the {} example(s)",
+            examples.len()
+        ));
+    };
+
+    let pipeline = if a.stages.is_empty() {
+        "(identity — the goal's input already equals its output)".to_string()
+    } else {
+        a.stages.iter().map(|s| s.name.clone()).collect::<Vec<_>>().join(" → ")
+    };
+    println!("ASSEMBLED    {}", pipeline);
+    for (i, s) in a.stages.iter().enumerate() {
+        println!("  stage {}     {}  {}", i + 1, s.name, s.hash);
+    }
+    let ty = |t: &Option<serde_json::Value>| t.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "?".into());
+    println!("  type        {} -> {}", ty(&a.composite.input_type), ty(&a.composite.output_type));
+    println!("  effects     {:?}", a.composite.effects);
+    println!("  terminates  {}", a.composite.terminates);
+    println!("  complexity  {}", a.composite.complexity);
+    println!("  examples    {}/{} verified through the composite", a.examples_verified, examples.len());
+    if require_certified {
+        println!("  certified   {} (every stage certifies)", a.certified);
+    }
+    println!("  composite   {}", a.composite_record["hash"].as_str().unwrap_or("?"));
+
+    if let Some(dir) = emit {
+        std::fs::create_dir_all(dir)?;
+        let rh = a.composite_record["hash"].as_str().unwrap();
+        std::fs::write(dir.join(format!("{rh}.json")), serde_json::to_string_pretty(&a.composite_record)?)?;
+        let bh = a.composite_record["body_hash"].as_str().unwrap();
+        std::fs::write(dir.join(format!("{bh}.json")), serde_json::to_string_pretty(&a.composite_body)?)?;
+        println!("  emitted     {} + {} -> {}", rh, bh, dir.display());
+    }
+    Ok(())
 }
 
 fn cmd_cluster(records: &PathBuf, solver: &str) -> Result<()> {

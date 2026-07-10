@@ -162,6 +162,37 @@ matters, the designed remedies in order: a **local content-addressed cache** (ar
 runs local-speed), connection reuse across the closure walk, and parallel artifact fetches. None
 implemented until a real workload makes the 1.5 s substantial.
 
+## Goal-directed assembly (`assemble`)
+
+`orchestrate` composes a pipeline the caller *specifies* stage by stage (one `--intent` per stage);
+`compose` derives the metadata of an ordering the caller *hands it*. Neither *finds* the pipeline.
+`nl-validator assemble --records <dir> --goal <goal.json>` closes that gap — it is principle 4
+("assemble, don't write") made operational: given a **goal** of input→output examples, it *searches*
+the commons for a sequence of functions whose composition reproduces every example, then verifies
+the assembled pipeline.
+
+The search is example-driven and breadth-first (so the shortest pipeline wins), over the commons's
+unary functions, pruned by `compose`'s stage-to-stage type composability and by execution — a
+candidate advances only if it runs *totally* on every example's running value, and a pipeline is
+accepted when it reproduces every example's output. The found pipeline is then verified three ways:
+it must `compose` (composability + derived composite type/effects/termination/complexity); its
+**synthesized composite body** — `\x -> fN(… f1(x))`, each stage applied by `fn_ref`
+content-address — must run every example through the resolved stages; and, under
+`--require-certified`, **every stage must itself certify** ("assemble only from verified parts").
+The result is emitted (`--emit <dir>`) as a first-class **derived composite record** whose body
+chains the stages by address — so the assembled whole is itself runnable, certifiable, and
+publishable, no new code written.
+
+Worked, over a four-function commons (`inc`/`double`/`square`/`negate`): the goal `{3→32, 2→18}`
+assembled the three-stage pipeline **`inc → square → double`** (`inc(3)=4, square=16, double=32`;
+`inc(2)=3, square=9, double=18` — two examples pin the order over `square∘inc∘…` alternatives),
+verified 2/2 examples through the composite, confirmed every stage certifies, and emitted a composite
+record `fn_6d1f47…` that `run --records` executes end to end (2/2). Honest scope: the search is over
+**unary** stages (multi-argument stages, whose non-first parameters `compose` gathers as auxiliary
+composite inputs, are a residual), local `--records` only (a live-node search wants a seedless
+enumeration path), and the emitted composite's *declared* metadata is `compose`-derived, not
+re-proven against the `fn_ref`-chain body.
+
 ## Scope (v0.2, honest)
 
 - **The inbound speech acts are wired.** Beyond `apply`/`validate`/`query`/`propose`, the responder
