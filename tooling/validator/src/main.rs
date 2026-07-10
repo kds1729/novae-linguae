@@ -401,10 +401,22 @@ enum Commands {
     /// stage must certify. Emits the discovered pipeline and a derived composite record whose body
     /// chains the stages by content-address. Exit 1 if no pipeline within `--max-stages` fits.
     Assemble {
-        /// Directory of records + bodies (the commons view) to assemble from.
-        #[arg(long, required = true)]
-        records: PathBuf,
-        /// Goal file: `{"examples":[{"input":<value-AST>,"output":<value-AST>}, …]}`.
+        /// Directory of records + bodies (the local commons view). Exactly one of `--records`/`--node`.
+        #[arg(long)]
+        records: Option<PathBuf>,
+        /// A LIVE commons node URL (e.g. https://nl.1105software.com): the candidate functions are
+        /// discovered via the node's `POST /v0/query` and fetched by content-address (every record
+        /// and body **re-hashed locally** — the store stays untrusted), then the same search runs.
+        #[arg(long)]
+        node: Option<String>,
+        /// With `--node`: scope the candidate set to functions carrying this intent tag (repeatable,
+        /// matched as `any`). Omit to search over ALL of the node's functions.
+        #[arg(long)]
+        intent: Vec<String>,
+        /// With `--node`: cap the candidate set fetched from the node.
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+        /// Goal file: `{"examples":[{"input":<value-AST | [primary,aux…]>,"output":<value-AST>}, …]}`.
         #[arg(long, required = true)]
         goal: PathBuf,
         /// Maximum pipeline length to search.
@@ -812,8 +824,8 @@ fn main() -> ExitCode {
         }
         Commands::Equiv { body_f, body_g, solver } => (cmd_equiv(&body_f, &body_g, &solver), false),
         Commands::Compose { records } => (cmd_compose(&records), false),
-        Commands::Assemble { records, goal, max_stages, require_certified, solver, emit } => {
-            (cmd_assemble(&records, &goal, max_stages, require_certified, &solver, emit.as_deref()), false)
+        Commands::Assemble { records, node, intent, limit, goal, max_stages, require_certified, solver, emit } => {
+            (cmd_assemble(records.as_deref(), node.as_deref(), &intent, limit, &goal, max_stages, require_certified, &solver, emit.as_deref()), false)
         }
         Commands::Cluster { records, solver } => (cmd_cluster(&records, &solver), false),
         Commands::Normalize { body, hash } => (cmd_normalize(&body, hash), false),
@@ -1480,16 +1492,46 @@ fn cmd_compose(records: &[PathBuf]) -> Result<()> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_assemble(
-    records_dir: &Path,
+    records_dir: Option<&Path>,
+    node: Option<&str>,
+    intents: &[String],
+    limit: usize,
     goal: &Path,
     max_stages: usize,
     require_certified: bool,
     solver: &str,
     emit: Option<&Path>,
 ) -> Result<()> {
-    let records = nl_validator::build_record_map(records_dir)?;
-    let bodies = nl_validator::build_link_map(records_dir)?;
+    // The commons view: a local directory, or a live node's candidate set (queried by filter,
+    // fetched by content-address, every artifact re-hashed locally — the store stays untrusted).
+    let (records, bodies) = match (records_dir, node) {
+        (Some(dir), None) => (nl_validator::build_record_map(dir)?, nl_validator::build_link_map(dir)?),
+        (None, Some(url)) => {
+            // Function records carry no `kind` column, but every one has a `terminates` field
+            // (values `always`/`conditional`/`unknown`) that non-function artifacts lack — so this
+            // enumerates exactly the commons's functions (v0.1 string-typed and v0.2 structured
+            // alike, where a `type_contains` filter would miss the structured ones).
+            let mut filter = serde_json::json!({
+                "terminates": ["always", "conditional", "unknown"], "limit": limit });
+            if !intents.is_empty() {
+                filter["intent_tags"] = serde_json::json!({ "any": intents });
+            }
+            let addrs = nl_validator::commons_client::query(url, &filter)?;
+            if addrs.is_empty() {
+                return Err(anyhow::anyhow!("the node returned no candidate functions for the filter"));
+            }
+            eprintln!("discovered {} candidate function(s) on the node; fetching by content-address…", addrs.len());
+            // Seed the reference-closure walk with the candidates, fetching each record AND its
+            // body (a referenced address), every one hash-verified locally. Lenient: a function
+            // whose body the node doesn't serve is skipped, not fatal — it just isn't a candidate.
+            // Cap generously for the bulk fetch (record + body + a few fn_ref helpers per candidate).
+            nl_validator::commons_client::maps_from_node_lenient(url, &addrs, addrs.len() * 8 + 64)?
+        }
+        (Some(_), Some(_)) => return Err(anyhow::anyhow!("supply exactly one of --records / --node")),
+        (None, None) => return Err(anyhow::anyhow!("supply one of --records / --node")),
+    };
     let goal_v = nl_validator::read_json(goal)?;
     // Each example's `input` is either a single value-AST (a 1-argument goal) or an array of
     // value-ASTs `[primary, aux…]` (a multi-argument goal — the primary is threaded, the rest are

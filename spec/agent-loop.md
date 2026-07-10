@@ -194,9 +194,22 @@ assembled the three-stage pipeline **`inc → square → double`** (`inc(3)=4, s
 composite, and emitted a composite `run --records` executes end to end. And **multi-argument**, over
 `double`/`square`/`add`/`mul`: the goal `{[3,10]→16, [5,1]→11}` assembled **`double → add`** with
 composite type `(int, int) → int` — the auxiliary is threaded into `add`'s second parameter — whose
-emitted composite body `\x0 x1 → add(double(x0), x1)` runs 2/2. Honest scope: local `--records` only
-(a live-node search wants a seedless enumeration path), and the emitted composite's *declared*
-metadata is `compose`-derived, not re-proven against the `fn_ref`-chain body.
+emitted composite body `\x0 x1 → add(double(x0), x1)` runs 2/2.
+
+**Over a live node (`--node`).** The same search runs against a **remote commons**: `assemble --node
+https://<node> --goal <examples> [--intent <tag>…]` enumerates the node's candidate functions via
+`POST /v0/query` (a `terminates`-field filter matches every function record; `--intent` scopes it),
+fetches each candidate's record *and* body by content-address, and **re-hashes every artifact
+locally** — the store stays untrusted (principle 7). The fetch is *lenient*: a function whose body
+the node doesn't serve is skipped, not fatal (a partial store is legitimate), so the search proceeds
+over whatever is runnable. Worked against **production** (`nl.1105software.com`): with `double`/`add`
+functions live on Arca, `assemble --node … --goal {[3,10]→16,[5,1]→11} --require-certified`
+discovered 200 candidates, fetched and hash-verified them, assembled **`double → add`**, verified 2/2
+through the composite, and confirmed both stages certify — a task solved by composing verified parts
+from the live commons, over the network, ~82 s (200 sequential HTTPS fetches, the same
+unoptimized per-request cost the orchestrate loop pays; a content-addressed cache is the standing
+remedy). Honest scope: the emitted composite's *declared* metadata is `compose`-derived, not
+re-proven against the `fn_ref`-chain body.
 
 ## Scope (v0.2, honest)
 

@@ -48,11 +48,10 @@ pub fn fetch_artifact(node: &str, addr: &str) -> Result<J> {
     Ok(v)
 }
 
-/// Typed discovery: `POST /v0/query` with an intent-tag filter; returns matched `fn_…` addresses.
-pub fn query_intent(node: &str, intent: &str, limit: usize) -> Result<Vec<String>> {
+/// Typed discovery: `POST /v0/query` with a filter object; returns matched `fn_…` addresses.
+pub fn query(node: &str, filter: &J) -> Result<Vec<String>> {
     let url = format!("{}/v0/query", node.trim_end_matches('/'));
-    let filter = json!({ "intent_tags": { "any": [intent] }, "limit": limit }).to_string();
-    let text = crate::interp::http_request("POST", &url, Some(&filter))?;
+    let text = crate::interp::http_request("POST", &url, Some(&filter.to_string()))?;
     let v: J = serde_json::from_str(&text).map_err(|e| anyhow!("query response not JSON: {e}"))?;
     if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
         bail!("node rejected the query: {err}");
@@ -61,6 +60,11 @@ pub fn query_intent(node: &str, intent: &str, limit: usize) -> Result<Vec<String
         .and_then(|r| r.as_array())
         .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
         .unwrap_or_default())
+}
+
+/// Typed discovery by intent tag (the common case) — `{intent_tags: {any: [intent]}, limit}`.
+pub fn query_intent(node: &str, intent: &str, limit: usize) -> Result<Vec<String>> {
+    query(node, &json!({ "intent_tags": { "any": [intent] }, "limit": limit }))
 }
 
 /// Publish an artifact (`POST /v0/records` — the node re-verifies on ingest, so publication is
@@ -136,6 +140,18 @@ pub fn seed_addresses(artifact: &J) -> Vec<String> {
 /// [`crate::build_record_map`] / [`crate::build_link_map`] for the remote case: a record's body is
 /// indexed under both its `expr_…` address and the record's own `fn_…` address.
 pub fn maps_from_node(node: &str, seeds: &[String]) -> Result<(HashMap<String, J>, HashMap<String, J>)> {
+    crawl(node, seeds, false, MAX_FETCHES)
+}
+
+/// Like [`maps_from_node`], but **tolerant of absent/failed fetches** — a missing referenced
+/// artifact is skipped rather than aborting the crawl. Right for a *search* over a partial,
+/// untrusted store (principle 7): a function whose body the node doesn't serve simply isn't a
+/// candidate, instead of failing the whole run. The caller verifies it got what it needs.
+pub fn maps_from_node_lenient(node: &str, seeds: &[String], max_fetches: usize) -> Result<(HashMap<String, J>, HashMap<String, J>)> {
+    crawl(node, seeds, true, max_fetches)
+}
+
+fn crawl(node: &str, seeds: &[String], lenient: bool, max_fetches: usize) -> Result<(HashMap<String, J>, HashMap<String, J>)> {
     let mut record_map: HashMap<String, J> = HashMap::new();
     let mut link_map: HashMap<String, J> = HashMap::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -151,11 +167,18 @@ pub fn maps_from_node(node: &str, seeds: &[String]) -> Result<(HashMap<String, J
         if !(addr.starts_with("fn_") || addr.starts_with("expr_")) {
             continue; // messages/certs aren't part of the runnable closure
         }
-        if fetched >= MAX_FETCHES {
-            bail!("remote closure exceeded {MAX_FETCHES} artifacts — refusing an unbounded crawl");
+        if fetched >= max_fetches {
+            bail!("remote closure exceeded {max_fetches} artifacts — refusing an unbounded crawl");
         }
         fetched += 1;
-        let art = fetch_artifact(node, &addr)?;
+        let art = match fetch_artifact(node, &addr) {
+            Ok(a) => a,
+            Err(e) if lenient => {
+                eprintln!("skip {addr}: {e}");
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         let mut refs = Vec::new();
         referenced_addresses(&art, &mut refs);
         if addr.starts_with("fn_") {
