@@ -479,6 +479,9 @@ fn build_composite_record(
     let ty = json!({ "kind": "fn", "params": params,
         "result": composite.output_type.clone().unwrap_or(json!({ "kind": "var", "name": "a" })) });
     let examples_j: Vec<J> = examples.iter().map(|(args, o)| json!({ "args": args, "result": o })).collect();
+    let mut seen = std::collections::HashSet::new();
+    let uniq: Vec<J> = stages.iter().map(|s| s.hash.clone()).filter(|h| seen.insert(h.clone())).map(|h| json!(h)).collect();
+    let derived_from_arr = if uniq.is_empty() { J::Null } else { J::Array(uniq) };
     let body_hash = crate::hash_artifact_with_kind(body, crate::ArtifactKind::BodyExpression)?;
     let mut record = json!({
         "schema_version": "0.2.0",
@@ -494,7 +497,9 @@ fn build_composite_record(
         },
         "examples": examples_j,
         "intent_tags": [],
-        "derived_from": stages.first().map(|s| json!(s.hash)).unwrap_or(J::Null),
+        // Provenance: the (deduplicated) stage addresses this composite was assembled from. Per the
+        // schema, `derived_from` is null or a non-empty unique array of content addresses.
+        "derived_from": derived_from_arr,
         "supersedes": J::Null,
         "body_hash": body_hash,
     });

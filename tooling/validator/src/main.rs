@@ -433,6 +433,11 @@ enum Commands {
         /// written alongside as `<expr_…>.json` so the pipeline runs via `run --records`).
         #[arg(long)]
         emit: Option<PathBuf>,
+        /// With `--node`: publish the assembled composite (its record AND self-contained inlined
+        /// body) back to the node through the verify-then-store gate — closing the loop, so the
+        /// whole becomes a first-class commons artifact others can discover and assemble from.
+        #[arg(long)]
+        publish: bool,
     },
     /// **Cluster** a directory of function records into behavioral-equivalence classes (the rung above
     /// hash equality), proving `∀x. f(x) = g(x)` pairwise within each signature-shape bucket. Prints each
@@ -824,8 +829,8 @@ fn main() -> ExitCode {
         }
         Commands::Equiv { body_f, body_g, solver } => (cmd_equiv(&body_f, &body_g, &solver), false),
         Commands::Compose { records } => (cmd_compose(&records), false),
-        Commands::Assemble { records, node, intent, limit, goal, max_stages, require_certified, solver, emit } => {
-            (cmd_assemble(records.as_deref(), node.as_deref(), &intent, limit, &goal, max_stages, require_certified, &solver, emit.as_deref()), false)
+        Commands::Assemble { records, node, intent, limit, goal, max_stages, require_certified, solver, emit, publish } => {
+            (cmd_assemble(records.as_deref(), node.as_deref(), &intent, limit, &goal, max_stages, require_certified, &solver, emit.as_deref(), publish), false)
         }
         Commands::Cluster { records, solver } => (cmd_cluster(&records, &solver), false),
         Commands::Normalize { body, hash } => (cmd_normalize(&body, hash), false),
@@ -1503,7 +1508,11 @@ fn cmd_assemble(
     require_certified: bool,
     solver: &str,
     emit: Option<&Path>,
+    publish: bool,
 ) -> Result<()> {
+    if publish && node.is_none() {
+        return Err(anyhow::anyhow!("--publish requires --node (the node to publish the composite back to)"));
+    }
     // The commons view: a local directory, or a live node's candidate set (queried by filter,
     // fetched by content-address, every artifact re-hashed locally — the store stays untrusted).
     let (records, bodies) = match (records_dir, node) {
@@ -1598,6 +1607,15 @@ fn cmd_assemble(
         let bh = a.composite_record["body_hash"].as_str().unwrap();
         std::fs::write(dir.join(format!("{bh}.json")), serde_json::to_string_pretty(&a.composite_body)?)?;
         println!("  emitted     {} + {} -> {}", rh, bh, dir.display());
+    }
+
+    // Close the loop: publish the assembled composite (its self-contained inlined body first, so the
+    // record's body_hash resolves, then the record) back to the node's verify-then-store gate.
+    if publish {
+        let url = node.expect("--publish requires --node");
+        nl_validator::commons_client::publish_artifact(url, &a.composite_body)?;
+        nl_validator::commons_client::publish_artifact(url, &a.composite_record)?;
+        println!("  published   composite record + body to {url}  (now discoverable + assemble-able)");
     }
     Ok(())
 }
