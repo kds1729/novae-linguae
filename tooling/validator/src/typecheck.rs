@@ -546,6 +546,17 @@ fn infer(expr: &J, env: &Env, inf: &mut Infer) -> Result<Ty> {
             }
             Ok(con("Sum"))
         }
+        "tuple" => {
+            // Tuple construction: the product of its element types, in order (a real structural
+            // type, unlike the opaque `Sum` — the elements are heterogeneous and positionally known).
+            let elems = expr["elems"]
+                .as_array()
+                .ok_or_else(|| anyhow!("tuple elems"))?
+                .iter()
+                .map(|e| infer(e, env, inf))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(Ty::Tup(elems))
+        }
         other => bail!("unknown expression kind: {other}"),
     }
 }
@@ -596,6 +607,18 @@ fn pattern_ty(pat: &J, scrut: &Ty, env: &mut Env, inf: &mut Infer) -> Result<()>
             if let Some(p) = pat.get("payload") {
                 let fresh = inf.fresh();
                 pattern_ty(p, &fresh, env, inf)?;
+            }
+            Ok(())
+        }
+        "tuple" => {
+            // Destructure a product: unify the scrutinee with a tuple of fresh element types, then
+            // check each sub-pattern against its element (so `(x, y)` on a `(int, bool)` binds
+            // `x : int`, `y : bool` — a real typed destructure, not the opaque-sum treatment).
+            let pats = pat["elems"].as_array().ok_or_else(|| anyhow!("tuple pattern elems"))?;
+            let elems: Vec<Ty> = (0..pats.len()).map(|_| inf.fresh()).collect();
+            inf.unify(scrut, &Ty::Tup(elems.clone()))?;
+            for (p, et) in pats.iter().zip(elems.iter()) {
+                pattern_ty(p, et, env, inf)?;
             }
             Ok(())
         }
@@ -880,6 +903,38 @@ mod tests {
                     { "kind": "app", "fn": { "kind": "var", "name": "not" }, "args": [{ "kind": "var", "name": "a" }] }] } } });
         let bad_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }], "result": sum });
         assert!(typecheck(&bad_ty, &bad).is_err(), "a payload type error is not hidden by the opaque Sum");
+    }
+
+    #[test]
+    fn tuple_construction_and_destructure_typecheck() {
+        // \a b -> case (a+b, a-b) of (s,d) => s*d : (int,int) -> int — the tuple destructure binds
+        // typed elements (s:int, d:int) and the result is int.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "tuple", "elems": [
+                { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                  "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] },
+                { "kind": "app", "fn": { "kind": "var", "name": "sub" },
+                  "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] }] },
+            "arms": [{ "pattern": { "kind": "tuple", "elems": [
+                { "kind": "bind", "name": "s" }, { "kind": "bind", "name": "d" }] },
+                "body": { "kind": "app", "fn": { "kind": "var", "name": "mul" },
+                    "args": [{ "kind": "var", "name": "s" }, { "kind": "var", "name": "d" }] } }] } });
+        let ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "int" }],
+                         "result": { "kind": "builtin", "name": "int" } });
+        assert!(typecheck(&ty, &body).is_ok(), "tuple destructure binds typed elements");
+        // A tuple RESULT type checks structurally: \n -> (n, neg n) : int -> (int, int).
+        let mk = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": {
+            "kind": "tuple", "elems": [
+                { "kind": "var", "name": "n" },
+                { "kind": "app", "fn": { "kind": "var", "name": "neg" }, "args": [{ "kind": "var", "name": "n" }] }] } });
+        let mk_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
+            "result": { "kind": "tuple", "elems": [{ "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "int" }] } });
+        assert!(typecheck(&mk_ty, &mk).is_ok(), "tuple construction is a structural product type");
+        // Element types are NOT erased: using a tuple element at the wrong type is caught.
+        let bad_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
+            "result": { "kind": "tuple", "elems": [{ "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "bool" }] } });
+        assert!(typecheck(&bad_ty, &mk).is_err(), "(int, int) is not (int, bool) — elements are typed, not opaque");
     }
 
     #[test]

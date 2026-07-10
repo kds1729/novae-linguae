@@ -1153,9 +1153,23 @@ fn check_body_node(value: &Value) -> Result<()> {
                 check_body_node(payload)?;
             }
         }
+        "tuple" => {
+            // Tuple CONSTRUCTION with computed-element EXPRESSIONS (`(f a, g b)`), ≥2 elements —
+            // the expression-level counterpart of the `tuple` value kind.
+            let elems = obj
+                .get("elems")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`tuple` expression missing `elems` array"))?;
+            if elems.len() < 2 {
+                return Err(anyhow!("`tuple` expression needs at least two elements"));
+            }
+            for e in elems {
+                check_body_node(e)?;
+            }
+        }
         other => {
             return Err(anyhow!(
-                "unknown body-expression kind `{other}` (expected: var, lit, app, let, lambda, case, field, variant)"
+                "unknown body-expression kind `{other}` (expected: var, lit, app, let, lambda, case, field, variant, tuple)"
             ));
         }
     }
@@ -1184,9 +1198,21 @@ fn check_pattern_node(value: &Value) -> Result<()> {
                 .ok_or_else(|| anyhow!("`lit` pattern missing `value`"))?;
             check_value_well_formed(val)?;
         }
+        "tuple" => {
+            let elems = obj
+                .get("elems")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`tuple` pattern missing `elems` array"))?;
+            if elems.len() < 2 {
+                return Err(anyhow!("`tuple` pattern needs at least two elements"));
+            }
+            for e in elems {
+                check_pattern_node(e)?;
+            }
+        }
         other => {
             return Err(anyhow!(
-                "unknown pattern kind `{other}` (expected: wildcard, bind, variant, lit)"
+                "unknown pattern kind `{other}` (expected: wildcard, bind, variant, lit, tuple)"
             ));
         }
     }

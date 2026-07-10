@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://novae-linguae.org/spec/v0.1/body-expression.schema.json",
   "title": "Nova Lingua Body Expression",
-  "description": "Structured AST for the executable body of a Nova Lingua function. Function records reference a body by `body_hash` (a content-address with the `expr_` prefix); this schema defines the body that hash resolves to. Covers eight expression kinds — `var`, `lit`, `app`, `let`, `lambda`, `case`, `field`, `variant` (construction, with a computed payload) — and four pattern kinds — `wildcard`, `bind`, `variant`, `lit`. Conditional `if` is intentionally absent: write it as `case` on a `bool` value (principle 7: minimal orthogonal vocabulary). Embedded types (in `lambda.params[].type`) and embedded values (in `lit.value` and `pat_lit.value`) are accepted as opaque objects at this layer; they must validate independently against type-expression.schema.json and value-expression.schema.json respectively. v0.2+ may tighten this via cross-file $refs once schema-resolution tooling exists. Well-formedness rules NOT enforced here (left to the verifier): variable scoping (every `var.name` bound by an enclosing function input, `let`, `lambda` param, or `case` pattern binding), pattern exhaustiveness in `case`, single-name-binding-per-arm, type-correctness of `app.fn` against args, payload-pattern-only-where-the-variant-carries-one. The body is just an expression — the function's parameter binding is on the OUTSIDE (typically the body is itself a `lambda` whose params match the function's signature). For deferred-to-later versions of this schema: type annotations on let bindings (currently inferred), multi-arm lambda equivalence, multi-binding let (currently chained), do-notation / monadic sugar, and (much later) effect rows / handler expressions.",
+  "description": "Structured AST for the executable body of a Nova Lingua function. Function records reference a body by `body_hash` (a content-address with the `expr_` prefix); this schema defines the body that hash resolves to. Covers nine expression kinds — `var`, `lit`, `app`, `let`, `lambda`, `case`, `field`, `variant` (construction, with a computed payload), `tuple` (construction, with computed elements) — and five pattern kinds — `wildcard`, `bind`, `variant`, `lit`, `tuple`. Conditional `if` is intentionally absent: write it as `case` on a `bool` value (principle 7: minimal orthogonal vocabulary). Embedded types (in `lambda.params[].type`) and embedded values (in `lit.value` and `pat_lit.value`) are accepted as opaque objects at this layer; they must validate independently against type-expression.schema.json and value-expression.schema.json respectively. v0.2+ may tighten this via cross-file $refs once schema-resolution tooling exists. Well-formedness rules NOT enforced here (left to the verifier): variable scoping (every `var.name` bound by an enclosing function input, `let`, `lambda` param, or `case` pattern binding), pattern exhaustiveness in `case`, single-name-binding-per-arm, type-correctness of `app.fn` against args, payload-pattern-only-where-the-variant-carries-one. The body is just an expression — the function's parameter binding is on the OUTSIDE (typically the body is itself a `lambda` whose params match the function's signature). For deferred-to-later versions of this schema: type annotations on let bindings (currently inferred), multi-arm lambda equivalence, multi-binding let (currently chained), do-notation / monadic sugar, and (much later) effect rows / handler expressions.",
   "$ref": "#/$defs/body",
   "$defs": {
     "body": {
@@ -14,9 +14,25 @@
         { "$ref": "#/$defs/lambda" },
         { "$ref": "#/$defs/case" },
         { "$ref": "#/$defs/field" },
-        { "$ref": "#/$defs/variant_expr" }
+        { "$ref": "#/$defs/variant_expr" },
+        { "$ref": "#/$defs/tuple_expr" }
       ],
       "description": "Any body expression. Discriminated by `kind`."
+    },
+    "tuple_expr": {
+      "type": "object",
+      "required": ["kind", "elems"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "tuple" },
+        "elems": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/body" },
+          "description": "The element EXPRESSIONS, in order — tuple construction with computed elements (`(f a, g b)`). At least two (a 1-tuple is the element itself; the empty tuple is `unit`). The expression-level counterpart of the `tuple` VALUE kind. Destructured by a `tuple` pattern in a `case`, or the 2-tuple `fst`/`snd` builtins."
+        }
+      },
+      "description": "Construct a tuple. The heterogeneous positional product; its type is the `tuple` type-expression kind, its value the `tuple` value kind. Added when in-language tuples were pulled (dependent multi-accumulator folds and tuple-returning functions)."
     },
     "variant_expr": {
       "type": "object",
@@ -180,9 +196,25 @@
         { "$ref": "#/$defs/pat_wildcard" },
         { "$ref": "#/$defs/pat_bind" },
         { "$ref": "#/$defs/pat_variant" },
-        { "$ref": "#/$defs/pat_lit" }
+        { "$ref": "#/$defs/pat_lit" },
+        { "$ref": "#/$defs/pat_tuple" }
       ],
       "description": "A pattern in a `case` arm. Discriminated by `kind`."
+    },
+    "pat_tuple": {
+      "type": "object",
+      "required": ["kind", "elems"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "tuple" },
+        "elems": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/pattern" },
+          "description": "Sub-patterns matched positionally against the tuple's elements. Arity must equal the tuple's; each element gets its own pattern. Bindings across elements must be disjoint (single-name-binding-per-arm, enforced by the verifier)."
+        }
+      },
+      "description": "Destructure a tuple positionally — `(x, y)` in a `case` (the reader side of tuple construction; the usual way to read a multi-value result). The product counterpart of `pat_variant`'s sum."
     },
     "pat_wildcard": {
       "type": "object",

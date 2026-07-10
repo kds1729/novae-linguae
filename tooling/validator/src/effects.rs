@@ -145,15 +145,46 @@ fn walk(node: &J, records: &HashMap<String, J>, bound: &[String], inf: &mut Effe
             walk(&node["scrutinee"], records, bound, inf);
             for arm in node.get("arms").and_then(|a| a.as_array()).into_iter().flatten() {
                 let mut b2 = bound.to_vec();
-                if arm.pointer("/pattern/kind").and_then(|k| k.as_str()) == Some("bind") {
-                    if let Some(pn) = arm.pointer("/pattern/name").and_then(|n| n.as_str()) {
-                        b2.push(pn.to_string());
-                    }
-                }
+                collect_pattern_binds(&arm["pattern"], &mut b2);
                 walk(&arm["body"], records, &b2, inf);
             }
         }
         "field" => walk(&node["record"], records, bound, inf),
+        // Construction nodes carry sub-EXPRESSIONS whose effects must propagate (`(print x, y)` /
+        // `Just(print x)`); a bare `_ => {}` would silently drop them.
+        "variant" => {
+            if let Some(p) = node.get("payload") {
+                walk(p, records, bound, inf);
+            }
+        }
+        "tuple" => {
+            for e in node.get("elems").and_then(|e| e.as_array()).into_iter().flatten() {
+                walk(e, records, bound, inf);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Collect every name a pattern binds (recursing through `tuple`/`variant` sub-patterns), so a
+/// destructured name is treated as bound (effect-polymorphic), not an opaque external callee.
+fn collect_pattern_binds(pat: &J, out: &mut Vec<String>) {
+    match pat.get("kind").and_then(|k| k.as_str()) {
+        Some("bind") => {
+            if let Some(n) = pat.get("name").and_then(|n| n.as_str()) {
+                out.push(n.to_string());
+            }
+        }
+        Some("variant") => {
+            if let Some(p) = pat.get("payload") {
+                collect_pattern_binds(p, out);
+            }
+        }
+        Some("tuple") => {
+            for e in pat.get("elems").and_then(|e| e.as_array()).into_iter().flatten() {
+                collect_pattern_binds(e, out);
+            }
+        }
         _ => {}
     }
 }

@@ -245,6 +245,22 @@ impl Parser {
                     values::scalar_value_from_token(&t).expect("scalar token kinds are handled")?;
                 Ok(json!({ "kind": "lit", "value": value }))
             }
+            TokKind::Lparen => {
+                // A tuple pattern `(x, y, …)` — positional destructure, ≥2 sub-patterns. (A single
+                // parenthesized pattern is not meaningful here — patterns don't need grouping — so a
+                // comma is required.)
+                self.bump();
+                let mut elems = vec![self.parse_pattern()?];
+                while self.at(&TokKind::Comma) {
+                    self.bump();
+                    elems.push(self.parse_pattern()?);
+                }
+                self.expect(TokKind::Rparen, "`)` to close a tuple pattern")?;
+                if elems.len() < 2 {
+                    return Err(SurfaceError::msg("a tuple pattern needs at least two elements"));
+                }
+                Ok(json!({ "kind": "tuple", "elems": elems }))
+            }
             _ => {
                 let t = self.peek();
                 Err(SurfaceError::at(
@@ -454,9 +470,20 @@ impl Parser {
                     self.bump();
                     return Ok(json!({ "kind": "lit", "value": { "kind": "unit" } }));
                 }
-                let inner = self.parse_expr()?;
+                let first = self.parse_expr()?;
+                // A comma turns `( … )` from grouping into tuple CONSTRUCTION `(a, b, …)` — the
+                // elements are expressions (like list/variant construction), ≥2 elements.
+                if self.at(&TokKind::Comma) {
+                    let mut elems = vec![first];
+                    while self.at(&TokKind::Comma) {
+                        self.bump();
+                        elems.push(self.parse_expr()?);
+                    }
+                    self.expect(TokKind::Rparen, "`)` to close a tuple")?;
+                    return Ok(json!({ "kind": "tuple", "elems": elems }));
+                }
                 self.expect(TokKind::Rparen, "`)` to close parenthesized expression")?;
-                Ok(inner)
+                Ok(first)
             }
             _ => {
                 let t = self.peek();
@@ -561,6 +588,14 @@ fn render(node: &Value) -> Result<(String, u8), SurfaceError> {
                 Some(payload) => Ok((format!("{tag}({})", render(payload)?.0), ATOM_PREC)),
                 None => Ok((tag.to_string(), ATOM_PREC)),
             }
+        }
+        "tuple" => {
+            let elems = node
+                .get("elems")
+                .and_then(|e| e.as_array())
+                .ok_or_else(|| SurfaceError::msg("`tuple` missing `elems`"))?;
+            let parts = elems.iter().map(|e| Ok(render(e)?.0)).collect::<Result<Vec<_>, SurfaceError>>()?;
+            Ok((format!("({})", parts.join(", ")), ATOM_PREC))
         }
         "app" => render_app(node),
         "let" => {
@@ -709,6 +744,14 @@ fn render_pattern(node: &Value) -> Result<String, SurfaceError> {
                 .get("value")
                 .ok_or_else(|| SurfaceError::msg("`lit` pattern missing `value`"))?;
             values::unparse_value(value)
+        }
+        "tuple" => {
+            let elems = node
+                .get("elems")
+                .and_then(|e| e.as_array())
+                .ok_or_else(|| SurfaceError::msg("`tuple` pattern missing `elems`"))?;
+            let parts = elems.iter().map(render_pattern).collect::<Result<Vec<_>, SurfaceError>>()?;
+            Ok(format!("({})", parts.join(", ")))
         }
         other => Err(SurfaceError::msg(format!("unknown pattern kind `{other}`"))),
     }
@@ -946,6 +989,10 @@ mod tests {
             "None",
             "Just(a / b)",
             "case b == 0 of { true => None; false => Just(a / b) }",
+            "(a + b, a - b)",
+            "(n, -n, 0)",
+            "case p of { (x, y) => x + y }",
+            "case p of { (x, Just(y)) => y; (x, None) => x }",
         ] {
             let ast = parse_body(s).unwrap();
             let printed = unparse_body(&ast).unwrap();

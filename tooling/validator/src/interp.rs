@@ -824,6 +824,18 @@ pub fn eval(expr: &J, env: &Env) -> Result<Val> {
             };
             Ok(Val::Variant(tag, payload))
         }
+        "tuple" => {
+            // Tuple construction with computed elements (`(f a, g b)`) — the body-expression form
+            // (the `lit` path builds only constant tuples). Destructured by a `tuple` pattern in a
+            // `case`, or the 2-tuple `fst`/`snd` builtins.
+            let elems = expr["elems"]
+                .as_array()
+                .ok_or_else(|| anyhow!("tuple elems"))?
+                .iter()
+                .map(|e| eval(e, env))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(Val::Tuple(elems))
+        }
         other => bail!("unknown expression kind: {other}"),
     }
 }
@@ -854,6 +866,25 @@ fn match_pattern(pat: &J, v: &Val) -> Result<Option<Env>> {
                     (Some(pp), Some(pv)) => match_pattern(pp, pv)?,
                     (Some(_), None) => None,
                 },
+                _ => None,
+            }
+        }
+        "tuple" => {
+            // Destructure a tuple positionally: `(x, y)` binds each element. Matches only a tuple of
+            // the same arity; sub-patterns match left to right and their bindings union (disjoint by
+            // construction — the surface forbids repeated binders).
+            let pats = pat["elems"].as_array().ok_or_else(|| anyhow!("tuple pattern elems"))?;
+            match v {
+                Val::Tuple(vs) if vs.len() == pats.len() => {
+                    let mut e = Env::new();
+                    for (p, sub) in pats.iter().zip(vs.iter()) {
+                        match match_pattern(p, sub)? {
+                            Some(b) => e.extend(b),
+                            None => return Ok(None),
+                        }
+                    }
+                    Some(e)
+                }
                 _ => None,
             }
         }
@@ -1523,6 +1554,39 @@ mod tests {
             "body": { "kind": "app", "fn": { "kind": "var", "name": "init" }, "args": [{ "kind": "var", "name": "xs" }] } });
         assert_eq!(eval_body(&init, &[lst]).unwrap(),
                    encode_value(&Val::List(vec![Val::Int(1), Val::Int(2)])));
+    }
+
+    #[test]
+    fn tuple_construction_and_destructure() {
+        // \a b -> case (a + b, a - b) of (s, d) => s * d   ==  a^2 - b^2
+        let body = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "tuple", "elems": [
+                { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                  "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] },
+                { "kind": "app", "fn": { "kind": "var", "name": "sub" },
+                  "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] }] },
+            "arms": [{ "pattern": { "kind": "tuple", "elems": [
+                { "kind": "bind", "name": "s" }, { "kind": "bind", "name": "d" }] },
+                "body": { "kind": "app", "fn": { "kind": "var", "name": "mul" },
+                    "args": [{ "kind": "var", "name": "s" }, { "kind": "var", "name": "d" }] } }] } });
+        // (5+3)*(5-3) = 16 = 25 - 9
+        assert_eq!(eval_body(&body, &[nat(5), nat(3)]).unwrap(), encode_value(&Val::Int(16)));
+        // A tuple RESULT round-trips through encode.
+        let mk = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": {
+            "kind": "tuple", "elems": [
+                { "kind": "var", "name": "n" },
+                { "kind": "app", "fn": { "kind": "var", "name": "neg" }, "args": [{ "kind": "var", "name": "n" }] }] } });
+        assert_eq!(eval_body(&mk, &[nat(4)]).unwrap(),
+                   encode_value(&Val::Tuple(vec![Val::Int(4), Val::Int(-4)])));
+        // A wrong-arity tuple pattern does not match (non-exhaustive → error, not a false bind).
+        let bad = json!({ "kind": "lambda", "params": [{ "name": "p" }], "body": {
+            "kind": "case", "scrutinee": { "kind": "var", "name": "p" },
+            "arms": [{ "pattern": { "kind": "tuple", "elems": [
+                { "kind": "bind", "name": "x" }, { "kind": "bind", "name": "y" },
+                { "kind": "bind", "name": "z" }] }, "body": { "kind": "var", "name": "x" } }] } });
+        let two = json!({ "kind": "tuple", "elems": [nat(1), nat(2)] });
+        assert!(eval_body(&bad, &[two]).is_err(), "a 3-arity pattern must not match a 2-tuple");
     }
 
     #[test]
