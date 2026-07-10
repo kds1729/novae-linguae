@@ -511,7 +511,10 @@ fn eval_value(expr: &syn::Expr, hint: Option<&Value>, env: &Env, depth: usize) -
                 let name = p.path.segments.last()?.ident.to_string();
                 if matches!(name.as_str(), "Some" | "Ok" | "Err") && c.args.len() == 1 {
                     let payload = eval_value(&c.args[0], None, env, d)?;
-                    return Some(json!({ "kind": "variant", "tag": name, "payload": payload }));
+                    // Rust's `Some` is Nova's canonical `Maybe` constructor `Just` (map_get /
+                    // parse_int / parse_json all produce `Just`/`None`); `Ok`/`Err` are shared.
+                    let tag = if name == "Some" { "Just".to_string() } else { name };
+                    return Some(json!({ "kind": "variant", "tag": tag, "payload": payload }));
                 }
             }
             None
@@ -1132,7 +1135,13 @@ fn expr_to_body(expr: &syn::Expr, strs: &HashSet<String>) -> Option<Value> {
         syn::Expr::Group(g) => expr_to_body(&g.expr, strs),
         syn::Expr::Reference(r) => expr_to_body(&r.expr, strs),
         syn::Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
-            p_var(&p.path.segments[0].ident.to_string())
+            // `None` is the nullary Maybe constructor (Nova's canonical Maybe is `Just`/`None`);
+            // any other single-segment path is a variable.
+            if p.path.segments[0].ident == "None" {
+                Some(json!({ "kind": "variant", "tag": "None" }))
+            } else {
+                p_var(&p.path.segments[0].ident.to_string())
+            }
         }
         syn::Expr::Lit(_) => value_ast(expr, None).map(|v| json!({ "kind": "lit", "value": v })),
         syn::Expr::Unary(u) => match u.op {
@@ -1181,7 +1190,34 @@ fn expr_to_body(expr: &syn::Expr, strs: &HashSet<String>) -> Option<Value> {
         syn::Expr::MethodCall(m) if m.method == "to_string" && m.args.is_empty() => {
             body_op_app("to_string", vec![expr_to_body(&m.receiver, strs)?])
         }
+        // Tuple construction `(a, b, …)` -> the `tuple` body node (>=2 elements; a 1-tuple is its
+        // element, `()` is unit — matching the value layer and the Python adapter).
+        syn::Expr::Tuple(t) => {
+            if t.elems.is_empty() {
+                return Some(json!({ "kind": "lit", "value": { "kind": "unit" } }));
+            }
+            if t.elems.len() == 1 {
+                return expr_to_body(&t.elems[0], strs);
+            }
+            let mut elems = Vec::new();
+            for e in &t.elems {
+                elems.push(expr_to_body(e, strs)?);
+            }
+            Some(json!({ "kind": "tuple", "elems": elems }))
+        }
         syn::Expr::Call(c) => {
+            // Variant construction with a computed payload: Rust `Some(e)` -> `Just(e)` (canonical
+            // Maybe), `Ok(e)`/`Err(e)` shared with Nova's Result.
+            if let syn::Expr::Path(p) = &*c.func {
+                if p.qself.is_none() {
+                    let name = p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+                    if matches!(name.as_str(), "Some" | "Ok" | "Err") && c.args.len() == 1 {
+                        let tag = if name == "Some" { "Just" } else { name.as_str() };
+                        return Some(json!({ "kind": "variant", "tag": tag,
+                                            "payload": expr_to_body(&c.args[0], strs)? }));
+                    }
+                }
+            }
             let fnv = match &*c.func {
                 syn::Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
                     p_var(&p.path.segments[0].ident.to_string())?
@@ -1792,6 +1828,47 @@ mod tests {
             rec["examples"][0]["result"],
             json!({ "kind": "list", "elems": [
                 { "kind": "nat", "value": 3 }, { "kind": "nat", "value": 2 }, { "kind": "nat", "value": 1 }] })
+        );
+    }
+
+    #[test]
+    fn body_tuple_and_variant_construction() {
+        // Tuple construction in an expression body.
+        let t: syn::Expr = syn::parse_str("(a + b, a - b)").unwrap();
+        assert_eq!(
+            expr_to_body(&t, &HashSet::new()).unwrap(),
+            json!({ "kind": "tuple", "elems": [
+                { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                  "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] },
+                { "kind": "app", "fn": { "kind": "var", "name": "sub" },
+                  "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] }] })
+        );
+        // Rust `Some(e)` -> Nova's canonical `Just(e)`; `None` -> the nullary variant.
+        let some: syn::Expr = syn::parse_str("Some(n + 1)").unwrap();
+        assert_eq!(
+            expr_to_body(&some, &HashSet::new()).unwrap(),
+            json!({ "kind": "variant", "tag": "Just",
+                    "payload": { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                                 "args": [{ "kind": "var", "name": "n" },
+                                          { "kind": "lit", "value": { "kind": "int", "value": 1 } }] } })
+        );
+        let none: syn::Expr = syn::parse_str("None").unwrap();
+        assert_eq!(expr_to_body(&none, &HashSet::new()).unwrap(),
+                   json!({ "kind": "variant", "tag": "None" }));
+        // `Ok`/`Err` keep their tags (Result is shared with Rust).
+        let ok: syn::Expr = syn::parse_str("Ok(x)").unwrap();
+        assert_eq!(expr_to_body(&ok, &HashSet::new()).unwrap(),
+                   json!({ "kind": "variant", "tag": "Ok", "payload": { "kind": "var", "name": "x" } }));
+    }
+
+    #[test]
+    fn value_some_maps_to_canonical_just() {
+        // A doctest `Some(3)` value ingests as the canonical Maybe `Just(3)`, not a `Some` tag —
+        // so a Rust-ingested optional matches what every Nova Maybe builtin produces.
+        let some: syn::Expr = syn::parse_str("Some(3)").unwrap();
+        assert_eq!(
+            value_ast(&some, None).unwrap(),
+            json!({ "kind": "variant", "tag": "Just", "payload": { "kind": "int", "value": 3 } })
         );
     }
 }

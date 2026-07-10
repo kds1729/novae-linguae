@@ -437,6 +437,14 @@ only real ingested records could surface.
   the identity on an already-string receiver). `format!` (a macro) and iterator-returning
   `.split()` stay out of subset. Verified by hash equality: four doc-tested Rust functions emit
   exactly the expected translated body addresses, and the lifted bodies evaluate correctly.
+  *Rust tuples + Option/Result (2026-07-09):* the Rust body lifter gained tuple construction
+  `(a, b)` and variant construction — Rust's `Some(e)`/`None` become Nova's canonical `Just`/`None`
+  (the `Maybe` constructors every builtin — `map_get`/`parse_int`/`parse_json` — produces, so a
+  Rust-ingested optional matches a Nova-computed one and a Python-ingested one), `Ok`/`Err` shared.
+  This also **fixed a latent cross-adapter inconsistency**: the Rust value layer had been encoding
+  a doctest `Some(3)` as a `Some`-tagged variant, which no Nova `Maybe` operation ever produces —
+  now `Just(3)`. So `add_sub` (`-> (i64, i64)`) and `bump` (`-> Option<i64>`) ingest to records with
+  a `(int, int)` / `Maybe int` type and a tuple / `Just` example.
   *Statement subset widened (2026-07-07):* the honest 9/57-stdlib finding is a control-flow gap
   (real library code is multi-statement, not single-expression), and the two most common loop
   shapes the single-statement translator couldn't reach are now in: a **guarded accumulator**
