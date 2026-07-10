@@ -316,8 +316,9 @@ by signature, certified, applied it live → `true`, published the assert; a gra
 `verify-claim` correctly reported the claim **undecidable** (an effectful assert is testimony);
 and a granted one **re-ran the whole cycle live and CONFIRMED**. `run` needed no new grant flag —
 it already grants exactly the record's declared effects (its examples are its own tests) — only
-`--secret`. Wire-format details deliberately unpulled: response headers, redirects,
-query-parameter encoding, multipart bodies — no workflow has needed them.
+`--secret`. Wire-format details deliberately unpulled at the time: response headers, redirects,
+query-parameter encoding, multipart bodies — no workflow had needed them (GW10 has since pulled
+query-parameter encoding; the rest remain unpulled).
 
 **GW7 — records from an API description (2026-07-07): ingestion at the description layer.** With
 the general `http` core in place, a **machine-readable API description is an ingestion source**:
@@ -345,7 +346,8 @@ net.read@127.0.0.1` discovered it among five candidates, disambiguated **by sign
 arity-1 one), applied it live → status 200, published the assert; a grantless `verify-claim`
 reported it undecidable (testimony) and a granted one re-ran it live and CONFIRMED. Wire-format
 depth (response headers, `$ref` schema resolution, query/multipart encoding, non-Bearer auth)
-stays unpulled — the description-to-record path, not full OpenAPI coverage, is the pull.
+stayed unpulled — the description-to-record path, not full OpenAPI coverage, was the pull
+(GW10 has since pulled `$ref` resolution, query/header parameters, and apiKey auth).
 
 **GW3 — dispatch on message content (2026-07-07): the zero-pull workflow.** The last of the
 three original golden workflows — *split a command string, compare its head against known
@@ -399,6 +401,48 @@ the **nominal `apply(Maybe, [int])`** the adapters emit did not (it never erased
 passed. Fixed in `ast_to_ty` (nominal `Maybe`/`Result` applications now erase to `Sum`, the
 same rule as `Json` and the structural `sum` kind) with a regression test — the kind of hole
 only real ingested records could surface.
+
+**GW10 — description depth (2026-07-10): query strings pull `url_encode`.** GW7 compiled the
+description-to-record path with wire-format depth left unpulled; GW10 is the workflow that needs
+it — a real search endpoint (`GET /search?q=<term>&limit=<n>`, apiKey-authed, `$ref`-factored
+components). The pull is **`url_encode : string → string`**, RFC 3986 *strict* percent-encoding
+(unreserved characters pass; every other UTF-8 byte becomes `%XX` uppercase hex — the strictest
+form, safe in any URL component): building a query string by raw `str_concat` over caller data
+is **unsound** (a space or `&` in the value changes the request), and percent-encoding needs
+per-character access the language deliberately lacks, so it enters as a builtin and pays the
+verified-by-default tax (evaluator; typecheck `string → string`; the terminate/complexity
+first-order linear classes; prover string-**sort** inference but OUT of the SMT fragment, like
+`str_lower` — no theory counterpart, so laws over it read UNSUPPORTED, never mis-proved; proptest
+string generation). [`tooling/nl-ingest-openapi`](../tooling/nl-ingest-openapi/) gained the
+depth: local `#/…` **`$ref` resolution** (parameters, requestBodies, responses, security
+schemes, path-item-level shared parameters — cycle-bounded; an external or dangling reference
+refuses the operation), **required query parameters** as record parameters (a string value rides
+through `url_encode`; an `integer` schema becomes an `int` parameter through `to_string` —
+digits are unreserved; parameter *names* are spec-time literals, percent-encoded at generation
+time), **required header parameters** (`map_put` by literal name, variable value), and
+**apiKey-in-header auth** (`<name>: {{secret:NAME}}`, the placeholder name defaulting to the
+scheme key). The refusal boundary is explicit and tested: an *optional* query/header parameter
+is omitted with a printed note (the record is the minimal documented call — never a silent
+truncation); a multipart-only request body (no deterministic boundary construction),
+apiKey-in-query/cookie (a secret placeholder substitutes only inside a *header* value at the
+effect boundary — in a query string the credential would enter the URL, hence the record and the
+trace), HTTP basic (no base64 builtin), and oauth2/openIdConnect flows all refuse the operation
+with a reason. Exit gate: the reference fake service grew the GW10 surface (`/search` +
+`/version` under `X-Api-Key`, 400 on an unencoded request target), and the worked example's
+query value is deliberately `"hello world"` — the documented 200 **proves the encoding ran**.
+`searchitems` (`(string, string, int) → int`) and `getversion` certify and are published to Arca
+with signed certifications; the remote loop closed in production (`orchestrate --node … --intent
+io/network/http --verify --require-certified --publish --grant net.read@127.0.0.1 --secret
+api_key=…` — discovered among seven candidates, disambiguated **by signature** as the only
+arity-3, certified, applied live → 200, assert published), a grantless `verify-claim` reported
+it undecidable (testimony), and a granted one re-ran it live and CONFIRMED. **Faithfulness
+held**: the item-store description regenerates byte-identical bodies through the widened
+adapter. Corpus follow-through same day: curated `url_funcs` rows (`encode_term` / `query_of` /
+`param_pair` / `search_url` / `encode_all` — eval 390 → 394, oracle 394/394) plus combinatorial
+family **#49** (near-bare encodes, single/chained query pairs, int params via `to_string`, the
+join-encoded list; corpus19 = 3,195 specs, 0 drops; ftdata19 staged). Residual description
+depth — response headers/redirects, multipart, non-local `$ref`s, oauth flows — stays refused,
+awaiting a workflow.
 
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.

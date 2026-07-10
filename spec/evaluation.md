@@ -77,6 +77,11 @@ lexicographic order over Unicode scalar values, **the same order canonical map k
 the Unicode **default (untailored)** lowercase mapping, deterministic and locale-independent (no
 Turkish-i tailoring). `str_lt` maps into the prover's string fragment (SMT-LIB `str.<` has exactly
 these semantics); `str_lower` stays out (no theory counterpart).
+Tier-2, pulled by GW10 (description depth — query strings): `url_encode : string → string` — RFC
+3986 **strict** percent-encoding (unreserved characters pass; every other UTF-8 byte becomes `%XX`
+uppercase hex), total and deterministic; raw `str_concat` of caller data into a URL is unsound (a
+space or `&` changes the request). Like `str_lower` it stays out of the SMT fragment (no theory
+counterpart) — its argument still infers the string *sort*, and laws over it read UNSUPPORTED.
 
 **Float report builtins** (tier-2, pulled by GW5 — the numeric-report workflow): `to_float : int →
 float` — total; IEEE-754 nearest-even for magnitudes beyond 2⁵³ (deterministic rounding, stated
