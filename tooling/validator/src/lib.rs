@@ -327,8 +327,10 @@ impl ArtifactKind {
             if kind_str == "eval-attestation" {
                 return Ok(ArtifactKind::EvalAttestation);
             }
+            // The nine body-expression kinds (spec/body-expression.schema.json) — incl. the
+            // construction forms `variant`/`tuple` a bare 0-argument body can top out at.
             const BODY_KINDS: &[&str] = &[
-                "var", "lit", "app", "let", "lambda", "case", "field",
+                "var", "lit", "app", "let", "lambda", "case", "field", "variant", "tuple",
             ];
             if BODY_KINDS.contains(&kind_str) {
                 return Ok(ArtifactKind::BodyExpression);
@@ -409,7 +411,11 @@ pub fn hash_artifact(value: &Value) -> Result<String> {
 /// end-to-end (principle 4: assemble from existing records).
 pub fn build_link_map(dir: &Path) -> Result<std::collections::HashMap<String, Value>> {
     use std::collections::HashMap;
-    const BODY_KINDS: [&str; 7] = ["lambda", "var", "lit", "app", "let", "case", "field"];
+    // The nine body-expression kinds (spec/body-expression.schema.json). `variant`/`tuple` are the
+    // construction forms a 0-argument function's *bare* body can top out at (`\-> Just(3)`,
+    // `\-> (a, b)`) — omitting them left such bodies unindexed and thus unresolvable.
+    const BODY_KINDS: [&str; 9] =
+        ["lambda", "var", "lit", "app", "let", "case", "field", "variant", "tuple"];
     let mut bodies_by_expr: HashMap<String, Value> = HashMap::new();
     let mut records = vec![];
     for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
@@ -1220,4 +1226,52 @@ fn check_pattern_node(value: &Value) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod link_map_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn bare_variant_and_tuple_bodies_are_body_expressions() {
+        // A 0-argument function's *bare* body can top out at `variant`/`tuple` (`\-> None`,
+        // `\-> (1, 2)`). These must auto-detect as body expressions and hash — a regression for the
+        // BODY_KINDS lists that omitted them (leaving such bodies undetectable/unindexed).
+        let variant = json!({ "kind": "variant", "tag": "None" });
+        let tuple = json!({ "kind": "tuple", "elems": [
+            { "kind": "lit", "value": { "kind": "int", "value": 1 } },
+            { "kind": "lit", "value": { "kind": "int", "value": 2 } }] });
+        assert!(matches!(ArtifactKind::detect(&variant).unwrap(), ArtifactKind::BodyExpression));
+        assert!(matches!(ArtifactKind::detect(&tuple).unwrap(), ArtifactKind::BodyExpression));
+        assert!(hash_artifact(&variant).is_ok());
+        assert!(hash_artifact(&tuple).is_ok());
+    }
+
+    #[test]
+    fn build_link_map_indexes_a_bare_variant_body() {
+        // A record whose body is a bare `variant` (a 0-argument `Maybe`-returning function) must be
+        // indexed by build_link_map under both the body address and the fn address.
+        let body = json!({ "kind": "variant", "tag": "None" });
+        let bh = hash_artifact_with_kind(&body, ArtifactKind::BodyExpression).unwrap();
+        // A per-content directory name avoids collisions without a clock/RNG (unavailable in tests).
+        let dir = std::env::temp_dir().join(format!("nl_linkmap_{}", &bh[5..21]));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut rec = json!({ "schema_version": "0.2.0", "hash": "fn_".to_string() + &"0".repeat(64),
+            "name_hints": ["nothing"],
+            "signature": { "type": { "kind": "fn", "params": [], "result":
+                { "kind": "apply", "ctor": { "kind": "builtin", "name": "Maybe" }, "args": [{ "kind": "var", "name": "a" }] } },
+                "refinements": [], "effects": [], "capabilities": [], "terminates": "always" },
+            "examples": [{ "args": [], "result": { "kind": "variant", "tag": "None" } }],
+            "intent_tags": [], "derived_from": Value::Null, "supersedes": Value::Null, "body_hash": bh });
+        let h = hash_artifact_with_kind(&rec, ArtifactKind::FunctionRecord).unwrap();
+        rec["hash"] = json!(h);
+        std::fs::write(dir.join(format!("{bh}.json")), body.to_string()).unwrap();
+        std::fs::write(dir.join(format!("{h}.json")), rec.to_string()).unwrap();
+        let map = build_link_map(&dir).unwrap();
+        assert!(map.contains_key(&bh), "bare-variant body indexed by its expr address");
+        assert!(map.contains_key(&h), "…and aliased under the fn address, so a fn_ref resolves");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
