@@ -138,15 +138,23 @@ class PythonBodyTests(unittest.TestCase):
         # Source order of the accumulators is kept: s's fold binds outermost.
         self.assertLess(s.index('"name": "s"'), s.index('"name": "c"'))
 
-    def test_dependent_accumulators_are_out_of_subset(self):
-        # `c += s` reads s's MID-LOOP value — a separate fold can't reproduce it; refused.
-        self.assertIsNone(py_body("def f(xs):\n    s = 0\n    c = 0\n"
-                                  "    for x in xs:\n        s += x\n        c += s\n    return c"))
-        # A guard reading an accumulator has the same mid-loop problem.
-        self.assertIsNone(py_body("def f(xs):\n    s = 0\n    c = 0\n"
-                                  "    for x in xs:\n        if x > c:\n            s += x\n"
-                                  "            c += 1\n    return s"))
-        # The same accumulator twice is sequential by construction.
+    def test_dependent_accumulators_use_a_tuple_fold(self):
+        # `c += s` reads s's MID-LOOP value — a SEPARATE fold can't reproduce it, but a single
+        # TUPLE-accumulator fold can (in-language tuples, pulled for exactly this). The updates
+        # run in source order inside the step, so c sees the new s.
+        body = py_body("def f(xs):\n    s = 0\n    c = 0\n"
+                       "    for x in xs:\n        s += x\n        c += s\n    return c")
+        self.assertIsNotNone(body)
+        s = json.dumps(body)
+        self.assertEqual(s.count('"foldl"'), 1)          # ONE fold, not two
+        self.assertIn('"kind": "tuple"', s)              # threaded through a tuple accumulator
+        # A guard reading an accumulator has the same mid-loop shape — also a tuple fold now.
+        guarded = py_body("def f(xs):\n    s = 0\n    c = 0\n"
+                          "    for x in xs:\n        if x > c:\n            s += x\n"
+                          "            c += 1\n    return s")
+        self.assertIsNotNone(guarded)
+        self.assertEqual(json.dumps(guarded).count('"foldl"'), 1)
+        # The same accumulator twice is still genuinely refused (duplicate target).
         self.assertIsNone(py_body("def f(xs):\n    s = 0\n"
                                   "    for x in xs:\n        s += x\n        s += 1\n    return s"))
 

@@ -212,6 +212,22 @@ def _maybe_case(scrutinee, just_body_of, none_body):
     }
 
 
+def _tuple_target_names(target):
+    """The element names of a tuple/list assignment or for-loop target (`x, y` or `[x, y]`) — a
+    flat sequence of plain names, >=2. Nested, starred, or non-name elements are out of subset."""
+    elts = target.elts
+    if len(elts) < 2:
+        raise BodyError("a tuple target needs at least two names")
+    names = []
+    for e in elts:
+        if not isinstance(e, ast.Name):
+            raise BodyError("tuple-unpacking targets must be plain names (no nesting/starred)")
+        names.append(e.id)
+    if len(set(names)) != len(names):
+        raise BodyError("repeated name in a tuple-unpacking target")
+    return names
+
+
 def _is_boolish(node):
     """True if `node` is a genuinely boolean expression — so a Python `if`/ternary test can be a
     `case` on a `bool` without silently mistranslating truthiness of non-bool values."""
@@ -393,6 +409,14 @@ def _expr_from_py(node, strs=frozenset(), dicts=frozenset()):
         for e in reversed(node.elts):
             expr = b_app(b_var("cons"), [_expr_from_py(e, strs, dicts), expr])
         return expr
+    if isinstance(node, ast.Tuple):
+        # A tuple `(a, b, …)` -> the `tuple` construction node (>=2 elements; a 1-tuple is the
+        # element, the empty tuple is unit — handled by the value layer). The heterogeneous product.
+        if any(isinstance(e, ast.Starred) for e in node.elts):
+            raise BodyError("starred tuple elements are out of subset")
+        if len(node.elts) < 2:
+            raise BodyError("a tuple needs at least two elements")
+        return {"kind": "tuple", "elems": [_expr_from_py(e, strs, dicts) for e in node.elts]}
     raise BodyError(f"unsupported expression {type(node).__name__}")
 
 
@@ -426,6 +450,16 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
         if ret_maybe:
             return b_variant("None")  # statements after a raise are dead
         raise BodyError("unsupported statement Raise")
+    if isinstance(head, ast.Assign) and len(head.targets) == 1 \
+            and isinstance(head.targets[0], (ast.Tuple, ast.List)):
+        # Tuple-unpacking assignment `x, y = expr; …rest` -> `case expr of { (x, y) => rest }` —
+        # the reader side of a tuple result. Targets must be plain names (no nested/starred).
+        names = _tuple_target_names(head.targets[0])
+        pat = {"kind": "tuple", "elems": [{"kind": "bind", "name": n} for n in names]}
+        # The unpacked names are freshly bound; drop them from the type-inference sets.
+        inner, inner_d, inner_m = strs - set(names), dicts - set(names), maybes - set(names)
+        return {"kind": "case", "scrutinee": _expr_from_py(head.value, strs, dicts),
+                "arms": [{"pattern": pat, "body": _block_from_py(tail, inner, inner_d, inner_m, ret_maybe)}]}
     if isinstance(head, ast.Assign):
         if len(head.targets) != 1 or not isinstance(head.targets[0], ast.Name):
             raise BodyError("only single-name assignment targets are in subset")
@@ -653,18 +687,59 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                     update = _expr_from_py(stmt.value, loop_strs, loop_dicts)
                 accs.append(acc)
                 updates.append(update)
+            if len(accs) > 1 and len(set(accs)) != len(accs):
+                raise BodyError("duplicate accumulator in a multi-accumulator loop")
+            accset = set(accs)
+            dependent = False
             if len(accs) > 1:
-                if len(set(accs)) != len(accs):
-                    raise BodyError("duplicate accumulator in a multi-accumulator loop")
                 for stmt in body:
                     target = stmt.target if isinstance(stmt, ast.AugAssign) else stmt.targets[0]
-                    others = set(accs) - {target.id}
+                    others = accset - {target.id}
                     if any(isinstance(n, ast.Name) and n.id in others for n in ast.walk(stmt.value)):
-                        raise BodyError("sequentially dependent accumulators (an update reads another)")
+                        dependent = True
                 if guard is not None \
-                        and any(isinstance(n, ast.Name) and n.id in set(accs) for n in ast.walk(guard)):
-                    raise BodyError("loop guard reads an accumulator in a multi-accumulator loop")
-            result = _block_from_py(tail, strs, dicts, maybes - set(accs), ret_maybe)
+                        and any(isinstance(n, ast.Name) and n.id in accset for n in ast.walk(guard)):
+                    dependent = True
+
+            if dependent:
+                # DEPENDENT accumulators — an update (or the guard) reads another accumulator's
+                # mid-loop value, which N separate folds can't reproduce. Thread ALL accumulators
+                # through ONE fold with a TUPLE accumulator, updating them in source order within a
+                # step (so a later update sees an earlier one's new value, as Python does):
+                #   let (s, c) = foldl(\_acc x -> case _acc of (s, c) =>
+                #                        let _g = <guard at iter start> in
+                #                        let s = case _g of {true => s'; false => s} in
+                #                        let c = case _g of {true => c'; false => c} in (s, c),
+                #                      (s0, c0), src)
+                #   in <rest>
+                used = accset | {x} | {n.id for s in stmts for n in ast.walk(s) if isinstance(n, ast.Name)}
+
+                def _fresh(base):
+                    while base in used:
+                        base += "_"
+                    used.add(base)
+                    return base
+                accp, gvar, foldvar = _fresh("_acc"), _fresh("_g"), _fresh("_folded")
+                acc_pat = {"kind": "tuple", "elems": [{"kind": "bind", "name": a} for a in accs]}
+                # Evaluate the guard once at iteration start (over the destructured accs), if present;
+                # then apply the updates in source order (each later one sees earlier rebindings).
+                step = {"kind": "tuple", "elems": [b_var(a) for a in accs]}
+                for acc, update in reversed(list(zip(accs, updates))):
+                    if guard is not None:
+                        update = b_if(b_var(gvar), update, b_var(acc))
+                    step = b_let(acc, update, step)
+                if guard is not None:
+                    step = b_let(gvar, _expr_from_py(guard, loop_strs, loop_dicts), step)
+                destructure = {"kind": "case", "scrutinee": b_var(accp),
+                               "arms": [{"pattern": acc_pat, "body": step}]}
+                seed = {"kind": "tuple", "elems": [b_var(a) for a in accs]}
+                fold = b_app(b_var("foldl"), [b_lambda([accp, x], destructure), seed, src])
+                result = _block_from_py(tail, strs, dicts, maybes - accset, ret_maybe)
+                unpack = {"kind": "case", "scrutinee": b_var(foldvar),
+                          "arms": [{"pattern": acc_pat, "body": result}]}
+                return b_let(foldvar, fold, unpack)
+
+            result = _block_from_py(tail, strs, dicts, maybes - accset, ret_maybe)
             for acc, update in reversed(list(zip(accs, updates))):
                 # A guarded step keeps the accumulator unchanged on the false branch.
                 if guard is not None:

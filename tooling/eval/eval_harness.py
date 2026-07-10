@@ -267,7 +267,9 @@ WRITE_CONVENTIONS = (
     "map_get returns a Maybe. A map value is written map {\"k\" => v, ...}; empty is map {}.\n"
     "- JSON: parse_json (string -> Maybe Json) and render_json (Json -> canonical string). Json is a "
     "sum type — JNull, JBool(b), JNum(n), JStr(s), JList(xs), JObj(m) — destructured by case like any "
-    "variant.\n\n"
+    "variant.\n"
+    "- Tuples: build with `(a, b)` (2+ elements, comma-separated); read by a tuple case pattern "
+    "`case p of { (x, y) => x + y }`, or `fst`/`snd` for pairs. `(e)` with no comma is just grouping.\n\n"
     "Examples of well-formed bodies:\n"
     "  \\a b -> a + b\n"
     "  \\n -> n - int(1)\n"
@@ -287,7 +289,8 @@ READ_CONVENTIONS = (
     "Value conventions (follow exactly):\n"
     "- Integers are written `int(N)`: `int(42)`, `int(-6)`. A bare `42` is WRONG (it parses as a different type).\n"
     "- Lists: `[int(2), int(4), int(6)]` (each element in its own canonical form).\n"
-    "- Booleans: `true` / `false`. Variants: `None`, `Just(int(3))`, `Ok(int(2))`, `Err(int(0))`.\n\n"
+    "- Booleans: `true` / `false`. Variants: `None`, `Just(int(3))`, `Ok(int(2))`, `Err(int(0))`.\n"
+    "- Tuples: `(int(8), int(2))` — comma-separated, each element in its own canonical form.\n\n"
 )
 
 ASSEMBLE_SYSTEM = (

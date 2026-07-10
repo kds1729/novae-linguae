@@ -304,6 +304,48 @@ def find_big(xs, cutoff) -> int | None:
     return None
 
 
+def add_sub(a: int, b: int) -> tuple[int, int]:
+    """Both the sum and the difference of two numbers (tuple RESULT construction).
+
+    >>> add_sub(5, 3)
+    (8, 2)
+    >>> add_sub(2, 7)
+    (9, -5)
+    """
+    return (a + b, a - b)
+
+
+def swap_diff(a: int, b: int) -> int:
+    """Swap two numbers into a tuple, then subtract — the first minus the second
+    (tuple-unpacking assignment `x, y = (…)`; with x=b, y=a the result is a - b).
+
+    >>> swap_diff(3, 10)
+    -7
+    >>> swap_diff(10, 3)
+    7
+    """
+    x, y = (b, a)
+    return y - x
+
+
+def running_gap(xs: list[int]) -> int:
+    """The negated running-sum total: subtract the running sum from a gap at each step — a
+    DEPENDENT two-accumulator loop (the gap update reads the just-updated sum), expressible only
+    with a tuple accumulator.
+
+    >>> running_gap([1, 2, 3])
+    -10
+    >>> running_gap([])
+    0
+    """
+    s = 0
+    g = 0
+    for x in xs:
+        s = s + x
+        g = g - s
+    return g
+
+
 def per_unit(total: int, count: int) -> int:
     """Units per box, refusing an empty box count (raise-totalization: the record's result is
     `Maybe int`, the guard-raise is its None arm — and the Traceback doctest IS the runnable

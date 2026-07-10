@@ -328,6 +328,7 @@ pattern     ::= "_"                              -- wildcard
               | ident                            -- bind
               | tag "(" pattern ")"             -- variant with payload
               | tag                              -- variant without payload
+              | "(" pattern "," pattern ("," pattern)* ")"  -- tuple destructure (2+)
               | value                            -- lit (delegate to §3)
 
 infix_expr  ::= app_expr (infix_op app_expr)*   -- same op table as predicates (§2)
@@ -338,7 +339,8 @@ field_expr  ::= atom_expr ("." ident)*          -- field access (postfix, left-a
 
 atom_expr   ::= ident                            -- var
               | value                            -- lit (delegate to §3 for non-ident atoms)
-              | "(" expr ")"
+              | "(" expr ")"                     -- grouping
+              | "(" expr "," expr ("," expr)* ")"  -- tuple construction (2+ elements)
 ```
 
 Infix operators in body expressions have the same precedence table as predicate expressions (§2). Unlike predicate `app` (which carries an `op` string), body `app` has no `op` field: an infix operator desugars to an `app` whose `fn` is a `var` naming the operator, e.g. `a + b` → `{"kind":"app","fn":{"kind":"var","name":"add"},"args":[…a…,…b…]}`. The operator names reused from §2 are the same.
@@ -348,6 +350,10 @@ Lambda parameter types are optional: `\x -> …` (inferred) and `\(x: int) -> �
 ### Ambiguity: `ident` as var vs value
 
 A lowercase `ident` in expression position is always `var`. To embed a `nat`/`int`/`float`/`string`/`bool` literal in a body expression, write the literal directly (`42`, `"hello"`, `true`) — these are not valid `ident` tokens. The same `int` vs `nat` disambiguation as §3 applies: a non-negative integer literal parses to `nat`, and to force a non-negative `int` literal use the `int(N)` form (`int(1)` → `{"kind":"lit","value":{"kind":"int","value":1}}`), which is a typed literal, **not** an application of a function named `int`. The pretty-printer emits non-negative `int` literals this way, so the body surface round-trips. A `Tag` in expression position is an error unless it appears as the subject of a case pattern (where it's a variant constructor) — bare tag references are not supported in v0.1 body expressions.
+
+### Tuples
+
+A parenthesised comma-list is a **tuple**: `(a, b)` in expression position is tuple *construction* (`{"kind":"tuple","elems":[…a…,…b…]}`, the computed-element counterpart of the §3 tuple value), and `(x, y)` in a `case` pattern is a positional *destructure* (`{"kind":"tuple","elems":[…]}` pattern). A comma is what distinguishes a tuple from grouping: `(e)` is just `e` parenthesised, while `(e, …)` is a tuple of two or more elements (a 1-tuple is its element; the empty tuple `()` is `unit`). The usual way to read a tuple result is `case p of { (x, y) => … }`; the 2-tuple `fst`/`snd` builtins are the alternative for pairs. Element/sub-pattern arity must match the tuple's; a wrong-arity pattern does not match (a non-exhaustive `case` is a runtime error, not a false bind).
 
 ### AST mapping examples
 

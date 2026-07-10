@@ -540,6 +540,21 @@ only real ingested records could surface.
   not move (its raising functions also use truthiness / kwargs / tuple targets / `try`), so
   the measured boundary is unchanged in aggregate: totalization serves clean, annotated
   guard-raise code — the kind agents and modern libraries write.
+  *In-language tuples (2026-07-09):* the last statement-subset residual that was a genuine
+  *language* gap (not a translation choice) — **dependent multi-accumulator loops need a tuple
+  accumulator**, and there was no tuple construction/destructure in the body language. Pulled it:
+  a `tuple` construction body node (computed elements) and a `tuple` *pattern* (positional
+  destructure) across the whole verified-by-default stack (evaluator, HM typechecker — a real
+  structural product, not the opaque `Sum`; effects; surface `(a, b)`; schema; well-formedness).
+  Types and values already had tuples (`Ty::Tup`/`Val::Tuple`/`fst`/`snd`); this closed the two
+  missing halves. Three Python idioms now ingest: **tuple return** `return (a, b)`, **tuple-unpacking
+  assignment** `x, y = e` (→ a one-arm `case` over a tuple pattern), and — the payoff — the
+  **dependent multi-accumulator loop**: `for x in xs: s += x; g -= s` (the gap update reads the
+  just-updated sum, which N separate folds can't reproduce) threads ONE `foldl` over a tuple
+  accumulator, updating the components in source order inside the step. `add_sub`/`swap_diff`/
+  `running_gap` (twenty-five-function executable corpus) ingest, run, and **certify**. Residuals now
+  are the honest tail: `while` (non-structural), tuple-unpacking `for` (`for (k, v) in …` — the
+  loop-element destructure, deferred), and deeper loop nesting.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 
