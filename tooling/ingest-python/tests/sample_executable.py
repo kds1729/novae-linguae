@@ -346,6 +346,36 @@ def running_gap(xs: list[int]) -> int:
     return g
 
 
+def sum_values(pairs: list[tuple[int, int]]) -> int:
+    """Sum the second component of each pair (tuple-unpacking `for (k, v) in …`).
+
+    >>> sum_values([(1, 2), (3, 4)])
+    6
+    >>> sum_values([])
+    0
+    """
+    total = 0
+    for (k, v) in pairs:
+        total = total + v
+    return total
+
+
+def keys_over(pairs: list[tuple[int, int]], cutoff: int) -> list[int]:
+    """The first components whose second component exceeds the cutoff (tuple-unpacking `for` with
+    a guarded append).
+
+    >>> keys_over([(1, 9), (2, 3), (5, 8)], 5)
+    [1, 5]
+    >>> keys_over([(1, 2)], 5)
+    []
+    """
+    out = []
+    for (k, v) in pairs:
+        if v > cutoff:
+            out.append(k)
+    return out
+
+
 def per_unit(total: int, count: int) -> int:
     """Units per box, refusing an empty box count (raise-totalization: the record's result is
     `Maybe int`, the guard-raise is its None arm — and the Traceback doctest IS the runnable

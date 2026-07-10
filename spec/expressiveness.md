@@ -552,9 +552,15 @@ only real ingested records could surface.
   **dependent multi-accumulator loop**: `for x in xs: s += x; g -= s` (the gap update reads the
   just-updated sum, which N separate folds can't reproduce) threads ONE `foldl` over a tuple
   accumulator, updating the components in source order inside the step. `add_sub`/`swap_diff`/
-  `running_gap` (twenty-five-function executable corpus) ingest, run, and **certify**. Residuals now
-  are the honest tail: `while` (non-structural), tuple-unpacking `for` (`for (k, v) in …` — the
-  loop-element destructure, deferred), and deeper loop nesting.
+  `running_gap` (twenty-five-function executable corpus) ingest, run, and **certify**.
+  *Tuple-unpacking `for` (2026-07-09, same day):* `for (k, v) in pairs: …` — the loop-element
+  destructure, the last tuple residual — now works across **every** loop shape (accumulator,
+  guarded, append, nested, search, multi-accumulator). A fresh element variable is the fold/map
+  binder, and each lambda body that reads the element is wrapped in a `case _elt of (k, v) => …`
+  destructure — so dict-iteration idioms (`for (k, v) in items: total += v`) lift uniformly.
+  `sum_values`/`keys_over` (twenty-seven-function corpus) ingest, run, and certify; each shape was
+  verified bit-for-bit against its Python reference. Residuals now are the honest tail: `while`
+  (non-structural), a tuple-unpacking *inner* loop target, and deeper loop nesting.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

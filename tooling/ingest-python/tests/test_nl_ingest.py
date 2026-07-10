@@ -328,10 +328,11 @@ class TestExecutableCorpus(unittest.TestCase):
         # or_default / bump / lookup_qty / find_big (the None<->Maybe boundary: narrowing,
         # Just-wrapped returns, bare get, Maybe-returning search), per_unit
         # (raise-totalization: guard-raise -> the None arm, Traceback doctest -> None example),
-        # and add_sub / swap_diff / running_gap (tuples: construction, unpacking, and a
-        # DEPENDENT multi-accumulator loop via a tuple-accumulator fold).
-        self.assertEqual(len(records), 25)
-        self.assertEqual(len(bodies), 25)               # every body is in the executable subset
+        # add_sub / swap_diff / running_gap (tuples: construction, unpacking, and a DEPENDENT
+        # multi-accumulator loop via a tuple-accumulator fold), and sum_values / keys_over
+        # (tuple-unpacking `for (k, v) in …` — accumulator and guarded-append shapes).
+        self.assertEqual(len(records), 27)
+        self.assertEqual(len(bodies), 27)               # every body is in the executable subset
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)

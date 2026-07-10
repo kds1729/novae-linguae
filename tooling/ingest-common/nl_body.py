@@ -542,17 +542,41 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
         #                                    the statements after the loop as the not-found branch
         # The accumulator shapes re-bind an `acc` that must already be bound (a preceding
         # `acc = init` -> let).
-        if head.orelse or not isinstance(head.target, ast.Name):
-            raise BodyError("only `for <name> in <src>:` accumulator loops are in subset")
-        x = head.target.id
-        # After the loop Python leaves x bound to the last element; none of the translations do,
-        # so a tail that reads the loop variable is out of subset rather than silently wrong.
+        if head.orelse:
+            raise BodyError("`for … else` is out of subset")
+        # The loop element is a single NAME, or a TUPLE `(a, b)` destructured per iteration. For a
+        # tuple target we bind a fresh element name and unpack it — via `_welt` — inside every
+        # lambda body that reads the element, so `for (k, v) in items: total += v` works uniformly
+        # across the accumulator/append/nested/search shapes.
+        if isinstance(head.target, ast.Name):
+            x, elt_names = head.target.id, None
+        elif isinstance(head.target, (ast.Tuple, ast.List)):
+            elt_names = _tuple_target_names(head.target)
+            live = {n.id for st in (head.body + list(tail)) for n in ast.walk(st) if isinstance(n, ast.Name)}
+            x = "_elt"
+            while x in live or x in elt_names:
+                x += "_"
+        else:
+            raise BodyError("only `for <name>` / `for (a, b)` loops are in subset")
+        bound_elt = {x} if elt_names is None else set(elt_names)
+        # After the loop Python leaves the element name(s) bound to the last item; none of the
+        # translations do, so a tail that reads any of them is out of subset (not silently wrong).
         for s in tail:
-            if any(isinstance(n, ast.Name) and n.id == x and isinstance(n.ctx, ast.Load)
+            if any(isinstance(n, ast.Name) and n.id in bound_elt and isinstance(n.ctx, ast.Load)
                    for n in ast.walk(s)):
                 raise BodyError("loop variable read after a loop")
-        loop_strs, loop_dicts, loop_maybes = strs - {x}, dicts - {x}, maybes - {x}
+        loop_strs, loop_dicts, loop_maybes = strs - bound_elt, dicts - bound_elt, maybes - bound_elt
         src = _expr_from_py(head.iter, strs, dicts)
+
+        def _welt(expr):
+            """Wrap a lambda body that reads the element: for a tuple target, destructure the fresh
+            element var into its component names; for a name target, the body is used as-is."""
+            if elt_names is None:
+                return expr
+            return {"kind": "case", "scrutinee": b_var(x),
+                    "arms": [{"pattern": {"kind": "tuple",
+                                          "elems": [{"kind": "bind", "name": n} for n in elt_names]},
+                              "body": expr}]}
 
         # Peel one optional guard `if cond: <body>` (no else) off the loop body.
         body = head.body
@@ -575,8 +599,8 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
             hits_src = src
             if guard is not None:
                 hits_src = b_app(b_var("filter"),
-                                 [b_lambda([x], _expr_from_py(guard, loop_strs, loop_dicts)), hits_src])
-            used = {x} | {n.id for s in stmts for n in ast.walk(s) if isinstance(n, ast.Name)}
+                                 [b_lambda([x], _welt(_expr_from_py(guard, loop_strs, loop_dicts))), hits_src])
+            used = bound_elt | {x} | {n.id for s in stmts for n in ast.walk(s) if isinstance(n, ast.Name)}
             hits = "hits"
             while hits in used:
                 hits += "_"
@@ -585,7 +609,15 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                 found_branch = b_variant("None")
             else:
                 found = _expr_from_py(stmt.value, loop_strs, loop_dicts)
-                found_branch = hit if found == b_var(x) else b_let(x, hit, found)
+                # Bind the found element: for a tuple, destructure `head(hits)` into the component
+                # names; for a name, `let x = head(hits)` (skipped when the value IS the element).
+                if elt_names is not None:
+                    found_branch = {"kind": "case", "scrutinee": hit,
+                                    "arms": [{"pattern": {"kind": "tuple",
+                                                          "elems": [{"kind": "bind", "name": n} for n in elt_names]},
+                                              "body": found}]}
+                else:
+                    found_branch = hit if found == b_var(x) else b_let(x, hit, found)
                 if ret_maybe and not _is_maybeish(stmt.value, loop_maybes, loop_dicts):
                     found_branch = b_variant("Just", found_branch)
             return b_let(hits, hits_src,
@@ -602,9 +634,10 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
             src2 = src
             if guard is not None:
                 src2 = b_app(b_var("filter"),
-                             [b_lambda([x], _expr_from_py(guard, loop_strs, loop_dicts)), src2])
+                             [b_lambda([x], _welt(_expr_from_py(guard, loop_strs, loop_dicts))), src2])
             elt = _expr_from_py(stmt.value.args[0], loop_strs, loop_dicts)
-            mapped = src2 if elt == b_var(x) else b_app(b_var("map"), [b_lambda([x], elt), src2])
+            mapped = src2 if (elt_names is None and elt == b_var(x)) \
+                else b_app(b_var("map"), [b_lambda([x], _welt(elt)), src2])
             # append onto the accumulator's prior value; `append(nil, L) = L`, so a `[]`-seeded
             # build is just the mapped/filtered list, and a non-empty seed is honored.
             rebind = b_app(b_var("append"), [b_var(acc), mapped])
@@ -654,8 +687,8 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
             outer_src = src
             if guard is not None:
                 outer_src = b_app(b_var("filter"),
-                                  [b_lambda([x], _expr_from_py(guard, loop_strs, loop_dicts)), outer_src])
-            step = b_lambda([acc, x], b_app(b_var("append"), [b_var(acc), batch]))
+                                  [b_lambda([x], _welt(_expr_from_py(guard, loop_strs, loop_dicts))), outer_src])
+            step = b_lambda([acc, x], _welt(b_app(b_var("append"), [b_var(acc), batch])))
             fold = b_app(b_var("foldl"), [step, b_var(acc), outer_src])
             return b_let(acc, fold, _block_from_py(tail, strs - {acc}, dicts - {acc},
                                                    maybes - {acc}, ret_maybe))
@@ -712,7 +745,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                 #                        let c = case _g of {true => c'; false => c} in (s, c),
                 #                      (s0, c0), src)
                 #   in <rest>
-                used = accset | {x} | {n.id for s in stmts for n in ast.walk(s) if isinstance(n, ast.Name)}
+                used = accset | bound_elt | {x} | {n.id for s in stmts for n in ast.walk(s) if isinstance(n, ast.Name)}
 
                 def _fresh(base):
                     while base in used:
@@ -733,7 +766,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                 destructure = {"kind": "case", "scrutinee": b_var(accp),
                                "arms": [{"pattern": acc_pat, "body": step}]}
                 seed = {"kind": "tuple", "elems": [b_var(a) for a in accs]}
-                fold = b_app(b_var("foldl"), [b_lambda([accp, x], destructure), seed, src])
+                fold = b_app(b_var("foldl"), [b_lambda([accp, x], _welt(destructure)), seed, src])
                 result = _block_from_py(tail, strs, dicts, maybes - accset, ret_maybe)
                 unpack = {"kind": "case", "scrutinee": b_var(foldvar),
                           "arms": [{"pattern": acc_pat, "body": result}]}
@@ -744,7 +777,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                 # A guarded step keeps the accumulator unchanged on the false branch.
                 if guard is not None:
                     update = b_if(_expr_from_py(guard, loop_strs, loop_dicts), update, b_var(acc))
-                fold = b_app(b_var("foldl"), [b_lambda([acc, x], update), b_var(acc), src])
+                fold = b_app(b_var("foldl"), [b_lambda([acc, x], _welt(update)), b_var(acc), src])
                 result = b_let(acc, fold, result)
             return result
         raise BodyError("loop body must be an accumulator assignment or an `.append(…)`")

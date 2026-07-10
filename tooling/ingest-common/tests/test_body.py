@@ -138,6 +138,25 @@ class PythonBodyTests(unittest.TestCase):
         # Source order of the accumulators is kept: s's fold binds outermost.
         self.assertLess(s.index('"name": "s"'), s.index('"name": "c"'))
 
+    def test_tuple_unpacking_for_loop(self):
+        # `for (k, v) in ps` destructures the element into a case inside the fold lambda.
+        body = py_body("def f(ps):\n    total = 0\n"
+                       "    for (k, v) in ps:\n        total = total + v\n    return total")
+        self.assertIsNotNone(body)
+        s = json.dumps(body)
+        self.assertIn('"foldl"', s)
+        # The fold lambda binds a fresh element name and a tuple pattern destructures it.
+        self.assertIn('"kind": "tuple"', s)
+        # The append shape unpacks too.
+        appended = py_body("def f(ps):\n    out = []\n"
+                           "    for (k, v) in ps:\n        out.append(k)\n    return out")
+        self.assertIsNotNone(appended)
+        self.assertIn('"map"', json.dumps(appended))
+        # Reading a component name AFTER the loop is refused (last-element binding Python does,
+        # the translation doesn't).
+        self.assertIsNone(py_body("def f(ps):\n    total = 0\n"
+                                  "    for (k, v) in ps:\n        total = total + v\n    return k"))
+
     def test_dependent_accumulators_use_a_tuple_fold(self):
         # `c += s` reads s's MID-LOOP value — a SEPARATE fold can't reproduce it, but a single
         # TUPLE-accumulator fold can (in-language tuples, pulled for exactly this). The updates
