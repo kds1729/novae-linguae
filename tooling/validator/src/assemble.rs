@@ -42,9 +42,13 @@ pub struct Assembled {
     /// Every stage independently certifies (only computed when `require_certified`).
     pub certified: bool,
     pub examples_verified: usize,
-    /// The derived composite record and its synthesized `fn_ref`-chain body.
+    /// The derived composite record and its synthesized (inlined, self-contained) composite body.
     pub composite_record: J,
     pub composite_body: J,
+    /// The composite's declared metadata **re-proven against its body** — `certify_record` run on
+    /// the inlined composite: whether it certifies, and a per-check `(name, status)` summary.
+    pub composite_certified: bool,
+    pub composite_checks: Vec<(String, String)>,
 }
 
 /// The declared arity of a function record (its fn-type parameter count), unwrapping `forall`.
@@ -155,20 +159,108 @@ fn search(candidates: &[Candidate], examples: &[(Vec<J>, J)], max_stages: usize)
     None
 }
 
-/// Synthesize the composite body — a lambda over the `m` composite parameters `x0` (primary) `x1…`
-/// (auxiliaries), applying each stage by `fn_ref` to the running value plus its share of the pool.
-fn composite_body(stages: &[(String, usize)], m: usize) -> J {
-    let params: Vec<J> = (0..m).map(|i| json!({ "name": format!("x{i}") })).collect();
-    let mut running = json!({ "kind": "var", "name": "x0" });
+/// The parameter names of a `lambda` body (its binders), or empty.
+fn lambda_params(body: &J) -> Vec<String> {
+    body.get("params")
+        .and_then(|p| p.as_array())
+        .map(|a| a.iter().filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from)).collect())
+        .unwrap_or_default()
+}
+
+/// Capture-avoiding substitution of `map` (name → replacement expression) through a body expression:
+/// a `var` is replaced if bound in `map`, and a binder (`let`/`lambda`/`case`-pattern) that shadows a
+/// name removes it from `map` in that scope. (The composite parameters use distinctive `_p…` names
+/// that no stage binds, and each stage inlines to an expression closed over its own internal
+/// bindings, so no free variable of a replacement is captured — and the example run below is the
+/// backstop if that ever failed.)
+fn subst(expr: &J, map: &HashMap<String, J>) -> J {
+    match expr.get("kind").and_then(|k| k.as_str()) {
+        Some("var") => {
+            let name = expr.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            map.get(name).cloned().unwrap_or_else(|| expr.clone())
+        }
+        Some("lit") => expr.clone(),
+        Some("app") => {
+            let f = subst(&expr["fn"], map);
+            let args: Vec<J> = expr["args"].as_array().map(|a| a.iter().map(|e| subst(e, map)).collect()).unwrap_or_default();
+            json!({ "kind": "app", "fn": f, "args": args })
+        }
+        Some("let") => {
+            let name = expr.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+            let value = subst(&expr["value"], map);
+            let mut inner = map.clone();
+            inner.remove(&name);
+            json!({ "kind": "let", "name": name, "value": value, "body": subst(&expr["body"], &inner) })
+        }
+        Some("lambda") => {
+            let mut inner = map.clone();
+            for p in lambda_params(expr) {
+                inner.remove(&p);
+            }
+            json!({ "kind": "lambda", "params": expr["params"].clone(), "body": subst(&expr["body"], &inner) })
+        }
+        Some("case") => {
+            let scrutinee = subst(&expr["scrutinee"], map);
+            let arms: Vec<J> = expr["arms"].as_array().map(|arms| arms.iter().map(|arm| {
+                let mut inner = map.clone();
+                for b in pattern_binds(&arm["pattern"]) {
+                    inner.remove(&b);
+                }
+                json!({ "pattern": arm["pattern"].clone(), "body": subst(&arm["body"], &inner) })
+            }).collect()).unwrap_or_default();
+            json!({ "kind": "case", "scrutinee": scrutinee, "arms": arms })
+        }
+        Some("field") => json!({ "kind": "field", "record": subst(&expr["record"], map), "name": expr["name"].clone() }),
+        Some("variant") => {
+            let mut v = json!({ "kind": "variant", "tag": expr["tag"].clone() });
+            if let Some(p) = expr.get("payload") {
+                v["payload"] = subst(p, map);
+            }
+            v
+        }
+        Some("tuple") => {
+            let elems: Vec<J> = expr["elems"].as_array().map(|a| a.iter().map(|e| subst(e, map)).collect()).unwrap_or_default();
+            json!({ "kind": "tuple", "elems": elems })
+        }
+        _ => expr.clone(),
+    }
+}
+
+/// Every name a pattern binds (recursing through `variant`/`tuple` sub-patterns).
+fn pattern_binds(pat: &J) -> Vec<String> {
+    match pat.get("kind").and_then(|k| k.as_str()) {
+        Some("bind") => pat.get("name").and_then(|n| n.as_str()).map(|s| vec![s.to_string()]).unwrap_or_default(),
+        Some("variant") => pat.get("payload").map(pattern_binds).unwrap_or_default(),
+        Some("tuple") => pat.get("elems").and_then(|e| e.as_array())
+            .map(|a| a.iter().flat_map(pattern_binds).collect()).unwrap_or_default(),
+        _ => vec![],
+    }
+}
+
+/// Synthesize a **self-contained** composite body by INLINING each stage: a lambda over the `m`
+/// composite parameters `_p0` (primary) `_p1…` (auxiliaries) in which each stage's lambda body is
+/// beta-reduced against the running value plus its share of the pool. The result has no `fn_ref`s —
+/// so the composite runs standalone and its declared metadata can be re-proven against real
+/// operations (`typecheck`/`terminate`/`complexity` all see through it, where a `fn_ref` is opaque).
+fn composite_body(stage_bodies: &[J], arities: &[usize], m: usize) -> J {
+    let params: Vec<J> = (0..m).map(|i| json!({ "name": format!("_p{i}") })).collect();
+    let mut running = json!({ "kind": "var", "name": "_p0" });
     let mut aux = 1usize;
-    for (h, k) in stages {
-        let mut args = vec![running];
-        for j in 0..(k - 1) {
-            args.push(json!({ "kind": "var", "name": format!("x{}", aux + j) }));
+    for (body, &k) in stage_bodies.iter().zip(arities) {
+        let stage_params = lambda_params(body);
+        let inner = body.get("body").cloned().unwrap_or_else(|| body.clone());
+        let mut map: HashMap<String, J> = HashMap::new();
+        // First parameter := the running value; the rest := the next auxiliaries.
+        if let Some(p0) = stage_params.first() {
+            map.insert(p0.clone(), running.clone());
+        }
+        for j in 1..k {
+            if let Some(p) = stage_params.get(j) {
+                map.insert(p.clone(), json!({ "kind": "var", "name": format!("_p{}", aux + j - 1) }));
+            }
         }
         aux += k - 1;
-        running = json!({ "kind": "app",
-            "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": h } }, "args": args });
+        running = subst(&inner, &map);
     }
     json!({ "kind": "lambda", "params": params, "body": running })
 }
@@ -238,15 +330,25 @@ pub fn assemble(
         c
     };
 
-    // Verify (2): the synthesized composite body runs every example through the resolved stages.
-    let arities: Vec<(String, usize)> = stages.iter().map(|s| (s.hash.clone(), s.arity)).collect();
-    let body = composite_body(&arities, m);
+    // Verify (2): synthesize the INLINED composite body (self-contained, no fn_refs) and run every
+    // example through it — this also backstops the inlining (a capture/substitution error would
+    // disagree with an example).
+    let arities: Vec<usize> = stages.iter().map(|s| s.arity).collect();
+    let stage_bodies: Vec<J> = stage_hashes
+        .iter()
+        .map(|h| {
+            let bh = records[h].pointer("/body_hash").and_then(|b| b.as_str());
+            bh.and_then(|bh| bodies.get(bh)).or_else(|| bodies.get(h)).cloned()
+                .ok_or_else(|| anyhow!("missing body for stage {h}"))
+        })
+        .collect::<Result<_>>()?;
+    let body = composite_body(&stage_bodies, &arities, m);
     let mut examples_verified = 0;
     for (args, output) in examples {
         let got = crate::eval_body(&body, args)?;
         if &got != output {
             crate::clear_resolver();
-            return Err(anyhow!("composite body disagrees with an example: got {got} want {output}"));
+            return Err(anyhow!("inlined composite body disagrees with an example: got {got} want {output}"));
         }
         examples_verified += 1;
     }
@@ -269,8 +371,19 @@ pub fn assemble(
         return Err(anyhow!("--require-certified: at least one stage is not certified"));
     }
 
+    // Verify (4): RE-PROVE the composite's declared (compose-derived) metadata against the inlined
+    // body — certify the composite record itself. Because the body is inlined (no opaque fn_refs),
+    // typecheck/terminate/complexity see through it, so this genuinely checks the derived type,
+    // effects, termination, and complexity rather than trusting compose's derivation.
     let composite_record = build_composite_record(&stages, &composite, examples, &body)?;
-    Ok(Some(Assembled { stages, composite, certified, examples_verified, composite_record, composite_body: body }))
+    let cert = crate::certify_record(&composite_record, &body, records, solver);
+    let composite_checks: Vec<(String, String)> =
+        cert.checks.iter().map(|c| (c.check.clone(), c.verdict.to_string())).collect();
+
+    Ok(Some(Assembled {
+        stages, composite, certified, examples_verified, composite_record,
+        composite_body: body, composite_certified: cert.certified, composite_checks,
+    }))
 }
 
 /// Composite metadata for the empty (identity) pipeline: `a -> a`, pure, always, O(1).
@@ -321,6 +434,9 @@ fn build_composite_record(
             "type": ty, "refinements": [],
             "effects": composite.effects.clone(), "capabilities": composite.capabilities.clone(),
             "terminates": composite.terminates.clone(),
+            // Declare the compose-derived complexity too, so `certify`'s complexity check re-proves
+            // it against the inlined body rather than reporting N/A.
+            "complexity": composite.complexity.clone(),
         },
         "examples": examples_j,
         "intent_tags": [],
@@ -383,6 +499,13 @@ mod tests {
         let a = assemble(&r, &b, &ex, 3, false, "z3").unwrap().expect("a pipeline");
         assert_eq!(a.stages.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["double", "square"]);
         assert_eq!(a.examples_verified, 2);
+        // The composite metadata is RE-PROVEN against the inlined body (no opaque fn_refs): it
+        // certifies, and typecheck sees the real int→int composition (not a fresh var).
+        assert!(a.composite_certified, "the inlined composite re-proves its declared metadata");
+        let checks: std::collections::HashMap<_, _> = a.composite_checks.iter().cloned().collect();
+        assert_eq!(checks.get("typecheck").map(|s| s.as_str()), Some("WELL-TYPED"));
+        // The inlined body has no fn_ref (it is beta-reduced).
+        assert!(!a.composite_body.to_string().contains("fn_ref"));
         // Identity goal.
         assert!(assemble(&r, &b, &[(vec![int(5)], int(5))], 3, false, "z3").unwrap().unwrap().stages.is_empty());
         // Unreachable.

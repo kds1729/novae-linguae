@@ -1586,6 +1586,10 @@ fn cmd_assemble(
         println!("  certified   {} (every stage certifies)", a.certified);
     }
     println!("  composite   {}", a.composite_record["hash"].as_str().unwrap_or("?"));
+    // The composite's declared metadata re-proven against its (inlined, self-contained) body.
+    let checks = a.composite_checks.iter().map(|(n, v)| format!("{n}={v}")).collect::<Vec<_>>().join("  ");
+    println!("  re-proven   {} against the inlined body  [{}]",
+             if a.composite_certified { "CERTIFIED" } else { "NOT certified" }, checks);
 
     if let Some(dir) = emit {
         std::fs::create_dir_all(dir)?;

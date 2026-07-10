@@ -179,13 +179,19 @@ stage's *first* parameter, and an arity-`k` stage additionally consumes `k-1` va
 "auxiliaries gathered left to right"), so the composite is `(primary, aux…) -> output` — an example's
 `input` is then an array `[primary, aux…]` (a single value is the one-argument special case). A
 pipeline is accepted when it reproduces every output *and* consumes the pool exactly (its composite
-arity equals the goal's). The found pipeline is then verified three ways:
+arity equals the goal's). The found pipeline is then verified four ways:
 it must `compose` (composability + derived composite type/effects/termination/complexity); its
-**synthesized composite body** — `\x -> fN(… f1(x))`, each stage applied by `fn_ref`
-content-address — must run every example through the resolved stages; and, under
-`--require-certified`, **every stage must itself certify** ("assemble only from verified parts").
-The result is emitted (`--emit <dir>`) as a first-class **derived composite record** whose body
-chains the stages by address — so the assembled whole is itself runnable, certifiable, and
+**synthesized composite body** must run every example; under `--require-certified`, **every stage
+must itself certify** ("assemble only from verified parts"); and — the fourth — the composite's
+`compose`-derived metadata is **re-proven against its own body**. The body is synthesized by
+*inlining* each stage (beta-reducing its body into the pipeline), so the composite is a
+**self-contained** lambda with no `fn_ref`s — which matters because a `fn_ref` is opaque to the type
+checker (typed as a fresh variable) and to the termination/complexity analyses (reported
+UNVERIFIABLE). Inlined, `certify` sees the *real* composition: `typecheck` verifies the composite
+type against the actual operations, `check-effects` the real builtins, and `check-termination` /
+`check-complexity` prove the declared bounds over the real body rather than shrugging at opaque
+callees. The result is emitted (`--emit <dir>`) as a first-class **derived composite record**,
+self-contained and re-certified — the assembled whole is itself runnable, certifiable, and
 publishable, no new code written.
 
 Worked, over a four-function commons (`inc`/`double`/`square`/`negate`): the goal `{3→32, 2→18}`
@@ -208,8 +214,12 @@ discovered 200 candidates, fetched and hash-verified them, assembled **`double �
 through the composite, and confirmed both stages certify — a task solved by composing verified parts
 from the live commons, over the network, ~82 s (200 sequential HTTPS fetches, the same
 unoptimized per-request cost the orchestrate loop pays; a content-addressed cache is the standing
-remedy). Honest scope: the emitted composite's *declared* metadata is `compose`-derived, not
-re-proven against the `fn_ref`-chain body.
+remedy). And every assembled composite is re-certified: the local `double → add` demo re-proves
+`typecheck=WELL-TYPED, effects=SOUND, termination=SOUND, complexity=SOUND` against its inlined body
+(`\p0 p1 → add(add(p0, p0), p1)`) — the declared metadata verified, not just derived. (The one
+residual: inlining beta-reduces one level, so a *stage* whose own body still uses `fn_ref`s — e.g. a
+previously-assembled composite — leaves those opaque, and its termination/complexity re-prove as
+UNVERIFIABLE; a first-order commons re-proves fully.)
 
 ## Scope (v0.2, honest)
 
