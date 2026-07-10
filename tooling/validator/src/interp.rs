@@ -702,8 +702,8 @@ fn val_to_json(v: &Val) -> Result<J> {
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
         "neg" | "abs" | "not" | "id" | "head" | "tail" | "last" | "init" | "length" | "null"
-        | "reverse" | "fst" | "snd" | "str_length" | "str_lower" | "to_string" | "to_float"
-        | "parse_int"
+        | "reverse" | "fst" | "snd" | "str_length" | "str_lower" | "url_encode" | "to_string"
+        | "to_float" | "parse_int"
         | "map_size" | "map_keys" | "parse_json" | "render_json" | "print" | "rand"
         | "now" | "panic" | "read_file" | "http_get" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
@@ -1077,6 +1077,23 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
         // Unicode DEFAULT (untailored) lowercase mapping — deterministic and locale-independent
         // (no Turkish-i tailoring). GW4 pulled it for case-insensitive grouping/sorting.
         "str_lower" => Val::Str(as_str(&a[0])?.to_lowercase()),
+        // RFC 3986 percent-encoding: unreserved characters (ALPHA / DIGIT / - . _ ~) pass through,
+        // every other UTF-8 BYTE becomes %XX (uppercase hex). Total and deterministic — the
+        // strictest form, safe in any URL component. GW10 pulled it: a query string built by
+        // str_concat over a raw value is UNSOUND (a space or `&` changes the request).
+        "url_encode" => {
+            let s = as_str(&a[0])?;
+            let mut out = String::with_capacity(s.len());
+            for b in s.bytes() {
+                match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                        out.push(b as char)
+                    }
+                    _ => out.push_str(&format!("%{b:02X}")),
+                }
+            }
+            Val::Str(out)
+        }
         "str_split" => {
             let sep = as_str(&a[0])?;
             let s = as_str(&a[1])?;
@@ -1631,6 +1648,15 @@ mod tests {
         assert_eq!(run1("str_lower", s("Nova LINGUA")), encode_value(&Val::Str("nova lingua".into())));
         assert_eq!(run1("str_lower", s("HÉLLO")), encode_value(&Val::Str("héllo".into())));
         assert_eq!(run1("str_lower", s("\u{130}")), encode_value(&Val::Str("i\u{307}".into())));
+        // url_encode is RFC 3986 strict percent-encoding: unreserved passes, everything else —
+        // including reserved characters and each UTF-8 byte of a multi-byte scalar — becomes %XX
+        // (uppercase hex). Encoding an already-unreserved string is the identity.
+        assert_eq!(run1("url_encode", s("hello world")), encode_value(&Val::Str("hello%20world".into())));
+        assert_eq!(run1("url_encode", s("a&b=c/d?e")), encode_value(&Val::Str("a%26b%3Dc%2Fd%3Fe".into())));
+        assert_eq!(run1("url_encode", s("AZaz09-._~")), encode_value(&Val::Str("AZaz09-._~".into())));
+        assert_eq!(run1("url_encode", s("héy")), encode_value(&Val::Str("h%C3%A9y".into())));
+        assert_eq!(run1("url_encode", s("100%")), encode_value(&Val::Str("100%25".into())));
+        assert_eq!(run1("url_encode", s("")), encode_value(&Val::Str("".into())));
     }
 
     #[test]

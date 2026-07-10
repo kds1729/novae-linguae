@@ -159,7 +159,7 @@ fn collect(
                         // String positions (spec/expressiveness.md phase 1): a var consumed by a
                         // string op is a String; str_join's second argument is a list OF strings.
                         ("str_concat" | "str_contains" | "str_split", 0 | 1)
-                        | ("str_length" | "parse_int", 0)
+                        | ("str_length" | "url_encode" | "parse_int", 0)
                         | ("str_join", 0) => set_kind(kinds, name, GenKind::Str),
                         ("str_join", 1) => set_kind(kinds, name, GenKind::List(Box::new(GenKind::Str))),
                         ("to_string", 0) => set_kind(kinds, name, GenKind::Int),

@@ -34,8 +34,8 @@ const FIRST_ORDER_OPS: &[&str] = &[
     "add", "sub", "mul", "neg", "abs", "min", "max", "mod", "div", "eq", "neq", "lt", "le", "gt", "ge",
     "and", "or", "xor", "not", "id", "head", "tail", "last", "init", "cons", "null", "length",
     "append", "reverse",
-    "str_concat", "str_length", "str_contains", "str_lt", "str_lower", "str_split", "str_join",
-    "to_string", "to_float", "parse_int",
+    "str_concat", "str_length", "str_contains", "str_lt", "str_lower", "url_encode", "str_split",
+    "str_join", "to_string", "to_float", "parse_int",
     "map_put", "map_get", "map_del", "map_size", "map_keys", "parse_json", "render_json",
 ];
 

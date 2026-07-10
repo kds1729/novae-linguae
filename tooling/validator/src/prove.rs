@@ -489,7 +489,7 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
         let operand_sort = match op.as_str() {
             "add" | "sub" | "mul" | "neg" | "abs" | "min" | "max" | "mod" | "div" | "lt" | "le" | "gt" | "ge" => Some(Sort::Int),
             "and" | "or" | "xor" | "not" => Some(Sort::Bool),
-            "str_concat" | "str_length" | "str_contains" | "str_lt" | "str_lower" => Some(Sort::Str),
+            "str_concat" | "str_length" | "str_contains" | "str_lt" | "str_lower" | "url_encode" => Some(Sort::Str),
             _ => None, // eq/neq/apply/self/id: don't constrain directly
         };
         if let Some(s) = operand_sort {
@@ -517,6 +517,8 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
             // str_lower stays OUT of the fragment: SMT-LIB has no case-conversion function and
             // encoding the Unicode mapping would be unsound-by-approximation. str_lt is IN (str.<).
             | "str_lower"
+            // url_encode stays OUT for the same reason: no SMT percent-encoding counterpart.
+            | "url_encode"
             // to_float is OUT: the fragment's arithmetic is Int; a widening into IEEE floats has
             // no sound Int-theory encoding (and the record-level float guard refuses float
             // domains wholesale — see `type_mentions_float`).
@@ -911,6 +913,16 @@ mod tests {
         let prop = json!({ "kind": "forall", "vars": ["s"], "body": {
             "kind": "app", "op": "eq", "args": [
                 { "kind": "app", "op": "str_lower", "args": [{ "kind": "var", "name": "s" }] },
+                { "kind": "var", "name": "s" }] } });
+        assert!(build_certificate(&prop, None).is_err());
+    }
+
+    #[test]
+    fn url_encode_is_out_of_fragment() {
+        // No SMT percent-encoding counterpart — a law over url_encode reads UNSUPPORTED, never mis-typed.
+        let prop = json!({ "kind": "forall", "vars": ["s"], "body": {
+            "kind": "app", "op": "eq", "args": [
+                { "kind": "app", "op": "url_encode", "args": [{ "kind": "var", "name": "s" }] },
                 { "kind": "var", "name": "s" }] } });
         assert!(build_certificate(&prop, None).is_err());
     }

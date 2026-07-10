@@ -393,6 +393,8 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
         // GW4 tier-2 pulls: code-point order + untailored lowercase (spec/expressiveness.md).
         "str_lt" => Ty::Fun(vec![con("string"), con("string")], Box::new(con("bool"))),
         "str_lower" => Ty::Fun(vec![con("string")], Box::new(con("string"))),
+        // GW10 pull: RFC 3986 percent-encoding (query/path values built by str_concat are unsound raw).
+        "url_encode" => Ty::Fun(vec![con("string")], Box::new(con("string"))),
         "str_split" => Ty::Fun(vec![con("string"), con("string")], Box::new(list(con("string")))),
         "str_join" => Ty::Fun(vec![con("string"), list(con("string"))], Box::new(con("string"))),
         // Numeric (GW5): one rendering concept — canonical decimal for int, the JCS/ECMAScript
