@@ -21,13 +21,30 @@ description, not the generated client plumbing.
 | `servers[0].url` | the `base` parameter (records stay host-portable; the server url is the example base) |
 | path template `/items/{name}` | a `str_concat` URL builder over `base` and the path-parameter variables |
 | path parameters | `string` parameters, in template order |
+| **required query parameters** (GW10) | record parameters: a string value rides through the **`url_encode`** builtin (RFC 3986 strict — raw concatenation of caller data into a URL is unsound); an `integer` schema becomes an `int` parameter through `to_string`; parameter *names* are spec-time literals, percent-encoded at generation time |
+| **required header parameters** (GW10) | `string` parameters, `map_put` into the header map by literal name |
 | `requestBody` | a `body` `string` parameter (omitted for bodyless verbs) |
 | `security` (Bearer) | an `Authorization: Bearer {{secret:NAME}}` header; operation-level `security: []` = no auth |
+| `security` (**apiKey in header**, GW10) | a `<name>: {{secret:NAME}}` header (placeholder name defaults to the scheme key) |
+| **local `$ref`s** (GW10) | resolved (parameters, requestBodies, responses, security schemes, path-item-level shared parameters; cycle-bounded) |
 | documented `responses` | the status code the worked example asserts |
 
 Each record **returns the response `.status`** (an `int`) — the deterministic, verifiable part of a
 response. Projecting the body (often server-assigned and nondeterministic) waits for observed-claims
 (see agent-loop.md §Scope).
+
+## Honest refusals
+
+What the language (or determinism) can't carry refuses the operation with a printed reason rather
+than generating something subtly wrong: an **external or dangling `$ref`**, a **multipart-only
+request body** (no deterministic boundary construction), **apiKey in query/cookie** (a secret
+placeholder substitutes only inside a *header* value at the effect boundary — in a query string the
+credential would enter the URL, hence the record and the trace), **HTTP basic** (no base64
+builtin), **oauth2/openIdConnect** flows, and **cookie parameters**. An *optional* query/header
+parameter is omitted with a note — the record is the minimal documented call, never a silent
+truncation. [`examples/search-service.openapi.json`](examples/search-service.openapi.json) is the
+GW10 reference description exercising all of it (`$ref`-factored components, `?q=&limit=` query
+building, a header parameter, apiKey auth, and a refused multipart upload).
 
 ## Verified by default
 

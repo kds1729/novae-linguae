@@ -6,6 +6,11 @@ Generates records from the reference item-store description and checks:
      hand-authored GW6 records (`item_status` / `delete_item`), so machine generation reproduces
      what a human wrote from the same description.
 
+The GW10 depth (search-service description + inline specs): local $ref resolution, required
+query params (string values through `url_encode`, integer schemas as int params through
+`to_string`), header params, apiKey-in-header auth, and the honest refusal boundary
+(multipart-only bodies, apiKey-in-query/cookie, http basic, external $refs, cookie params).
+
 Run:  python3 -m unittest discover -s tooling/nl-ingest-openapi/tests
 """
 
@@ -23,6 +28,7 @@ REPO_ROOT = _ADAPTER.parent.parent
 VALIDATOR = REPO_ROOT / "tooling" / "validator" / "target" / "release" / "nl-validator"
 EXAMPLES = REPO_ROOT / "spec" / "examples"
 SPEC = _ADAPTER / "examples" / "item-store.openapi.json"
+SEARCH_SPEC = _ADAPTER / "examples" / "search-service.openapi.json"
 
 sys.path.insert(0, str(_ADAPTER))
 import openapi_ingest as oi  # noqa: E402
@@ -76,6 +82,128 @@ class OpenApiIngestTest(unittest.TestCase):
         self.assertNotIn("secret", body)
         put = json.dumps(json.load(open(Path(self.tmp) / "body-putitem.json")))
         self.assertIn("{{secret:api_token}}", put)
+
+
+class SearchServiceTest(unittest.TestCase):
+    """The GW10 depth over the $ref-factored search-service description."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="nl-openapi-gw10-")
+        try:
+            oi.main([str(SEARCH_SPEC), "--out", cls.tmp])
+        except SystemExit:
+            pass
+        cls.recs = {p.name.replace(".v0.2.json", ""): p
+                    for p in Path(cls.tmp).glob("*.v0.2.json")}
+        cls.spec = json.load(open(SEARCH_SPEC))
+
+    def _body(self, name):
+        return json.dumps(json.load(open(Path(self.tmp) / f"body-{name}.json")))
+
+    def test_multipart_refused_others_generated(self):
+        # uploadArchive is multipart-only -> refused; the two $ref-parameterized reads generate.
+        self.assertEqual(set(self.recs), {"searchitems", "getversion"})
+
+    @unittest.skipUnless(VALIDATOR.exists(), "nl-validator not built")
+    def test_every_record_certifies(self):
+        for name, rp in self.recs.items():
+            bp = Path(self.tmp) / f"body-{name}.json"
+            r = subprocess.run([str(VALIDATOR), "certify", str(rp), "--body", str(bp),
+                                "--records", self.tmp], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, f"{name} did not certify:\n{r.stdout}\n{r.stderr}")
+
+    def test_query_params_encode_by_schema_type(self):
+        # A string query value rides through url_encode; an integer one through to_string
+        # (digits are unreserved); names are spec-time literals `?q=` / `&limit=`.
+        body = self._body("searchitems")
+        self.assertIn("url_encode", body)
+        self.assertIn("to_string", body)
+        self.assertIn("?q=", body)
+        self.assertIn("&limit=", body)
+
+    def test_optional_query_param_omitted(self):
+        # `offset` is required:false -> not a record parameter (the minimal documented call).
+        rec = json.load(open(self.recs["searchitems"]))
+        params = rec["signature"]["type"]["params"]
+        self.assertEqual(len(params), 3)  # base, q, limit
+        self.assertNotIn("offset", self._body("searchitems"))
+
+    def test_integer_schema_becomes_int_param(self):
+        rec = json.load(open(self.recs["searchitems"]))
+        params = rec["signature"]["type"]["params"]
+        self.assertEqual([p["name"] for p in params], ["string", "string", "int"])
+
+    def test_api_key_auth_and_header_param(self):
+        # apiKey-in-header -> the scheme's named header with a secret placeholder; a required
+        # header PARAM is a record parameter map_put by its literal name with a VAR value.
+        search = self._body("searchitems")
+        self.assertIn('"X-Api-Key"', search)
+        self.assertIn("{{secret:api_key}}", search)
+        version = self._body("getversion")
+        self.assertIn('"X-Client-Id"', version)
+        self.assertIn("x_client_id", version)  # the variable, not a literal value
+
+    def test_ref_parameters_resolved(self):
+        # All parameters in the description are $refs — generation happening at all proves
+        # resolution; the query literal shows the resolved parameter NAME, not the ref text.
+        self.assertNotIn("$ref", self._body("searchitems"))
+
+
+class RefusalBoundaryTest(unittest.TestCase):
+    """Inline descriptions locking each documented refusal."""
+
+    BASE = {"openapi": "3.0.0", "info": {"title": "t", "version": "1"},
+            "servers": [{"url": "http://127.0.0.1:1"}]}
+
+    def _walk(self, spec):
+        return oi.walk({**self.BASE, **spec}, None)
+
+    def test_api_key_in_query_refused(self):
+        built, skipped = self._walk({
+            "components": {"securitySchemes": {"k": {"type": "apiKey", "in": "query", "name": "key"}}},
+            "security": [{"k": []}],
+            "paths": {"/x": {"get": {"operationId": "opA", "responses": {"200": {"description": "ok"}}}}}})
+        self.assertEqual(built, [])
+        self.assertIn("header value", skipped[0][1])
+
+    def test_http_basic_refused(self):
+        built, skipped = self._walk({
+            "components": {"securitySchemes": {"b": {"type": "http", "scheme": "basic"}}},
+            "security": [{"b": []}],
+            "paths": {"/x": {"get": {"operationId": "opB", "responses": {"200": {"description": "ok"}}}}}})
+        self.assertEqual(built, [])
+        self.assertIn("base64", skipped[0][1])
+
+    def test_external_ref_refused(self):
+        built, skipped = self._walk({
+            "paths": {"/x": {"get": {"operationId": "opC",
+                                     "parameters": [{"$ref": "other.json#/components/parameters/P"}],
+                                     "responses": {"200": {"description": "ok"}}}}}})
+        self.assertEqual(built, [])
+        self.assertIn("$ref", skipped[0][1])
+
+    def test_cookie_param_refused(self):
+        built, skipped = self._walk({
+            "paths": {"/x": {"get": {"operationId": "opD",
+                                     "parameters": [{"name": "sid", "in": "cookie",
+                                                     "required": True, "schema": {"type": "string"}}],
+                                     "responses": {"200": {"description": "ok"}}}}}})
+        self.assertEqual(built, [])
+        self.assertIn("cookie", skipped[0][1])
+
+    def test_path_item_level_parameters_merge(self):
+        # A path-item-level $ref parameter is shared by the operation (no op-level params at all).
+        built, skipped = self._walk({
+            "components": {"parameters": {
+                "Q": {"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}}},
+            "paths": {"/x": {
+                "parameters": [{"$ref": "#/components/parameters/Q"}],
+                "get": {"operationId": "opE", "responses": {"200": {"description": "ok"}}}}}})
+        self.assertEqual(skipped, [])
+        record, body_ast, _ = built[0]
+        self.assertEqual(len(record["signature"]["type"]["params"]), 2)  # base, q
+        self.assertIn("url_encode", json.dumps(body_ast))
 
 
 if __name__ == "__main__":

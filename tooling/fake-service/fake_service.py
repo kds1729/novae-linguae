@@ -9,16 +9,26 @@ touching any real, billable, or mutable-in-the-world system:
     GET    /items/{name}   200 + the stored body, or 404
     DELETE /items/{name}   204 if it existed, 404 otherwise
 
-Every request must carry `Authorization: Bearer <token>` (the --token argument), else 401 —
-which is what makes the gate exercise the secret-placeholder path ({{secret:...}} header
+Every /items request must carry `Authorization: Bearer <token>` (the --token argument), else
+401 — which is what makes the gate exercise the secret-placeholder path ({{secret:...}} header
 values) rather than skipping auth. Names are CLIENT-chosen, so there is no server-assigned
 nondeterminism and a run replays byte-identically. State is in-memory only.
+
+The GW10 surface (spec/expressiveness.md — query params, header params, apiKey auth) uses a
+SECOND auth style, `X-Api-Key: <token>`, on two read endpoints:
+
+    GET /search?q=<term>&limit=<n>   200 if q non-empty and limit an integer, else 400
+    GET /version                     200 if an X-Client-Id header is present, else 400
+
+Both 400 on an unencoded character in the request target — so a worked example whose query
+value contains a space passes ONLY IF the client percent-encoded it (the url_encode gate).
 
     python3 fake_service.py [--port 8878] [--token test-token]
 """
 
 import argparse
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -56,11 +66,42 @@ class Handler(BaseHTTPRequestHandler):
         self.store[name] = body
         self._reply(200 if existed else 201, body)
 
+    def _api_keyed(self):
+        if self.headers.get("X-Api-Key") == self.token:
+            return True
+        self._reply(401, b'{"error":"unauthorized"}')
+        return False
+
     def do_GET(self):
         # /health is an UNAUTHENTICATED liveness probe (no Bearer token, no params) — the
         # smallest operation, and the one an API-description generator emits with no auth header.
         if self.path == "/health":
             self._reply(200, b'{"status":"ok"}')
+            return
+        parsed = urlparse(self.path)
+        if parsed.path in ("/search", "/version"):
+            # The GW10 surface, X-Api-Key-authed. An unencoded space never even reaches here
+            # (a malformed request line), but any other raw non-ASCII byte in the target is a
+            # deterministic 400 — so the documented 200 PROVES the client percent-encoded.
+            if any(ord(c) > 126 or c == " " for c in self.path):
+                self._reply(400, b'{"error":"unencoded character in request target"}')
+                return
+            if not self._api_keyed():
+                return
+            if parsed.path == "/version":
+                if not self.headers.get("X-Client-Id"):
+                    self._reply(400, b'{"error":"missing X-Client-Id header"}')
+                    return
+                self._reply(200, b'{"version":"1.0.0"}')
+                return
+            qs = parse_qs(parsed.query)
+            q = qs.get("q", [""])[0]
+            limit = qs.get("limit", [""])[0]
+            if not q or not limit.isdigit():
+                self._reply(400, b'{"error":"q (non-empty) and limit (integer) are required"}')
+                return
+            names = sorted(n for n in self.store if q in n)[: int(limit)]
+            self._reply(200, ('{"results":' + str(names).replace("'", '"') + "}").encode())
             return
         if not self._authed():
             return
