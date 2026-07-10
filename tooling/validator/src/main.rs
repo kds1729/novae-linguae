@@ -1491,15 +1491,22 @@ fn cmd_assemble(
     let records = nl_validator::build_record_map(records_dir)?;
     let bodies = nl_validator::build_link_map(records_dir)?;
     let goal_v = nl_validator::read_json(goal)?;
-    let examples: Vec<(serde_json::Value, serde_json::Value)> = goal_v
+    // Each example's `input` is either a single value-AST (a 1-argument goal) or an array of
+    // value-ASTs `[primary, aux…]` (a multi-argument goal — the primary is threaded, the rest are
+    // the auxiliary pool multi-arg stages draw from).
+    let examples: Vec<(Vec<serde_json::Value>, serde_json::Value)> = goal_v
         .get("examples")
         .and_then(|e| e.as_array())
         .ok_or_else(|| anyhow::anyhow!("goal must have an `examples` array"))?
         .iter()
         .map(|ex| {
-            let input = ex.get("input").cloned().ok_or_else(|| anyhow::anyhow!("example missing `input`"))?;
+            let input = ex.get("input").ok_or_else(|| anyhow::anyhow!("example missing `input`"))?;
+            let args: Vec<serde_json::Value> = match input {
+                serde_json::Value::Array(a) => a.clone(),
+                other => vec![other.clone()],
+            };
             let output = ex.get("output").cloned().ok_or_else(|| anyhow::anyhow!("example missing `output`"))?;
-            Ok((input, output))
+            Ok((args, output))
         })
         .collect::<Result<_>>()?;
 
@@ -1521,7 +1528,14 @@ fn cmd_assemble(
         println!("  stage {}     {}  {}", i + 1, s.name, s.hash);
     }
     let ty = |t: &Option<serde_json::Value>| t.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "?".into());
-    println!("  type        {} -> {}", ty(&a.composite.input_type), ty(&a.composite.output_type));
+    let inputs = if a.composite.extra_input_types.is_empty() {
+        ty(&a.composite.input_type)
+    } else {
+        let mut parts = vec![ty(&a.composite.input_type)];
+        parts.extend(a.composite.extra_input_types.iter().map(|t| t.to_string()));
+        format!("({})", parts.join(", "))
+    };
+    println!("  type        {} -> {}", inputs, ty(&a.composite.output_type));
     println!("  effects     {:?}", a.composite.effects);
     println!("  terminates  {}", a.composite.terminates);
     println!("  complexity  {}", a.composite.complexity);

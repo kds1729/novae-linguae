@@ -171,10 +171,15 @@ implemented until a real workload makes the 1.5 s substantial.
 the commons for a sequence of functions whose composition reproduces every example, then verifies
 the assembled pipeline.
 
-The search is example-driven and breadth-first (so the shortest pipeline wins), over the commons's
-unary functions, pruned by `compose`'s stage-to-stage type composability and by execution — a
-candidate advances only if it runs *totally* on every example's running value, and a pipeline is
-accepted when it reproduces every example's output. The found pipeline is then verified three ways:
+The search is example-driven and breadth-first (so the shortest pipeline wins), pruned by `compose`'s
+stage-to-stage type composability and by execution — a candidate advances only if it runs *totally*
+on every example's running value. **Stages may be multi-argument**: the running value feeds each
+stage's *first* parameter, and an arity-`k` stage additionally consumes `k-1` values from the goal's
+**auxiliary pool** (`args[1..]`, drawn left-to-right across the pipeline, matching `compose`'s
+"auxiliaries gathered left to right"), so the composite is `(primary, aux…) -> output` — an example's
+`input` is then an array `[primary, aux…]` (a single value is the one-argument special case). A
+pipeline is accepted when it reproduces every output *and* consumes the pool exactly (its composite
+arity equals the goal's). The found pipeline is then verified three ways:
 it must `compose` (composability + derived composite type/effects/termination/complexity); its
 **synthesized composite body** — `\x -> fN(… f1(x))`, each stage applied by `fn_ref`
 content-address — must run every example through the resolved stages; and, under
@@ -185,13 +190,13 @@ publishable, no new code written.
 
 Worked, over a four-function commons (`inc`/`double`/`square`/`negate`): the goal `{3→32, 2→18}`
 assembled the three-stage pipeline **`inc → square → double`** (`inc(3)=4, square=16, double=32`;
-`inc(2)=3, square=9, double=18` — two examples pin the order over `square∘inc∘…` alternatives),
-verified 2/2 examples through the composite, confirmed every stage certifies, and emitted a composite
-record `fn_6d1f47…` that `run --records` executes end to end (2/2). Honest scope: the search is over
-**unary** stages (multi-argument stages, whose non-first parameters `compose` gathers as auxiliary
-composite inputs, are a residual), local `--records` only (a live-node search wants a seedless
-enumeration path), and the emitted composite's *declared* metadata is `compose`-derived, not
-re-proven against the `fn_ref`-chain body.
+`inc(2)=3, square=9, double=18` — two examples pin the order), verified 2/2 examples through the
+composite, and emitted a composite `run --records` executes end to end. And **multi-argument**, over
+`double`/`square`/`add`/`mul`: the goal `{[3,10]→16, [5,1]→11}` assembled **`double → add`** with
+composite type `(int, int) → int` — the auxiliary is threaded into `add`'s second parameter — whose
+emitted composite body `\x0 x1 → add(double(x0), x1)` runs 2/2. Honest scope: local `--records` only
+(a live-node search wants a seedless enumeration path), and the emitted composite's *declared*
+metadata is `compose`-derived, not re-proven against the `fn_ref`-chain body.
 
 ## Scope (v0.2, honest)
 
