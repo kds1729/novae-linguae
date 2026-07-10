@@ -452,8 +452,17 @@ only real ingested records could surface.
   `case`), and `match` (→ `case`, with `Some`→`Just`/`None`/`Ok`/`Err`/literal/wildcard/binder/tuple
   patterns; arm guards and or-patterns stay out). Verified by execution: `sign` (nested if/else),
   `abs_diff` (let + if), and `unwrap_or` (match on an `Option`) lift, wrap in a lambda over their
-  parameters, and evaluate correctly against their doctest values. Still single-body per function —
-  loops (`for`/`while`) are the remaining Rust gap the Python translator already covers.
+  parameters, and evaluate correctly against their doctest values.
+  *Rust iterator chains (2026-07-10):* Rust's *idiomatic* way to work a collection is the functional
+  iterator chain, which maps directly onto Nova's `map`/`filter`/`foldl` — more natural than an
+  imperative loop. The lifter now translates `xs.iter().map(|x| e).collect()` → `map(\x -> e, xs)`,
+  `.filter(|&x| p)` → `filter`, `.fold(init, |acc, x| e)` → `foldl`, `.sum()`/`.product()` → the
+  numeric-identity fold, `.rev()` → `reverse`, `.count()`/`.len()` → `length`, with the adapter
+  methods (`iter`/`into_iter`/`cloned`/`copied`/`collect`/`by_ref`) transparent and deref (`*x`) /
+  reference closure params (`|&x|`) stripped (Nova has no references). `sum_squares`
+  (`map(|x| x*x).sum()`) and `positives` (`filter(…).cloned().collect()`) ingest, and the map/filter/
+  sum/fold/rev forms all evaluate correctly against their examples. The remaining Rust gap is the
+  imperative accumulator `for` loop the Python translator covers (idiomatic Rust prefers the chains).
   *Statement subset widened (2026-07-07):* the honest 9/57-stdlib finding is a control-flow gap
   (real library code is multi-statement, not single-expression), and the two most common loop
   shapes the single-statement translator couldn't reach are now in: a **guarded accumulator**

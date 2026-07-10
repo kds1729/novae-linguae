@@ -1186,6 +1186,32 @@ fn syn_pat_to_pattern(pat: &syn::Pat) -> Option<Value> {
     }
 }
 
+/// A Rust closure `|x| body` / `|&x| body` -> a Nova `lambda` over its (simple-ident) parameters.
+/// Reference patterns (`&x`) bind the plain name (Nova has no references). Typed / destructuring /
+/// multi-statement-block closures are out of subset.
+fn closure_to_lambda(c: &syn::ExprClosure, strs: &HashSet<String>) -> Option<Value> {
+    let mut params = Vec::new();
+    for p in &c.inputs {
+        let ident = match p {
+            syn::Pat::Ident(pi) if pi.by_ref.is_none() && pi.subpat.is_none() => pi.ident.to_string(),
+            syn::Pat::Reference(r) => match &*r.pat {
+                syn::Pat::Ident(pi) if pi.by_ref.is_none() && pi.subpat.is_none() => pi.ident.to_string(),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        if p_var(&ident).is_none() {
+            return None;
+        }
+        params.push(json!({ "name": ident }));
+    }
+    if params.is_empty() {
+        return None;
+    }
+    let body = expr_to_body(&c.body, strs)?;
+    Some(json!({ "kind": "lambda", "params": params, "body": body }))
+}
+
 fn expr_to_body(expr: &syn::Expr, strs: &HashSet<String>) -> Option<Value> {
     match expr {
         syn::Expr::Paren(p) => expr_to_body(&p.expr, strs),
@@ -1208,6 +1234,9 @@ fn expr_to_body(expr: &syn::Expr, strs: &HashSet<String>) -> Option<Value> {
             }
             syn::UnOp::Neg(_) => body_op_app("neg", vec![expr_to_body(&u.expr, strs)?]),
             syn::UnOp::Not(_) => body_op_app("not", vec![expr_to_body(&u.expr, strs)?]),
+            // `*x` (deref, common in iterator closures over `&T`) is transparent: the value IS the
+            // element (Nova has no references).
+            syn::UnOp::Deref(_) => expr_to_body(&u.expr, strs),
             _ => None,
         },
         syn::Expr::Binary(b) => {
@@ -1246,6 +1275,40 @@ fn expr_to_body(expr: &syn::Expr, strs: &HashSet<String>) -> Option<Value> {
         // `n.to_string()` on a non-string is the canonical decimal rendering.
         syn::Expr::MethodCall(m) if m.method == "to_string" && m.args.is_empty() => {
             body_op_app("to_string", vec![expr_to_body(&m.receiver, strs)?])
+        }
+        // Iterator-method chains — the idiomatic Rust way to work a collection, mapping directly
+        // onto Nova's map/filter/foldl. Adapter methods (`iter`/`into_iter`/`cloned`/`copied`/
+        // `collect`/`by_ref`) are transparent (they don't change the value in this pure model).
+        syn::Expr::MethodCall(m) => {
+            let method = m.method.to_string();
+            let n = m.args.len();
+            match (method.as_str(), n) {
+                ("iter" | "into_iter" | "cloned" | "copied" | "collect" | "by_ref", 0) => {
+                    expr_to_body(&m.receiver, strs) // transparent
+                }
+                ("rev", 0) => body_op_app("reverse", vec![expr_to_body(&m.receiver, strs)?]),
+                ("count" | "len", 0) => body_op_app("length", vec![expr_to_body(&m.receiver, strs)?]),
+                // `.sum()` / `.product()` fold the numeric identity over the list.
+                ("sum", 0) => body_op_app("foldl", vec![
+                    p_var("add")?, json!({ "kind": "lit", "value": { "kind": "int", "value": 0 } }),
+                    expr_to_body(&m.receiver, strs)?]),
+                ("product", 0) => body_op_app("foldl", vec![
+                    p_var("mul")?, json!({ "kind": "lit", "value": { "kind": "int", "value": 1 } }),
+                    expr_to_body(&m.receiver, strs)?]),
+                ("map", 1) | ("filter", 1) => {
+                    let syn::Expr::Closure(c) = m.args.first()? else { return None };
+                    let lam = closure_to_lambda(c, strs)?;
+                    body_op_app(&method, vec![lam, expr_to_body(&m.receiver, strs)?])
+                }
+                // `.fold(init, |acc, x| …)` -> `foldl(\acc x -> …, init, recv)`.
+                ("fold", 2) => {
+                    let init = expr_to_body(&m.args[0], strs)?;
+                    let syn::Expr::Closure(c) = &m.args[1] else { return None };
+                    let lam = closure_to_lambda(c, strs)?;
+                    body_op_app("foldl", vec![lam, init, expr_to_body(&m.receiver, strs)?])
+                }
+                _ => None,
+            }
         }
         // `if c { a } else { b }` -> `case c of { true => a; false => b }`. Rust conditions are
         // statically `bool` (no truthiness), so any if-cond is a safe boolean scrutinee. An `if`
@@ -2069,6 +2132,32 @@ mod tests {
         // A guarded arm is out of subset.
         let guarded = item_fn("pub fn h(n: i64) -> i64 { match n { x if x > 0 => 1, _ => 0 } }");
         assert!(body_ast(&guarded).is_none());
+    }
+
+    #[test]
+    fn body_iterator_chains_lift_and_execute() {
+        let int = |n: i64| json!({ "kind": "int", "value": n });
+        let list = |ns: &[i64]| json!({ "kind": "list", "elems": ns.iter().map(|n| int(*n)).collect::<Vec<_>>() });
+        // map: xs.iter().map(|x| x * 2).collect() -> map(\x -> x*2, xs).
+        let f = item_fn("pub fn dbl(xs: Vec<i64>) -> Vec<i64> { xs.iter().map(|x| x * 2).collect() }");
+        let lam = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&f).unwrap() });
+        assert_eq!(nl_validator::eval_body(&lam, &[list(&[1, 2, 3])]).unwrap(), list(&[2, 4, 6]));
+        // filter + count: xs.iter().filter(|&x| x > 0).count() -> length(filter(\x -> x>0, xs)).
+        let g = item_fn("pub fn npos(xs: Vec<i64>) -> usize { xs.iter().filter(|&x| x > 0).count() }");
+        let lam2 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&g).unwrap() });
+        assert_eq!(nl_validator::eval_body(&lam2, &[list(&[1, -2, 3, -4])]).unwrap(), int(2));
+        // sum: xs.iter().sum() -> foldl add 0 xs.
+        let h = item_fn("pub fn tot(xs: Vec<i64>) -> i64 { xs.iter().sum() }");
+        let lam3 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&h).unwrap() });
+        assert_eq!(nl_validator::eval_body(&lam3, &[list(&[3, 4, 5])]).unwrap(), int(12));
+        // fold with an explicit accumulator closure.
+        let k = item_fn("pub fn tot2(xs: Vec<i64>) -> i64 { xs.iter().fold(0, |acc, x| acc + x) }");
+        let lam4 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&k).unwrap() });
+        assert_eq!(nl_validator::eval_body(&lam4, &[list(&[3, 4, 5])]).unwrap(), int(12));
+        // rev.
+        let r = item_fn("pub fn rv(xs: Vec<i64>) -> Vec<i64> { xs.iter().rev().collect() }");
+        let lam5 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&r).unwrap() });
+        assert_eq!(nl_validator::eval_body(&lam5, &[list(&[1, 2, 3])]).unwrap(), list(&[3, 2, 1]));
     }
 
     #[test]
