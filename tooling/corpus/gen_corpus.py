@@ -1791,6 +1791,59 @@ def string_funcs():
     ]
 
 
+def url_funcs():
+    # URL/QUERY rows (the GW10 pull: url_encode — RFC 3986 strict percent-encoding). Building a
+    # query string by raw str_concat over caller data is UNSOUND (a space or `&` changes the
+    # request), so the OpenAPI description adapter routes every string query value through
+    # url_encode; these rows teach the builtin and the query-building idioms around it. No SMT
+    # counterpart (like str_lower), so the rows verify by validate + typecheck + run.
+    q, xs = var("q"), var("xs")
+    return [
+        {"name": "encode_term", "intent": "Percent-encode a string for use in a URL.",
+         "summary": "url_encode s — RFC 3986 strict: unreserved characters pass, every other "
+                    "UTF-8 byte becomes %XX (uppercase hex).", "tags": ["string", "url", "encode"],
+         "type_ast": fn([STRING], STRING), "body_ast": lam(["s"], bapp("url_encode", var("s"))),
+         "examples": [{"args": ["hello world"], "result": "hello%20world"},
+                      {"args": ["a&b=c"], "result": "a%26b%3Dc"},
+                      {"args": ["safe-._~"], "result": "safe-._~"}, {"args": [""], "result": ""}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "query_of", "intent": "Build a ?q= search query string from a term.",
+         "summary": 'str_concat "?q=" (url_encode q) — the parameter NAME is literal text; the '
+                    "caller's VALUE must be percent-encoded.", "tags": ["string", "url", "format"],
+         "type_ast": fn([STRING], STRING),
+         "body_ast": lam(["q"], bapp("str_concat", str_lit("?q="), bapp("url_encode", q))),
+         "examples": [{"args": ["new items"], "result": "?q=new%20items"},
+                      {"args": ["abc"], "result": "?q=abc"}, {"args": [""], "result": "?q="}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "param_pair", "intent": "Build one key=value query parameter from a key and a raw value.",
+         "summary": 'str_concat k (str_concat "=" (url_encode v)) — encode the value, never the '
+                    "literal key.", "tags": ["string", "url", "format"],
+         "type_ast": fn([STRING, STRING], STRING),
+         "body_ast": lam(["k", "v"], bapp("str_concat", var("k"),
+                                          bapp("str_concat", str_lit("="), bapp("url_encode", var("v"))))),
+         "examples": [{"args": ["q", "a b"], "result": "q=a%20b"},
+                      {"args": ["tag", "x&y"], "result": "tag=x%26y"},
+                      {"args": ["limit", "5"], "result": "limit=5"}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "search_url", "intent": "Build a full search URL from a base and a raw search term.",
+         "summary": 'str_concat base (str_concat "/search?q=" (url_encode q)).',
+         "tags": ["string", "url", "format"], "type_ast": fn([STRING, STRING], STRING),
+         "body_ast": lam(["base", "q"], bapp("str_concat", var("base"),
+                                             bapp("str_concat", str_lit("/search?q="), bapp("url_encode", q)))),
+         "examples": [{"args": ["http://h", "new items"], "result": "http://h/search?q=new%20items"},
+                      {"args": ["https://x.y", "a"], "result": "https://x.y/search?q=a"}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "encode_all", "intent": "Percent-encode every string in a list.",
+         "summary": "map url_encode xs.", "tags": ["string", "url", "list", "map"],
+         "type_ast": fn([list_of(STRING)], list_of(STRING)),
+         "body_ast": lam(["xs"], bapp("map", var("url_encode"), xs)),
+         "examples": [{"args": [["a b", "c"]], "result": ["a%20b", "c"]},
+                      {"args": [[]], "result": []},
+                      {"args": [["100%"]], "result": ["100%25"]}],
+         "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
 def dispatch_funcs():
     # GW3 rows (spec/expressiveness.md — dispatch on message content, the zero-pull workflow):
     # route on a command string with string-literal case patterns, split "cmd n" text into head
@@ -3792,6 +3845,64 @@ def combinatorial_specs(exclude_names=()):
                    [{"args": [v], "result": V("Just", of(v, k2)) if cf(v, k) else V("None")}
                     for v in (k, k - 1, k + 1, 4)], terminates="always"))
 
+    # 49. URL/QUERY SHAPES — the GW10 pull (url_encode: RFC 3986 strict percent-encoding). The
+    # OpenAPI description adapter builds `?k=` + url_encode(value) (+ `&k=` + to_string(n)) query
+    # strings — raw str_concat over caller data is unsound (a space or `&` changes the request).
+    # Family #41's lesson: a builtin is only learned if it appears in some training shape; #45's:
+    # a pull needs its day-one mass. Near-bare encodes, single/chained query pairs, int params via
+    # to_string, and the join-encoded list. Expected values via a byte-exact mirror of the builtin.
+    def _pct49(text):
+        keep = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        return "".join(c if c in keep else "".join(f"%{b:02X}" for b in c.encode()) for c in text)
+    _S49_IN = ["hello world", "a&b", "x=y", "plain", "100%", ""]
+    for k in ("q", "name", "tag", "term"):
+        add(_cspec(f"query_{k}", f'Build a "?{k}=" query string from a raw value.',
+                   f'str_concat "?{k}=" (url_encode s)', ["string", "url", "format"],
+                   fn([STRING], STRING),
+                   lam(["s"], bapp("str_concat", str_lit(f"?{k}="), bapp("url_encode", var("s")))),
+                   [{"args": [v], "result": f"?{k}=" + _pct49(v)} for v in _S49_IN],
+                   terminates="always"))
+    for k in ("user", "item", "lang"):
+        add(_cspec(f"and_{k}", f'Build an "&{k}=" continuation parameter from a raw value.',
+                   f'str_concat "&{k}=" (url_encode s)', ["string", "url", "format"],
+                   fn([STRING], STRING),
+                   lam(["s"], bapp("str_concat", str_lit(f"&{k}="), bapp("url_encode", var("s")))),
+                   [{"args": [v], "result": f"&{k}=" + _pct49(v)} for v in _S49_IN[:4]],
+                   terminates="always"))
+    for k1, k2 in (("q", "tag"), ("name", "kind")):
+        add(_cspec(f"query_{k1}_{k2}", f'Build a two-parameter "?{k1}=…&{k2}=…" query string from two raw values.',
+                   f'str_concat "?{k1}=" (str_concat (url_encode a) (str_concat "&{k2}=" (url_encode b)))',
+                   ["string", "url", "format"], fn([STRING, STRING], STRING),
+                   lam(["a", "b"], bapp("str_concat", str_lit(f"?{k1}="),
+                                        bapp("str_concat", bapp("url_encode", var("a")),
+                                             bapp("str_concat", str_lit(f"&{k2}="),
+                                                  bapp("url_encode", var("b")))))),
+                   [{"args": [a, b], "result": f"?{k1}=" + _pct49(a) + f"&{k2}=" + _pct49(b)}
+                    for a, b in (("new items", "sale"), ("a b", "c&d"), ("x", ""))],
+                   terminates="always"))
+    for k in ("limit", "page", "count"):
+        add(_cspec(f"query_{k}_int", f'Build a "?{k}=" query string from an integer (digits are unreserved).',
+                   f'str_concat "?{k}=" (to_string n)', ["string", "url", "format"],
+                   fn([INT], STRING),
+                   lam(["n"], bapp("str_concat", str_lit(f"?{k}="), bapp("to_string", var("n")))),
+                   [{"args": [v], "result": f"?{k}=" + str(v)} for v in (5, 0, 12, -1)],
+                   terminates="always"))
+    for seg in ("search", "items"):
+        add(_cspec(f"url_{seg}", f'Build a full /{seg} URL from a base and a raw query value.',
+                   f'str_concat base (str_concat "/{seg}?q=" (url_encode s))',
+                   ["string", "url", "format"], fn([STRING, STRING], STRING),
+                   lam(["base", "s"], bapp("str_concat", var("base"),
+                                           bapp("str_concat", str_lit(f"/{seg}?q="),
+                                                bapp("url_encode", var("s"))))),
+                   [{"args": ["http://h", v], "result": f"http://h/{seg}?q=" + _pct49(v)}
+                    for v in ("new items", "a", "")], terminates="always"))
+    add(_cspec("join_encoded", "Percent-encode each string, then join them with & separators.",
+               'str_join "&" (map url_encode xs)', ["string", "url", "list", "map"],
+               fn([list_of(STRING)], STRING),
+               lam(["xs"], bapp("str_join", str_lit("&"), bapp("map", var("url_encode"), var("xs")))),
+               [{"args": [["a b", "c"]], "result": "a%20b&c"}, {"args": [[]], "result": ""},
+                {"args": [["x&y"]], "result": "x%26y"}], terminates="always"))
+
     return out
 
 
@@ -3802,8 +3913,8 @@ def all_specs():
             + arith_laws() + bool_laws() + order_laws()
             + more_arith() + more_laws() + bool_more() + recursive_more()
             + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion()
-            + variant_consuming_funcs() + nested_hof_funcs() + string_funcs() + dispatch_funcs()
-            + map_json_funcs())
+            + variant_consuming_funcs() + nested_hof_funcs() + string_funcs() + url_funcs()
+            + dispatch_funcs() + map_json_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -4702,6 +4813,7 @@ def main():
                 "variant_consuming_funcs": len(variant_consuming_funcs()),
                 "nested_hof_funcs": len(nested_hof_funcs()),
                 "string_funcs": len(string_funcs()),
+                "url_funcs": len(url_funcs()),
                 "dispatch_funcs": len(dispatch_funcs()),
                 "map_json_funcs": len(map_json_funcs()),
                 "higher_order_funcs": len(higher_order_funcs()),
