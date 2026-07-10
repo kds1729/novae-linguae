@@ -67,6 +67,21 @@ pub fn query_intent(node: &str, intent: &str, limit: usize) -> Result<Vec<String
     query(node, &json!({ "intent_tags": { "any": [intent] }, "limit": limit }))
 }
 
+/// Typed discovery returning compact SUMMARIES (`POST /v0/query?include=summary`): each result is a
+/// projection carrying `hash`, `type`, `terminates`, `body_hash`, … but NOT the full record or body.
+/// One round-trip reads every candidate's signature, so a client can PRUNE (by arity, sort, effects)
+/// before the expensive per-record + per-body fetch. The summary tier only truncates when the filter
+/// carries an explicit `token_budget`; with just a `limit` the whole candidate page comes back.
+pub fn query_summaries(node: &str, filter: &J) -> Result<Vec<J>> {
+    let url = format!("{}/v0/query?include=summary", node.trim_end_matches('/'));
+    let text = crate::interp::http_request("POST", &url, Some(&filter.to_string()))?;
+    let v: J = serde_json::from_str(&text).map_err(|e| anyhow!("query response not JSON: {e}"))?;
+    if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+        bail!("node rejected the summary query: {err}");
+    }
+    Ok(v.get("results").and_then(|r| r.as_array()).cloned().unwrap_or_default())
+}
+
 /// Publish an artifact (`POST /v0/records` — the node re-verifies on ingest, so publication is
 /// through the same gate as everything else). Returns the node's response for reporting.
 pub fn publish_artifact(node: &str, artifact: &J) -> Result<J> {

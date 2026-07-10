@@ -1497,6 +1497,29 @@ fn cmd_compose(records: &[PathBuf]) -> Result<()> {
     }
 }
 
+/// Read a function's ARITY from the `type` field of a commons summary (`?include=summary`), for the
+/// arity prune in [`cmd_assemble`]. The node stores `type_str` as the raw v0.1 surface string, or the
+/// JSON-serialized v0.2 structured type. We read the structured form reliably (`params.len()`); a
+/// non-`fn` structured type is a value (arity 0). Anything we can't confidently parse — including v0.1
+/// surface strings — returns `None`, which the caller treats as "keep" (never prune on doubt).
+fn type_arity(type_str: &str) -> Option<usize> {
+    let mut j: serde_json::Value = serde_json::from_str(type_str).ok()?;
+    // A polymorphic type is `forall`-wrapped around the function — unwrap so the arity is still read
+    // (otherwise every generic candidate falls through to keep-on-doubt and dodges the prune).
+    if j.get("kind").and_then(|k| k.as_str()) == Some("forall") {
+        j = match j.get("body") {
+            Some(b) => b.clone(),
+            None => return None,
+        };
+    }
+    match j.get("kind").and_then(|k| k.as_str()) {
+        Some("fn") => j.get("params").and_then(|p| p.as_array()).map(|a| a.len()),
+        // A structured type that isn't a function is a plain value — arity 0, never a usable stage.
+        Some(_) => Some(0),
+        None => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_assemble(
     records_dir: Option<&Path>,
@@ -1513,34 +1536,8 @@ fn cmd_assemble(
     if publish && node.is_none() {
         return Err(anyhow::anyhow!("--publish requires --node (the node to publish the composite back to)"));
     }
-    // The commons view: a local directory, or a live node's candidate set (queried by filter,
-    // fetched by content-address, every artifact re-hashed locally — the store stays untrusted).
-    let (records, bodies) = match (records_dir, node) {
-        (Some(dir), None) => (nl_validator::build_record_map(dir)?, nl_validator::build_link_map(dir)?),
-        (None, Some(url)) => {
-            // Function records carry no `kind` column, but every one has a `terminates` field
-            // (values `always`/`conditional`/`unknown`) that non-function artifacts lack — so this
-            // enumerates exactly the commons's functions (v0.1 string-typed and v0.2 structured
-            // alike, where a `type_contains` filter would miss the structured ones).
-            let mut filter = serde_json::json!({
-                "terminates": ["always", "conditional", "unknown"], "limit": limit });
-            if !intents.is_empty() {
-                filter["intent_tags"] = serde_json::json!({ "any": intents });
-            }
-            let addrs = nl_validator::commons_client::query(url, &filter)?;
-            if addrs.is_empty() {
-                return Err(anyhow::anyhow!("the node returned no candidate functions for the filter"));
-            }
-            eprintln!("discovered {} candidate function(s) on the node; fetching by content-address…", addrs.len());
-            // Seed the reference-closure walk with the candidates, fetching each record AND its
-            // body (a referenced address), every one hash-verified locally. Lenient: a function
-            // whose body the node doesn't serve is skipped, not fatal — it just isn't a candidate.
-            // Cap generously for the bulk fetch (record + body + a few fn_ref helpers per candidate).
-            nl_validator::commons_client::maps_from_node_lenient(url, &addrs, addrs.len() * 8 + 64)?
-        }
-        (Some(_), Some(_)) => return Err(anyhow::anyhow!("supply exactly one of --records / --node")),
-        (None, None) => return Err(anyhow::anyhow!("supply one of --records / --node")),
-    };
+    // Parse the goal FIRST — its argument shape bounds which candidates can ever be a pipeline stage,
+    // which lets the live-node fetch prune before paying for per-record + per-body round-trips.
     let goal_v = nl_validator::read_json(goal)?;
     // Each example's `input` is either a single value-AST (a 1-argument goal) or an array of
     // value-ASTs `[primary, aux…]` (a multi-argument goal — the primary is threaded, the rest are
@@ -1560,6 +1557,60 @@ fn cmd_assemble(
             Ok((args, output))
         })
         .collect::<Result<_>>()?;
+    // A pipeline stage consumes the running value (1) plus (arity−1) auxiliaries drawn from the goal's
+    // aux pool, so any usable stage has 1 ≤ arity ≤ aux_count+1. This ceiling is a SOUND prune: an
+    // arity-0 (nothing to thread) or over-arity (not enough auxiliaries) function can never appear,
+    // whatever the search does.
+    let max_usable_arity = examples.iter().map(|(a, _)| a.len().saturating_sub(1)).max().unwrap_or(0) + 1;
+
+    // The commons view: a local directory, or a live node's candidate set (queried by filter,
+    // fetched by content-address, every artifact re-hashed locally — the store stays untrusted).
+    let (records, bodies) = match (records_dir, node) {
+        (Some(dir), None) => (nl_validator::build_record_map(dir)?, nl_validator::build_link_map(dir)?),
+        (None, Some(url)) => {
+            // Function records carry no `kind` column, but every one has a `terminates` field
+            // (values `always`/`conditional`/`unknown`) that non-function artifacts lack — so this
+            // enumerates exactly the commons's functions (v0.1 string-typed and v0.2 structured
+            // alike, where a `type_contains` filter would miss the structured ones).
+            let mut filter = serde_json::json!({
+                "terminates": ["always", "conditional", "unknown"], "limit": limit });
+            if !intents.is_empty() {
+                filter["intent_tags"] = serde_json::json!({ "any": intents });
+            }
+            // Summary-first discovery: one `?include=summary` round-trip reads every candidate's
+            // signature, then the arity ceiling prunes the unusable ones BEFORE the expensive
+            // per-record + per-body fetch. Keep-on-doubt — a candidate whose arity we can't read from
+            // its summary stays in, so the prune only ever removes provably-unusable functions.
+            let summaries = nl_validator::commons_client::query_summaries(url, &filter)?;
+            if summaries.is_empty() {
+                return Err(anyhow::anyhow!("the node returned no candidate functions for the filter"));
+            }
+            let mut viable: Vec<String> = Vec::new();
+            let mut pruned = 0usize;
+            for s in &summaries {
+                let Some(hash) = s.get("hash").and_then(|h| h.as_str()) else { continue };
+                let keep = match s.get("type").and_then(|t| t.as_str()).and_then(type_arity) {
+                    Some(a) => a >= 1 && a <= max_usable_arity,
+                    None => true, // unreadable arity ⇒ keep, never prune on doubt
+                };
+                if keep { viable.push(hash.to_string()); } else { pruned += 1; }
+            }
+            if viable.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "no candidate has a usable arity (1..={max_usable_arity}) for this goal (pruned all {} summaries)",
+                    summaries.len()));
+            }
+            eprintln!(
+                "discovered {} candidate(s); arity-pruned {} (unusable at arity 1..={}), fetching {} by content-address…",
+                summaries.len(), pruned, max_usable_arity, viable.len());
+            // Seed the reference-closure walk with the surviving candidates, fetching each record AND
+            // its body, every one hash-verified locally. Lenient: a function whose body the node
+            // doesn't serve is skipped, not fatal — it just isn't a candidate.
+            nl_validator::commons_client::maps_from_node_lenient(url, &viable, viable.len() * 8 + 64)?
+        }
+        (Some(_), Some(_)) => return Err(anyhow::anyhow!("supply exactly one of --records / --node")),
+        (None, None) => return Err(anyhow::anyhow!("supply one of --records / --node")),
+    };
 
     let assembled = nl_validator::assemble(&records, &bodies, &examples, max_stages, require_certified, solver)?;
     let Some(a) = assembled else {
@@ -2190,4 +2241,23 @@ fn cmd_sign(record: &PathBuf, seed: &str, in_place: bool) -> Result<()> {
         std::io::stdout().write_all(b"\n")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod arity_tests {
+    use super::type_arity;
+
+    #[test]
+    fn reads_arity_from_structured_and_polymorphic_types() {
+        // Monomorphic function: 2 params.
+        let binary = r#"{"kind":"fn","params":[{"kind":"builtin","name":"nat"},{"kind":"builtin","name":"int"}],"result":{"kind":"builtin","name":"int"}}"#;
+        assert_eq!(type_arity(binary), Some(2));
+        // Polymorphic (forall-wrapped) function: still 1 — the forall must be unwrapped.
+        let poly = r#"{"kind":"forall","vars":["a"],"body":{"kind":"fn","params":[{"kind":"var","name":"a"}],"result":{"kind":"var","name":"a"}}}"#;
+        assert_eq!(type_arity(poly), Some(1));
+        // A non-function structured type is a value — arity 0 (never a usable stage).
+        assert_eq!(type_arity(r#"{"kind":"builtin","name":"int"}"#), Some(0));
+        // A v0.1 surface string / unparseable type is unknown — None (caller keeps it, never prunes).
+        assert_eq!(type_arity("nat -> int"), None);
+    }
 }
