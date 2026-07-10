@@ -196,5 +196,55 @@ class TestV2Records(unittest.TestCase):
         self.assertEqual(rec["intent_tags"], ["lossless"])
 
 
+class TestExecutableBodies(unittest.TestCase):
+    """The body builder produces runnable bodies for `function`-declaration and arrow BLOCK
+    single-`return` shapes (not just bare arrow expressions), normalizes strict equality, and stays
+    byte-identical to the Python adapter (shared `nl_body` core)."""
+
+    def _ts(self, name, src):
+        from nl_body import body_ast_from_ts
+        return body_ast_from_ts(name, src)
+
+    def test_function_declaration_and_arrow_block_agree(self):
+        # A `function` declaration and the equivalent arrow expression build the SAME body.
+        decl = self._ts("inc", "export function inc(x: number): number { return x + 1; }")
+        arrow = self._ts("inc", "(x: number) => x + 1")
+        self.assertEqual(decl, arrow)
+        self.assertEqual(decl["body"]["fn"], {"kind": "var", "name": "add"})
+
+    def test_block_with_let_binding(self):
+        b = self._ts("f", "(x: number) => { const y = x + 1; return y * 2; }")
+        self.assertEqual(b["body"]["kind"], "let")
+        self.assertEqual(b["body"]["name"], "y")
+
+    def test_strict_equality_normalizes(self):
+        self.assertEqual(self._ts("z", "(x: number) => x === 0")["body"]["fn"], {"kind": "var", "name": "eq"})
+        self.assertEqual(self._ts("z", "(a: number, b: number) => a !== b")["body"]["fn"],
+                         {"kind": "var", "name": "neq"})
+
+    def test_logical_operators_normalize(self):
+        # TS `&&`/`||` are Python `and`/`or` -> the `and`/`or` builtins.
+        self.assertEqual(
+            self._ts("both", "export function both(a: boolean, b: boolean): boolean { return a && b; }")
+            ["body"]["fn"], {"kind": "var", "name": "and"})
+        self.assertEqual(self._ts("either", "(a: boolean, b: boolean) => a || b")["body"]["fn"],
+                         {"kind": "var", "name": "or"})
+
+    def test_out_of_subset_returns_none(self):
+        self.assertIsNone(self._ts("loop", "(x: number) => { let y = 0; for (;;) {} return y; }"))
+        self.assertIsNone(self._ts("tern", "(x: number) => x > 0 ? 1 : 0"))  # TS ternary isn't Python
+
+    def test_agrees_byte_for_byte_with_python_adapter(self):
+        from nl_body import body_ast_from_ts, body_ast_from_py
+        import ast as pyast
+        for ts_src, py_src in [
+            ("export function inc(x: number): number { return x + 1; }", "def inc(x):\n    return x + 1"),
+            ("(x: number) => x === 0", "def z(x):\n    return x == 0"),
+        ]:
+            ts_addr = c.expr_address(body_ast_from_ts("f", ts_src))
+            py_addr = c.expr_address(body_ast_from_py(pyast.parse(py_src).body[0]))
+            self.assertEqual(ts_addr, py_addr, "TS and Python bodies must content-address alike")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -196,5 +196,47 @@ class TestV2Records(unittest.TestCase):
         self.assertEqual(self._run("verify", path).returncode, 0)
 
 
+class TestOperatorBodies(unittest.TestCase):
+    """The executable body builder handles infix operator expressions over atoms/applications, with
+    correct precedence, and stays byte-identical to the Python adapter (shared `nl_body` core)."""
+
+    def _hs(self, name, eqn):
+        from nl_body import body_ast_from_hs
+        return body_ast_from_hs(name, eqn)
+
+    def test_operator_precedence_and_application_operands(self):
+        # a + b * c  ==>  add(a, mul(b, c))  (mul binds tighter)
+        self.assertEqual(
+            self._hs("f", "f a b c = a + b * c"),
+            {"kind": "lambda", "params": [{"name": "a"}, {"name": "b"}, {"name": "c"}],
+             "body": {"kind": "app", "fn": {"kind": "var", "name": "add"}, "args": [
+                 {"kind": "var", "name": "a"},
+                 {"kind": "app", "fn": {"kind": "var", "name": "mul"},
+                  "args": [{"kind": "var", "name": "b"}, {"kind": "var", "name": "c"}]}]}})
+        # an application can be an operand:  length xs + 1
+        self.assertEqual(
+            self._hs("g", "g xs = length xs + 1")["body"]["fn"], {"kind": "var", "name": "add"})
+        # `/=` is Haskell not-equal
+        self.assertEqual(self._hs("ne", "ne a b = a /= b")["body"]["fn"], {"kind": "var", "name": "neq"})
+
+    def test_boundaries_stay_out_of_subset(self):
+        self.assertIsNone(self._hs("h", "h x | x < 0 = x"))       # guards
+        self.assertIsNone(self._hs("k", "k x = (x + 1) * 2"))     # parenthesised sub-expression
+        self.assertIsNone(self._hs("l", "l x = \\y -> y"))        # lambda
+
+    def test_agrees_byte_for_byte_with_python_adapter(self):
+        from nl_body import body_ast_from_hs, body_ast_from_py
+        import ast as pyast
+        for hs_eqn, py_src in [
+            ("add x y = x + y", "def add(x, y):\n    return x + y"),
+            ("f a b c = a + b * c", "def f(a, b, c):\n    return a + b * c"),
+            ("g xs = length xs + 1", "def g(xs):\n    return len(xs) + 1"),
+        ]:
+            name = hs_eqn.split()[0]
+            hs_addr = c.expr_address(body_ast_from_hs(name, hs_eqn))
+            py_addr = c.expr_address(body_ast_from_py(pyast.parse(py_src).body[0]))
+            self.assertEqual(hs_addr, py_addr, f"{name}: HS and Python bodies must content-address alike")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

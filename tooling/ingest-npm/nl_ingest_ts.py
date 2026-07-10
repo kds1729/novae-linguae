@@ -18,6 +18,17 @@ Recognised export forms:
   - ``export const f = (a: A): R => …`` (and ``async``, generics, ``= function (…) {…}``)
   - ``export const f = x => …`` (single bare parameter)
 
+EXECUTABLE BODIES (v2, ``--emit-dir``): a function whose body is in the shared expression subset gets
+a REAL Nova Lingua body AST (a `lambda` over its parameters), so ``nl-validator run/certify`` executes
+and verifies it. Supported shapes: arrow expression bodies ``(x) => expr``; arrow OR
+``function``-declaration single-``return`` block bodies ``{ [const|let n = e; …] return e; }``; the
+arithmetic/comparison/boolean operators, calls, and member access of the shared subset, with
+``===``/``!==`` read as ``==``/``!=`` and ``&&``/``||`` as ``and``/``or`` over the coercion-free value
+domain. NB TS ``number`` maps to Nova ``float``, so a numeric-literal body (``x + 1``) currently fails
+the *typecheck* stage (int literal vs float parameter) even though it runs — the honest float-domain
+boundary; boolean/string/passthrough bodies certify. Out-of-subset bodies (loops, branches, ``?:``,
+early returns) keep a synthetic ``expr_`` body_hash and contribute no runnable body.
+
 CAVEATS (all addressable in future iterations):
   - Only **exported** functions are ingested. Class methods, object-method shorthand, overload
     signature merging, re-exports (``export { x } from …``), and namespaces are not handled.
@@ -26,8 +37,6 @@ CAVEATS (all addressable in future iterations):
     ``unknown``. Bare object-literal **return** types (``: { a: number }``) are not parsed and may
     truncate the rendered return type (named/`Promise<…>`/array/union returns are fine).
   - ``arity`` counts declared parameters (a leading TS ``this`` parameter is excluded).
-  - ``body_hash`` is a synthetic ``expr_`` BLAKE3 of the declaration's source slice — not a Nova
-    Lingua body AST.
   - ``effects``, ``terminates``, ``properties``, ``intent_tags``, real ``examples`` are not inferred.
 """
 

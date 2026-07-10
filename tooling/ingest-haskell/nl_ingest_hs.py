@@ -12,6 +12,16 @@ with a focused, layout-aware parser — it does not run GHC. It deliberately han
 well-formed cases; a future full-fidelity version could use ``haskell-src-exts`` or the GHC API.
 The hashing/record core is shared with the other adapters (``tooling/ingest-common/nl_core.py``).
 
+EXECUTABLE BODIES (v2, ``--emit-dir``): a single-clause equation whose RHS is in the shared subset
+gets a REAL Nova Lingua body AST (a `lambda` over its parameters), so ``nl-validator run/certify``
+executes and verifies it against its Haddock ``-- >>>`` doctests. Supported RHS shapes: a bare
+variable, a flat application of atoms (``f a b``), and infix expressions over such operands using the
+arithmetic/comparison/boolean operators (``x + y``, ``length xs + 1``, ``x == 0``, ``a && b``) with
+Haskell precedence and ``/=`` as not-equal — all mapping to the SAME builtins the Python/TS front ends
+emit, so the same function ingested from any language content-addresses alike. Guards, sections,
+lambdas, ``let``/``case``/``if``, and parenthesised sub-expressions are out of subset and keep a
+synthetic ``expr_`` body_hash (no runnable body).
+
 CAVEATS (all addressable in future iterations):
   - Only **exported** top-level functions that have a top-level ``name :: Type`` signature are
     ingested. A module with no explicit export list exports everything; ``--include-private``
@@ -21,8 +31,6 @@ CAVEATS (all addressable in future iterations):
     tool's Rust types), normalised to single spaces. It is not the Nova Lingua type AST.
   - ``arity`` is the count of top-level ``->`` arrows after stripping ``forall``/contexts; curried
     types make this a best-effort count.
-  - ``body_hash`` is a synthetic ``expr_`` BLAKE3 of the function's defining equations (or its
-    signature if no equation is found) — not a Nova Lingua body AST.
   - ``effects``, ``terminates``, ``properties``, ``intent_tags`` and real ``examples`` are not
     inferred. Class/instance methods, GADT/record-syntax fields, and TH splices are not ingested.
 """

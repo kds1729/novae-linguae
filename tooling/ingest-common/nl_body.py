@@ -894,34 +894,122 @@ def _atom(tok):
     raise BodyError(f"{tok!r} is not a simple atom")
 
 
+# Haskell infix operator -> (Nova builtin, binding precedence). Chosen to match the builtins the
+# Python/TS front ends emit (`_PY_BIN`/`_PY_CMP`/`_PY_BOOL`), so the SAME function ingested from any
+# adapter hashes to the SAME record. `/=` is Haskell not-equal (-> neq). Precedence follows the Haskell
+# Report defaults so `a + b * c` associates correctly.
+_HS_OPS = {
+    "||": ("or", 2), "&&": ("and", 3),
+    "==": ("eq", 4), "/=": ("neq", 4), "<=": ("le", 4), ">=": ("ge", 4), "<": ("lt", 4), ">": ("gt", 4),
+    "+": ("add", 6), "-": ("sub", 6), "*": ("mul", 7),
+}
+
+
+def _hs_split_binding(text):
+    """Split `f x y = rhs` at the DEFINING `=` — the first top-level lone `=`, i.e. not part of a `==`,
+    `<=`, `>=`, or `/=` operator in the RHS. Returns (lhs, rhs) or None."""
+    depth = 0
+    for i, c in enumerate(text):
+        if c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif c == "=" and depth == 0:
+            prev = text[i - 1] if i > 0 else " "
+            nxt = text[i + 1] if i + 1 < len(text) else " "
+            if prev not in "<>=/!" and nxt != "=":
+                return text[:i], text[i + 1:]
+    return None
+
+
+def _hs_app_chunk(text):
+    """One operand of a Haskell operator expression: a bare atom, or a flat application of atoms
+    (`f a b`). Parens, sections, and lambdas -> None (the honest boundary — nested structure needs a
+    real parser)."""
+    text = text.strip()
+    if not text or "(" in text or ")" in text or "\\" in text:
+        return None
+    toks = text.split()
+    if len(toks) == 1:
+        return _atom(toks[0])
+    head = _atom(toks[0])
+    if head["kind"] != "var":
+        return None
+    return b_app(head, [_atom(t) for t in toks[1:]])
+
+
+def _hs_tokenize_ops(text):
+    """Split a Haskell RHS into alternating operand chunks and infix operators at paren depth 0.
+    Returns (operands, ops) with len(operands) == len(ops)+1, or None on an empty operand, unbalanced
+    parens, or a leading operator (a unary/section shape this subset doesn't model)."""
+    operands, ops, buf, depth, i = [], [], [], 0, 0
+    while i < len(text):
+        c = text[i]
+        if c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif depth == 0:
+            pair = text[i:i + 2]
+            if pair in _HS_OPS:
+                operands.append("".join(buf).strip()); ops.append(pair); buf = []; i += 2; continue
+            if c in _HS_OPS:
+                operands.append("".join(buf).strip()); ops.append(c); buf = []; i += 1; continue
+        buf.append(c)
+        i += 1
+    if depth != 0:
+        return None
+    operands.append("".join(buf).strip())
+    if any(o == "" for o in operands):
+        return None
+    return operands, ops
+
+
+def _hs_build_ops(operands, ops):
+    """Combine operand chunks and infix operators into one body AST by operator precedence (repeatedly
+    reducing the leftmost highest-precedence operator = left-associative within a level). None if any
+    operand isn't a supported atom/application."""
+    atoms = []
+    for chunk in operands:
+        a = _hs_app_chunk(chunk)
+        if a is None:
+            return None
+        atoms.append(a)
+    ops = list(ops)
+    while ops:
+        top = max(_HS_OPS[o][1] for o in ops)
+        k = next(idx for idx, o in enumerate(ops) if _HS_OPS[o][1] == top)
+        atoms[k:k + 2] = [_op_app(_HS_OPS[ops[k]][0], [atoms[k], atoms[k + 1]])]
+        del ops[k]
+    return atoms[0]
+
+
 def body_ast_from_hs(name, equation_text):
     """An *executable* body AST (a `lambda` over the equation's parameters) for a single-clause Haskell
-    equation whose RHS is a bare variable or a flat application of atoms (`f a b`). Guards, operators,
-    multi-line / multi-clause bodies -> None."""
+    equation whose RHS is a bare variable, a flat application of atoms (`f a b`), or an infix
+    expression over such operands using the arithmetic/comparison/boolean operators in `_HS_OPS`
+    (`x + y`, `length xs + 1`, `x == 0`, `a && b`). Guards, sections, lambdas, `let`/`case`/`if`,
+    parenthesised sub-expressions, multi-line / multi-clause bodies -> None."""
     if not equation_text or "\n" in equation_text:
         return None
     text = equation_text.strip()
-    if "|" in text:  # guards
+    if "|" in text.replace("||", ""):  # guards — but keep the boolean-or operator `||`
         return None
-    parts = split_top(text, "=")  # splits on EVERY top-level '=' so any ==/<=/>= in the RHS rejects
-    if len(parts) != 2:
+    split = _hs_split_binding(text)
+    if split is None:
         return None
-    lhs, rhs = parts[0].strip(), parts[1].strip()
+    lhs, rhs = split[0].strip(), split[1].strip()
     lhs_toks = lhs.split()
     if not lhs_toks or lhs_toks[0] != name:
         return None
     params = lhs_toks[1:]  # the equation's parameters, e.g. `f x y = …` -> [x, y]
     try:
-        toks = [t for t in split_top(rhs, " ") if t.strip()]
-        if not toks:
+        toks = _hs_tokenize_ops(rhs)
+        if toks is None:
             return None
-        if len(toks) == 1:
-            expr = _atom(toks[0])
-        else:
-            fn = _atom(toks[0])
-            if fn["kind"] != "var":
-                return None
-            expr = b_app(fn, [_atom(t) for t in toks[1:]])
+        expr = _hs_build_ops(*toks)
+        if expr is None:
+            return None
         return b_lambda(params, expr) if params else expr
     except BodyError:
         return None
@@ -989,26 +1077,114 @@ def _ts_string_params(prefix):
     return frozenset(out)
 
 
+def _ts_normalize_expr(text):
+    """Rewrite the TS-only operator spellings the Python-expression parser rejects into their
+    value-domain equivalents so the shared builder can parse them: strict `===`/`!==` are ordinary
+    equality/inequality over the coercion-free value domain (`==`/`!=`), and the logical `&&`/`||` are
+    Python's `and`/`or`. A wrong guess still fails the example gate rather than shipping — this only
+    widens what parses, never what's accepted."""
+    text = text.replace("===", "==").replace("!==", "!=")
+    return text.replace("&&", " and ").replace("||", " or ")
+
+
+def _ts_expr(rhs, strs):
+    """Build a body expression from a TS *expression* (an arrow's expression body, or a `return`'s
+    operand), reusing the shared Python-expression builder over the common subset. None if it isn't in
+    subset or doesn't parse (TS-only `?:` / `!` etc.)."""
+    if not rhs:
+        return None
+    try:
+        return _expr_from_py(ast.parse(_ts_normalize_expr(rhs), mode="eval").body, strs)
+    except (SyntaxError, ValueError, BodyError):
+        return None
+
+
+def _ts_block_expr(block_text, strs):
+    """The body of a TS arrow BLOCK that is `[const|let NAME [: T] = EXPR; …] return EXPR;` — the common
+    single-`return` shape. Leading `const`/`let` bindings become nested `let` nodes; the trailing
+    `return` supplies the body. None for any other statement shape (loops, branches, reassignment,
+    multiple/early returns) — the honest subset boundary."""
+    inner = block_text.strip()
+    if inner.startswith("{"):
+        inner = inner[1:]
+    if inner.endswith("}"):
+        inner = inner[:-1]
+    stmts = [s.strip() for s in split_top(inner, ";") if s.strip()]
+    if not stmts or not stmts[-1].startswith("return"):
+        return None
+    ret_expr = stmts[-1][len("return"):].strip()
+    bindings = []
+    for st in stmts[:-1]:
+        m = re.match(r"^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(.+)$", st, re.DOTALL)
+        if not m:
+            return None
+        bindings.append((m.group(1), m.group(2).strip()))
+    expr = _ts_expr(ret_expr, strs)
+    if expr is None:
+        return None
+    try:
+        for nm, val in reversed(bindings):
+            vexpr = _ts_expr(val, strs)
+            if vexpr is None:
+                return None
+            expr = b_let(nm, vexpr, expr)
+    except BodyError:
+        return None
+    return expr
+
+
+def _ts_top_group(s, opener, closer, last):
+    """The (open, close) indices of the FIRST (or, if `last`, the LAST) balanced top-level `opener…
+    closer` group in `s`, or None. Used to find a declaration's parameter list (first `(…)`) and its
+    body (LAST `{…}` — a `: { … }` object return type sorts before the body block)."""
+    depth, start, found = 0, None, None
+    for i, c in enumerate(s):
+        if c == opener:
+            if depth == 0:
+                start = i
+            depth += 1
+        elif c == closer and depth > 0:
+            depth -= 1
+            if depth == 0:
+                found = (start, i)
+                if not last:
+                    return found
+    return found
+
+
 def body_ast_from_ts(name, slice_text):
-    """An *executable* body AST (a `lambda` over the arrow's parameters) for a TypeScript arrow with an
-    *expression* body (`(x) => expr`). TypeScript expression syntax coincides with Python's for the
-    supported subset (identifiers, literals, arithmetic / comparison operators, calls, member access,
-    parens), so the body is parsed with Python's `ast` and reused via `_expr_from_py`. Block bodies,
-    and TS-only syntax (`?:`, `===`, `!`) that doesn't parse as a Python expression, -> None."""
+    """An *executable* body AST (a `lambda` over the parameters) for a TypeScript function — an arrow
+    expression body `(x) => expr`, an arrow or `function`-declaration single-`return` block body
+    `{ … return expr; }` (with optional leading `const`/`let` bindings), covering `export function f`,
+    `function` expressions, and arrow forms alike. TypeScript expression syntax coincides with Python's
+    for the supported subset (identifiers, literals, arithmetic/comparison/boolean operators, calls,
+    member access, strict-equality), so expressions are parsed with Python's `ast` and reused via
+    `_expr_from_py`. Block bodies beyond the single-`return` shape and TS-only expression syntax
+    (`?:`, `!`) that doesn't parse as a Python expression -> None."""
     if not slice_text:
         return None
     idx = slice_text.find("=>")
-    if idx < 0:
-        return None
-    rhs = slice_text[idx + 2:].strip().rstrip(";").strip()
-    if not rhs or rhs.startswith("{"):
-        return None
-    params = _ts_params(slice_text[:idx])
-    if params is None:
-        return None
-    try:
-        node = ast.parse(rhs, mode="eval").body
-        expr = _expr_from_py(node, _ts_string_params(slice_text[:idx]))
-    except (SyntaxError, ValueError, BodyError):
+    if idx >= 0:
+        # Arrow: parameters before `=>`, an expression or block body after.
+        params = _ts_params(slice_text[:idx])
+        if params is None:
+            return None
+        strs = _ts_string_params(slice_text[:idx])
+        rhs = slice_text[idx + 2:].strip().rstrip(";").strip()
+        expr = _ts_block_expr(rhs, strs) if rhs.startswith("{") else _ts_expr(rhs, strs)
+    else:
+        # `function`-declaration / function-expression: params are the first top-level `(…)`, the body
+        # is the LAST top-level `{…}` (any `: { … }` object return type sorts before it).
+        pg = _ts_top_group(slice_text, "(", ")", last=False)
+        bg = _ts_top_group(slice_text, "{", "}", last=True)
+        if pg is None or bg is None or bg[0] < pg[1]:
+            return None
+        prefix = slice_text[:pg[1] + 1]
+        params = _ts_params(prefix)
+        if params is None:
+            return None
+        strs = _ts_string_params(prefix)
+        expr = _ts_block_expr(slice_text[bg[0]:bg[1] + 1], strs)
+    if expr is None:
         return None
     return b_lambda(params, expr) if params else expr
