@@ -60,6 +60,25 @@ struct Cli {
     /// (map/filter/sort/reverse/id, ...); implies --v2. Verify with `nl-validator check-properties`.
     #[arg(long)]
     properties: bool,
+
+    /// Also write a runnable directory: each record as `<fn_hash>.json` and each lifted body as
+    /// `<expr_hash>.json`, so `nl-validator run --records <dir>` executes the ingested functions
+    /// against their (v2) examples. Bodies outside the executable subset (synthetic-hash fallback)
+    /// are not written.
+    #[arg(long)]
+    emit_dir: Option<PathBuf>,
+}
+
+/// Write a record and (if the body lifted to a real AST) its body to `emit_dir`.
+fn write_emit(dir: &std::path::Path, record: &Value, func: &syn::ItemFn) -> Result<()> {
+    fs::create_dir_all(dir)?;
+    let hash = record["hash"].as_str().context("record has no hash")?;
+    fs::write(dir.join(format!("{hash}.json")), serde_json::to_string_pretty(record)?)?;
+    if let Some(body) = body_ast(func) {
+        let addr = record["body_hash"].as_str().context("record has no body_hash")?;
+        fs::write(dir.join(format!("{addr}.json")), serde_json::to_string_pretty(&body)?)?;
+    }
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -81,6 +100,9 @@ fn main() -> Result<()> {
                 Item::Fn(func) if matches!(func.vis, syn::Visibility::Public(_)) => {
                     let record = build_one(&func, crate_name, v2, cli.properties, false)
                         .with_context(|| format!("building record for `{}` in {}", func.sig.ident, path.display()))?;
+                    if let Some(dir) = &cli.emit_dir {
+                        write_emit(dir, &record, &func)?;
+                    }
                     print_record(&record, cli.pretty)?;
                 }
                 // Public methods of inherent `impl` blocks (receiver -> arg0). Trait *impls* are
@@ -95,6 +117,9 @@ fn main() -> Result<()> {
                         else { continue };
                         let record = build_one(&func, crate_name, v2, cli.properties, true)
                             .with_context(|| format!("building record for method `{}` in {}", m.sig.ident, path.display()))?;
+                        if let Some(dir) = &cli.emit_dir {
+                            write_emit(dir, &record, &func)?;
+                        }
                         print_record(&record, cli.pretty)?;
                     }
                 }
@@ -109,6 +134,9 @@ fn main() -> Result<()> {
                         else { continue };
                         let record = build_one(&func, crate_name, v2, cli.properties, true)
                             .with_context(|| format!("building record for trait method `{}` in {}", m.sig.ident, path.display()))?;
+                        if let Some(dir) = &cli.emit_dir {
+                            write_emit(dir, &record, &func)?;
+                        }
                         print_record(&record, cli.pretty)?;
                     }
                 }
@@ -1565,10 +1593,41 @@ fn path_ident(expr: &syn::Expr) -> Option<String> {
     }
 }
 
+/// The parameter names of a function, in order — each a plain ident. `None` if any parameter is
+/// destructured / a receiver (not wrappable as a lambda binder).
+fn param_names(func: &syn::ItemFn) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    for arg in &func.sig.inputs {
+        match arg {
+            syn::FnArg::Typed(pt) => match &*pt.pat {
+                syn::Pat::Ident(pi) if pi.by_ref.is_none() && pi.subpat.is_none() => {
+                    let n = pi.ident.to_string();
+                    p_var(&n)?; // a valid binder name
+                    out.push(n);
+                }
+                _ => return None,
+            },
+            syn::FnArg::Receiver(_) => return None, // a raw receiver (lift_method rewrites these)
+        }
+    }
+    Some(out)
+}
+
 /// A body AST for a function whose block is in the statement subset (`let` bindings, `if`/`match`,
-/// tuple/variant construction, and a value-producing tail). None for anything else.
+/// iterator chains / accumulator loops, tuple/variant construction, and a value-producing tail).
+/// The result is a **`lambda`** over the parameters — the canonical *runnable* form (matching the
+/// Python adapter), so `nl-validator run`/`certify` can apply the mined examples. A 0-parameter
+/// function is its bare result (applying it to `[]` still evaluates). None if outside the subset.
 fn body_ast(func: &syn::ItemFn) -> Option<Value> {
-    block_to_body(&func.block.stmts, &str_typed_params(func))
+    let inner = block_to_body(&func.block.stmts, &str_typed_params(func))?;
+    let names = param_names(func)?;
+    if names.is_empty() {
+        Some(inner)
+    } else {
+        Some(json!({ "kind": "lambda",
+            "params": names.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>(),
+            "body": inner }))
+    }
 }
 
 // --- v0.2: curated algebraic-law catalog (opt-in --properties) ---------------------------------
@@ -2065,17 +2124,22 @@ mod tests {
 
     #[test]
     fn body_ast_for_expression_body_round_trips() {
-        // `n * 2` is a single result expression -> a real body AST: app(var "mul", [var n, lit 2]).
+        // `n * 2` -> a body lambda-wrapped over the parameters (the runnable form):
+        // \n -> mul(n, 2).
         let f = item_fn(
             "/// ```\n/// assert_eq!(double(5), 10);\n/// ```\npub fn double(n: u64) -> u64 { n * 2 }",
         );
         let b = body_ast(&f).expect("an in-subset body");
         assert_eq!(
             b,
-            json!({ "kind": "app", "fn": { "kind": "var", "name": "mul" },
-                    "args": [ { "kind": "var", "name": "n" },
-                              { "kind": "lit", "value": { "kind": "int", "value": 2 } } ] })
+            json!({ "kind": "lambda", "params": [ { "name": "n" } ], "body":
+                { "kind": "app", "fn": { "kind": "var", "name": "mul" },
+                  "args": [ { "kind": "var", "name": "n" },
+                            { "kind": "lit", "value": { "kind": "int", "value": 2 } } ] } })
         );
+        // And it now EXECUTES: double(5) = 10.
+        assert_eq!(nl_validator::eval_body(&b, &[json!({ "kind": "nat", "value": 5 })]).unwrap(),
+                   json!({ "kind": "int", "value": 10 }));
 
         // The body AST validates against the body-expression schema, and the record's body_hash is
         // exactly the validator's content-address for that body artifact (a resolvable expr_ address).
@@ -2152,15 +2216,12 @@ mod tests {
 
     #[test]
     fn body_if_and_let_lift_and_execute() {
-        // if/else-if/else -> nested case; let -> let binding. Lift the body, wrap it in a lambda
-        // over the parameters, and EXECUTE it against the doctest values.
+        // if/else-if/else -> nested case; let -> let binding. body_ast lambda-wraps over the
+        // parameters, so it is directly runnable — EXECUTE it against the doctest values.
         let int = |n: i64| json!({ "kind": "int", "value": n });
-        let run = |src: &str, params: &[&str], cases: &[(Vec<i64>, i64)]| {
+        let run = |src: &str, cases: &[(Vec<i64>, i64)]| {
             let f = item_fn(src);
-            let bare = body_ast(&f).expect("an in-subset statement body");
-            let lam = json!({ "kind": "lambda",
-                "params": params.iter().map(|p| json!({ "name": p })).collect::<Vec<_>>(),
-                "body": bare });
+            let lam = body_ast(&f).expect("an in-subset statement body");
             for (args, want) in cases {
                 let av: Vec<Value> = args.iter().map(|n| int(*n)).collect();
                 assert_eq!(nl_validator::eval_body(&lam, &av).unwrap(), int(*want),
@@ -2168,15 +2229,15 @@ mod tests {
             }
         };
         run("pub fn sign(n: i64) -> i64 { if n > 0 { 1 } else if n < 0 { -1 } else { 0 } }",
-            &["n"], &[(vec![5], 1), (vec![-3], -1), (vec![0], 0)]);
+            &[(vec![5], 1), (vec![-3], -1), (vec![0], 0)]);
         run("pub fn abs_diff(a: i64, b: i64) -> i64 { let d = a - b; if d < 0 { -d } else { d } }",
-            &["a", "b"], &[(vec![3, 7], 4), (vec![7, 3], 4)]);
+            &[(vec![3, 7], 4), (vec![7, 3], 4)]);
         // An annotated `let x: T = e` binding (Pat::Type) unwraps to the same binding.
         run("pub fn twice_plus(n: i64) -> i64 { let d: i64 = n + n; d + 1 }",
-            &["n"], &[(vec![3], 7), (vec![0], 1)]);
+            &[(vec![3], 7), (vec![0], 1)]);
         // A tuple-unpacking `let` destructures via a one-arm case.
         run("pub fn f(a: i64, b: i64) -> i64 { let (x, y) = (b, a); x - y }",
-            &["a", "b"], &[(vec![3, 10], 7), (vec![10, 3], -7)]);
+            &[(vec![3, 10], 7), (vec![10, 3], -7)]);
         // An `if` with no `else` does not produce a value in every branch -> out of subset.
         let noelse = item_fn("pub fn g(n: i64) -> i64 { if n > 0 { return 1; } 0 }");
         assert!(body_ast(&noelse).is_none());
@@ -2187,18 +2248,16 @@ mod tests {
         let int = |n: i64| json!({ "kind": "int", "value": n });
         // A match on an Option: Some(x) => x ; None => d — the Just/None reader side.
         let f = item_fn("pub fn unwrap_or(o: Option<i64>, d: i64) -> i64 { match o { Some(x) => x, None => d } }");
-        let bare = body_ast(&f).expect("match body in subset");
-        assert_eq!(bare["kind"], "case");
-        let just_arm = &bare["arms"][0];
-        assert_eq!(just_arm["pattern"]["tag"], "Just"); // Some -> Just
-        let lam = json!({ "kind": "lambda", "params": [{ "name": "o" }, { "name": "d" }], "body": bare });
+        let lam = body_ast(&f).expect("match body in subset");
+        assert_eq!(lam["body"]["kind"], "case"); // lambda over the case
+        assert_eq!(lam["body"]["arms"][0]["pattern"]["tag"], "Just"); // Some -> Just
         let some7 = json!({ "kind": "variant", "tag": "Just", "payload": int(7) });
         let none = json!({ "kind": "variant", "tag": "None" });
         assert_eq!(nl_validator::eval_body(&lam, &[some7, int(0)]).unwrap(), int(7));
         assert_eq!(nl_validator::eval_body(&lam, &[none, int(0)]).unwrap(), int(0));
         // A match on a literal with a wildcard default.
         let g = item_fn("pub fn label(n: i64) -> i64 { match n { 0 => 0, _ => 1 } }");
-        let lam2 = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": body_ast(&g).unwrap() });
+        let lam2 = body_ast(&g).unwrap();
         assert_eq!(nl_validator::eval_body(&lam2, &[int(0)]).unwrap(), int(0));
         assert_eq!(nl_validator::eval_body(&lam2, &[int(4)]).unwrap(), int(1));
         // A guarded arm is out of subset.
@@ -2210,26 +2269,54 @@ mod tests {
     fn body_iterator_chains_lift_and_execute() {
         let int = |n: i64| json!({ "kind": "int", "value": n });
         let list = |ns: &[i64]| json!({ "kind": "list", "elems": ns.iter().map(|n| int(*n)).collect::<Vec<_>>() });
-        // map: xs.iter().map(|x| x * 2).collect() -> map(\x -> x*2, xs).
-        let f = item_fn("pub fn dbl(xs: Vec<i64>) -> Vec<i64> { xs.iter().map(|x| x * 2).collect() }");
-        let lam = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&f).unwrap() });
-        assert_eq!(nl_validator::eval_body(&lam, &[list(&[1, 2, 3])]).unwrap(), list(&[2, 4, 6]));
+        // map: xs.iter().map(|x| x * 2).collect() -> map(\x -> x*2, xs). body_ast lambda-wraps.
+        let dbl = body_ast(&item_fn("pub fn dbl(xs: Vec<i64>) -> Vec<i64> { xs.iter().map(|x| x * 2).collect() }")).unwrap();
+        assert_eq!(nl_validator::eval_body(&dbl, &[list(&[1, 2, 3])]).unwrap(), list(&[2, 4, 6]));
         // filter + count: xs.iter().filter(|&x| x > 0).count() -> length(filter(\x -> x>0, xs)).
-        let g = item_fn("pub fn npos(xs: Vec<i64>) -> usize { xs.iter().filter(|&x| x > 0).count() }");
-        let lam2 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&g).unwrap() });
-        assert_eq!(nl_validator::eval_body(&lam2, &[list(&[1, -2, 3, -4])]).unwrap(), int(2));
+        let npos = body_ast(&item_fn("pub fn npos(xs: Vec<i64>) -> usize { xs.iter().filter(|&x| x > 0).count() }")).unwrap();
+        assert_eq!(nl_validator::eval_body(&npos, &[list(&[1, -2, 3, -4])]).unwrap(), int(2));
         // sum: xs.iter().sum() -> foldl add 0 xs.
-        let h = item_fn("pub fn tot(xs: Vec<i64>) -> i64 { xs.iter().sum() }");
-        let lam3 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&h).unwrap() });
-        assert_eq!(nl_validator::eval_body(&lam3, &[list(&[3, 4, 5])]).unwrap(), int(12));
+        let tot = body_ast(&item_fn("pub fn tot(xs: Vec<i64>) -> i64 { xs.iter().sum() }")).unwrap();
+        assert_eq!(nl_validator::eval_body(&tot, &[list(&[3, 4, 5])]).unwrap(), int(12));
         // fold with an explicit accumulator closure.
-        let k = item_fn("pub fn tot2(xs: Vec<i64>) -> i64 { xs.iter().fold(0, |acc, x| acc + x) }");
-        let lam4 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&k).unwrap() });
-        assert_eq!(nl_validator::eval_body(&lam4, &[list(&[3, 4, 5])]).unwrap(), int(12));
+        let tot2 = body_ast(&item_fn("pub fn tot2(xs: Vec<i64>) -> i64 { xs.iter().fold(0, |acc, x| acc + x) }")).unwrap();
+        assert_eq!(nl_validator::eval_body(&tot2, &[list(&[3, 4, 5])]).unwrap(), int(12));
         // rev.
-        let r = item_fn("pub fn rv(xs: Vec<i64>) -> Vec<i64> { xs.iter().rev().collect() }");
-        let lam5 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&r).unwrap() });
-        assert_eq!(nl_validator::eval_body(&lam5, &[list(&[1, 2, 3])]).unwrap(), list(&[3, 2, 1]));
+        let rv = body_ast(&item_fn("pub fn rv(xs: Vec<i64>) -> Vec<i64> { xs.iter().rev().collect() }")).unwrap();
+        assert_eq!(nl_validator::eval_body(&rv, &[list(&[1, 2, 3])]).unwrap(), list(&[3, 2, 1]));
+    }
+
+    #[test]
+    fn executable_corpus_runs() {
+        // End to end: ingest a real-shaped Rust module (fixtures/sample_ingest.rs) spanning the
+        // whole executable subset, and RUN each function's doctest-mined examples in-process —
+        // ingest -> lift (lambda-wrapped body) -> eval == the mined result.
+        let src = include_str!("../../fixtures/sample_ingest.rs");
+        let file = syn::parse_file(src).unwrap();
+        let mut ran = 0;
+        for item in file.items {
+            let syn::Item::Fn(func) = item else { continue };
+            if !matches!(func.vis, syn::Visibility::Public(_)) {
+                continue;
+            }
+            let name = func.sig.ident.to_string();
+            let rec = build_v2_record(&func, None, false, false).unwrap()
+                .unwrap_or_else(|| panic!("{name}: a v0.2 record (has doc-tests)"));
+            let body = body_ast(&func).unwrap_or_else(|| panic!("{name}: an executable body"));
+            // The record's body_hash is the address of exactly this lifted body.
+            let addr = nl_validator::hash_artifact_with_kind(&body, nl_validator::ArtifactKind::BodyExpression).unwrap();
+            assert_eq!(rec["body_hash"], json!(addr), "{name}: body_hash matches the lifted body");
+            let examples = rec["examples"].as_array().unwrap();
+            assert!(!examples.is_empty(), "{name}: has mined examples");
+            for ex in examples {
+                let args: Vec<Value> = ex["args"].as_array().unwrap().clone();
+                let got = nl_validator::eval_body(&body, &args)
+                    .unwrap_or_else(|e| panic!("{name}: eval failed: {e}"));
+                assert_eq!(got, ex["result"], "{name}: on {:?}", ex["args"]);
+            }
+            ran += 1;
+        }
+        assert_eq!(ran, 9, "all nine sample functions ingest, lift, and run");
     }
 
     #[test]
@@ -2237,16 +2324,14 @@ mod tests {
         let int = |n: i64| json!({ "kind": "int", "value": n });
         let list = |ns: &[i64]| json!({ "kind": "list", "elems": ns.iter().map(|n| int(*n)).collect::<Vec<_>>() });
         // `let mut total = 0; for x in xs { total += x; } total` -> foldl add 0 xs.
-        let f = item_fn("pub fn sum(xs: Vec<i64>) -> i64 { let mut total = 0; for x in xs { total += x; } total }");
-        let bare = body_ast(&f).expect("accumulator for-loop in subset");
-        assert!(bare.to_string().contains("foldl"));
-        let lam = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": bare });
-        assert_eq!(nl_validator::eval_body(&lam, &[list(&[1, 2, 3, 4])]).unwrap(), int(10));
-        assert_eq!(nl_validator::eval_body(&lam, &[list(&[])]).unwrap(), int(0));
+        let sum = body_ast(&item_fn("pub fn sum(xs: Vec<i64>) -> i64 { let mut total = 0; for x in xs { total += x; } total }"))
+            .expect("accumulator for-loop in subset");
+        assert!(sum.to_string().contains("foldl"));
+        assert_eq!(nl_validator::eval_body(&sum, &[list(&[1, 2, 3, 4])]).unwrap(), int(10));
+        assert_eq!(nl_validator::eval_body(&sum, &[list(&[])]).unwrap(), int(0));
         // `*=` product accumulator.
-        let g = item_fn("pub fn prod(xs: Vec<i64>) -> i64 { let mut acc = 1; for x in xs { acc *= x; } acc }");
-        let lam2 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&g).unwrap() });
-        assert_eq!(nl_validator::eval_body(&lam2, &[list(&[2, 3, 4])]).unwrap(), int(24));
+        let prod = body_ast(&item_fn("pub fn prod(xs: Vec<i64>) -> i64 { let mut acc = 1; for x in xs { acc *= x; } acc }")).unwrap();
+        assert_eq!(nl_validator::eval_body(&prod, &[list(&[2, 3, 4])]).unwrap(), int(24));
         // A multi-statement loop body is out of subset (single accumulator statement only).
         let multi = item_fn("pub fn h(xs: Vec<i64>) -> i64 { let mut a = 0; for x in xs { a += x; a += 1; } a }");
         assert!(body_ast(&multi).is_none());

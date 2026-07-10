@@ -469,6 +469,17 @@ only real ingested records could surface.
   the Python adapter's fidelity for the common single-body shapes; the honest residuals it shares
   with Python (or that are Rust-specific) are `while`, guarded/append/nested loop variants, and
   tuple-destructuring loop targets — future increments if a target needs them.
+  *Rust bodies are now runnable (2026-07-10):* the lifter's output is **lambda-wrapped over the
+  parameters** — the canonical runnable form the Python adapter emits — instead of a bare
+  free-variable expression, so `nl-validator run`/`certify` can apply the mined examples. `nl-ingest
+  --emit-dir <dir>` writes each record as `<fn_hash>.json` and each lifted body as `<expr_hash>.json`
+  (the Python adapter's `--emit-dir` counterpart), so a Rust module's records execute end to end.
+  Demonstrated by an in-process **executable-corpus test** over a nine-function sample
+  ([`tooling/validator/fixtures/sample_ingest.rs`](../tooling/validator/fixtures/sample_ingest.rs) —
+  spanning if/let/match, iterator chains, an accumulator for-loop, tuple return, and an `Option`):
+  every function ingests, its body lifts, its `body_hash` matches that body, and its doctest examples
+  evaluate to the mined results. (This moved every Rust body_hash — the pre-existing bare form was a
+  v0.1-era artifact from before executable bodies; no committed record depended on it.)
   *Statement subset widened (2026-07-07):* the honest 9/57-stdlib finding is a control-flow gap
   (real library code is multi-statement, not single-expression), and the two most common loop
   shapes the single-statement translator couldn't reach are now in: a **guarded accumulator**
