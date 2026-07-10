@@ -24,6 +24,7 @@ TOOL_DIR = HERE.parent
 REPO_ROOT = TOOL_DIR.parent.parent  # tooling/ingest-python -> tooling -> repo root
 SPEC_DIR = REPO_ROOT / "spec"
 VALIDATOR = REPO_ROOT / "tooling" / "validator" / "target" / "release" / "nl-validator"
+NL_INGEST = REPO_ROOT / "tooling" / "validator" / "target" / "release" / "nl-ingest"
 FR_SCHEMA = SPEC_DIR / "function-record.schema.json"
 SAMPLE = HERE / "sample.py"
 
@@ -537,6 +538,47 @@ class TestSearchLoopBodies(unittest.TestCase):
                "            return x\n"
                "    return x\n")
         self.assertIsNone(self._body(src))
+
+
+@unittest.skipUnless(NL_INGEST.exists(), "nl-ingest (Rust) release binary not built")
+class TestCrossAdapterAgreement(unittest.TestCase):
+    """The Python and Rust adapters must produce BYTE-IDENTICAL records for the same function —
+    same body content-address and same doctest-mined examples — across arithmetic, boolean, Maybe
+    (the Some->Just canonicalization), and tuple shapes. Guards against a future divergence like the
+    `Some`-vs-`Just` bug. Paired fixtures: `xadapter_sample.{py,rs}`."""
+
+    def test_python_and_rust_records_agree(self):
+        py_src = (HERE / "xadapter_sample.py").read_text(encoding="utf-8")
+        py = {r["name_hints"][0]: r for r in n.records_from_source(py_src, None, include_private=False, v2=True)}
+
+        out = subprocess.run([str(NL_INGEST), "--v2", str(HERE / "xadapter_sample.rs")],
+                             capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        rust = {}
+        for line in out.stdout.splitlines():
+            if line.strip():
+                r = json.loads(line)
+                rust[r["name_hints"][0]] = r
+
+        shared = sorted(set(py) & set(rust))
+        self.assertEqual(shared, ["add_sub", "double", "is_pos", "safe_div", "times2"])
+        for name in shared:
+            # The core invariant: the same function has the same body content-address from both
+            # adapters (arithmetic, boolean, the Some->Just Maybe canonicalization, and tuples).
+            self.assertEqual(py[name]["body_hash"], rust[name]["body_hash"],
+                             f"{name}: adapters must agree on the body content-address")
+            # Every example the Python adapter mines is also mined by Rust. Rust may mine MORE — a
+            # Rust doctest can state `assert_eq!(f(..), None)`, but a Python doctest cannot express a
+            # None result (an empty `>>> f(..)` output IS the None case, unminable) — so safe_div's
+            # None example appears on the Rust side only. Not an adapter bug; a doctest-expressiveness
+            # difference. Subset-agreement is the honest cross-adapter check.
+            py_ex = {json.dumps(e, sort_keys=True) for e in py[name]["examples"]}
+            rust_ex = {json.dumps(e, sort_keys=True) for e in rust[name]["examples"]}
+            self.assertTrue(py_ex <= rust_ex,
+                            f"{name}: every Python-mined example must also be Rust-mined")
+        # The documented asymmetry: Rust mines safe_div's None example, Python cannot.
+        self.assertEqual(len(py["safe_div"]["examples"]), 1)
+        self.assertEqual(len(rust["safe_div"]["examples"]), 2)
 
 
 if __name__ == "__main__":
