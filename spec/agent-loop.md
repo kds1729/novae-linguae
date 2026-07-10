@@ -184,13 +184,14 @@ it must `compose` (composability + derived composite type/effects/termination/co
 **synthesized composite body** must run every example; under `--require-certified`, **every stage
 must itself certify** ("assemble only from verified parts"); and — the fourth — the composite's
 `compose`-derived metadata is **re-proven against its own body**. The body is synthesized by
-*inlining* each stage (beta-reducing its body into the pipeline), so the composite is a
-**self-contained** lambda with no `fn_ref`s — which matters because a `fn_ref` is opaque to the type
-checker (typed as a fresh variable) and to the termination/complexity analyses (reported
-UNVERIFIABLE). Inlined, `certify` sees the *real* composition: `typecheck` verifies the composite
-type against the actual operations, `check-effects` the real builtins, and `check-termination` /
-`check-complexity` prove the declared bounds over the real body rather than shrugging at opaque
-callees. The result is emitted (`--emit <dir>`) as a first-class **derived composite record**,
+*inlining* each stage (beta-reducing its body into the pipeline) **recursively** — a stage whose own
+body applies `fn_ref`s (e.g. a previously-assembled composite pulled back from the commons) has those
+resolved and inlined too, all the way down — so the composite is a **self-contained** lambda with no
+`fn_ref`s at all. This matters because a `fn_ref` is opaque to the type checker (typed as a fresh
+variable) and to the termination/complexity analyses (reported UNVERIFIABLE). Fully inlined, `certify`
+sees the *real* composition: `typecheck` verifies the composite type against the actual operations,
+`check-effects` the real builtins, and `check-termination` / `check-complexity` prove the declared
+bounds over the real body rather than shrugging at opaque callees. The result is emitted (`--emit <dir>`) as a first-class **derived composite record**,
 self-contained and re-certified — the assembled whole is itself runnable, certifiable, and
 publishable, no new code written.
 
@@ -216,10 +217,11 @@ from the live commons, over the network, ~82 s (200 sequential HTTPS fetches, th
 unoptimized per-request cost the orchestrate loop pays; a content-addressed cache is the standing
 remedy). And every assembled composite is re-certified: the local `double → add` demo re-proves
 `typecheck=WELL-TYPED, effects=SOUND, termination=SOUND, complexity=SOUND` against its inlined body
-(`\p0 p1 → add(add(p0, p0), p1)`) — the declared metadata verified, not just derived. (The one
-residual: inlining beta-reduces one level, so a *stage* whose own body still uses `fn_ref`s — e.g. a
-previously-assembled composite — leaves those opaque, and its termination/complexity re-prove as
-UNVERIFIABLE; a first-order commons re-proves fully.)
+(`\p0 p1 → add(add(p0, p0), p1)`) — the declared metadata verified, not just derived. Inlining is
+*recursive*, so even a stage that is itself a `fn_ref`-bodied composite re-proves fully: assembling
+the goal over a commons containing a prior `double_then_add` composite (whose body applies
+`fn_ref(double)`) picks it as one stage, expands its nested `fn_ref` all the way down, and re-proves
+`termination=SOUND, complexity=SOUND` where a one-level inline would have left it UNVERIFIABLE.
 
 ## Scope (v0.2, honest)
 

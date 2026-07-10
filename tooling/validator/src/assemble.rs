@@ -237,32 +237,93 @@ fn pattern_binds(pat: &J) -> Vec<String> {
     }
 }
 
-/// Synthesize a **self-contained** composite body by INLINING each stage: a lambda over the `m`
-/// composite parameters `_p0` (primary) `_p1…` (auxiliaries) in which each stage's lambda body is
-/// beta-reduced against the running value plus its share of the pool. The result has no `fn_ref`s —
-/// so the composite runs standalone and its declared metadata can be re-proven against real
-/// operations (`typecheck`/`terminate`/`complexity` all see through it, where a `fn_ref` is opaque).
-fn composite_body(stage_bodies: &[J], arities: &[usize], m: usize) -> J {
+/// The `fn_ref` target of an expression that is a `fn_ref` literal, else None.
+fn fn_ref_target(expr: &J) -> Option<&str> {
+    if expr.get("kind").and_then(|k| k.as_str()) == Some("lit") {
+        expr.pointer("/value/kind").and_then(|k| k.as_str()).filter(|k| *k == "fn_ref")?;
+        return expr.pointer("/value/target").and_then(|t| t.as_str());
+    }
+    None
+}
+
+const INLINE_DEPTH_LIMIT: usize = 256;
+
+/// **Recursively** inline every `fn_ref` application: replace `app(fn_ref(h), args)` with the
+/// beta-reduction of `h`'s (fully-applied) body against `args`, then inline the result — so a stage
+/// whose own body applies `fn_ref`s (e.g. a previously-assembled composite) is expanded all the way
+/// down. Leaves a `fn_ref` that isn't directly applied at its arity (e.g. one passed to a
+/// higher-order builtin like `map`, or with resolution missing) untouched — that stays opaque, but
+/// direct composition chains fully inline. Bounded by `INLINE_DEPTH_LIMIT` (a `fn_ref` cycle would
+/// otherwise loop).
+fn inline_fn_refs(expr: &J, bodies: &HashMap<String, J>, depth: usize) -> J {
+    if depth > INLINE_DEPTH_LIMIT {
+        return expr.clone();
+    }
+    match expr.get("kind").and_then(|k| k.as_str()) {
+        Some("app") => {
+            let f = &expr["fn"];
+            let args: Vec<J> = expr["args"].as_array()
+                .map(|a| a.iter().map(|e| inline_fn_refs(e, bodies, depth)).collect()).unwrap_or_default();
+            // Directly-applied `fn_ref`: resolve its body and beta-reduce, if arity matches.
+            if let Some(target) = fn_ref_target(f) {
+                if let Some(callee) = bodies.get(target) {
+                    let params = lambda_params(callee);
+                    if params.len() == args.len() {
+                        let map: HashMap<String, J> =
+                            params.into_iter().zip(args.iter().cloned()).collect();
+                        let inner = callee.get("body").cloned().unwrap_or_else(|| callee.clone());
+                        let reduced = subst(&inner, &map);
+                        return inline_fn_refs(&reduced, bodies, depth + 1);
+                    }
+                }
+            }
+            json!({ "kind": "app", "fn": inline_fn_refs(f, bodies, depth), "args": args })
+        }
+        Some("let") => json!({ "kind": "let", "name": expr["name"].clone(),
+            "value": inline_fn_refs(&expr["value"], bodies, depth),
+            "body": inline_fn_refs(&expr["body"], bodies, depth) }),
+        Some("lambda") => json!({ "kind": "lambda", "params": expr["params"].clone(),
+            "body": inline_fn_refs(&expr["body"], bodies, depth) }),
+        Some("case") => {
+            let arms: Vec<J> = expr["arms"].as_array().map(|arms| arms.iter().map(|arm|
+                json!({ "pattern": arm["pattern"].clone(), "body": inline_fn_refs(&arm["body"], bodies, depth) })
+            ).collect()).unwrap_or_default();
+            json!({ "kind": "case", "scrutinee": inline_fn_refs(&expr["scrutinee"], bodies, depth), "arms": arms })
+        }
+        Some("field") => json!({ "kind": "field", "record": inline_fn_refs(&expr["record"], bodies, depth), "name": expr["name"].clone() }),
+        Some("variant") => {
+            let mut v = json!({ "kind": "variant", "tag": expr["tag"].clone() });
+            if let Some(p) = expr.get("payload") {
+                v["payload"] = inline_fn_refs(p, bodies, depth);
+            }
+            v
+        }
+        Some("tuple") => json!({ "kind": "tuple",
+            "elems": expr["elems"].as_array().map(|a| a.iter().map(|e| inline_fn_refs(e, bodies, depth)).collect::<Vec<_>>()).unwrap_or_default() }),
+        _ => expr.clone(),
+    }
+}
+
+/// Synthesize a **self-contained** composite body by fully inlining the pipeline: build the
+/// `fn_ref` chain `\_p0 _p1… -> app(fn_ref(fN), … app(fn_ref(f1), _p0, aux…) …)` over the composite
+/// parameters, then [`inline_fn_refs`] it *recursively* — so the result has no `fn_ref`s at all
+/// (even through stages whose own bodies use them), letting the whole composite re-prove against
+/// real operations where a `fn_ref` is opaque to typecheck/terminate/complexity.
+fn composite_body(stage_hashes: &[String], arities: &[usize], m: usize, bodies: &HashMap<String, J>) -> J {
     let params: Vec<J> = (0..m).map(|i| json!({ "name": format!("_p{i}") })).collect();
     let mut running = json!({ "kind": "var", "name": "_p0" });
     let mut aux = 1usize;
-    for (body, &k) in stage_bodies.iter().zip(arities) {
-        let stage_params = lambda_params(body);
-        let inner = body.get("body").cloned().unwrap_or_else(|| body.clone());
-        let mut map: HashMap<String, J> = HashMap::new();
-        // First parameter := the running value; the rest := the next auxiliaries.
-        if let Some(p0) = stage_params.first() {
-            map.insert(p0.clone(), running.clone());
-        }
-        for j in 1..k {
-            if let Some(p) = stage_params.get(j) {
-                map.insert(p.clone(), json!({ "kind": "var", "name": format!("_p{}", aux + j - 1) }));
-            }
+    for (h, &k) in stage_hashes.iter().zip(arities) {
+        let mut args = vec![running];
+        for j in 0..(k - 1) {
+            args.push(json!({ "kind": "var", "name": format!("_p{}", aux + j) }));
         }
         aux += k - 1;
-        running = subst(&inner, &map);
+        running = json!({ "kind": "app",
+            "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": h } }, "args": args });
     }
-    json!({ "kind": "lambda", "params": params, "body": running })
+    let chain = json!({ "kind": "lambda", "params": params, "body": running });
+    inline_fn_refs(&chain, bodies, 0)
 }
 
 /// Assemble a pipeline from the commons that satisfies `examples`, then verify it. Each example is
@@ -330,19 +391,12 @@ pub fn assemble(
         c
     };
 
-    // Verify (2): synthesize the INLINED composite body (self-contained, no fn_refs) and run every
-    // example through it — this also backstops the inlining (a capture/substitution error would
-    // disagree with an example).
+    // Verify (2): synthesize the fully-INLINED composite body (self-contained, no fn_refs —
+    // recursively expanded even through stages whose own bodies use fn_refs) and run every example
+    // through it — this also backstops the inlining (a capture/substitution error would disagree
+    // with an example).
     let arities: Vec<usize> = stages.iter().map(|s| s.arity).collect();
-    let stage_bodies: Vec<J> = stage_hashes
-        .iter()
-        .map(|h| {
-            let bh = records[h].pointer("/body_hash").and_then(|b| b.as_str());
-            bh.and_then(|bh| bodies.get(bh)).or_else(|| bodies.get(h)).cloned()
-                .ok_or_else(|| anyhow!("missing body for stage {h}"))
-        })
-        .collect::<Result<_>>()?;
-    let body = composite_body(&stage_bodies, &arities, m);
+    let body = composite_body(&stage_hashes, &arities, m, bodies);
     let mut examples_verified = 0;
     for (args, output) in examples {
         let got = crate::eval_body(&body, args)?;
@@ -535,6 +589,32 @@ mod tests {
         let ex2 = vec![(vec![int(6), int(2)], int(12)), (vec![int(3), int(4)], int(12))];
         let a2 = assemble(&r, &b, &ex2, 3, false, "z3").unwrap().expect("a one-binary pipeline");
         assert_eq!(a2.stages.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["times"]);
+    }
+
+    #[test]
+    fn recursive_inlining_expands_nested_fn_refs() {
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        add_unary("double", "add", &mut r, &mut b); // \n -> add(n, n)
+        let double_h = r.keys().find(|h| r[*h]["name_hints"][0] == "double").unwrap().clone();
+        // `quad` = double ∘ double — a commons function whose OWN body applies `fn_ref`s.
+        let fnref = |h: &str, arg: J| json!({ "kind": "app",
+            "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": h } }, "args": [arg] });
+        let quad_body = json!({ "kind": "lambda", "params": [{ "name": "n" }],
+            "body": fnref(&double_h, fnref(&double_h, json!({ "kind": "var", "name": "n" }))) });
+        insert("quad", &json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
+            "result": { "kind": "builtin", "name": "int" } }), quad_body, &mut r, &mut b);
+
+        // Goal quad(3)=12, quad(5)=20 → the single stage `quad`, whose body uses fn_refs.
+        let ex = vec![(vec![int(3)], int(12)), (vec![int(5)], int(20))];
+        let a = assemble(&r, &b, &ex, 3, false, "z3").unwrap().expect("a pipeline");
+        assert_eq!(a.stages.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["quad"]);
+        // RECURSIVE inlining expanded quad's nested fn_refs all the way down — none remain.
+        assert!(!a.composite_body.to_string().contains("fn_ref"),
+                "the composite body fully inlines nested fn_refs");
+        // …so termination re-proves SOUND (not UNVERIFIABLE, as a fn_ref body would).
+        assert!(a.composite_certified);
+        let checks: std::collections::HashMap<_, _> = a.composite_checks.iter().cloned().collect();
+        assert_eq!(checks.get("termination").map(|s| s.as_str()), Some("SOUND"));
     }
 
     #[test]
