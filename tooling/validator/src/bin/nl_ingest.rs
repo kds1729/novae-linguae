@@ -1432,6 +1432,30 @@ fn block_to_body(stmts: &[syn::Stmt], strs: &HashSet<String>) -> Option<Value> {
         // The result position: a trailing expression, or `return <expr>;` (statements after a
         // return/trailing expr are dead).
         syn::Stmt::Expr(syn::Expr::Return(r), _) => expr_to_body(r.expr.as_deref()?, strs),
+        // An accumulator `for` loop (handled BEFORE the generic trailing-expr arm, since a
+        // semicolon-less loop parses as `Stmt::Expr(ForLoop, None)`).
+        syn::Stmt::Expr(syn::Expr::ForLoop(fl), _) => {
+            let syn::Pat::Ident(pi) = &*fl.pat else { return None };
+            if pi.by_ref.is_some() || pi.subpat.is_some() {
+                return None;
+            }
+            let x = pi.ident.to_string();
+            if p_var(&x).is_none() {
+                return None;
+            }
+            let src = expr_to_body(&fl.expr, strs)?;
+            if fl.body.stmts.len() != 1 {
+                return None;
+            }
+            let loop_strs: HashSet<String> = strs.iter().filter(|s| **s != x).cloned().collect();
+            let (acc, update) = accumulator_update(&fl.body.stmts[0], &loop_strs)?;
+            let rest = block_to_body(tail, &(strs - &HashSet::from([acc.clone()])))?;
+            let lam = json!({ "kind": "lambda",
+                "params": [{ "name": acc }, { "name": x }], "body": update });
+            let fold = json!({ "kind": "app", "fn": p_var("foldl")?,
+                "args": [lam, { "kind": "var", "name": acc }, src] });
+            Some(json!({ "kind": "let", "name": acc, "value": fold, "body": rest }))
+        }
         syn::Stmt::Expr(e, None) => expr_to_body(e, strs),
         // `let x = e;` -> `let x = <e> in <rest>`. Only a plain single-name binding with an
         // initializer (no `let x;`, no `let-else`, no type-only) is in subset here; a tuple pattern
@@ -1488,6 +1512,54 @@ fn block_to_body(stmts: &[syn::Stmt], strs: &HashSet<String>) -> Option<Value> {
                 }
                 _ => None,
             }
+        }
+        _ => None,
+    }
+}
+
+/// A single accumulator statement inside a `for` loop body: `acc <op>= e` or `acc = update`, over an
+/// accumulator that must be a plain name. Returns `(acc_name, update_expr)`.
+fn accumulator_update(stmt: &syn::Stmt, strs: &HashSet<String>) -> Option<(String, Value)> {
+    let expr = match stmt {
+        syn::Stmt::Expr(e, _) => e,
+        _ => return None,
+    };
+    match expr {
+        // Plain `acc = update`.
+        syn::Expr::Assign(a) => {
+            let acc = path_ident(&a.left)?;
+            Some((acc, expr_to_body(&a.right, strs)?))
+        }
+        // Compound `acc += e` / `-=` / `*=` / `/=` / `%=` (syn 2.0 models these as `Expr::Binary`).
+        syn::Expr::Binary(b) => {
+            let op = match b.op {
+                syn::BinOp::AddAssign(_) => "add",
+                syn::BinOp::SubAssign(_) => "sub",
+                syn::BinOp::MulAssign(_) => "mul",
+                syn::BinOp::DivAssign(_) => "div",
+                syn::BinOp::RemAssign(_) => "mod",
+                _ => return None,
+            };
+            let acc = path_ident(&b.left)?;
+            // String `s += t` over a known string is concatenation, like binary `+`.
+            let op = if op == "add" && (strs.contains(&acc) || is_stringish(&b.right, strs)) {
+                "str_concat"
+            } else {
+                op
+            };
+            let update = body_op_app(op, vec![json!({ "kind": "var", "name": acc }),
+                                              expr_to_body(&b.right, strs)?])?;
+            Some((acc, update))
+        }
+        _ => None,
+    }
+}
+
+/// The single-segment identifier of a path expression (`acc`), or None.
+fn path_ident(expr: &syn::Expr) -> Option<String> {
+    match expr {
+        syn::Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
+            Some(p.path.segments[0].ident.to_string())
         }
         _ => None,
     }
@@ -2158,6 +2230,26 @@ mod tests {
         let r = item_fn("pub fn rv(xs: Vec<i64>) -> Vec<i64> { xs.iter().rev().collect() }");
         let lam5 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&r).unwrap() });
         assert_eq!(nl_validator::eval_body(&lam5, &[list(&[1, 2, 3])]).unwrap(), list(&[3, 2, 1]));
+    }
+
+    #[test]
+    fn body_accumulator_for_loop_lifts_and_executes() {
+        let int = |n: i64| json!({ "kind": "int", "value": n });
+        let list = |ns: &[i64]| json!({ "kind": "list", "elems": ns.iter().map(|n| int(*n)).collect::<Vec<_>>() });
+        // `let mut total = 0; for x in xs { total += x; } total` -> foldl add 0 xs.
+        let f = item_fn("pub fn sum(xs: Vec<i64>) -> i64 { let mut total = 0; for x in xs { total += x; } total }");
+        let bare = body_ast(&f).expect("accumulator for-loop in subset");
+        assert!(bare.to_string().contains("foldl"));
+        let lam = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": bare });
+        assert_eq!(nl_validator::eval_body(&lam, &[list(&[1, 2, 3, 4])]).unwrap(), int(10));
+        assert_eq!(nl_validator::eval_body(&lam, &[list(&[])]).unwrap(), int(0));
+        // `*=` product accumulator.
+        let g = item_fn("pub fn prod(xs: Vec<i64>) -> i64 { let mut acc = 1; for x in xs { acc *= x; } acc }");
+        let lam2 = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": body_ast(&g).unwrap() });
+        assert_eq!(nl_validator::eval_body(&lam2, &[list(&[2, 3, 4])]).unwrap(), int(24));
+        // A multi-statement loop body is out of subset (single accumulator statement only).
+        let multi = item_fn("pub fn h(xs: Vec<i64>) -> i64 { let mut a = 0; for x in xs { a += x; a += 1; } a }");
+        assert!(body_ast(&multi).is_none());
     }
 
     #[test]

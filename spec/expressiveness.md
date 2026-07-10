@@ -461,8 +461,14 @@ only real ingested records could surface.
   methods (`iter`/`into_iter`/`cloned`/`copied`/`collect`/`by_ref`) transparent and deref (`*x`) /
   reference closure params (`|&x|`) stripped (Nova has no references). `sum_squares`
   (`map(|x| x*x).sum()`) and `positives` (`filter(…).cloned().collect()`) ingest, and the map/filter/
-  sum/fold/rev forms all evaluate correctly against their examples. The remaining Rust gap is the
-  imperative accumulator `for` loop the Python translator covers (idiomatic Rust prefers the chains).
+  sum/fold/rev forms all evaluate correctly against their examples.
+  *Rust accumulator `for` loop (2026-07-10):* the imperative counterpart — `let mut acc = init;
+  for x in src { acc <op>= e }` (or `acc = update`) → `let acc = foldl(\acc x -> update, acc, src)`,
+  the same shape the Python translator produces (single-statement loop body; `+=`/`-=`/`*=`/`/=`/`%=`
+  and string `+=`). `sum` and `prod` lift and evaluate to 10 / 24. With this the Rust lifter reaches
+  the Python adapter's fidelity for the common single-body shapes; the honest residuals it shares
+  with Python (or that are Rust-specific) are `while`, guarded/append/nested loop variants, and
+  tuple-destructuring loop targets — future increments if a target needs them.
   *Statement subset widened (2026-07-07):* the honest 9/57-stdlib finding is a control-flow gap
   (real library code is multi-statement, not single-expression), and the two most common loop
   shapes the single-statement translator couldn't reach are now in: a **guarded accumulator**
