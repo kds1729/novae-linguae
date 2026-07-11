@@ -129,6 +129,13 @@ class SearchServiceTest(unittest.TestCase):
                          status["signature"]["type"]["params"])
         self.assertEqual(rec["signature"]["effects"], ["net.read"])
 
+    def test_offline_generation_attaches_no_traces(self):
+        # Example traces (GW12) are observations of a LIVE run — the offline path must not invent
+        # them, and offline-generated records stay byte-stable (the faithfulness contract).
+        for name, rp in self.recs.items():
+            for ex in json.load(open(rp))["examples"]:
+                self.assertNotIn("trace", ex, name)
+
     def test_json_value_encoder_shapes(self):
         # The encoder promises exactly what parse_json produces — and refuses floats.
         self.assertEqual(oi._json_to_value(None), {"kind": "variant", "tag": "JNull"})

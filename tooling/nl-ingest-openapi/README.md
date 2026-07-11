@@ -62,6 +62,14 @@ a live service — the "gate = examples vs an emulator" step — so a generated 
 verified-by-default exactly like a hand-authored one. The in-repo
 [`tooling/fake-service`](../fake-service/) is a reference service to verify against.
 
+For an **effectful** record the live gate is also the trace capture (GW12, replay-checkable
+examples): each example runs exactly once — grants and secrets supplied by the operator — must
+reproduce its documented result, and the observed effect trace is attached to the example by
+`trc_…` content-address (the trace artifact is written alongside the record, re-addressing it).
+The adapter then re-checks the examples by **replay with no secrets**: the check any commons
+consumer can perform offline — no credentials, no reachable service — with the usual honest scope
+(the trace is the publisher's testimony; replay proves the documented result follows from it).
+
 ```
 python3 openapi_ingest.py examples/item-store.openapi.json --out /tmp/recs \
     --secret-name api_token --verify-against http://127.0.0.1:8878 --token test-token

@@ -48,6 +48,13 @@ fn resolve_fn_ref(addr: &str) -> Option<J> {
     RESOLVER.with(|r| r.borrow().get(addr).cloned())
 }
 
+/// Look up any artifact the installed link map carries by content-address (bodies AND trace
+/// artifacts — `build_link_map` indexes both). Public so `run_examples` can resolve an example's
+/// `trace` reference through the same map the run already installed.
+pub fn resolver_lookup(addr: &str) -> Option<J> {
+    RESOLVER.with(|r| r.borrow().get(addr).cloned())
+}
+
 // Effect enforcement: a scoped capability sandbox. Effectful builtins (`print` → io.console, `rand`
 // → random) gate on a *granted* effect set and append to a structured trace — so a body may only
 // perform effects its grant permits (e.g. a function record's declared `signature.effects`), and the
@@ -1360,6 +1367,7 @@ pub fn eval_body(body: &J, args: &[J]) -> Result<J> {
 }
 
 /// Outcome of running one worked example through the body.
+#[derive(Debug)]
 pub struct ExampleRun {
     pub index: usize,
     pub passed: bool,
@@ -1370,6 +1378,15 @@ pub struct ExampleRun {
 
 /// Run every `examples[]` of a function record through its `body`: bind the example's args, evaluate
 /// the body, and compare to the example's claimed `result`. This is what makes the examples executable.
+///
+/// An example carrying a `trace` reference (`trc_…`, spec/trace.schema.json) is run by **replay**:
+/// the recorded observations are resolved through the installed resolver (the same link map that
+/// resolves `fn_ref`s — `build_link_map` indexes trace artifacts) and every effect is served from
+/// the record — no grants, no secrets, no live service — with the trace required to be consumed
+/// exactly. That is what lets a commons consumer check an *effectful* record's examples offline
+/// (the record-level counterpart of an `observed` claim, same honest scope: the trace is the
+/// publisher's testimony about what the world said). An example without a `trace` runs live under
+/// whatever grants are installed, exactly as before.
 pub fn run_examples(record: &J, body: &J) -> Result<Vec<ExampleRun>> {
     let f = eval_recursive_body(body)?;
     let examples = record.get("examples").and_then(|e| e.as_array()).cloned().unwrap_or_default();
@@ -1378,9 +1395,34 @@ pub fn run_examples(record: &J, body: &J) -> Result<Vec<ExampleRun>> {
         let args = ex.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
         let expected_j = ex.get("result").cloned().unwrap_or(J::Null);
         let run = (|| -> Result<(bool, J)> {
+            // Decode everything BEFORE installing replay, so no error path can leave the thread
+            // replaying into the next example.
             let argv = args.iter().map(decode_value).collect::<Result<Vec<_>>>()?;
-            let got = apply(f.clone(), argv)?;
             let expected = decode_value(&expected_j)?;
+            let replaying = match ex.get("trace").and_then(|t| t.as_str()) {
+                Some(trace_addr) => {
+                    let trace = resolver_lookup(trace_addr).ok_or_else(|| {
+                        anyhow!("example {index} references trace `{trace_addr}` which is not in the provided records — without the recorded observations the effectful example cannot be replayed")
+                    })?;
+                    let ops = trace
+                        .get("ops")
+                        .and_then(|o| o.as_array())
+                        .ok_or_else(|| anyhow!("trace `{trace_addr}` has no `ops` array"))?
+                        .clone();
+                    set_effect_replay(ops);
+                    true
+                }
+                None => false,
+            };
+            let got = apply(f.clone(), argv);
+            let leftover = effect_replay_remaining().unwrap_or(0);
+            if replaying {
+                clear_effect_replay();
+            }
+            let got = got?;
+            if replaying && leftover > 0 {
+                bail!("example {index}'s trace was not fully consumed ({leftover} recorded observation{} left over) — the trace does not correspond to this example", if leftover == 1 { "" } else { "s" });
+            }
             Ok((val_eq(&got, &expected), encode_value(&got)))
         })();
         match run {
@@ -2391,6 +2433,58 @@ mod tests {
         clear_effects();
         set_effect_replay(vec![json!({ "effect": "net.read", "detail": { "url": "http://x" }, "result": s("BODY") })]);
         assert_eq!(eval_body(&get_body, &[s("http://anything")]).unwrap(), s("BODY"));
+        clear_effects();
+    }
+
+    #[test]
+    fn example_with_trace_replays_grantlessly() {
+        // GW12: an effectful example carrying a `trace` reference runs by REPLAY through the
+        // installed resolver — no grants, no live effect — so a consumer checks it offline.
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "msg" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "print" },
+                      "args": [{ "kind": "var", "name": "msg" }] } });
+        let trace = json!({ "kind": "trace", "version": "0.1.0",
+            "ops": [{ "effect": "io.console", "detail": s("hi"), "result": { "kind": "unit" } }] });
+        let trc = crate::hash_artifact_with_kind(&trace, crate::ArtifactKind::Trace).unwrap();
+
+        clear_effects(); // the consumer grants NOTHING
+        set_resolver([(trc.clone(), trace)].into());
+
+        // Without the trace reference the effectful example cannot run grantlessly…
+        let live = json!({ "examples": [{ "args": [s("hi")], "result": { "kind": "unit" } }] });
+        let runs = run_examples(&live, &body).unwrap();
+        assert!(!runs[0].passed);
+        assert!(runs[0].error.as_deref().unwrap_or("").contains("ungranted"), "{:?}", runs[0].error);
+
+        // …with it, the example replays and passes.
+        let rec = json!({ "examples": [{ "args": [s("hi")], "result": { "kind": "unit" }, "trace": trc.clone() }] });
+        let runs = run_examples(&rec, &body).unwrap();
+        assert!(runs[0].passed, "{:?}", runs[0]);
+
+        // A trace with observations the example never used does not correspond to it.
+        let fat = json!({ "kind": "trace", "version": "0.1.0",
+            "ops": [{ "effect": "io.console", "detail": s("hi"), "result": { "kind": "unit" } },
+                    { "effect": "io.console", "detail": s("stray"), "result": { "kind": "unit" } }] });
+        let fat_addr = crate::hash_artifact_with_kind(&fat, crate::ArtifactKind::Trace).unwrap();
+        set_resolver([(fat_addr.clone(), fat)].into());
+        let rec = json!({ "examples": [{ "args": [s("hi")], "result": { "kind": "unit" }, "trace": fat_addr }] });
+        let runs = run_examples(&rec, &body).unwrap();
+        assert!(!runs[0].passed);
+        assert!(runs[0].error.as_deref().unwrap_or("").contains("not fully consumed"), "{:?}", runs[0].error);
+
+        // A missing trace is an honest per-example error naming the address, and a later pure
+        // example still runs (no replay leaks across examples).
+        let gone = "trc_".to_string() + &"0".repeat(64);
+        let pure_body = json!({ "kind": "lambda", "params": [{ "name": "x" }],
+            "body": { "kind": "var", "name": "x" } });
+        let rec = json!({ "examples": [
+            { "args": [s("hi")], "result": { "kind": "unit" }, "trace": gone },
+            { "args": [s("ok")], "result": s("ok") } ] });
+        let runs = run_examples(&rec, &pure_body).unwrap();
+        assert!(runs[0].error.as_deref().unwrap_or("").contains("trc_"), "{:?}", runs[0].error);
+        assert!(runs[1].passed, "{:?}", runs[1]);
+        clear_resolver();
         clear_effects();
     }
 }

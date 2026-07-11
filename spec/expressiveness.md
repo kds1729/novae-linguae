@@ -444,6 +444,23 @@ join-encoded list; corpus19 = 3,195 specs, 0 drops; ftdata19 staged). Residual d
 depth — response headers/redirects, multipart, non-local `$ref`s, oauth flows — stays refused,
 awaiting a workflow.
 
+**GW12 — replay-checkable examples (2026-07-11, same day): the observed-claim move, applied to
+records.** GW11 made effectful *asserts* third-party-checkable; a record's worked *examples* had
+the identical problem — an effectful example could only be checked live (grants + secrets + a
+reachable service), so a commons consumer fetching `put_item` took its examples on faith. The
+pull is one optional field: an example may carry `trace: trc_…` (the same first-class trace
+artifact), and `run` checks such an example by **replay** — the trace resolves through the same
+link map that resolves `fn_ref`s (local `build_link_map` and the node crawl both already index
+traces since GW11), effects served from the record, **no grants, no secrets, no live service**,
+exact consumption required. Emission is the OpenAPI adapter's live gate restructured: for an
+effectful record each example runs exactly ONCE (previously the gate could double-execute a
+mutating example), must reproduce its documented result, and its observed trace is attached —
+re-addressing the record — after which the adapter re-checks the examples by secretless replay,
+proving the consumer's offline check works before publishing. Pure examples never carry traces
+(the offline generation path is byte-stable — faithfulness held). Honest scope unchanged from
+GW11: a replayed PASS = the documented result follows deterministically from the publisher's
+recorded observations. Additive schema field, no existing hash moves.
+
 **GW11 — observed claims (2026-07-11): effectful asserts become replay-verifiable, and the
 description layer projects response bodies.** Two prior milestones pointed at the same missing
 piece: GW6 left an effectful assert as the signer's *testimony* (grantless `verify-claim` =

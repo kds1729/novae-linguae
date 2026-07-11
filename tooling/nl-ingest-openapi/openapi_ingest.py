@@ -446,6 +446,55 @@ def certify(record_path, body_path, out_dir):
     return r.returncode == 0, r.stdout.strip().splitlines()[-1] if r.stdout else r.stderr.strip()
 
 
+def attach_example_traces(record_path, body_path, record, out_dir, secret_names, token):
+    """The live gate for an EFFECTFUL record, one execution per example (GW12): run each worked
+    example once via `eval --trace-out` (grants = the record's declared effects, secrets supplied),
+    require the live result to equal the documented one, and attach the observed trace to the
+    example by `trc_…` content-address — writing the trace artifact alongside the record. The
+    record's examples change, so its content-address is recomputed. After this, `run` checks the
+    examples by REPLAY: no grants, no secrets, no live service — a commons consumer can verify the
+    record offline. Returns (ok, message)."""
+    name = record["name_hints"][0]
+    effects = (record.get("signature") or {}).get("effects") or []
+    for i, ex in enumerate(record.get("examples", [])):
+        argfiles = []
+        for j, a in enumerate(ex.get("args", [])):
+            p = os.path.join(out_dir, f".arg-{name}-{i}-{j}.json")
+            json.dump(a, open(p, "w"))
+            argfiles.append(p)
+        trace_path = os.path.join(out_dir, f"trace-{name}-{i}.json")
+        cmd = [_VALIDATOR, "eval", body_path]
+        for p in argfiles:
+            cmd += ["--arg", p]
+        for e in effects:
+            cmd += ["--grant", e]
+        for n in secret_names:
+            cmd += ["--secret", f"{n}={token}"]
+        cmd += ["--trace-out", trace_path]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        for p in argfiles:
+            os.unlink(p)
+        if r.returncode != 0:
+            return False, f"example {i} live run failed: {(r.stderr or '').strip()}"
+        got = json.loads(r.stdout)
+        if got != ex.get("result"):
+            return False, (f"example {i} live result does not match the documented one: "
+                           f"{json.dumps(got)} != {json.dumps(ex.get('result'))}")
+        trc = subprocess.run([_VALIDATOR, "hash", trace_path],
+                             capture_output=True, text=True).stdout.strip()
+        if not trc.startswith("trc_"):
+            return False, f"example {i} trace did not hash to a trc_… address: {trc!r}"
+        ex["trace"] = trc
+    # The examples changed -> the record's content-address moves; recompute and rewrite.
+    record.pop("hash", None)
+    json.dump(record, open(record_path, "w"), indent=2)
+    new_hash = subprocess.run([_VALIDATOR, "hash", record_path],
+                              capture_output=True, text=True).stdout.strip()
+    record["hash"] = new_hash
+    json.dump(record, open(record_path, "w"), indent=2)
+    return True, new_hash
+
+
 def verify_examples(record_path, out_dir, base_url, secret_names, token):
     secret_flags = [f for n in secret_names for f in ("--secret", f"{n}={token}")]
     r = subprocess.run(
@@ -497,13 +546,29 @@ def main(argv=None):
 
     ok = True
     for name, rp, bp, record in written:
+        line = f"{name:16} body={record['body_hash'][:20]}…"
+        effectful = bool((record.get("signature") or {}).get("effects"))
+        if args.verify_against and effectful:
+            # GW12: the live gate for an effectful record IS the trace capture — each example runs
+            # exactly once (grants + secrets), must reproduce its documented result, and its
+            # observed trace is attached by trc_… address (re-addressing the record).
+            att_ok, att_msg = attach_example_traces(rp, bp, record, args.out, secret_names, args.token)
+            if not att_ok:
+                ok = False
+                print(f"{line}  live-gate=FAIL: {att_msg}")
+                continue
+            line += "  live=PASS+traces"
         cert_ok, cert_msg = certify(rp, bp, args.out)
-        line = f"{name:16} body={record['body_hash'][:20]}…  certify={'OK' if cert_ok else 'FAIL'}"
-        if args.verify_against:
-            run_ok, run_msg = verify_examples(rp, args.out, args.verify_against, secret_names, args.token)
-            line += f"  examples={'PASS' if run_ok else 'FAIL: ' + run_msg}"
-            ok = ok and run_ok
+        line += f"  certify={'OK' if cert_ok else 'FAIL'}"
         ok = ok and cert_ok
+        if args.verify_against:
+            # For an effectful record this now REPLAYS from the attached traces — deliberately
+            # run with NO secrets, proving the offline check a commons consumer performs needs
+            # neither credentials nor the service. A pure record just runs as before.
+            run_ok, run_msg = verify_examples(rp, args.out, args.verify_against, [], "")
+            label = "PASS (replayed offline)" if effectful else "PASS"
+            line += f"  examples={label if run_ok else 'FAIL: ' + run_msg}"
+            ok = ok and run_ok
         print(line)
         if not cert_ok:
             print(f"    {cert_msg}")

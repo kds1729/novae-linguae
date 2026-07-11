@@ -609,6 +609,21 @@ Worked example: [`greet.v0.2.json`](examples/greet.v0.2.json) (`\msg -> print(ms
 `string -> unit`, declaring `effects: ["io.console"]`) runs clean under `run`; the same body under
 `eval` is **rejected** without `--grant io.console` and emits a one-event trace with it.
 
+**Replay-checkable examples (GW12).** An effectful record's worked examples used to be checkable
+only by re-running them live — grants, secrets, and a reachable service — so a commons consumer had
+to take them on faith. An example may now carry a **`trace` reference** (`trc_…`,
+[trace.schema.json](trace.schema.json) — the same first-class trace artifact an `observed` claim
+uses): the recorded observations of one real run of that example, published alongside the record.
+`run` then checks such an example by **replay** — the trace resolves through the same link map that
+resolves `fn_ref`s, every effect is served from the record, **no grants, no secrets, no live
+service**, and the trace must be consumed exactly (a leftover or mismatched observation fails the
+example rather than confirming a prefix). The honest scope is the observed-claim one: a replayed
+PASS means the documented result follows deterministically from the recorded observations, which
+are the *publisher's* testimony. Pure examples never need a trace and are unaffected. The OpenAPI
+adapter emits these automatically: its `--verify-against` live gate runs each example exactly once,
+requires the live result to equal the documented one, and attaches the observed trace — so a
+description-generated record lands in the commons with examples anyone can check offline.
+
 **Static inference.** `nl-validator check-effects <record> --body <body> [--records <dir>]` is the
 verification counterpart: it infers a body's effects *without running it* by walking the AST for the
 effectful builtins it names, folding in the **declared effects of any `fn_ref` callee** resolved from

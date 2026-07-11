@@ -192,7 +192,12 @@
           "type": "array",
           "items": { "$ref": "#/$defs/ve_value" }
         },
-        "result": { "$ref": "#/$defs/ve_value" }
+        "result": { "$ref": "#/$defs/ve_value" },
+        "trace": {
+          "type": "string",
+          "pattern": "^trc_[0-9a-f]{64}$",
+          "description": "Optional content-address of a recorded effect trace (trace.schema.json) for an EFFECTFUL example: the observations of one real run of this example. With it, `run` replays the example deterministically — no effect grants, no secrets, no live service — so a commons consumer can check an effectful record's examples offline (the record-level counterpart of an `observed` claim; same honest scope — the trace itself is the publisher's testimony). Pure examples never need one."
+        }
       }
     },
 
