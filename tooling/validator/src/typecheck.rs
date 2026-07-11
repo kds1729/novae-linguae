@@ -339,6 +339,16 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
                 Box::new(Ty::Rec(resp)),
             )
         }
+        // The header-preserving request (GW14): same call, response headers survive as a
+        // `Map string string` — what a Location-driven workflow projects from.
+        "http_full" => {
+            let str_map = Ty::Con("Map".into(), vec![con("string"), con("string")]);
+            let mut resp = BTreeMap::new();
+            resp.insert("status".to_string(), con("int"));
+            resp.insert("headers".to_string(), str_map.clone());
+            resp.insert("body".to_string(), con("string"));
+            Ty::Fun(vec![con("string"), con("string"), str_map, con("string")], Box::new(Ty::Rec(resp)))
+        }
         "spawn" => Ty::Fun(vec![con("string"), list(con("string"))], Box::new(con("string"))),
         // `replicate : forall a. int -> a -> List a` — the heap-allocating builtin (effect `alloc`).
         "replicate" => {

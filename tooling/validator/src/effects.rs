@@ -52,9 +52,9 @@ fn walk(node: &J, records: &HashMap<String, J>, bound: &[String], inf: &mut Effe
                 if let Some(e) = builtin_effect(name) {
                     inf.effects.insert(e.to_string());
                 }
-                // A bare reference to the general `http` builtin (passed as a value, method
+                // A bare reference to a general request builtin (passed as a value, method
                 // unknown): either side of the read/write split may be performed.
-                if name == "http" {
+                if name == "http" || name == "http_full" {
                     inf.effects.insert("net.read".to_string());
                 }
             }
@@ -90,10 +90,10 @@ fn walk(node: &J, records: &HashMap<String, J>, bound: &[String], inf: &mut Effe
                     if !is_builtin(n) && n != "self" && !bound.iter().any(|b| b == n) {
                         inf.opaque = true;
                     }
-                    // The general `http` builtin's effect depends on its METHOD: a literal method
+                    // The general request builtins' effect depends on the METHOD: a literal method
                     // refines the inference to the side actually performed (net.read for GET/HEAD,
                     // net.write otherwise); a non-literal method is conservatively both.
-                    if n == "http" {
+                    if n == "http" || n == "http_full" {
                         let method = node
                             .pointer("/args/0/value/kind")
                             .and_then(|k| k.as_str())
@@ -309,6 +309,16 @@ mod tests {
         assert_eq!(effects(&dynamic).into_iter().collect::<Vec<_>>(), vec!["net.read", "net.write"]);
         let bare = json!({ "kind": "var", "name": "http" });
         assert_eq!(effects(&bare).into_iter().collect::<Vec<_>>(), vec!["net.read", "net.write"]);
+
+        // `http_full` (GW14) gets the same refinement: the header-preserving request is still
+        // method-decided, so a literal GET is read-only and a bare reference is both.
+        let full_get = json!({ "kind": "lambda", "params": [{ "name": "u" }, { "name": "h" }, { "name": "b" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "http_full" },
+                      "args": [{ "kind": "lit", "value": { "kind": "string", "value": "GET" } },
+                               { "kind": "var", "name": "u" }, { "kind": "var", "name": "h" }, { "kind": "var", "name": "b" }] } });
+        assert_eq!(effects(&full_get).into_iter().collect::<Vec<_>>(), vec!["net.read"]);
+        let full_bare = json!({ "kind": "var", "name": "http_full" });
+        assert_eq!(effects(&full_bare).into_iter().collect::<Vec<_>>(), vec!["net.read", "net.write"]);
     }
 
     #[test]

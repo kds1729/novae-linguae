@@ -577,6 +577,20 @@ pub(crate) fn http_roundtrip(
     extra_headers: &[(String, String)],
     body: Option<&str>,
 ) -> Result<(i128, String)> {
+    http_roundtrip_full(method, url, extra_headers, body).map(|(s, _, b)| (s, b))
+}
+
+/// The header-preserving client behind `http_full` (GW14): the same round-trip, but the response
+/// headers survive decoding as a canonical map — names lowercased, OWS-trimmed values, duplicates
+/// comma-joined in arrival order (RFC 7230 §3.2.2's list rule; `Set-Cookie` gets the same treatment,
+/// the honest reference-grade choice). Redirects are NOT followed — a 3xx is returned as-is with its
+/// `location` header, so redirect-following is in-language code, not builtin machinery.
+pub(crate) fn http_roundtrip_full(
+    method: &str,
+    url: &str,
+    extra_headers: &[(String, String)],
+    body: Option<&str>,
+) -> Result<(i128, BTreeMap<String, String>, String)> {
     use std::net::TcpStream;
     use std::time::Duration;
 
@@ -618,7 +632,7 @@ pub(crate) fn http_roundtrip(
     } else {
         plain_roundtrip(tcp, req.as_bytes())?
     };
-    decode_http_response_full(&raw)
+    decode_http_response_parts(&raw)
 }
 
 /// The historical body-only client behind `http_get`/`http_post`.
@@ -663,7 +677,16 @@ fn tls_roundtrip(host: &str, tcp: std::net::TcpStream, req: &[u8]) -> Result<Vec
 
 /// Split an HTTP/1.1 response into its status code and body, de-chunking a `Transfer-Encoding:
 /// chunked` payload so the caller never sees chunk-size markers. Body as a (lossy) UTF-8 string.
+/// The `http`/`http_get`/`http_post` shape — headers dropped.
+#[cfg(test)]
 fn decode_http_response_full(raw: &[u8]) -> Result<(i128, String)> {
+    decode_http_response_parts(raw).map(|(s, _, b)| (s, b))
+}
+
+/// The full decode: status, headers, body. Header names are lowercased and values OWS-trimmed
+/// (the canonical form — lowercase names are what `str_lt`'s code-point order sorts sanely, and
+/// HTTP names are case-insensitive); duplicate headers are comma-joined in arrival order.
+fn decode_http_response_parts(raw: &[u8]) -> Result<(i128, BTreeMap<String, String>, String)> {
     let status = {
         let line_end = raw.windows(2).position(|w| w == b"\r\n").unwrap_or(raw.len());
         let line = String::from_utf8_lossy(&raw[..line_end]);
@@ -671,23 +694,39 @@ fn decode_http_response_full(raw: &[u8]) -> Result<(i128, String)> {
         line.split_whitespace().nth(1).and_then(|s| s.parse::<i128>().ok()).unwrap_or(0)
     };
     let idx = raw.windows(4).position(|w| w == b"\r\n\r\n");
-    let (headers, mut body): (&[u8], &[u8]) = match idx {
+    let (header_bytes, mut body): (&[u8], &[u8]) = match idx {
         Some(i) => (&raw[..i], &raw[i + 4..]),
-        None => return Ok((status, String::from_utf8_lossy(raw).into_owned())),
+        None => return Ok((status, BTreeMap::new(), String::from_utf8_lossy(raw).into_owned())),
     };
-    let chunked = String::from_utf8_lossy(headers).lines().any(|l| {
-        let l = l.to_ascii_lowercase();
-        l.starts_with("transfer-encoding:") && l.contains("chunked")
-    });
+    let mut headers: BTreeMap<String, String> = BTreeMap::new();
+    // skip(1): the status line is not a header field.
+    for line in String::from_utf8_lossy(header_bytes).lines().skip(1) {
+        let Some((name, value)) = line.split_once(':') else { continue };
+        let name = name.trim().to_ascii_lowercase();
+        let value = value.trim();
+        if name.is_empty() {
+            continue;
+        }
+        match headers.get_mut(&name) {
+            Some(prev) => {
+                prev.push_str(", ");
+                prev.push_str(value);
+            }
+            None => {
+                headers.insert(name, value.to_string());
+            }
+        }
+    }
+    let chunked = headers.get("transfer-encoding").map(|v| v.to_ascii_lowercase().contains("chunked")).unwrap_or(false);
     if chunked {
         let decoded = dechunk(body)?;
-        return Ok((status, String::from_utf8_lossy(&decoded).into_owned()));
+        return Ok((status, headers, String::from_utf8_lossy(&decoded).into_owned()));
     }
     // A defensive nicety: some servers still emit a stray trailing CRLF.
     if body.ends_with(b"\r\n") {
         body = &body[..body.len() - 2];
     }
-    Ok((status, String::from_utf8_lossy(body).into_owned()))
+    Ok((status, headers, String::from_utf8_lossy(body).into_owned()))
 }
 
 /// Decode an HTTP/1.1 chunked transfer body: a sequence of `<hex-size>[;ext]CRLF<data>CRLF`, ending at a
@@ -842,7 +881,7 @@ fn builtin_arity(name: &str) -> Option<usize> {
         | "map_get" | "map_del"
         | "apply" | "write_file" | "http_post" | "spawn" | "replicate" => 2,
         "foldl" | "foldr" | "compose" | "map_put" => 3,
-        "http" => 4,
+        "http" | "http_full" => 4,
         _ => return None,
     })
 }
@@ -858,10 +897,10 @@ pub fn builtin_effect(name: &str) -> Option<&'static str> {
         "write_file" => Some("fs.write"),
         "http_get" => Some("net.read"),
         "http_post" => Some("net.write"),
-        // The general request's effect depends on its METHOD argument at runtime (net.read for
+        // The general requests' effect depends on their METHOD argument at runtime (net.read for
         // GET/HEAD, net.write otherwise); net.write is the conservative static answer here, and the
         // effects walker refines it when the method is a literal (see effects.rs).
-        "http" => Some("net.write"),
+        "http" | "http_full" => Some("net.write"),
         "spawn" => Some("process.spawn"),
         "replicate" => Some("alloc"),
         _ => None,
@@ -1377,7 +1416,7 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
                 http_request("POST", &url, Some(&body)).map(Val::Str)
             })?
         }
-        "http" => {
+        "http" | "http_full" => {
             // The general request (GW6): http(method, url, headers, body) -> {status, body}.
             // net.read for GET/HEAD, net.write for every other method — decided by the METHOD, so a
             // mutating call is gated by the mutating grant even through this one builtin. The grant
@@ -1385,6 +1424,10 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             // placeholders, substituted from the operator's secrets only inside the live effect —
             // the trace detail records the SYMBOLIC headers, so a credential never enters the trace
             // (and replay needs no secrets at all: the response is replayed from the record).
+            // `http_full` (GW14) is the same request with the response headers surviving into the
+            // result — {status, headers, body} — which is what makes `Location`-driven workflows
+            // (server-assigned identity, redirects) expressible in-language.
+            let want_headers = name == "http_full";
             let method = as_str(&a[0])?.to_ascii_uppercase();
             let url = as_str(&a[1])?;
             let headers = as_map(&a[2])?;
@@ -1408,9 +1451,15 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
                     // the live effect — the trace keeps the symbolic form for both.
                     real.push((k.clone(), substitute_oauth(&substitute_secrets(v)?)?));
                 }
-                let (status, resp_body) = http_roundtrip(&method, &url, &real, Some(&body))?;
+                let (status, resp_headers, resp_body) = http_roundtrip_full(&method, &url, &real, Some(&body))?;
                 let mut rec = BTreeMap::new();
                 rec.insert("status".to_string(), Val::Int(status));
+                if want_headers {
+                    rec.insert(
+                        "headers".to_string(),
+                        Val::Map(resp_headers.into_iter().map(|(k, v)| (k, Val::Str(v))).collect()),
+                    );
+                }
                 rec.insert("body".to_string(), Val::Str(resp_body));
                 Ok(Val::Record(rec))
             })?
@@ -2406,6 +2455,94 @@ mod tests {
         set_effect_replay(vec![json!({ "effect": "net.write", "detail": {}, "result": resp })]);
         let out = eval_body(&http_body, &[s("PUT"), s("http://h.example/x"), no_headers, s("{}")]).unwrap();
         assert_eq!(out, resp);
+        clear_effects();
+    }
+
+    #[test]
+    fn http_response_header_decoding_is_canonical() {
+        // Names lowercase, values OWS-trimmed; duplicates comma-join in arrival order.
+        let raw = b"HTTP/1.1 302 Found\r\nLocation:  /v0/things/th_1 \r\nX-Tag: a\r\nx-tag: b\r\nContent-Length: 0\r\n\r\n";
+        let (status, headers, body) = super::decode_http_response_parts(raw).unwrap();
+        assert_eq!(status, 302);
+        assert_eq!(body, "");
+        assert_eq!(headers.get("location").map(String::as_str), Some("/v0/things/th_1"));
+        assert_eq!(headers.get("x-tag").map(String::as_str), Some("a, b"));
+        assert!(!headers.contains_key("Location"), "names are canonically lowercase");
+
+        // A chunked response still surfaces its headers (and the de-chunked body).
+        let chunked = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nETag: \"v7\"\r\n\r\n2\r\nhi\r\n0\r\n\r\n";
+        let (status, headers, body) = super::decode_http_response_parts(chunked).unwrap();
+        assert_eq!((status, body.as_str()), (200, "hi"));
+        assert_eq!(headers.get("etag").map(String::as_str), Some("\"v7\""));
+
+        // A header-less malformed response yields an empty map, not an error.
+        let bare = b"HTTP/1.1 200 OK";
+        let (_, headers, _) = super::decode_http_response_parts(bare).unwrap();
+        assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn http_full_builtin_surfaces_headers_and_replays() {
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+        // \m u h b -> http_full m u h b
+        let body = json!({ "kind": "lambda",
+            "params": [{ "name": "m" }, { "name": "u" }, { "name": "h" }, { "name": "b" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "http_full" },
+                      "args": [{ "kind": "var", "name": "m" }, { "kind": "var", "name": "u" },
+                               { "kind": "var", "name": "h" }, { "kind": "var", "name": "b" }] } });
+        let no_headers = json!({ "kind": "map", "entries": [] });
+
+        // Same method-decided gate as `http`: a mutating method under net.read-only is rejected.
+        set_effect_grants(vec!["net.read".to_string()]);
+        let err = eval_body(&body, &[s("POST"), s("http://h.example/x"), no_headers.clone(), s("")])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("net.write"), "method decides the effect: {err}");
+        clear_effects();
+
+        // Live against a local listener: the response headers survive into the result record —
+        // the Location a server-assigned-identity workflow projects from.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let mut req = Vec::new();
+            loop {
+                let n = std::io::Read::read(&mut conn, &mut buf).unwrap();
+                req.extend_from_slice(&buf[..n]);
+                if req.windows(4).any(|w| w == b"\r\n\r\n") || n == 0 {
+                    break;
+                }
+            }
+            std::io::Write::write_all(
+                &mut conn,
+                b"HTTP/1.1 201 Created\r\nLocation: /v0/things/th_9\r\nContent-Length: 2\r\n\r\nok",
+            )
+            .unwrap();
+        });
+        set_effect_grants(vec!["net.write@127.0.0.1".to_string()]);
+        let out = eval_body(&body, &[s("POST"), s(&format!("http://{addr}/v0/things")), no_headers.clone(), s("{}")])
+            .unwrap();
+        assert_eq!(out.pointer("/fields/2/value/value"), Some(&json!(201)), "status field: {out}");
+        let headers_entries = out.pointer("/fields/1/value/entries").and_then(|e| e.as_array()).unwrap().clone();
+        let loc = headers_entries
+            .iter()
+            .find(|e| e["key"] == "location")
+            .and_then(|e| e.pointer("/value/value"))
+            .cloned();
+        assert_eq!(loc, Some(json!("/v0/things/th_9")), "location header survives: {out}");
+        let trace = take_effect_trace();
+        clear_effects();
+        assert_eq!(trace.len(), 1);
+        assert_eq!(trace[0]["effect"], "net.write");
+
+        // Replay: the recorded {status, headers, body} record reproduces grantless offline.
+        let resp = trace[0]["result"].clone();
+        set_effect_replay(vec![json!({ "effect": "net.write", "detail": {}, "result": resp })]);
+        let replayed =
+            eval_body(&body, &[s("POST"), s(&format!("http://{addr}/v0/things")), no_headers, s("{}")]).unwrap();
+        assert_eq!(replayed, resp);
         clear_effects();
     }
 
