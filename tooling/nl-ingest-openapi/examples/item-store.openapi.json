@@ -35,6 +35,63 @@
         }
       }
     },
+    "/things": {
+      "post": {
+        "operationId": "createThing",
+        "summary": "Create a thing; the server assigns its identity and answers where it lives.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created (idempotent; the id is derived from the body).",
+            "headers": {
+              "Location": {
+                "description": "Where the server put it.",
+                "example": "/things/th_44136fa355b3",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-Id": {
+                "description": "Trace id (no documented example — not projectable).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/latest": {
+      "get": {
+        "operationId": "getLatest",
+        "summary": "Where the newest resource lives, as a redirect.",
+        "security": [],
+        "responses": {
+          "307": {
+            "description": "Redirect to the current target.",
+            "headers": {
+              "Location": {
+                "description": "The redirect target.",
+                "example": "/health",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/items/{name}": {
       "put": {
         "operationId": "putItem",

@@ -36,6 +36,12 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
                     commons records, principle 4). Emitted only when a deterministic success
                     example is constructible from the spec alone (a GET with no path parameters);
                     anything else gets a printed note, never a silent guess.
+    resp headers -> a header the documented response DECLARES with an example (Location being
+                    the canonical case — server-assigned identity, redirect targets) yields a
+                    header-projection record `<opId><Header> : … -> Maybe string` over the
+                    header-preserving `http_full` (GW16): the call bound once, status-guarded to
+                    the documented response, `map_get` of the lowercase name. A declared header
+                    without a documented example is noted, never guessed.
 
 Each generated status record RETURNS the response `.status` (an int) — the always-deterministic
 part of a response. Body-projection records carry the payload as data; their asserts under grants
@@ -63,7 +69,7 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "ingest-common")))
 
-from nl_body import b_app, b_field, b_lit, b_var  # noqa: E402
+from nl_body import b_app, b_field, b_let, b_lit, b_var  # noqa: E402
 from nl_core import build_v2_record, expr_address  # noqa: E402
 
 STRING = {"kind": "builtin", "name": "string"}
@@ -71,6 +77,7 @@ INT = {"kind": "builtin", "name": "int"}
 JSON_T = {"kind": "builtin", "name": "Json"}
 # The structural sum {Just Json, None} — how a Maybe result is declared (the json_get precedent).
 MAYBE_JSON = {"kind": "sum", "variants": [{"tag": "Just", "type": JSON_T}, {"tag": "None"}]}
+MAYBE_STRING = {"kind": "sum", "variants": [{"tag": "Just", "type": STRING}, {"tag": "None"}]}
 _VALIDATOR = os.path.normpath(
     os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator")
 )
@@ -238,6 +245,47 @@ def _json_to_value(x):
     return None
 
 
+def _case_bool(test, then_expr, else_expr):
+    """`case test of { true => then; false => else }` with LITERAL bool patterns — the exact shape
+    the surface parser emits for a hand-written two-way branch, so a generated body can hash (or
+    α-normalize) identically to its hand-authored twin. (`b_if`'s wildcard else arm is a different
+    AST.)"""
+    return {
+        "kind": "case",
+        "scrutinee": test,
+        "arms": [
+            {"pattern": {"kind": "lit", "value": {"kind": "bool", "value": True}}, "body": then_expr},
+            {"pattern": {"kind": "lit", "value": {"kind": "bool", "value": False}}, "body": else_expr},
+        ],
+    }
+
+
+def _response_header_examples(spec, op, want):
+    """The documented response HEADERS of the status the worked example asserts, split into
+    (projectable, unprojectable): projectable = [(name, example_string)] — headers whose
+    documented `example` (or schema.example) is a string, spec-time knowledge a projection
+    record can promise; unprojectable = [name] — declared headers with no documented example
+    (noted, never guessed). GW16 (spec/expressiveness.md): the description-layer counterpart
+    of the GW14 header pull."""
+    resp = deref(spec, (op.get("responses") or {}).get(str(want)))
+    if not isinstance(resp, dict):
+        return [], []
+    projectable, unprojectable = [], []
+    for name, header in sorted((resp.get("headers") or {}).items()):
+        header = deref(spec, header)
+        if not isinstance(header, dict):
+            unprojectable.append(name)
+            continue
+        example = header.get("example")
+        if example is None and isinstance(header.get("schema"), dict):
+            example = header["schema"].get("example")
+        if isinstance(example, str):
+            projectable.append((name, example))
+        else:
+            unprojectable.append(name)
+    return projectable, unprojectable
+
+
 def _response_json_example(spec, op):
     """The documented application/json EXAMPLE of the operation's first 2xx response, as
     (status_code, parsed_example), or None. This is spec-time data — the one thing that makes a
@@ -389,6 +437,47 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
             records.append((proj_record, proj_body))
             notes.append(f"body projection: {op_id}Body -> Maybe Json "
                          f"(documented {proj_code} example)")
+
+    # HEADER PROJECTION (GW16 — the description-layer counterpart of the GW14 pull): a header the
+    # documented response declares WITH an example is spec-time knowledge of where the answer
+    # arrives (Location being the canonical case — server-assigned identity, redirect targets),
+    # so it gates a record `<opId><Header> : … -> Maybe string` over `http_full`: the call bound
+    # ONCE (projecting two fields off two calls would perform the effect twice), status-guarded
+    # to exactly the documented response, `map_get` of the LOWERCASE name (the canonical decode).
+    # A declared header without an example is noted, never guessed; with `--verify-against`, the
+    # live gate proves the documented example is what the service really answers.
+    want = example["result"]["value"]
+    projectable, unprojectable = _response_header_examples(spec, op, want)
+    for hname in unprojectable:
+        notes.append(f"response header `{hname}` not projected — no documented example "
+                     "(a promise the description does not make)")
+    for hname, hexample in projectable:
+        suffix = re.sub(r"[^a-zA-Z0-9]", " ", hname).title().replace(" ", "")
+        call_full = curried_app(b_var("http_full"), s_lit(verb), url, headers, body_arg)
+        hdr_body = {
+            "kind": "lambda",
+            "params": [{"name": p} for p in lam_params],
+            "body": b_let("r", call_full, _case_bool(
+                curried_app(b_var("eq"), b_field(b_var("r"), "status"),
+                            # `nat`, not `int`: a non-negative literal parses to nat, so the
+                            # generated guard matches a hand-written `case eq r.status 201` exactly.
+                            b_lit({"kind": "nat", "value": want})),
+                curried_app(b_var("map_get"), s_lit(hname.lower()), b_field(b_var("r"), "headers")),
+                {"kind": "variant", "tag": "None"})),
+        }
+        hdr_example = {"args": example["args"],
+                       "result": {"kind": "variant", "tag": "Just",
+                                  "payload": {"kind": "string", "value": hexample}}}
+        hdr_record = build_v2_record(
+            name=op_id + suffix, type_ast={"kind": "fn", "params": param_types,
+                                           "result": MAYBE_STRING},
+            examples=[hdr_example], body_text=hdr_body,
+            module_name=None, extra_hints=[_param_name(op_id + suffix)],
+            effects=[effect], terminates="always", intent_tags=intent, complexity="O(n)",
+        )
+        records.append((hdr_record, hdr_body))
+        notes.append(f"header projection: {op_id}{suffix} -> Maybe string "
+                     f"(documented {want} `{hname}` example)")
     return ("ok", records, notes)
 
 

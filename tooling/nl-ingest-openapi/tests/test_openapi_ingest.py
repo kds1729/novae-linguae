@@ -52,7 +52,9 @@ class OpenApiIngestTest(unittest.TestCase):
                     for p in Path(cls.tmp).glob("*.v0.2.json")}
 
     def test_all_operations_generated(self):
-        self.assertEqual(set(self.recs), {"healthcheck", "putitem", "getitemstatus", "deleteitem"})
+        self.assertEqual(set(self.recs),
+                         {"healthcheck", "putitem", "getitemstatus", "deleteitem",
+                          "creatething", "createthinglocation", "getlatest", "getlatestlocation"})
 
     @unittest.skipUnless(VALIDATOR.exists(), "nl-validator not built")
     def test_every_record_certifies(self):
@@ -82,6 +84,44 @@ class OpenApiIngestTest(unittest.TestCase):
         self.assertNotIn("secret", body)
         put = json.dumps(json.load(open(Path(self.tmp) / "body-putitem.json")))
         self.assertIn("{{secret:api_token}}", put)
+
+    def test_header_projection_from_documented_header(self):
+        # GW16: createThing's 201 documents a `Location` example -> a second record
+        # `createThingLocation : … -> Maybe string` over http_full — the call bound once,
+        # status-guarded to the documented 201, map_get of the LOWERCASE name. X-Request-Id
+        # declares no example -> refused (no `createthingxrequestid` record).
+        self.assertNotIn("createthingxrequestid", self.recs)
+        rec = json.load(open(self.recs["createthinglocation"]))
+        variants = {v["tag"]: v.get("type") for v in rec["signature"]["type"]["result"]["variants"]}
+        self.assertEqual(variants, {"Just": {"kind": "builtin", "name": "string"}, "None": None})
+        body = json.dumps(json.load(open(Path(self.tmp) / "body-createthinglocation.json")))
+        self.assertIn("http_full", body)
+        self.assertEqual(body.count("http_full"), 1, "the call must be bound once (let), not repeated")
+        self.assertIn('"location"', body)
+        self.assertNotIn('"Location"', body, "map_get key is the canonical lowercase name")
+        self.assertEqual(rec["examples"][0]["result"],
+                         {"kind": "variant", "tag": "Just",
+                          "payload": {"kind": "string", "value": "/things/th_44136fa355b3"}})
+        self.assertEqual(rec["signature"]["effects"], ["net.write"])
+        # getLatest's documented 307 Location projects too — a redirect target is header data.
+        latest = json.load(open(self.recs["getlatestlocation"]))
+        self.assertEqual(latest["signature"]["effects"], ["net.read"])
+        latest_body = json.dumps(json.load(open(Path(self.tmp) / "body-getlatestlocation.json")))
+        self.assertIn('"value": 307', latest_body)
+
+    @unittest.skipUnless(VALIDATOR.exists(), "nl-validator not built")
+    def test_header_projection_alpha_equivalent_to_hand_authored(self):
+        # The GW16 faithfulness result, one rung above GW7's byte-identity: the generated
+        # createThingLocation and the hand-authored GW14 create_thing differ only in a parameter
+        # name (`body` vs `v`), so their canonical NORMAL FORMS coincide — α-equivalence decided
+        # solver-free by `normalize`.
+        def nf(p):
+            r = subprocess.run([str(VALIDATOR), "normalize", "--hash", "--body", str(p)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return r.stdout.strip()
+        self.assertEqual(nf(Path(self.tmp) / "body-createthinglocation.json"),
+                         nf(EXAMPLES / "body-create-thing.json"))
 
 
 class SearchServiceTest(unittest.TestCase):
