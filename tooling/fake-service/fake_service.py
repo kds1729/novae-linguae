@@ -23,7 +23,17 @@ SECOND auth style, `X-Api-Key: <token>`, on two read endpoints:
 Both 400 on an unencoded character in the request target — so a worked example whose query
 value contains a space passes ONLY IF the client percent-encoded it (the url_encode gate).
 
-    python3 fake_service.py [--port 8878] [--token test-token]
+The GW13 surface adds a THIRD auth style, OAuth2 client-credentials:
+
+    POST /token             form grant_type=client_credentials + the fixed client id/secret
+                            (--oauth-client, default gw13-client:gw13-secret) -> 200
+                            {"access_token": "<derived token>"}; anything else 400/401
+    GET  /reports/summary   200 + a FIXED JSON body iff `Authorization: Bearer <that token>`
+
+The issued token is deliberately DISTINCT from --token, so a passing gate proves the client
+really exchanged credentials at /token rather than replaying the static bearer secret.
+
+    python3 fake_service.py [--port 8878] [--token test-token] [--oauth-client id:secret]
 """
 
 import argparse
@@ -34,6 +44,11 @@ from urllib.parse import parse_qs, urlparse
 class Handler(BaseHTTPRequestHandler):
     store = {}
     token = "test-token"
+    oauth_client = ("gw13-client", "gw13-secret")
+
+    @property
+    def oauth_token(self):
+        return f"{self.token}-oauth"
 
     def _reply(self, status, body=b""):
         self.send_response(status)
@@ -53,6 +68,23 @@ class Handler(BaseHTTPRequestHandler):
             return self.path[len("/items/"):]
         self._reply(404, b'{"error":"not found"}')
         return None
+
+    def do_POST(self):
+        # GW13: the OAuth2 client-credentials token endpoint. Form-encoded per RFC 6749 §4.4.
+        if self.path != "/token":
+            self._reply(404, b'{"error":"not found"}')
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+        if form.get("grant_type", [""])[0] != "client_credentials":
+            self._reply(400, b'{"error":"unsupported_grant_type"}')
+            return
+        cid, csec = self.oauth_client
+        if form.get("client_id", [""])[0] != cid or form.get("client_secret", [""])[0] != csec:
+            self._reply(401, b'{"error":"invalid_client"}')
+            return
+        body = ('{"access_token":"' + self.oauth_token + '","token_type":"Bearer"}').encode()
+        self._reply(200, body)
 
     def do_PUT(self):
         if not self._authed():
@@ -77,6 +109,14 @@ class Handler(BaseHTTPRequestHandler):
         # smallest operation, and the one an API-description generator emits with no auth header.
         if self.path == "/health":
             self._reply(200, b'{"status":"ok"}')
+            return
+        if self.path == "/reports/summary":
+            # GW13: protected by the /token-ISSUED bearer only — the static --token is refused
+            # here, so a 200 proves a real client-credentials exchange happened.
+            if self.headers.get("Authorization") != f"Bearer {self.oauth_token}":
+                self._reply(401, b'{"error":"unauthorized"}')
+                return
+            self._reply(200, b'{"status":"green","total":12}')
             return
         parsed = urlparse(self.path)
         if parsed.path in ("/search", "/version"):
@@ -133,8 +173,11 @@ def main():
     ap = argparse.ArgumentParser(description="Reference fake HTTP service for effectful exit gates.")
     ap.add_argument("--port", type=int, default=8878)
     ap.add_argument("--token", default="test-token")
+    ap.add_argument("--oauth-client", default="gw13-client:gw13-secret",
+                    help="the client-credentials pair /token accepts, as id:secret")
     args = ap.parse_args()
     Handler.token = args.token
+    Handler.oauth_client = tuple(args.oauth_client.split(":", 1))
     HTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
 
 

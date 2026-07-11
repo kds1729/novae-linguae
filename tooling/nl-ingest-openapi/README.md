@@ -26,6 +26,7 @@ description, not the generated client plumbing.
 | `requestBody` | a `body` `string` parameter (omitted for bodyless verbs) |
 | `security` (Bearer) | an `Authorization: Bearer {{secret:NAME}}` header; operation-level `security: []` = no auth |
 | `security` (**apiKey in header**, GW10) | a `<name>: {{secret:NAME}}` header (placeholder name defaults to the scheme key) |
+| `security` (**oauth2 clientCredentials**, GW13) | an `Authorization: Bearer {{oauth:NAME}}` header — the record names the identity symbolically; at run time `--oauth NAME=token_url|client_id|client_secret` exchanges credentials at the description's token endpoint inside the live effect (token never in the record or trace; replay needs no identity). Every other oauth2 flow refuses — interactive flows need a principal the effect boundary cannot supply |
 | **local `$ref`s** (GW10) | resolved (parameters, requestBodies, responses, security schemes, path-item-level shared parameters; cycle-bounded) |
 | documented `responses` | the status code the worked example asserts |
 | documented 2xx `application/json` **example** (GW11) | a second **body-projection record** `<opId>Body : … -> Maybe Json` — `parse_json` over the response body, worked example = `Just(<the documented payload>)` |

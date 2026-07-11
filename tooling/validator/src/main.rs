@@ -180,6 +180,12 @@ enum Commands {
         /// trace keeps the placeholder) and replay needs no secrets at all. Repeatable.
         #[arg(long = "secret")]
         secrets: Vec<String>,
+        /// Supply an OAuth2 client-credentials identity (`NAME=token_url|client_id|client_secret`)
+        /// for `{{oauth:NAME}}` placeholders in `http` header values. The access token is fetched
+        /// from the token endpoint inside the live effect boundary (cached per evaluation) — like a
+        /// secret it never enters a record or the trace, and replay needs no identity. Repeatable.
+        #[arg(long = "oauth")]
+        oauth: Vec<String>,
         /// Replay a recorded effect trace (a trace artifact from --trace-out, or a legacy bare
         /// JSON array): effectful builtins return their recorded results instead of performing
         /// real I/O — deterministic re-execution (P5).
@@ -219,6 +225,11 @@ enum Commands {
         /// examples are its own tests, and an under-declaring record fails them.) Repeatable.
         #[arg(long = "secret")]
         secrets: Vec<String>,
+        /// Supply an OAuth2 client-credentials identity (`NAME=token_url|client_id|client_secret`)
+        /// for `{{oauth:NAME}}` placeholders — needed only for LIVE example runs; a trace-carrying
+        /// example replays with no identity at all. Repeatable.
+        #[arg(long = "oauth")]
+        oauth: Vec<String>,
     },
     /// Statically infer a function record's effects from its `body` and check them against the
     /// declared `signature.effects` — the verification counterpart to runtime enforcement (no
@@ -503,6 +514,11 @@ enum Commands {
         /// values — effect-boundary configuration, never a language value, never in the trace.
         #[arg(long = "secret")]
         secret: Vec<String>,
+        /// Supply an OAuth2 client-credentials identity (`NAME=token_url|client_id|client_secret`)
+        /// for `{{oauth:NAME}}` placeholders — the same effect-boundary doctrine as --secret; the
+        /// fetched token never enters a record or the trace. Repeatable.
+        #[arg(long = "oauth")]
+        oauth: Vec<String>,
         /// Where to write the recorded trace artifact when the reply carries an `observed` claim
         /// (an effectful fulfilment). The claim references the trace by `trc_…` content-address;
         /// the artifact itself must accompany the assert or no receiver can replay-verify it.
@@ -571,6 +587,10 @@ enum Commands {
         /// values — effect-boundary configuration, never a language value, never in the trace.
         #[arg(long = "secret")]
         secret: Vec<String>,
+        /// Supply an OAuth2 client-credentials identity (`NAME=token_url|client_id|client_secret`)
+        /// for `{{oauth:NAME}}` placeholders — same doctrine as --secret. Repeatable.
+        #[arg(long = "oauth")]
+        oauth: Vec<String>,
     },
     /// Verify a Nova Locutio `assert` by RE-RUNNING its `predicate` claim against the commons:
     /// resolve the claim's content-addressed function(s) from `--records` and evaluate it. The
@@ -597,6 +617,11 @@ enum Commands {
         /// values, so a granted re-run can authenticate with the verifier's OWN credentials.
         #[arg(long = "secret")]
         secret: Vec<String>,
+        /// Supply an OAuth2 client-credentials identity (`NAME=token_url|client_id|client_secret`)
+        /// so a granted LIVE re-run can authenticate as the verifier's OWN identity. An `observed`
+        /// claim replays from its trace and needs none. Repeatable.
+        #[arg(long = "oauth")]
+        oauth: Vec<String>,
     },
     /// Verify a delegation chain (spec/trust-model.md): can `--grantee` wield `--capability` by a chain
     /// of signed `delegate` tokens back to a recognized `--root`? Checks every token's signature,
@@ -772,6 +797,30 @@ fn parse_secrets(raw: &[String]) -> Result<Vec<(String, String)>> {
         .collect()
 }
 
+/// Parse repeated `--oauth NAME=token_url|client_id|client_secret` flags (client-credentials
+/// identities for `{{oauth:NAME}}` placeholders). `|` separates the three parts — it cannot
+/// appear in a URL authority/path or a sane client credential; the secret may contain `=`.
+fn parse_oauth(raw: &[String]) -> Result<Vec<(String, nl_validator::OAuthConfig)>> {
+    raw.iter()
+        .map(|s| {
+            let (name, rest) = s
+                .split_once('=')
+                .ok_or_else(|| anyhow!("--oauth expects NAME=token_url|client_id|client_secret, got `{s}`"))?;
+            let mut parts = rest.splitn(3, '|');
+            match (parts.next(), parts.next(), parts.next()) {
+                (Some(url), Some(id), Some(secret)) if !url.is_empty() && !id.is_empty() => {
+                    Ok((name.to_string(), nl_validator::OAuthConfig {
+                        token_url: url.to_string(),
+                        client_id: id.to_string(),
+                        client_secret: secret.to_string(),
+                    }))
+                }
+                _ => Err(anyhow!("--oauth expects NAME=token_url|client_id|client_secret, got `{s}`")),
+            }
+        })
+        .collect()
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let (result, print_ok) = match cli.command {
@@ -791,19 +840,21 @@ fn main() -> ExitCode {
         Commands::CheckProperties { record, body, generate, cases } => {
             (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases)), true)
         }
-        Commands::Eval { body, args, grants, secrets, replay, trace_out } => {
-            match parse_secrets(&secrets) {
-                Ok(s) => {
+        Commands::Eval { body, args, grants, secrets, oauth, replay, trace_out } => {
+            match parse_secrets(&secrets).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
+                Ok((s, o)) => {
                     nl_validator::set_effect_secrets(s);
+                    nl_validator::set_effect_oauth(o);
                     (cmd_eval(&body, &args, &grants, replay.as_ref(), trace_out.as_ref()), false)
                 }
                 Err(e) => (Err(e), false),
             }
         }
-        Commands::Run { record, body, records, secrets } => {
-            match parse_secrets(&secrets) {
-                Ok(s) => {
+        Commands::Run { record, body, records, secrets, oauth } => {
+            match parse_secrets(&secrets).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
+                Ok((s, o)) => {
                     nl_validator::set_effect_secrets(s);
+                    nl_validator::set_effect_oauth(o);
                     (cmd_run(&record, body.as_ref(), records.as_ref()), false)
                 }
                 Err(e) => (Err(e), false),
@@ -822,11 +873,12 @@ fn main() -> ExitCode {
         Commands::AttestWeights { record, eval, results, sign, timestamp } => {
             (cmd_attest_weights(&record, &eval, &results, &sign, timestamp.as_deref()), false)
         }
-        Commands::Respond { request, records, seed, timestamp, grant, secret, trace_out } => {
+        Commands::Respond { request, records, seed, timestamp, grant, secret, oauth, trace_out } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
-            match parse_secrets(&secret) {
-                Ok(s) => {
+            match parse_secrets(&secret).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
+                Ok((s, o)) => {
                     nl_validator::set_effect_secrets(s);
+                    nl_validator::set_effect_oauth(o);
                     (cmd_respond(&request, &records, &seed, timestamp.as_deref(), trace_out.as_ref()), false)
                 }
                 Err(e) => (Err(e), false),
@@ -842,11 +894,12 @@ fn main() -> ExitCode {
         }
         Commands::Cluster { records, solver } => (cmd_cluster(&records, &solver), false),
         Commands::Normalize { body, hash } => (cmd_normalize(&body, hash), false),
-        Commands::VerifyClaim { assert, records, node, grant, secret } => {
+        Commands::VerifyClaim { assert, records, node, grant, secret, oauth } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
-            match parse_secrets(&secret) {
-                Ok(s) => {
+            match parse_secrets(&secret).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
+                Ok((s, o)) => {
                     nl_validator::set_effect_secrets(s);
+                    nl_validator::set_effect_oauth(o);
                     (cmd_verify_claim(&assert, records.as_ref(), node.as_deref()), false)
                 }
                 Err(e) => (Err(e), false),
@@ -864,12 +917,13 @@ fn main() -> ExitCode {
         Commands::Authorize { policy, capability, grantee, delegations, at } => {
             (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
-        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, grant, secret } => {
+        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, grant, secret, oauth } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
-            match parse_secrets(&secret) {
+            match parse_secrets(&secret).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
                 Err(e) => (Err(e), false),
-                Ok(s) => {
+                Ok((s, o)) => {
                     nl_validator::set_effect_secrets(s);
+                    nl_validator::set_effect_oauth(o);
                     if verify {
                         (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified), false)
                     } else {

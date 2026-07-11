@@ -270,7 +270,16 @@ the goal over a commons containing a prior `double_then_add` composite (whose bo
   placeholder naming an unsupplied secret is refused by name — sending placeholder text as a
   credential would be a silent auth failure. A verifier re-running an authenticated claim under
   grants authenticates with its OWN `--secret` values — the claim names *what* to authenticate as
-  (symbolically), never the credential itself.
+  (symbolically), never the credential itself. **OAuth2 rides the same doctrine (pulled by GW13):**
+  a `{{oauth:NAME}}` header placeholder names a **client-credentials identity** symbolically; the
+  operator supplies `--oauth NAME=token_url|client_id|client_secret`, and the access token is
+  fetched from the token endpoint *inside the live effect boundary* (cached per evaluation) — like
+  a secret it never exists as a language value, never enters a record, and never enters the trace,
+  so replay needs no identity at all. The token-endpoint round-trip is credential *machinery*, not
+  body semantics — untraced for the same reason a TLS handshake is, and explicitly operator-opted
+  (`--oauth` names the endpoint). Client-credentials is deliberately the ONLY OAuth2 flow carried:
+  every other flow needs an interactive principal the effect boundary cannot supply, so a
+  description demanding one refuses honestly.
   **Effectful asserts are observations — and now carry their observations (GW11).** `eq(fetch(url),
   result)` is not a stably re-runnable equation, so a fulfilment that performed effects emits an
   **`observed` claim** (claim-expression.schema.json): the same predicate, conditioned on the run's

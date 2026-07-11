@@ -16,7 +16,7 @@
 //! tags. `field`/record and `tuple` are supported. Effects are not modelled — bodies that would
 //! perform I/O are out of scope for this pure evaluator.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
 use serde_json::{json, Value as J};
 use std::cell::RefCell;
@@ -74,6 +74,26 @@ struct EffectState {
     /// substituted from here at the effect boundary — the secret value never exists as a language
     /// value, never enters a record, and never enters the trace (the trace keeps the placeholder).
     secrets: std::collections::HashMap<String, String>,
+    /// Operator-supplied OAuth2 client-credentials identities (GW13). A `{{oauth:NAME}}` placeholder
+    /// in an `http` header value resolves to a live access token: fetched from the identity's token
+    /// endpoint with its client credentials INSIDE the live effect boundary, cached per evaluation.
+    /// Like a secret, the token never exists as a language value, never enters a record, and never
+    /// enters the trace — replay needs no identity at all.
+    oauth: std::collections::HashMap<String, OAuthConfig>,
+    /// Per-evaluation token cache: one token fetch per identity per evaluation.
+    oauth_tokens: std::collections::HashMap<String, String>,
+}
+
+/// An OAuth2 **client-credentials** identity (`--oauth NAME=token_url|client_id|client_secret`).
+/// The one grant type that is pure machine-to-machine: no browser, no user, no redirect — the
+/// token endpoint exchanges the client credentials for a bearer token directly, which is why it is
+/// the only OAuth2 flow inside the effect-boundary credentials doctrine (the others need an
+/// interactive principal the boundary cannot supply).
+#[derive(Clone)]
+pub struct OAuthConfig {
+    pub token_url: String,
+    pub client_id: String,
+    pub client_secret: String,
 }
 
 impl EffectState {
@@ -84,6 +104,8 @@ impl EffectState {
             replay: None,
             rng: 0x1234_5678_9abc_def0,
             secrets: std::collections::HashMap::new(),
+            oauth: std::collections::HashMap::new(),
+            oauth_tokens: std::collections::HashMap::new(),
         }
     }
 }
@@ -133,6 +155,79 @@ pub fn effect_replay_remaining() -> Option<usize> {
 /// the wire.
 pub fn set_effect_secrets<I: IntoIterator<Item = (String, String)>>(secrets: I) {
     EFFECTS.with(|e| e.borrow_mut().secrets = secrets.into_iter().collect());
+}
+
+/// Install the operator's OAuth2 client-credentials identities (`--oauth NAME=token_url|id|secret`).
+/// Clears the per-evaluation token cache — a fresh evaluation authenticates afresh.
+pub fn set_effect_oauth<I: IntoIterator<Item = (String, OAuthConfig)>>(identities: I) {
+    EFFECTS.with(|e| {
+        let mut e = e.borrow_mut();
+        e.oauth = identities.into_iter().collect();
+        e.oauth_tokens.clear();
+    });
+}
+
+/// Resolve a `{{oauth:NAME}}` placeholder to a live access token: the cached one, or a fresh
+/// client-credentials exchange against the identity's token endpoint (RFC 6749 §4.4 —
+/// `grant_type=client_credentials`, form-encoded, `access_token` out of the JSON response).
+/// The token-endpoint round-trip is credential MACHINERY, not body semantics: it happens only
+/// inside a live effect (replay never gets here), it is not a traced observation (exactly like
+/// the TLS handshake under a net effect), and the operator supplied the endpoint explicitly —
+/// `--oauth` IS the opt-in for that fetch.
+fn oauth_token(name: &str) -> Result<String> {
+    // Short borrows only: the token fetch must not hold the sandbox RefCell across real I/O.
+    let cached = EFFECTS.with(|e| e.borrow().oauth_tokens.get(name).cloned());
+    if let Some(tok) = cached {
+        return Ok(tok);
+    }
+    let cfg = EFFECTS.with(|e| e.borrow().oauth.get(name).cloned());
+    let Some(cfg) = cfg else {
+        bail!("oauth identity `{name}` is not supplied (pass --oauth {name}=token_url|client_id|client_secret)");
+    };
+    let form = format!(
+        "grant_type=client_credentials&client_id={}&client_secret={}",
+        pct_encode(&cfg.client_id),
+        pct_encode(&cfg.client_secret)
+    );
+    let headers = vec![("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string())];
+    let (status, body) = http_roundtrip("POST", &cfg.token_url, &headers, Some(&form))
+        .with_context(|| format!("oauth token exchange for `{name}` at {}", cfg.token_url))?;
+    if status != 200 {
+        bail!("oauth token endpoint for `{name}` answered {status}: {}", &body[..body.len().min(200)]);
+    }
+    let parsed: J = serde_json::from_str(&body)
+        .map_err(|e| anyhow!("oauth token endpoint for `{name}` returned non-JSON: {e}"))?;
+    let token = parsed
+        .get("access_token")
+        .and_then(|t| t.as_str())
+        .ok_or_else(|| anyhow!("oauth token response for `{name}` has no string `access_token`"))?
+        .to_string();
+    EFFECTS.with(|e| {
+        e.borrow_mut().oauth_tokens.insert(name.to_string(), token.clone());
+    });
+    Ok(token)
+}
+
+/// Substitute every `{{oauth:NAME}}` placeholder in `value` with a live access token (see
+/// [`oauth_token`]). Same honesty as secrets: an unsupplied identity is refused by name.
+fn substitute_oauth(value: &str) -> Result<String> {
+    const MARK: &str = "{{oauth:";
+    if !value.contains(MARK) {
+        return Ok(value.to_string());
+    }
+    let mut out = String::new();
+    let mut rest = value;
+    while let Some(start) = rest.find(MARK) {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + MARK.len()..];
+        let Some(end) = after.find("}}") else {
+            bail!("unterminated {{{{oauth:...}}}} placeholder in header value");
+        };
+        out.push_str(&oauth_token(&after[..end])?);
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 /// Substitute every `{{secret:NAME}}` placeholder in `value` from the installed secrets. A
@@ -455,6 +550,20 @@ pub(crate) fn url_host(url: &str) -> Result<String> {
     let authority = rest.split('/').next().unwrap_or(rest);
     let host = authority.rsplit_once(':').map_or(authority, |(h, _)| h);
     Ok(host.to_string())
+}
+
+/// RFC 3986 strict percent-encoding: unreserved characters (ALPHA / DIGIT / - . _ ~) pass, every
+/// other UTF-8 byte becomes %XX uppercase hex. Backs the `url_encode` builtin (GW10 — raw
+/// concatenation of caller data into a URL is unsound) and the oauth client-credentials form body.
+pub(crate) fn pct_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 /// A minimal, dependency-free HTTP/1.1 request over a raw TCP socket — `https://` via
@@ -1102,19 +1211,7 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
         // every other UTF-8 BYTE becomes %XX (uppercase hex). Total and deterministic — the
         // strictest form, safe in any URL component. GW10 pulled it: a query string built by
         // str_concat over a raw value is UNSOUND (a space or `&` changes the request).
-        "url_encode" => {
-            let s = as_str(&a[0])?;
-            let mut out = String::with_capacity(s.len());
-            for b in s.bytes() {
-                match b {
-                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                        out.push(b as char)
-                    }
-                    _ => out.push_str(&format!("%{b:02X}")),
-                }
-            }
-            Val::Str(out)
-        }
+        "url_encode" => Val::Str(pct_encode(&as_str(&a[0])?)),
         "str_split" => {
             let sep = as_str(&a[0])?;
             let s = as_str(&a[1])?;
@@ -1307,7 +1404,9 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             effect_op_at(effect, Some(&host), detail, move || {
                 let mut real = Vec::with_capacity(symbolic.len());
                 for (k, v) in &symbolic {
-                    real.push((k.clone(), substitute_secrets(v)?));
+                    // Secrets first, then oauth: both placeholder families resolve only inside
+                    // the live effect — the trace keeps the symbolic form for both.
+                    real.push((k.clone(), substitute_oauth(&substitute_secrets(v)?)?));
                 }
                 let (status, resp_body) = http_roundtrip(&method, &url, &real, Some(&body))?;
                 let mut rec = BTreeMap::new();
@@ -2433,6 +2532,98 @@ mod tests {
         clear_effects();
         set_effect_replay(vec![json!({ "effect": "net.read", "detail": { "url": "http://x" }, "result": s("BODY") })]);
         assert_eq!(eval_body(&get_body, &[s("http://anything")]).unwrap(), s("BODY"));
+        clear_effects();
+    }
+
+    #[test]
+    fn http_oauth_placeholder_exchanges_and_caches_at_the_boundary() {
+        // GW13: `{{oauth:NAME}}` resolves to a live client-credentials token — fetched from the
+        // identity's token endpoint inside the live effect, cached per evaluation, symbolic in the
+        // trace, and never needed on replay. One local listener plays token endpoint AND api:
+        // exactly ONE token exchange must occur across two api calls (the cache), so it accepts
+        // three connections total.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut transcripts = Vec::new();
+            for i in 0..3 {
+                let (mut conn, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let mut req = Vec::new();
+                loop {
+                    let n = std::io::Read::read(&mut conn, &mut buf).unwrap();
+                    req.extend_from_slice(&buf[..n]);
+                    if n == 0 {
+                        break;
+                    }
+                    // Headers seen; read the body per Content-Length if present.
+                    if let Some(pos) = req.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&req[..pos]).into_owned();
+                        let want: usize = head
+                            .lines()
+                            .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap()))
+                            .unwrap_or(0);
+                        if req.len() >= pos + 4 + want {
+                            break;
+                        }
+                    }
+                }
+                let text = String::from_utf8_lossy(&req).into_owned();
+                let reply: &[u8] = if i == 0 {
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 28\r\n\r\n{\"access_token\":\"tok-abc123\"}"
+                } else {
+                    b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n"
+                };
+                std::io::Write::write_all(&mut conn, reply).unwrap();
+                transcripts.push(text);
+            }
+            transcripts
+        });
+
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+        let http_body = json!({ "kind": "lambda",
+            "params": [{ "name": "m" }, { "name": "u" }, { "name": "h" }, { "name": "b" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "http" },
+                      "args": [{ "kind": "var", "name": "m" }, { "kind": "var", "name": "u" },
+                               { "kind": "var", "name": "h" }, { "kind": "var", "name": "b" }] } });
+        let headers = json!({ "kind": "map", "entries": [
+            { "key": "Authorization", "value": { "kind": "string", "value": "Bearer {{oauth:svc}}" } }] });
+        set_effect_grants(vec!["net.read".to_string()]);
+        super::set_effect_oauth(vec![("svc".to_string(), super::OAuthConfig {
+            token_url: format!("http://127.0.0.1:{}/token", addr.port()),
+            client_id: "client&id".to_string(), // reserved chars must be form-encoded
+            client_secret: "s=cr/t".to_string(),
+        })]);
+        let url = format!("http://127.0.0.1:{}/api", addr.port());
+        let out = eval_body(&http_body, &[s("GET"), s(&url), headers.clone(), s("")]).unwrap();
+        assert_eq!(out.pointer("/fields/1/value/value").and_then(|v| v.as_i64()), Some(204));
+        // Second call: served from the token cache — no second exchange.
+        let out2 = eval_body(&http_body, &[s("GET"), s(&url), headers, s("")]).unwrap();
+        assert_eq!(out2.pointer("/fields/1/value/value").and_then(|v| v.as_i64()), Some(204));
+
+        let trace = take_effect_trace();
+        clear_effects();
+        let trace_text = serde_json::Value::Array(trace.clone()).to_string();
+        assert!(trace_text.contains("{{oauth:svc}}"), "trace keeps the placeholder: {trace_text}");
+        assert!(!trace_text.contains("tok-abc123"), "the token must NOT enter the trace");
+        assert_eq!(trace.len(), 2, "the token exchange is credential machinery, not a traced effect");
+
+        let transcripts = server.join().unwrap();
+        assert!(transcripts[0].contains("POST /token"), "{}", transcripts[0]);
+        assert!(transcripts[0].contains("grant_type=client_credentials"), "{}", transcripts[0]);
+        assert!(transcripts[0].contains("client_id=client%26id"), "form-encoded id: {}", transcripts[0]);
+        assert!(transcripts[0].contains("client_secret=s%3Dcr%2Ft"), "form-encoded secret: {}", transcripts[0]);
+        assert!(transcripts[1].contains("Authorization: Bearer tok-abc123"), "{}", transcripts[1]);
+        assert!(transcripts[2].contains("Authorization: Bearer tok-abc123"), "{}", transcripts[2]);
+
+        // Unsupplied identity: refused by name. Replay: the recorded result comes back with NO
+        // identity installed at all (the trace is sufficient — credentials never needed again).
+        let missing = super::substitute_oauth("{{oauth:absent}}").unwrap_err().to_string();
+        assert!(missing.contains("absent"), "{missing}");
+        set_effect_replay(trace);
+        let replayed = eval_body(&http_body, &[s("GET"), s("http://gone.example/api"),
+            json!({ "kind": "map", "entries": [] }), s("")]).unwrap();
+        assert_eq!(replayed.pointer("/fields/1/value/value").and_then(|v| v.as_i64()), Some(204));
         clear_effects();
     }
 

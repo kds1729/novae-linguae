@@ -192,6 +192,42 @@ class SearchServiceTest(unittest.TestCase):
         self.assertNotIn("$ref", self._body("searchitems"))
 
 
+class OAuthServiceTest(unittest.TestCase):
+    """The GW13 surface: OAuth2 client-credentials over the reports-service description."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="nl-openapi-gw13-")
+        try:
+            oi.main([str(_ADAPTER / "examples" / "reports-service.openapi.json"), "--out", cls.tmp])
+        except SystemExit:
+            pass
+        cls.recs = {p.name.replace(".v0.2.json", ""): p
+                    for p in Path(cls.tmp).glob("*.v0.2.json")}
+
+    def test_client_credentials_generates_interactive_refuses(self):
+        # getReportSummary (clientCredentials) compiles — plus its documented-example projection;
+        # getMyReport (authorizationCode) refuses: an interactive flow needs a principal the
+        # effect boundary cannot supply.
+        self.assertEqual(set(self.recs), {"getreportsummary", "getreportsummarybody"})
+
+    def test_oauth_placeholder_is_symbolic(self):
+        # The record names the identity {{oauth:<scheme-key>}} — no token URL, no credential,
+        # nothing to leak: the description's tokenUrl is run-time operator configuration.
+        body = json.dumps(json.load(open(Path(self.tmp) / "body-getreportsummary.json")))
+        self.assertIn("Bearer {{oauth:reports_auth}}", body)
+        self.assertNotIn("{{secret:", body)
+        self.assertNotIn("/token", body)
+
+    @unittest.skipUnless(VALIDATOR.exists(), "nl-validator not built")
+    def test_every_record_certifies(self):
+        for name, rp in self.recs.items():
+            bp = Path(self.tmp) / f"body-{name}.json"
+            r = subprocess.run([str(VALIDATOR), "certify", str(rp), "--body", str(bp),
+                                "--records", self.tmp], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, f"{name} did not certify:\n{r.stdout}\n{r.stderr}")
+
+
 class RefusalBoundaryTest(unittest.TestCase):
     """Inline descriptions locking each documented refusal."""
 

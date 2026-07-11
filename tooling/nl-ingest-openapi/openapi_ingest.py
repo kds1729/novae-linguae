@@ -185,6 +185,18 @@ def resolve_auth(spec, op, global_security, secret_override):
     if kind == "http":
         return ("refuse", f"http `{scheme.get('scheme')}` auth — needs an encoding the language "
                           "does not have (no base64 builtin)")
+    if kind == "oauth2":
+        # GW13: the CLIENT-CREDENTIALS flow is pure machine-to-machine — the one OAuth2 flow the
+        # effect-boundary credentials doctrine can carry. The record's header names the identity
+        # SYMBOLICALLY ({{oauth:NAME}}); the operator supplies token_url|client_id|client_secret
+        # at run time (`--oauth`), the token is fetched inside the live effect and never enters
+        # the record or the trace. Interactive flows (a user, a browser, a redirect) refuse.
+        flows = scheme.get("flows") or {}
+        if "clientCredentials" in flows:
+            return ("header", ("Authorization", f"Bearer {{{{oauth:{name}}}}}"))
+        other = ", ".join(sorted(flows)) or "none declared"
+        return ("refuse", f"oauth2 without a clientCredentials flow ({other}) — interactive flows "
+                          "need a principal the effect boundary cannot supply")
     return ("refuse", f"`{kind}` security — flow-based auth is out of the description subset")
 
 
@@ -446,7 +458,8 @@ def certify(record_path, body_path, out_dir):
     return r.returncode == 0, r.stdout.strip().splitlines()[-1] if r.stdout else r.stderr.strip()
 
 
-def attach_example_traces(record_path, body_path, record, out_dir, secret_names, token):
+def attach_example_traces(record_path, body_path, record, out_dir, secret_names, token,
+                          oauth_ids=()):
     """The live gate for an EFFECTFUL record, one execution per example (GW12): run each worked
     example once via `eval --trace-out` (grants = the record's declared effects, secrets supplied),
     require the live result to equal the documented one, and attach the observed trace to the
@@ -470,6 +483,8 @@ def attach_example_traces(record_path, body_path, record, out_dir, secret_names,
             cmd += ["--grant", e]
         for n in secret_names:
             cmd += ["--secret", f"{n}={token}"]
+        for name, cfg in oauth_ids:
+            cmd += ["--oauth", f"{name}={cfg}"]
         cmd += ["--trace-out", trace_path]
         r = subprocess.run(cmd, capture_output=True, text=True)
         for p in argfiles:
@@ -516,6 +531,9 @@ def main(argv=None):
     ap.add_argument("--verify-against", default=None,
                     help="run each record's examples against this live base URL (a fake or real service)")
     ap.add_argument("--token", default="test-token", help="Bearer token for --verify-against")
+    ap.add_argument("--oauth-client", default="gw13-client:gw13-secret",
+                    help="client-credentials pair (id:secret) for oauth2 schemes during --verify-against; "
+                         "the tokenUrl comes from the description itself")
     args = ap.parse_args(argv)
 
     spec = json.load(open(args.spec))
@@ -524,6 +542,17 @@ def main(argv=None):
     schemes = (spec.get("components") or {}).get("securitySchemes") or {}
     secret_name = args.secret_name
     secret_names = [secret_name] if secret_name else (list(schemes) or ["api_token"])
+    # OAuth2 client-credentials identities for the live gate: identity name = the scheme key
+    # (matching the {{oauth:<key>}} the records carry), tokenUrl from the DESCRIPTION itself,
+    # client id/secret from the operator (--oauth-client) — the same division as --secret.
+    cid, _, csec = args.oauth_client.partition(":")
+    oauth_ids = []
+    for key, sch in schemes.items():
+        sch = deref(spec, sch)
+        if isinstance(sch, dict) and sch.get("type") == "oauth2":
+            cc = (sch.get("flows") or {}).get("clientCredentials") or {}
+            if cc.get("tokenUrl"):
+                oauth_ids.append((secret_name or key, f"{cc['tokenUrl']}|{cid}|{csec}"))
     os.makedirs(args.out, exist_ok=True)
 
     ops, skipped = walk(spec, secret_name)
@@ -552,7 +581,8 @@ def main(argv=None):
             # GW12: the live gate for an effectful record IS the trace capture — each example runs
             # exactly once (grants + secrets), must reproduce its documented result, and its
             # observed trace is attached by trc_… address (re-addressing the record).
-            att_ok, att_msg = attach_example_traces(rp, bp, record, args.out, secret_names, args.token)
+            att_ok, att_msg = attach_example_traces(rp, bp, record, args.out, secret_names, args.token,
+                                                    oauth_ids=oauth_ids)
             if not att_ok:
                 ok = False
                 print(f"{line}  live-gate=FAIL: {att_msg}")

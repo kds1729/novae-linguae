@@ -444,6 +444,27 @@ join-encoded list; corpus19 = 3,195 specs, 0 drops; ftdata19 staged). Residual d
 depth — response headers/redirects, multipart, non-local `$ref`s, oauth flows — stays refused,
 awaiting a workflow.
 
+**GW13 — OAuth2 client-credentials (2026-07-11, same day): the largest refused auth style joins
+the effect-boundary doctrine.** Real machine-to-machine APIs overwhelmingly authenticate by
+OAuth2 client-credentials, and GW10 refused all of OAuth2. The apparent collision — a
+runtime-fetched token is *data*, and credentials must never be data — dissolves the same way
+secrets did: the record carries only a **symbolic identity** (`Authorization: Bearer
+{{oauth:NAME}}`), the operator supplies `--oauth NAME=token_url|client_id|client_secret`
+(available on eval/run/respond/orchestrate/verify-claim), and the token exchange (RFC 6749 §4.4,
+form-encoded, values percent-encoded by the same RFC 3986 encoder behind `url_encode`) happens
+**inside the live effect boundary** — cached per evaluation, never a language value, never in a
+record, never in a trace, so replay needs no identity at all. The token-endpoint round-trip is
+credential *machinery*, untraced for the same reason a TLS handshake is, and operator-opted by
+naming the endpoint. **Client-credentials is deliberately the only flow carried**: every other
+OAuth2 flow (authorizationCode, implicit, password) needs an interactive principal the effect
+boundary cannot supply — the adapter refuses them by name, tested. Exit gate: the fake service
+grew a `/token` endpoint whose issued bearer is DISTINCT from the static one (a passing gate
+proves a real exchange happened, not a replayed secret); the reports-service description compiles
+`getReportSummary` + its body projection, both certify, pass the live gate with traces attached,
+and replay offline with no service, no secrets, and no identity — while the `authorizationCode`
+operation refuses honestly. Composes with GW11/GW12 out of the box: the oauth-authed record's
+observed asserts and trace-carried examples are third-party-checkable like any other.
+
 **GW12 — replay-checkable examples (2026-07-11, same day): the observed-claim move, applied to
 records.** GW11 made effectful *asserts* third-party-checkable; a record's worked *examples* had
 the identical problem — an effectful example could only be checked live (grants + secrets + a

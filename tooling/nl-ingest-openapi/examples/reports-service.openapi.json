@@ -1,0 +1,62 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Reports Service",
+    "version": "1.0.0",
+    "description": "The GW13 reference surface: OAuth2 client-credentials auth. GET /reports/summary is protected by a bearer token issued at /token — the description carries the tokenUrl, the record carries only the symbolic {{oauth:...}} identity."
+  },
+  "servers": [{ "url": "http://127.0.0.1:8878" }],
+  "components": {
+    "securitySchemes": {
+      "reports_auth": {
+        "type": "oauth2",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "http://127.0.0.1:8878/token",
+            "scopes": {}
+          }
+        }
+      },
+      "user_auth": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "http://127.0.0.1:8878/authorize",
+            "tokenUrl": "http://127.0.0.1:8878/token",
+            "scopes": {}
+          }
+        }
+      }
+    }
+  },
+  "security": [{ "reports_auth": [] }],
+  "paths": {
+    "/reports/summary": {
+      "get": {
+        "operationId": "getReportSummary",
+        "summary": "The fixed daily summary report.",
+        "responses": {
+          "200": {
+            "description": "OK — the summary.",
+            "content": {
+              "application/json": {
+                "example": { "status": "green", "total": 12 }
+              }
+            }
+          },
+          "401": { "description": "Missing or invalid bearer token." }
+        }
+      }
+    },
+    "/reports/mine": {
+      "get": {
+        "operationId": "getMyReport",
+        "summary": "A per-user report — needs an interactive OAuth2 flow, so it must refuse.",
+        "security": [{ "user_auth": [] }],
+        "responses": {
+          "200": { "description": "OK." }
+        }
+      }
+    }
+  }
+}
