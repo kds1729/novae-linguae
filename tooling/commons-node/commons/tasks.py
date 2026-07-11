@@ -30,12 +30,19 @@ def _get_json(url, timeout=30):
 
 @shared_task
 def replicate_peer(peer):
-    """Mirror up to COMMONS_REPLICATE_BATCH new verified records from one peer. Returns a summary."""
+    """Mirror up to COMMONS_REPLICATE_BATCH new verified records from one peer. Returns a summary.
+
+    Failure semantics matter here (found by the first full production mirror, which silently
+    missed 12 records): a record that FAILS THE GATE (unverifiable, malformed, wrong address) is a
+    legitimate permanent skip — a bad peer must not be able to wedge the cursor. But a TRANSIENT
+    FETCH failure (timeout, connection reset mid-run) is not a judgment about the record; if the
+    durable cursor advanced past it, the record would be missed forever. So fetch failures stop
+    the run *without* committing the cursor past their page — the next interval retries them."""
     base = peer.rstrip("/")
     cursor_key = f"replicate_cursor:{base}"
     since = int(cache.get(cursor_key) or 0)
     remaining = settings.COMMONS_REPLICATE_BATCH
-    scanned = mirrored = 0
+    scanned = mirrored = fetch_failures = 0
 
     while remaining > 0:
         limit = min(settings.COMMONS_SYNC_PER_PEER_LIMIT, remaining)
@@ -44,12 +51,18 @@ def replicate_peer(peer):
         except Exception:
             break  # peer unreachable this run; cursor is preserved, retry next interval
         hashes = feed.get("hashes", []) or []
+        page_fetch_failed = False
         for h in hashes:
             scanned += 1
             if Record.objects.filter(hash=h).exists():
                 continue
             try:
                 raw = _get_json(f"{base}/v0/records/{h}")
+            except Exception:
+                page_fetch_failed = True  # transient — retry this page next run
+                fetch_failures += 1
+                continue
+            try:
                 kind, version, address = V.verify_record(raw)   # untrusted-peer admission gate
                 if address != h:
                     continue  # the peer served different content under this address — refuse it
@@ -58,13 +71,16 @@ def replicate_peer(peer):
                     mirrored += 1
             except Exception:
                 continue  # unverifiable / malformed / hash-mismatch — skip, do not trust the peer
+        if page_fetch_failed:
+            break  # do NOT commit the cursor past records we never actually saw
         since = int(feed.get("cursor", since) or since)
         cache.set(cursor_key, since, None)                      # durable cursor (no expiry)
         remaining -= len(hashes)
         if feed.get("complete") or not hashes:
             break
 
-    return {"peer": base, "scanned": scanned, "mirrored": mirrored, "cursor": since}
+    return {"peer": base, "scanned": scanned, "mirrored": mirrored,
+            "fetch_failures": fetch_failures, "cursor": since}
 
 
 @shared_task

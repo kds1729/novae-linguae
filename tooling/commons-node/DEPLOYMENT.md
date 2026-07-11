@@ -71,7 +71,14 @@ only thing that can run away. The content-addressed design makes egress unusuall
   SQLite is unchanged).
 - ✅ **Replication worker** + **async embedding** ([`commons/tasks.py`](commons/tasks.py)): Celery beat
   runs `replicate_all` (mirror verified records from `COMMONS_PEERS`) and `embed_pending` (backfill
-  embeddings, so publish never blocks on the model server).
+  embeddings, so publish never blocks on the model server). **Demonstrated against production**: a
+  fresh node with `COMMONS_PEERS=<the live node>` mirrored the full store (597 records across all
+  seven kinds) through the untrusted-peer gate, and both an `observed` claim (`verify-claim <msg>
+  --node <replica>`) and an effectful record's trace-carried examples then verified against the
+  REPLICA — a claim survives its origin node. Failure semantics (fixed by that first real mirror,
+  which silently missed 12 records): an *unverifiable* record is a permanent skip (a bad peer can't
+  wedge the cursor), but a *transient fetch failure* stops the run without committing the durable
+  cursor past its page — the next interval retries, so the mirror converges to complete.
 - CDN for `resolve`: `resolve` already emits `Cache-Control: public, max-age=…, immutable`; front it with
   any CDN at ~100% hit rate (off-box, so it also absorbs metered egress). No code change.
 

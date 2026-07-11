@@ -102,6 +102,49 @@ class CommonsProtocolTests(TestCase):
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertTrue(resp.json()["hash"].startswith("expr_"), resp.content)
 
+    def test_replicate_retries_transient_fetch_failures(self):
+        # The first full production mirror silently missed 12 records: a transient fetch failure
+        # was swallowed like a legitimate verification skip and the durable cursor advanced past
+        # it — never retried. Now a fetch failure stops the run WITHOUT committing the cursor
+        # (retry next interval), while an unverifiable record still skips permanently (a bad peer
+        # must not wedge the cursor).
+        from django.core.cache import cache
+
+        from . import tasks
+
+        peer = "https://peer.example"
+        cache.delete(f"replicate_cursor:{peer}")
+        rec = _load("map.json")
+        trace = _load("trace-greet.v0.1.json")
+        trace_addr = "trc_360f45009b20e152bd1489105fd95234da350d11c2341f308ef24d147a0bbd08"
+        flaky_calls = {"n": 0}
+
+        def fake_get(url, timeout=30):
+            if "/v0/sync" in url:
+                return {"hashes": [rec["hash"], trace_addr], "cursor": 2, "complete": True}
+            if rec["hash"] in url:
+                flaky_calls["n"] += 1
+                if flaky_calls["n"] == 1:
+                    raise OSError("connection reset (transient)")
+                return rec
+            if trace_addr in url:
+                return trace
+            raise AssertionError(f"unexpected fetch {url}")
+
+        with mock.patch.object(tasks, "_get_json", side_effect=fake_get):
+            first = tasks.replicate_peer(peer)
+            self.assertEqual(first["mirrored"], 1, first)          # the healthy record landed
+            self.assertEqual(first["fetch_failures"], 1, first)
+            self.assertEqual(int(cache.get(f"replicate_cursor:{peer}") or 0), 0,
+                             "cursor must not advance past a page with fetch failures")
+            second = tasks.replicate_peer(peer)
+            self.assertEqual(second["mirrored"], 1, second)        # the flaky record retried in
+            self.assertEqual(second["fetch_failures"], 0, second)
+            self.assertEqual(second["cursor"], 2)
+        self.assertTrue(Record.objects.filter(hash=rec["hash"]).exists())
+        self.assertTrue(Record.objects.filter(hash=trace_addr).exists())
+        cache.delete(f"replicate_cursor:{peer}")
+
     def test_resolve_returns_exact_record(self):
         rec = _load("map.json")
         self._publish(rec)
