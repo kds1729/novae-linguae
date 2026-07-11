@@ -1,0 +1,102 @@
+{
+ "schema_version": "0.2.0",
+ "hash": "fn_94434efc55f2574390f61488a0459e3cb984df3d2159ca000e19645676f13b4d",
+ "name_hints": [
+  "next_link",
+  "rel_next"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "kind": "apply"
+   }
+  },
+  "refinements": [],
+  "effects": [],
+  "capabilities": [],
+  "terminates": "always",
+  "complexity": "O(n)"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "</list?page=1>; rel=\"prev\", </list?page=3>; rel=\"next\""
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "/list?page=3"
+    }
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "</list?page=3>; rel=\"next\""
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "/list?page=3"
+    }
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "</list?page=2>; rel=\"prev\""
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": ""
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  }
+ ],
+ "intent_tags": [
+  "string",
+  "transform/parse"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_16f15cd7a8b18b93ed0dc5a05b09c56752962846baaa01bc4308592721fcb555"
+}

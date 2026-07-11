@@ -48,6 +48,16 @@ The GW14 surface (spec/expressiveness.md — response headers) is the piece the 
 A client that drops response headers cannot find a POSTed thing at all — the documented 200
 on the follow-up GET proves the Location header was read.
 
+The GW15 surface (pagination — a zero-pull: no new builtin, the Link header is DATA):
+
+    GET /list?page=N        three fixed pages (N in 1..3), unauthenticated; pages 1-2 carry an
+                            RFC 8288 `Link` header whose rel="next" names the following page —
+                            page 2's Link ALSO carries rel="prev" first, so a client must parse
+                            the header, not substring-match it; page 3 has prev but NO next, so
+                            a page-walk stops by absence, not by hitting a depth bound
+
+A client that cannot read the Link header sees one page and no way to the rest.
+
     python3 fake_service.py [--port 8878] [--token test-token] [--oauth-client id:secret]
 """
 
@@ -145,6 +155,28 @@ class Handler(BaseHTTPRequestHandler):
         # the method; the target is the unauthenticated liveness probe.
         if self.path == "/latest":
             self._reply(307, b"", headers=[("Location", "/health")])
+            return
+        # GW15: the paginated collection. Three fixed pages; the rel="next" Link is the ONLY
+        # route to the following page (a client that drops headers sees one page). Page 2's
+        # Link carries rel="prev" BEFORE rel="next", so the header must be parsed, and page 3
+        # has no next, so a page-walk terminates by absence.
+        if self.path == "/list" or self.path.startswith("/list?"):
+            qs = parse_qs(urlparse(self.path).query)
+            try:
+                page = int(qs.get("page", ["1"])[0])
+            except ValueError:
+                page = 0
+            bodies = {1: b'{"items":["a1","a2"]}', 2: b'{"items":["b1"]}', 3: b'{"items":["c1","c2","c3"]}'}
+            if page not in bodies:
+                self._reply(404, b'{"error":"no such page"}')
+                return
+            links = []
+            if page > 1:
+                links.append(f'</list?page={page - 1}>; rel="prev"')
+            if page < 3:
+                links.append(f'</list?page={page + 1}>; rel="next"')
+            headers = [("Link", ", ".join(links))] if links else []
+            self._reply(200, bodies[page], headers=headers)
             return
         if self.path.startswith("/things/"):
             if not self._authed():

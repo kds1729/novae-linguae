@@ -1,0 +1,90 @@
+{
+ "schema_version": "0.2.0",
+ "hash": "fn_a09bc79b2008db6e571f4ad10d6a004bd7a24510e66513890b1f2c39d9641aea",
+ "name_hints": [
+  "link_target",
+  "link_url"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "kind": "apply"
+   }
+  },
+  "refinements": [],
+  "effects": [],
+  "capabilities": [],
+  "terminates": "always",
+  "complexity": "O(n)"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "</list?page=3>; rel=\"next\""
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "/list?page=3"
+    }
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": " </list?page=1>; rel=\"prev\""
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "/list?page=1"
+    }
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "rel=\"next\" but no url"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  }
+ ],
+ "intent_tags": [
+  "string",
+  "transform/parse"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_e492059215f7f219c8497f91528148581a23e0a3e60da5e9dec6fe6a5e277d5a"
+}

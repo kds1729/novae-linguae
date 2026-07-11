@@ -1,0 +1,205 @@
+{
+ "schema_version": "0.2.0",
+ "hash": "fn_9ca283978bd5c43a3d8df0aa9a5239726161eae669621e8cb760c3441ae16613",
+ "name_hints": [
+  "next_of",
+  "next_page"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "fields": [
+      {
+       "name": "status",
+       "type": {
+        "kind": "builtin",
+        "name": "int"
+       }
+      },
+      {
+       "name": "headers",
+       "type": {
+        "args": [
+         {
+          "kind": "builtin",
+          "name": "string"
+         },
+         {
+          "kind": "builtin",
+          "name": "string"
+         }
+        ],
+        "ctor": {
+         "kind": "builtin",
+         "name": "Map"
+        },
+        "kind": "apply"
+       }
+      },
+      {
+       "name": "body",
+       "type": {
+        "kind": "builtin",
+        "name": "string"
+       }
+      }
+     ],
+     "kind": "record"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "kind": "apply"
+   }
+  },
+  "refinements": [],
+  "effects": [],
+  "capabilities": [],
+  "terminates": "always",
+  "complexity": "O(n)"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "record",
+     "fields": [
+      {
+       "name": "body",
+       "value": {
+        "kind": "string",
+        "value": "{\"items\":[\"b1\"]}"
+       }
+      },
+      {
+       "name": "headers",
+       "value": {
+        "kind": "map",
+        "entries": [
+         {
+          "key": "link",
+          "value": {
+           "kind": "string",
+           "value": "</list?page=1>; rel=\"prev\", </list?page=3>; rel=\"next\""
+          }
+         }
+        ]
+       }
+      },
+      {
+       "name": "status",
+       "value": {
+        "kind": "int",
+        "value": 200
+       }
+      }
+     ]
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "/list?page=3"
+    }
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "record",
+     "fields": [
+      {
+       "name": "body",
+       "value": {
+        "kind": "string",
+        "value": "{}"
+       }
+      },
+      {
+       "name": "headers",
+       "value": {
+        "kind": "map",
+        "entries": [
+         {
+          "key": "link",
+          "value": {
+           "kind": "string",
+           "value": "</list?page=2>; rel=\"prev\""
+          }
+         }
+        ]
+       }
+      },
+      {
+       "name": "status",
+       "value": {
+        "kind": "int",
+        "value": 200
+       }
+      }
+     ]
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "record",
+     "fields": [
+      {
+       "name": "body",
+       "value": {
+        "kind": "string",
+        "value": "{}"
+       }
+      },
+      {
+       "name": "headers",
+       "value": {
+        "kind": "map",
+        "entries": []
+       }
+      },
+      {
+       "name": "status",
+       "value": {
+        "kind": "int",
+        "value": 200
+       }
+      }
+     ]
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  }
+ ],
+ "intent_tags": [
+  "http",
+  "record",
+  "map",
+  "header"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_9f4a0439bedee3253b048cd11f111e22af66cfafb0f5847f7708e23d8a1bc0ff"
+}

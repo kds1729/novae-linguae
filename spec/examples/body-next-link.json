@@ -1,0 +1,149 @@
+{
+ "body": {
+  "body": {
+   "arms": [
+    {
+     "body": {
+      "kind": "variant",
+      "tag": "None"
+     },
+     "pattern": {
+      "kind": "lit",
+      "value": {
+       "kind": "bool",
+       "value": true
+      }
+     }
+    },
+    {
+     "body": {
+      "args": [
+       {
+        "args": [
+         {
+          "kind": "var",
+          "name": "nexts"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "head"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "kind": "lit",
+       "value": {
+        "kind": "fn_ref",
+        "target": "fn_a09bc79b2008db6e571f4ad10d6a004bd7a24510e66513890b1f2c39d9641aea"
+       }
+      },
+      "kind": "app"
+     },
+     "pattern": {
+      "kind": "lit",
+      "value": {
+       "kind": "bool",
+       "value": false
+      }
+     }
+    }
+   ],
+   "kind": "case",
+   "scrutinee": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "nexts"
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "null"
+    },
+    "kind": "app"
+   }
+  },
+  "kind": "let",
+  "name": "nexts",
+  "value": {
+   "args": [
+    {
+     "args": [
+      {
+       "kind": "var",
+       "name": "link"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "kind": "lit",
+        "value": {
+         "kind": "string",
+         "value": ","
+        }
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "str_split"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "body": {
+       "args": [
+        {
+         "kind": "var",
+         "name": "seg"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "kind": "lit",
+          "value": {
+           "kind": "string",
+           "value": "rel=\"next\""
+          }
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "str_contains"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      },
+      "kind": "lambda",
+      "params": [
+       {
+        "name": "seg"
+       }
+      ]
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "filter"
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "link"
+  }
+ ]
+}

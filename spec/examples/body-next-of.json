@@ -1,0 +1,78 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "v"
+      }
+     ],
+     "fn": {
+      "kind": "lit",
+      "value": {
+       "kind": "fn_ref",
+       "target": "fn_94434efc55f2574390f61488a0459e3cb984df3d2159ca000e19645676f13b4d"
+      }
+     },
+     "kind": "app"
+    },
+    "pattern": {
+     "kind": "variant",
+     "payload": {
+      "kind": "bind",
+      "name": "v"
+     },
+     "tag": "Just"
+    }
+   },
+   {
+    "body": {
+     "kind": "variant",
+     "tag": "None"
+    },
+    "pattern": {
+     "kind": "variant",
+     "tag": "None"
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "field",
+     "name": "headers",
+     "record": {
+      "kind": "var",
+      "name": "r"
+     }
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "lit",
+      "value": {
+       "kind": "string",
+       "value": "link"
+      }
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "map_get"
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "r"
+  }
+ ]
+}

@@ -1,0 +1,118 @@
+{
+ "schema_version": "0.2.0",
+ "hash": "fn_33bf5ff2122486fb680a1177d3236edf8e68c3905f92b3f021aa2004a163e2cf",
+ "name_hints": [
+  "fetch_pages",
+  "walk_pages",
+  "get_all_pages"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "List"
+    },
+    "kind": "apply"
+   }
+  },
+  "refinements": [],
+  "effects": [
+   "net.read"
+  ],
+  "capabilities": [],
+  "terminates": "always",
+  "complexity": "O(n)"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
+    },
+    {
+     "kind": "string",
+     "value": "/list?page=1"
+    },
+    {
+     "kind": "nat",
+     "value": 5
+    }
+   ],
+   "result": {
+    "kind": "list",
+    "elems": [
+     {
+      "kind": "string",
+      "value": "{\"items\":[\"a1\",\"a2\"]}"
+     },
+     {
+      "kind": "string",
+      "value": "{\"items\":[\"b1\"]}"
+     },
+     {
+      "kind": "string",
+      "value": "{\"items\":[\"c1\",\"c2\",\"c3\"]}"
+     }
+    ]
+   },
+   "trace": "trc_31206b0c2c5737ab0db493301feadab3b887abc3d19c67875abd6dd4f479cec5"
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
+    },
+    {
+     "kind": "string",
+     "value": "/list?page=1"
+    },
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "list",
+    "elems": [
+     {
+      "kind": "string",
+      "value": "{\"items\":[\"a1\",\"a2\"]}"
+     }
+    ]
+   },
+   "trace": "trc_5d2f72f13b9eae1e3f1105e6f6dd4c43e6bfda27c9c1f9d6b2f60c24d3a65771"
+  }
+ ],
+ "intent_tags": [
+  "io",
+  "io/network/http",
+  "query/pages"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_1852ae32901c259588ca8df205880b2054c1921affd02ccf0470b75250ca7a67"
+}

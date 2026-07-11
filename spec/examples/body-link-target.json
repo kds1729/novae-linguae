@@ -1,0 +1,194 @@
+{
+ "body": {
+  "body": {
+   "arms": [
+    {
+     "body": {
+      "kind": "variant",
+      "tag": "None"
+     },
+     "pattern": {
+      "kind": "lit",
+      "value": {
+       "kind": "bool",
+       "value": true
+      }
+     }
+    },
+    {
+     "body": {
+      "arms": [
+       {
+        "body": {
+         "kind": "variant",
+         "payload": {
+          "args": [
+           {
+            "args": [
+             {
+              "args": [
+               {
+                "kind": "var",
+                "name": "after"
+               }
+              ],
+              "fn": {
+               "kind": "var",
+               "name": "head"
+              },
+              "kind": "app"
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "lit",
+               "value": {
+                "kind": "string",
+                "value": ">"
+               }
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "str_split"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "head"
+          },
+          "kind": "app"
+         },
+         "tag": "Just"
+        },
+        "pattern": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": true
+         }
+        }
+       },
+       {
+        "body": {
+         "kind": "variant",
+         "tag": "None"
+        },
+        "pattern": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": false
+         }
+        }
+       }
+      ],
+      "kind": "case",
+      "scrutinee": {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "after"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "head"
+         },
+         "kind": "app"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "kind": "lit",
+          "value": {
+           "kind": "string",
+           "value": ">"
+          }
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "str_contains"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      }
+     },
+     "pattern": {
+      "kind": "lit",
+      "value": {
+       "kind": "bool",
+       "value": false
+      }
+     }
+    }
+   ],
+   "kind": "case",
+   "scrutinee": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "after"
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "null"
+    },
+    "kind": "app"
+   }
+  },
+  "kind": "let",
+  "name": "after",
+  "value": {
+   "args": [
+    {
+     "args": [
+      {
+       "kind": "var",
+       "name": "seg"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "kind": "lit",
+        "value": {
+         "kind": "string",
+         "value": "<"
+        }
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "str_split"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    }
+   ],
+   "fn": {
+    "kind": "var",
+    "name": "tail"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "seg"
+  }
+ ]
+}
