@@ -132,7 +132,14 @@ to use is the consumer's trust decision, not the order they came back in.) It th
 function's own
 declared property over the unbounded domain (don't trust the record's claim — re-prove it with the SMT
 + induction + lemma-discovery engine), then **apply** it and **re-verify** the result by re-running
-(principle 3). The transcript gains `trust` and `prove` steps between `ack` and `propose`. Worked: with
+(principle 3). The transcript gains `trust` and `prove` steps between `ack` and `propose`.
+The candidates are an **ordered list, not a single pick**: the argument-signature filter is coarse (two
+functions over the same argument types are indistinguishable to it), so a wrong first fit is expected —
+when a candidate fails the certify gate or the responder answers a signed `reject` (e.g. "effect not
+granted"), the run **advances to the next candidate** (trust order under a policy, discovery order
+without one) rather than ending; every reject stays in the transcript, and only the last candidate's
+failure ends the run. Which of several *semantically different* same-signature functions the caller
+meant remains the caller's problem — say it with a sharper intent tag. Worked: with
 a trusted root vouching for `double`, `--verify --intent arithmetic` over `[21]` discovers `double`,
 confirms it trusted, proves its `doubles` property, applies it, and re-verifies `21 → 42` (CONFIRMED);
 drop the vouching attestation and the same run ABORTS at the trust gate.

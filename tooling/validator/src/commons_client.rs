@@ -18,8 +18,11 @@ use serde_json::{json, Value as J};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Cap on how many artifacts one closure walk may fetch — a malformed (or malicious) reference
-/// graph can't turn discovery into an unbounded crawl.
-const MAX_FETCHES: usize = 64;
+/// graph can't turn discovery into an unbounded crawl. 64 predated trace-carried examples and
+/// fn_ref chains: a single intent query's closure (records + bodies + example traces + fn_ref
+/// callees) legitimately passes 64 on the production node today, so the bound is 256 — still a
+/// firm refusal point, just sized to the artifact graph records actually carry now.
+const MAX_FETCHES: usize = 256;
 
 fn kind_for_address(addr: &str) -> Result<ArtifactKind> {
     Ok(match addr.split('_').next().unwrap_or("") {

@@ -428,9 +428,12 @@ pub fn orchestrate_verified_with_maps(
     let graph = AttestationGraph::from_messages(attestations, timestamp);
 
     // TRUST GATE + DISAMBIGUATION: among the signature-compatible candidates, rank by the local policy
-    // and use the most-trusted one (no central authority — principle 7). Without a policy there is no
-    // trust signal, so fall back to the first compatible match.
-    let (target, trusted) = match policy {
+    // (no central authority — principle 7); untrusted candidates are excluded outright. Without a policy
+    // there is no trust signal, so keep discovery order. The result is an ORDERED candidate list, not a
+    // single choice: the coarse signature filter matches by argument fit alone, so the first fit can be
+    // the wrong function (GW14's io/network/http run proposed one and aborted on its signed reject) —
+    // the loop below advances to the next candidate instead, keeping every reject in the transcript.
+    let (ordered, trusted): (Vec<String>, Option<bool>) = match policy {
         Some(p) => {
             let (verdicts, best) = best_trusted(&compatible, p, &graph, timestamp);
             let candidates: Vec<J> = compatible
@@ -444,7 +447,11 @@ pub fn orchestrate_verified_with_maps(
                         label: "trust".into(),
                         message: json!({ "chosen": compatible[i], "reason": verdicts[i].reason, "candidates": candidates }),
                     });
-                    (compatible[i].clone(), Some(true))
+                    let mut idx: Vec<usize> = (0..compatible.len()).filter(|&j| verdicts[j].trusted).collect();
+                    idx.sort_by(|&a, &b| {
+                        rank_key(&verdicts[b]).partial_cmp(&rank_key(&verdicts[a])).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    (idx.into_iter().map(|j| compatible[j].clone()).collect(), Some(true))
                 }
                 None => {
                     steps.push(Step {
@@ -456,80 +463,102 @@ pub fn orchestrate_verified_with_maps(
                 }
             }
         }
-        None => (compatible[0].clone(), None),
+        None => (compatible.clone(), None),
     };
 
-    // CERTIFY the chosen function before using it — run every "verified by default" check (type, effects,
-    // refinements, termination, complexity/cost) against its body. "Assemble, don't write" only yields
-    // verifiable artifacts if the pieces are themselves verified (principle 3); with `require_certified`,
-    // a function that isn't certified aborts the run rather than being applied.
-    // A signed certification from a certifier this policy trusts (trust-delegation — the receiver can rely
-    // on a trusted third party's certification instead of, or alongside, re-running the checks itself).
-    let commons_cert = policy.map(|p| p.certification_verdict(&graph, &target, None, timestamp));
-    let certified = match (records.get(&target), link.get(&target)) {
-        (Some(rec), Some(body)) => {
-            let cert = certify_record(rec, body, &records, solver);
-            let failed: Vec<&str> = cert.checks.iter().filter(|c| c.hard_fail).map(|c| c.check.as_str()).collect();
-            steps.push(Step {
-                label: "certify".into(),
-                message: json!({ "function": target, "certified": cert.certified,
-                    "checks": cert.checks.iter().map(|c| json!({ "check": c.check, "verdict": c.verdict })).collect::<Vec<_>>(),
-                    "failed": failed,
-                    "commons_certified": commons_cert.as_ref().map(|c| c.certified),
-                    "trusted_certifiers": commons_cert.as_ref().map(|c| c.trusted_certifiers.clone()).unwrap_or_default() }),
-            });
-            Some(cert.certified)
-        }
-        // No resolvable body to certify — leave `certified` unknown rather than claim a verdict.
-        _ => None,
-    };
-    if require_certified && certified != Some(true) {
-        return Ok(VerifiedRun { steps, trusted, certified, property: None, confirmed: false });
-    }
-
-    // PROVE the discovered function's own declared property — verify the *piece*, not just one result.
-    let property = records.get(&target).and_then(|r| r.get("properties")).and_then(|p| p.as_array()).and_then(|ps| {
-        ps.iter().find(|p| p.pointer("/expr/kind").and_then(|k| k.as_str()) == Some("forall")).map(|p| {
-            let name = p.get("name").and_then(|n| n.as_str()).unwrap_or("<unnamed>").to_string();
-            let expr = p.get("expr").unwrap();
-            let proved = prove_law(expr, link.get(&target), solver);
-            steps.push(Step {
-                label: "prove".into(),
-                message: json!({ "function": target, "property": name, "proved": proved }),
-            });
-            (name, proved)
-        })
-    });
-
-    // APPLY: propose → commit → assert.
-    let mut propose = json!({
-        "schema_version": "0.2.0", "kind": "propose", "to": responder_did,
-        "in_reply_to": null, "timestamp": timestamp, "constraints": null,
-        "body": { "action": "apply", "target": target, "args": args }
-    });
-    sign_message(&mut propose, orchestrator)?;
-    steps.push(Step { label: "propose".into(), message: propose.clone() });
-    let commit = respond_to_message(&propose, link.clone(), records.clone(), responder, timestamp)?;
-    let kind = commit.get("kind").and_then(|k| k.as_str()).unwrap_or("?").to_string();
-    steps.push(Step { label: kind.clone(), message: commit.clone() });
-    if kind != "commit" {
-        return Ok(VerifiedRun { steps, trusted, certified, property, confirmed: false });
-    }
-    let assert = respond_to_message(&commit, link.clone(), records.clone(), responder, timestamp)?;
-
-    // An effectful fulfilment produced an OBSERVED claim + its trace artifact: index the trace so
-    // the re-verify below replays it, and carry it as a step so --publish ships it with the assert.
     let mut link = link;
-    if let Some(trace) = crate::respond::take_trace_artifact() {
-        let addr = crate::hash_artifact_with_kind(&trace, crate::ArtifactKind::Trace)?;
-        link.insert(addr, trace.clone());
-        steps.push(Step { label: "trace".into(), message: trace });
-    }
+    let total = ordered.len();
+    for (attempt, target) in ordered.iter().enumerate() {
+        let target = target.clone();
+        let last = attempt + 1 == total;
 
-    // RE-VERIFY the result by re-running the claim (trust nothing — principle 3).
-    let confirmed = verify_claim(&assert, link.clone()).unwrap_or(false);
-    steps.push(Step { label: "assert".into(), message: assert });
-    Ok(VerifiedRun { steps, trusted, certified, property, confirmed })
+        // CERTIFY the candidate before using it — run every "verified by default" check (type, effects,
+        // refinements, termination, complexity/cost) against its body. "Assemble, don't write" only yields
+        // verifiable artifacts if the pieces are themselves verified (principle 3); with `require_certified`,
+        // an uncertified candidate is SKIPPED (the next may certify), and only the last aborts the run.
+        // A signed certification from a certifier this policy trusts rides along (trust-delegation).
+        let commons_cert = policy.map(|p| p.certification_verdict(&graph, &target, None, timestamp));
+        let certified = match (records.get(&target), link.get(&target)) {
+            (Some(rec), Some(body)) => {
+                let cert = certify_record(rec, body, &records, solver);
+                let failed: Vec<&str> = cert.checks.iter().filter(|c| c.hard_fail).map(|c| c.check.as_str()).collect();
+                steps.push(Step {
+                    label: "certify".into(),
+                    message: json!({ "function": target, "certified": cert.certified,
+                        "checks": cert.checks.iter().map(|c| json!({ "check": c.check, "verdict": c.verdict })).collect::<Vec<_>>(),
+                        "failed": failed,
+                        "commons_certified": commons_cert.as_ref().map(|c| c.certified),
+                        "trusted_certifiers": commons_cert.as_ref().map(|c| c.trusted_certifiers.clone()).unwrap_or_default() }),
+                });
+                Some(cert.certified)
+            }
+            // No resolvable body to certify — leave `certified` unknown rather than claim a verdict.
+            _ => None,
+        };
+        if require_certified && certified != Some(true) {
+            if last {
+                return Ok(VerifiedRun { steps, trusted, certified, property: None, confirmed: false });
+            }
+            steps.push(Step {
+                label: "retry".into(),
+                message: json!({ "after": target, "reason": "not certified", "remaining": total - attempt - 1 }),
+            });
+            continue;
+        }
+
+        // PROVE the discovered function's own declared property — verify the *piece*, not just one result.
+        let property = records.get(&target).and_then(|r| r.get("properties")).and_then(|p| p.as_array()).and_then(|ps| {
+            ps.iter().find(|p| p.pointer("/expr/kind").and_then(|k| k.as_str()) == Some("forall")).map(|p| {
+                let name = p.get("name").and_then(|n| n.as_str()).unwrap_or("<unnamed>").to_string();
+                let expr = p.get("expr").unwrap();
+                let proved = prove_law(expr, link.get(&target), solver);
+                steps.push(Step {
+                    label: "prove".into(),
+                    message: json!({ "function": target, "property": name, "proved": proved }),
+                });
+                (name, proved)
+            })
+        });
+
+        // APPLY: propose → commit → assert. A signed `reject` (a policy answer — e.g. "effect not
+        // granted") advances to the next candidate rather than ending the run.
+        let mut propose = json!({
+            "schema_version": "0.2.0", "kind": "propose", "to": responder_did,
+            "in_reply_to": null, "timestamp": timestamp, "constraints": null,
+            "body": { "action": "apply", "target": target, "args": args }
+        });
+        sign_message(&mut propose, orchestrator)?;
+        steps.push(Step { label: "propose".into(), message: propose.clone() });
+        let commit = respond_to_message(&propose, link.clone(), records.clone(), responder, timestamp)?;
+        let kind = commit.get("kind").and_then(|k| k.as_str()).unwrap_or("?").to_string();
+        steps.push(Step { label: kind.clone(), message: commit.clone() });
+        if kind != "commit" {
+            if last {
+                return Ok(VerifiedRun { steps, trusted, certified, property, confirmed: false });
+            }
+            steps.push(Step {
+                label: "retry".into(),
+                message: json!({ "after": target, "reason": "rejected", "remaining": total - attempt - 1 }),
+            });
+            continue;
+        }
+        let assert = respond_to_message(&commit, link.clone(), records.clone(), responder, timestamp)?;
+
+        // An effectful fulfilment produced an OBSERVED claim + its trace artifact: index the trace so
+        // the re-verify below replays it, and carry it as a step so --publish ships it with the assert.
+        if let Some(trace) = crate::respond::take_trace_artifact() {
+            let addr = crate::hash_artifact_with_kind(&trace, crate::ArtifactKind::Trace)?;
+            link.insert(addr, trace.clone());
+            steps.push(Step { label: "trace".into(), message: trace });
+        }
+
+        // RE-VERIFY the result by re-running the claim (trust nothing — principle 3).
+        let confirmed = verify_claim(&assert, link.clone()).unwrap_or(false);
+        steps.push(Step { label: "assert".into(), message: assert });
+        return Ok(VerifiedRun { steps, trusted, certified, property, confirmed });
+    }
+    // `compatible` was non-empty, so the loop always returns from its last iteration.
+    unreachable!("candidate loop returns on its last attempt")
 }
 
 #[cfg(test)]
@@ -751,6 +780,60 @@ mod tests {
         assert!(verdicts[0].trusted && verdicts[1].trusted);
         assert!(verdicts[1].supporting.len() > verdicts[0].supporting.len());
         assert_eq!(best, Some(1), "more distinct trusted attesters wins the tie");
+    }
+
+    #[test]
+    fn wrong_first_fit_advances_to_the_next_candidate() {
+        // Two candidates share the intent AND the signature fit (one string argument) — the coarse
+        // filter cannot split them. The lexicographically-first one is EFFECTFUL, so the grantless
+        // responder answers a signed `reject` ("effect not granted") — the run must ADVANCE to the
+        // pure second candidate and confirm, keeping the reject in the transcript (the GW14
+        // io/network/http abort, fixed).
+        let (fn_eff, fn_pure) = (format!("fn_{}", "a".repeat(64)), format!("fn_{}", "b".repeat(64)));
+        let (expr_eff, expr_pure) = (format!("expr_{}", "a".repeat(64)), format!("expr_{}", "b".repeat(64)));
+        let body_eff = json!({ "kind": "lambda", "params": [{ "name": "u" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "http_get" },
+                      "args": [{ "kind": "var", "name": "u" }] } });
+        let body_pure = json!({ "kind": "lambda", "params": [{ "name": "u" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "str_length" },
+                      "args": [{ "kind": "var", "name": "u" }] } });
+        let rec = |hash: &str, name: &str, result: &str, effects: Vec<&str>, body_hash: &str| {
+            json!({
+                "schema_version": "0.2.0", "hash": hash, "name_hints": [name],
+                "signature": { "type": { "kind": "fn", "params": [{ "kind": "builtin", "name": "string" }],
+                                         "result": { "kind": "builtin", "name": result } },
+                               "refinements": [], "effects": effects, "capabilities": [],
+                               "terminates": "always" },
+                "examples": [{ "args": [{ "kind": "string", "value": "x" }],
+                               "result": { "kind": "int", "value": 1 } }],
+                "intent_tags": ["retrytest"], "derived_from": null, "supersedes": null,
+                "body_hash": body_hash })
+        };
+        let records: std::collections::HashMap<String, J> = [
+            (fn_eff.clone(), rec(&fn_eff, "eff_fetch", "string", vec!["net.read"], &expr_eff)),
+            (fn_pure.clone(), rec(&fn_pure, "pure_len", "nat", vec![], &expr_pure)),
+        ].into();
+        let link: std::collections::HashMap<String, J> = [
+            (expr_eff, body_eff.clone()), (fn_eff.clone(), body_eff),
+            (expr_pure, body_pure.clone()), (fn_pure.clone(), body_pure),
+        ].into();
+
+        let run = orchestrate_verified_with_maps(
+            link, records, "retrytest", vec![json!({ "kind": "string", "value": "hello" })],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+            "z3", None, &[], None, false,
+        ).unwrap();
+
+        assert!(run.confirmed, "the pure second candidate must confirm after the effectful first is rejected");
+        let labels: Vec<&str> = run.steps.iter().map(|x| x.label.as_str()).collect();
+        assert_eq!(labels, ["query", "ack", "certify", "propose", "reject", "retry",
+                            "certify", "propose", "commit", "assert"]);
+        let retry = run.steps.iter().find(|s| s.label == "retry").unwrap();
+        assert_eq!(retry.message.get("after").unwrap().as_str().unwrap(), fn_eff);
+        assert_eq!(retry.message.get("reason").unwrap(), "rejected");
+        // The winning claim is about the PURE candidate: str_length("hello") = 5.
+        let result = run.steps.last().unwrap().message.pointer("/body/claim/expr/args/1/value").unwrap();
+        assert_eq!(result, &json!({ "kind": "int", "value": 5 }));
     }
 
     #[test]
