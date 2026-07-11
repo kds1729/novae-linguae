@@ -448,6 +448,35 @@ awaiting a workflow (GW13 has since pulled the client-credentials OAuth flow and
 headers + in-language redirects; multipart, non-local `$ref`s, and the interactive OAuth flows
 remain refused).
 
+**GW16 — description-layer response headers (2026-07-11, same day): the GW7 move applied to
+GW14.** With `http_full` in the language, a header the API description *documents* is
+compilable knowledge: [`nl-ingest-openapi`](../tooling/nl-ingest-openapi/) now reads
+`responses[].headers`, and a header declared **with a documented example** on the status the
+worked example asserts yields a header-projection record **`<opId><Header> : … → Maybe
+string`** — the call bound once (projecting two fields off two calls would perform the effect
+twice), status-guarded to exactly the documented response, `map_get` of the **lowercase** name
+(the canonical decode). A declared header *without* an example is noted and refused — a promise
+the description does not make (the reference description's `X-Request-Id` exercises this). The
+reference item-store description grew the GW14 surface (`createThing` — POST, 201 +
+`Location: /things/th_44136fa355b3`, the content-derived id for the documented `"{}"` body —
+and `getLatest`, the 307 whose `Location` is a redirect target), and the live gate (GW12)
+*proves the documented example is what the service really answers* — each example runs once,
+must reproduce, and carries its trace. **The faithfulness result, one rung above GW7's
+byte-identity:** the generated `createThingLocation` and the hand-authored GW14 `create_thing`
+differ only in a parameter name (`body` vs `v`), so their **canonical normal forms coincide**
+(`normalize --hash` → the same `expr_cc4ddae9…`) — α-equivalence, decided solver-free: the
+description holds the hand-written workflow record's full semantics. (The GW7 byte-identity
+also still holds: `getItemStatus` regenerates as `expr_19ea0b5f…` through the widened adapter.)
+Production: the four net-new records + bodies + example traces + signed certs are on Arca; a
+signed `apply` request addressed to `createThingLocation` **by content-address** was fulfilled
+live under grants (`respond` — discovery was deliberately skipped: Arca now holds several
+`(string, string)` fits including the α-equivalent hand-authored twin, which no
+argument-signature filter can split), yielding the observed assert `msg_54361c9d…` +
+`trc_42025dcf…`; a grantless, secretless `verify-claim` by address with the service killed
+replays it CONFIRMED. No corpus change (the description layer isn't corpus material — the
+header-consumption shapes are already family #50, the GW7 rationale). Residual: multipart
+bodies, non-local `$ref`s, interactive OAuth flows — unchanged.
+
 **GW15 — pagination (2026-07-11, same day): the Link header is data, and the zero-pull proves
 it.** GW14's design bet — exposing headers makes the header-driven wire idioms *in-language
 code* — gets its proof on the very next workflow: *fetch every page of a collection by following
