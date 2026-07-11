@@ -19,7 +19,7 @@ from .query import (QueryError, check_token_budget, greedy_budget, record_summar
 from .search import run_search, SearchError
 
 _SCHEMA_VERSIONS = ["0.1.0", "0.2.0"]
-_KINDS = ["function-record", "message", "body", "type", "certification", "weights", "eval-attestation"]
+_KINDS = ["function-record", "message", "body", "type", "certification", "weights", "eval-attestation", "trace"]
 
 # Verification failures that mean "the record is not valid" (422) vs. node-side problems.
 _UNPROCESSABLE = {"schema_invalid", "hash_mismatch", "signature_invalid", "unsupported_kind"}
