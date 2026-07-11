@@ -73,6 +73,35 @@ class CommonsProtocolTests(TestCase):
         got = self.client.get(f"/v0/records/{address}")
         self.assertEqual(got.json(), body)
 
+    def test_publish_trace_is_self_addressing(self):
+        # A recorded effect trace (spec/trace.schema.json) is hashless and self-addressing like a
+        # bare body: the node validates it, computes its trc_… address, and serves it back — which
+        # is what lets a third party replay-verify an `observed` assert it fetched by msg_… address.
+        trace = _load("trace-greet.v0.1.json")
+        resp = self._publish(trace)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        address = resp.json()["hash"]
+        self.assertTrue(address.startswith("trc_"), address)
+        # The address is exactly what the worked example's observed claim references.
+        assert_msg = _load("assert-observed.v0.2.json")
+        self.assertEqual(address, assert_msg["body"]["claim"]["trace"])
+        # Idempotent, and resolvable to the exact trace.
+        again = self._publish(trace)
+        self.assertEqual(again.status_code, 200)
+        got = self.client.get(f"/v0/records/{address}")
+        self.assertEqual(got.json(), trace)
+        # The observed assert itself goes through the ordinary signed-message gate.
+        self.assertEqual(self._publish(assert_msg).status_code, 201)
+
+    def test_publish_bare_variant_body(self):
+        # `variant`/`tuple` are legal bare-body top-level kinds (a 0-argument body like `\-> None`
+        # tops out at them); the gate's body-kind list was missing both — same latent hole as the
+        # Rust validator's (fixed there in 006dfa4).
+        body = {"kind": "variant", "tag": "None"}
+        resp = self._publish(body)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertTrue(resp.json()["hash"].startswith("expr_"), resp.content)
+
     def test_resolve_returns_exact_record(self):
         rec = _load("map.json")
         self._publish(rec)

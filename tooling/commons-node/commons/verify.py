@@ -22,6 +22,7 @@ from django.conf import settings
 _PREFIX_KIND = {
     "fn": "function-record", "msg": "message", "expr": "body", "type": "type",
     "cert": "certification", "wgt": "weights", "evl": "eval-attestation",
+    "trc": "trace",
 }
 
 # (kind, schema_version) -> schema filename in COMMONS_SPEC_DIR.
@@ -35,6 +36,7 @@ _SCHEMA = {
     ("certification", "0.2.0"): "certification.schema.json",
     ("weights", "0.1.0"): "weights.schema.json",
     ("eval-attestation", "0.1.0"): "eval-attestation.schema.json",
+    ("trace", "0.1.0"): "trace.schema.json",
 }
 
 
@@ -68,7 +70,9 @@ def _run(*args):
 
 # Body-expression node kinds (body-expression.schema.json). A BARE body has no embedded `hash`
 # field — the whole expression IS the hashed content — so it is self-addressing on ingest.
-_BODY_EXPR_KINDS = {"var", "lit", "app", "let", "lambda", "case", "field"}
+# `variant`/`tuple` are the construction forms a 0-argument body can top out at (the same omission
+# was fixed in the Rust validator's two body-kind lists).
+_BODY_EXPR_KINDS = {"var", "lit", "app", "let", "lambda", "case", "field", "variant", "tuple"}
 
 
 def verify_record(raw):
@@ -81,6 +85,8 @@ def verify_record(raw):
     if not isinstance(raw.get("hash"), str):
         if raw.get("kind") in _BODY_EXPR_KINDS:
             return _verify_bare_body(raw)
+        if raw.get("kind") == "trace":
+            return _verify_bare_trace(raw)
         raise VerifyError("schema_invalid", "record is missing a string 'hash'")
 
     kind, version = detect(raw)
@@ -129,6 +135,32 @@ def _verify_bare_body(raw):
     finally:
         os.unlink(path)
     return "body", "0.1.0", address
+
+
+def _verify_bare_trace(raw):
+    """Verify a recorded effect trace (spec/trace.schema.json): schema-valid, then self-addressing —
+    the node computes the `trc_…` content address exactly as it does for a bare body. Traces are
+    unsigned by design: they are content-addressed evidence referenced by a *signed* `observed`
+    assert, and replay-verification is what gives them meaning."""
+    schema = _schema_path("trace", "0.1.0")
+    if schema is None:
+        raise VerifyError("unsupported_kind", "no schema for trace 0.1.0")
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(raw, f)
+        path = f.name
+    try:
+        validated = _run("validate", schema, path)
+        if validated.returncode != 0:
+            raise VerifyError("schema_invalid", (validated.stderr or "").strip())
+        hashed = _run("hash", path)
+        if hashed.returncode != 0:
+            raise VerifyError("schema_invalid", (hashed.stderr or "").strip())
+        address = (hashed.stdout or "").strip()
+        if not address.startswith("trc_"):
+            raise VerifyError("schema_invalid", f"trace hashed to unexpected address {address!r}")
+    finally:
+        os.unlink(path)
+    return "trace", "0.1.0", address
 
 
 def extract(raw, kind):
