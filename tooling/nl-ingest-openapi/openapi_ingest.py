@@ -29,10 +29,18 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
     $ref         -> local `#/...` references (parameters, requestBodies, responses, security
                     schemes, path-item-level shared parameters) are resolved; an external or
                     dangling reference refuses the operation honestly
-    responses    -> the documented status the worked example asserts
+    responses    -> the documented status the worked example asserts; a 2xx response that
+                    documents an application/json EXAMPLE additionally yields a body-projection
+                    record `<opId>Body : … -> Maybe Json` (`parse_json` over the response body —
+                    field access then composes in-language via the certified json_get/json_path
+                    commons records, principle 4). Emitted only when a deterministic success
+                    example is constructible from the spec alone (a GET with no path parameters);
+                    anything else gets a printed note, never a silent guess.
 
-Each generated record RETURNS the response `.status` (an int) — the deterministic, verifiable part
-of a response; projecting the body (server-assigned, nondeterministic) waits for observed-claims.
+Each generated status record RETURNS the response `.status` (an int) — the always-deterministic
+part of a response. Body-projection records carry the payload as data; their asserts under grants
+are `observed` claims (trace-conditioned, replay-verifiable — spec/trace.schema.json), which is
+what makes a third-party-checkable claim about a response body possible at all.
 Every record is gated through `nl-validator certify` (typecheck / effects / termination /
 complexity); with `--verify-against <base-url>` the worked examples are additionally RUN against a
 live service (a fake or a real one), the "gate = examples vs an emulator" step — so a generated
@@ -60,6 +68,9 @@ from nl_core import build_v2_record, expr_address  # noqa: E402
 
 STRING = {"kind": "builtin", "name": "string"}
 INT = {"kind": "builtin", "name": "int"}
+JSON_T = {"kind": "builtin", "name": "Json"}
+# The structural sum {Just Json, None} — how a Maybe result is declared (the json_get precedent).
+MAYBE_JSON = {"kind": "sum", "variants": [{"tag": "Just", "type": JSON_T}, {"tag": "None"}]}
 _VALIDATOR = os.path.normpath(
     os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator")
 )
@@ -182,6 +193,57 @@ def _schema_type(spec, param):
     return (schema or {}).get("type")
 
 
+def _json_to_value(x):
+    """Encode a parsed JSON document as the Json-sum VALUE the evaluator's parse_json produces —
+    the expected-result encoding for a body-projection example. Returns None for a document we
+    refuse to promise (non-integer numbers: their canonical rendering is a float-equality
+    promise the description's author never made)."""
+    if x is None:
+        return {"kind": "variant", "tag": "JNull"}
+    if isinstance(x, bool):
+        return {"kind": "variant", "tag": "JBool", "payload": {"kind": "bool", "value": x}}
+    if isinstance(x, int):
+        return {"kind": "variant", "tag": "JNum", "payload": {"kind": "int", "value": x}}
+    if isinstance(x, float):
+        return None
+    if isinstance(x, str):
+        return {"kind": "variant", "tag": "JStr", "payload": {"kind": "string", "value": x}}
+    if isinstance(x, list):
+        elems = [_json_to_value(e) for e in x]
+        if any(e is None for e in elems):
+            return None
+        return {"kind": "variant", "tag": "JList",
+                "payload": {"kind": "list", "elems": elems}}
+    if isinstance(x, dict):
+        entries = []
+        for k in sorted(x):  # canonical map form: unique keys in code-point order
+            v = _json_to_value(x[k])
+            if v is None:
+                return None
+            entries.append({"key": k, "value": v})
+        return {"kind": "variant", "tag": "JObj",
+                "payload": {"kind": "map", "entries": entries}}
+    return None
+
+
+def _response_json_example(spec, op):
+    """The documented application/json EXAMPLE of the operation's first 2xx response, as
+    (status_code, parsed_example), or None. This is spec-time data — the one thing that makes a
+    runnable worked example for a body projection possible without guessing."""
+    responses = op.get("responses", {})
+    for code in sorted(c for c in responses if c.isdigit() and 200 <= int(c) < 300):
+        resp = deref(spec, responses[code])
+        if not isinstance(resp, dict):
+            continue
+        media = (resp.get("content") or {}).get("application/json") or {}
+        example = media.get("example")
+        if example is None and isinstance(media.get("schema"), dict):
+            example = media["schema"].get("example")
+        if example is not None:
+            return int(code), example
+    return None
+
+
 def build_operation(spec, base_url, path, verb, op, shared_params, global_security, secret_name):
     """Compile one operation. Returns ("ok", record, body_ast, notes) or ("skip", op_id, reason)."""
     verb = verb.upper()
@@ -280,7 +342,42 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
         module_name=None, extra_hints=[_param_name(op_id)],
         effects=[effect], terminates="always", intent_tags=intent, complexity="O(n)",
     )
-    return ("ok", record, body_ast, notes)
+    records = [(record, body_ast)]
+
+    # BODY PROJECTION (the GW7 residual, unblocked by observed claims): a documented 2xx
+    # application/json example is spec-time knowledge of the payload, so it can gate a second
+    # record `<opId>Body : … -> Maybe Json` — parse_json over the response body. Only where a
+    # deterministic SUCCESS example is constructible from the spec alone: a GET with no path
+    # parameters and no request body (path parameters name server state the description cannot
+    # promise). Field access composes in-language (json_get / json_path), principle 4.
+    proj = _response_json_example(spec, op)
+    if proj is not None:
+        proj_code, proj_doc = proj
+        expected = _json_to_value(proj_doc)
+        if verb != "GET" or path_param_names or has_body:
+            notes.append("documented response example not projected — only a bodyless GET "
+                         "without path parameters has a spec-constructible success example")
+        elif expected is None:
+            notes.append("documented response example not projected — it contains a "
+                         "non-integer number (a float-equality promise we refuse to invent)")
+        else:
+            proj_body = {"kind": "lambda",
+                         "params": [{"name": p} for p in lam_params],
+                         "body": curried_app(b_var("parse_json"), b_field(call, "body"))}
+            proj_example = {"args": example["args"],
+                            "result": {"kind": "variant", "tag": "Just", "payload": expected}}
+            proj_record = build_v2_record(
+                name=op_id + "Body", type_ast={"kind": "fn", "params": param_types,
+                                               "result": MAYBE_JSON},
+                examples=[proj_example], body_text=proj_body,
+                module_name=None, extra_hints=[_param_name(op_id + "Body")],
+                effects=[effect], terminates="always", intent_tags=intent + ["parse"],
+                complexity="O(n)",
+            )
+            records.append((proj_record, proj_body))
+            notes.append(f"body projection: {op_id}Body -> Maybe Json "
+                         f"(documented {proj_code} example)")
+    return ("ok", records, notes)
 
 
 def _example_for(base_url, verb, path_param_names, has_body, op,
@@ -332,7 +429,10 @@ def walk(spec, secret_name):
             got = build_operation(spec, base_url, path, verb, op, shared_params,
                                   global_security, secret_name)
             if got[0] == "ok":
-                built.append((got[1], got[2], got[3]))
+                # One operation may compile to several records (status + body projection);
+                # the notes ride with the first so they print once.
+                for i, (record, body_ast) in enumerate(got[1]):
+                    built.append((record, body_ast, got[2] if i == 0 else []))
             else:
                 skipped.append((got[1], got[2]))
     return built, skipped

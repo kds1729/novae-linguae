@@ -102,8 +102,43 @@ class SearchServiceTest(unittest.TestCase):
         return json.dumps(json.load(open(Path(self.tmp) / f"body-{name}.json")))
 
     def test_multipart_refused_others_generated(self):
-        # uploadArchive is multipart-only -> refused; the two $ref-parameterized reads generate.
-        self.assertEqual(set(self.recs), {"searchitems", "getversion"})
+        # uploadArchive is multipart-only -> refused; the two $ref-parameterized reads generate,
+        # and getVersion's documented 200 example additionally yields a body-projection record.
+        self.assertEqual(set(self.recs), {"searchitems", "getversion", "getversionbody"})
+
+    def test_body_projection_from_documented_example(self):
+        # getVersion documents `{"version": "1.0.0"}` on its 200 -> a second record
+        # `getVersionBody : … -> Maybe Json` whose body is parse_json over the response body and
+        # whose worked example asserts Just(JObj({version: JStr})). searchItems documents no
+        # example -> no projection (its live payload is state-dependent; we never guess).
+        rec = json.load(open(self.recs["getversionbody"]))
+        self.assertEqual(rec["signature"]["type"]["result"]["kind"], "sum")
+        tags = {v["tag"] for v in rec["signature"]["type"]["result"]["variants"]}
+        self.assertEqual(tags, {"Just", "None"})
+        self.assertIn("parse_json", self._body("getversionbody"))
+        result = rec["examples"][0]["result"]
+        self.assertEqual(result["tag"], "Just")
+        self.assertEqual(result["payload"]["tag"], "JObj")
+        entries = result["payload"]["payload"]["entries"]
+        self.assertEqual(entries, [{"key": "version", "value":
+                                    {"kind": "variant", "tag": "JStr",
+                                     "payload": {"kind": "string", "value": "1.0.0"}}}])
+        # Same surface as the status record: params, effect, auth placeholder.
+        status = json.load(open(self.recs["getversion"]))
+        self.assertEqual(rec["signature"]["type"]["params"],
+                         status["signature"]["type"]["params"])
+        self.assertEqual(rec["signature"]["effects"], ["net.read"])
+
+    def test_json_value_encoder_shapes(self):
+        # The encoder promises exactly what parse_json produces — and refuses floats.
+        self.assertEqual(oi._json_to_value(None), {"kind": "variant", "tag": "JNull"})
+        self.assertEqual(oi._json_to_value(True)["tag"], "JBool")
+        self.assertEqual(oi._json_to_value(3), {"kind": "variant", "tag": "JNum",
+                                                "payload": {"kind": "int", "value": 3}})
+        self.assertIsNone(oi._json_to_value(1.5))
+        self.assertIsNone(oi._json_to_value({"ok": [1.5]}))
+        keys = [e["key"] for e in oi._json_to_value({"b": 1, "a": 2})["payload"]["entries"]]
+        self.assertEqual(keys, ["a", "b"])  # canonical code-point key order
 
     @unittest.skipUnless(VALIDATOR.exists(), "nl-validator not built")
     def test_every_record_certifies(self):

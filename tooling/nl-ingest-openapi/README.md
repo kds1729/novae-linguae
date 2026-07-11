@@ -28,10 +28,18 @@ description, not the generated client plumbing.
 | `security` (**apiKey in header**, GW10) | a `<name>: {{secret:NAME}}` header (placeholder name defaults to the scheme key) |
 | **local `$ref`s** (GW10) | resolved (parameters, requestBodies, responses, security schemes, path-item-level shared parameters; cycle-bounded) |
 | documented `responses` | the status code the worked example asserts |
+| documented 2xx `application/json` **example** (GW11) | a second **body-projection record** `<opId>Body : … -> Maybe Json` — `parse_json` over the response body, worked example = `Just(<the documented payload>)` |
 
-Each record **returns the response `.status`** (an `int`) — the deterministic, verifiable part of a
-response. Projecting the body (often server-assigned and nondeterministic) waits for observed-claims
-(see agent-loop.md §Scope).
+Each status record **returns the response `.status`** (an `int`) — the always-deterministic part of
+a response. A **body projection** is emitted only where the description itself documents the payload
+(a response `example`) *and* a deterministic success example is constructible from the spec alone (a
+bodyless `GET` with no path parameters — path parameters name server state the description cannot
+promise); anything else gets a printed note. Field access composes in-language via the certified
+`json_get`/`json_path` commons records (principle 4 — the adapter exposes the payload as data, it
+does not enumerate fields). Applied under grants, a projection's assert is an **`observed` claim**
+(trace-conditioned, spec/trace.schema.json): a third party replays it against the recorded trace —
+no effect grants, no secrets — which is what makes a verifiable claim about a response body possible
+at all (see agent-loop.md §Scope).
 
 ## Honest refusals
 

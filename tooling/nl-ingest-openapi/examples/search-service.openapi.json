@@ -103,7 +103,12 @@
         ],
         "responses": {
           "200": {
-            "$ref": "#/components/responses/OK"
+            "description": "OK — the fixed service version.",
+            "content": {
+              "application/json": {
+                "example": { "version": "1.0.0" }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
