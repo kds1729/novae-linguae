@@ -448,6 +448,40 @@ awaiting a workflow (GW13 has since pulled the client-credentials OAuth flow and
 headers + in-language redirects; multipart, non-local `$ref`s, and the interactive OAuth flows
 remain refused).
 
+**GW15 — pagination (2026-07-11, same day): the Link header is data, and the zero-pull proves
+it.** GW14's design bet — exposing headers makes the header-driven wire idioms *in-language
+code* — gets its proof on the very next workflow: *fetch every page of a collection by following
+the RFC 8288 `Link` header*, and the pull is **zero new builtins** (the second zero-pull after
+GW3). A `Link` value (`</list?page=2>; rel="next", …`) is a STRING, and parsing it composes
+already-taught pieces: [`examples/link-target.v0.2.json`](examples/link-target.v0.2.json)
+(the URL between `<`/`>` of one segment — split/tail/head with null guards, total through
+`Maybe`), [`examples/next-link.v0.2.json`](examples/next-link.v0.2.json) (`filter` with an
+inline `str_contains` lambda over the comma-split segments picks the `rel="next"` one — page 2's
+header deliberately carries `rel="prev"` FIRST, so substring-matching the whole value would be
+wrong), [`examples/next-of.v0.2.json`](examples/next-of.v0.2.json) (the response-level
+projection over `http_full`'s headers map), and
+[`examples/fetch-pages.v0.2.json`](examples/fetch-pages.v0.2.json) (`(string, string, nat) →
+List string` — the depth-bounded walk that collects each page's body and follows `next_of`;
+`net.read` only; the last page has no `rel="next"`, so the walk ends by ABSENCE, not by
+exhausting its bound). The chain composes **by content-address** (`fetch_pages` → `next_of` →
+`next_link` → `link_target`, each an `fn_ref` — assemble, don't write), which surfaced one real
+tooling gap, promptly closed: `eval` gained `--records`, so a *composed* body can have its
+trace captured exactly as `run --records` executes it (and `seed_certifications.py` now passes
+the records directory through to `certify`, so a composed record's effects certify SOUND — the
+pure callees fold in — instead of UNVERIFIABLE-by-unresolved-callee). All four records certify
+and are on Arca with signed certifications; `fetch_pages`' examples carry traces and replay
+offline (service dead). The remote loop closed in production: `orchestrate --node … --intent
+query/pages --verify --require-certified --publish` fetched the record **and its whole fn_ref
+chain** by content-address (hash-verified), certified it, walked the three live pages →
+the full body list, and published the observed assert (`msg_c6860072…` + `trc_f52d8643…`); a
+grantless `verify-claim` by address with the service killed replays it CONFIRMED. Corpus
+follow-through same day: curated `link_funcs` rows (`link_target` / `segments_with` /
+`first_with` — eval 404 → 410, oracle 410/410) plus combinatorial family **#51**
+(segment-filter shapes: the split-then-filter-with-a-lambda composite and its null-guarded
+head/count variants, which no other family emitted — `str_contains` only ever appeared as a
+bare predicate; corpus21 = 3,218 specs, 0 drops; ftdata21 staged). Pagination, like redirects,
+is now a *library* concern — the builtin surface didn't move.
+
 **GW14 — response headers (2026-07-11): server-assigned identity pulls `http_full`, and
 redirects stay in-language.** The GW6 fake service deliberately used CLIENT-chosen names because
 the real REST idiom — *POST, and the server tells you where the resource lives* — was
