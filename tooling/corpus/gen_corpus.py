@@ -1844,6 +1844,78 @@ def url_funcs():
     ]
 
 
+def header_funcs():
+    # RESPONSE-HEADER rows (the GW14 pull: `http_full` — the response headers survive as a
+    # `Map string string`). The effectful call itself can't run in the verify gate; what's
+    # teachable is the PURE consumption layer: project `.headers`, `map_get` a name (headers are
+    # canonically LOWERCASE — the decode lowercases them), case the Maybe, and the Location-driven
+    # idioms (redirect detection, joining a relative Location onto a base). Verify by
+    # validate + typecheck + run (no SMT counterpart for maps).
+    resp_h = rec_t(status=INT, headers=map_of(STRING), body=STRING)
+    created = Rec(status=201, headers={"content-length": "2", "location": "/things/th_1"}, body="ok")
+    moved = Rec(status=307, headers={"location": "/health"}, body="")
+    plain = Rec(status=200, headers={"content-type": "application/json"}, body="{}")
+    bare = Rec(status=204, headers={}, body="")
+    hdrs = lambda: bfield(var("r"), "headers")  # noqa: E731 — the one projection every row shares
+    return [
+        {"name": "location_of", "intent": "The Location header of an HTTP response, if present.",
+         "summary": 'map_get "location" r.headers — header names are canonically lowercase; '
+                    "absence is None, not an error.", "tags": ["http", "record", "map", "header"],
+         "type_ast": fn([resp_h], maybe_t(STRING)),
+         "body_ast": lam(["r"], bapp("map_get", str_lit("location"), hdrs())),
+         "examples": [{"args": [created], "result": V("Just", "/things/th_1")},
+                      {"args": [moved], "result": V("Just", "/health")},
+                      {"args": [bare], "result": V("None")}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "header_of", "intent": "Look up a header by name in an HTTP response.",
+         "summary": "map_get k r.headers — the general lookup; names are lowercase.",
+         "tags": ["http", "record", "map", "header"],
+         "type_ast": fn([resp_h, STRING], maybe_t(STRING)),
+         "body_ast": lam(["r", "k"], bapp("map_get", var("k"), hdrs())),
+         "examples": [{"args": [plain, "content-type"], "result": V("Just", "application/json")},
+                      {"args": [plain, "etag"], "result": V("None")},
+                      {"args": [created, "location"], "result": V("Just", "/things/th_1")}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "header_or", "intent": "A response header's value, or a default when absent.",
+         "summary": "case map_get k r.headers of Just(v) => v; None => d.",
+         "tags": ["http", "record", "map", "header", "case"],
+         "type_ast": fn([resp_h, STRING, STRING], STRING),
+         "body_ast": lam(["r", "k", "d"], _case_of(bapp("map_get", var("k"), hdrs()),
+                                                   (_vpat("Just", "v"), var("v")),
+                                                   (_vpat("None"), var("d")))),
+         "examples": [{"args": [plain, "content-type", "text/plain"], "result": "application/json"},
+                      {"args": [bare, "content-type", "text/plain"], "result": "text/plain"},
+                      {"args": [moved, "location", "/"], "result": "/health"}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "is_redirect", "intent": "Whether an HTTP response is a redirect that can be followed.",
+         "summary": 'case map_get "location" r.headers of Just(loc) => and (ge r.status 300) '
+                    "(lt r.status 400); None => false — a 3xx WITH a Location.",
+         "tags": ["http", "record", "map", "header", "predicate"],
+         "type_ast": fn([resp_h], BOOL),
+         "body_ast": lam(["r"], _case_of(bapp("map_get", str_lit("location"), hdrs()),
+                                         (_vpat("Just", "loc"),
+                                          bapp("and", bapp("ge", bfield(var("r"), "status"), int_lit(300)),
+                                               bapp("lt", bfield(var("r"), "status"), int_lit(400)))),
+                                         (_vpat("None"), bool_lit(False)))),
+         "examples": [{"args": [moved], "result": True}, {"args": [created], "result": False},
+                      {"args": [bare], "result": False}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "next_url", "intent": "The URL a response redirects to, joined onto a base — or the base itself.",
+         "summary": 'case map_get "location" r.headers of Just(loc) => str_concat base loc; '
+                    "None => base — a relative Location needs its base.",
+         "tags": ["http", "record", "map", "header", "case", "format"],
+         "type_ast": fn([STRING, resp_h], STRING),
+         "body_ast": lam(["base", "r"], _case_of(bapp("map_get", str_lit("location"), hdrs()),
+                                                 (_vpat("Just", "loc"),
+                                                  bapp("str_concat", var("base"), var("loc"))),
+                                                 (_vpat("None"), var("base")))),
+         "examples": [{"args": ["http://h", moved], "result": "http://h/health"},
+                      {"args": ["http://h", bare], "result": "http://h"},
+                      {"args": ["https://x.y", created], "result": "https://x.y/things/th_1"}],
+         "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
 def dispatch_funcs():
     # GW3 rows (spec/expressiveness.md — dispatch on message content, the zero-pull workflow):
     # route on a command string with string-literal case patterns, split "cmd n" text into head
@@ -3903,6 +3975,75 @@ def combinatorial_specs(exclude_names=()):
                [{"args": [["a b", "c"]], "result": "a%20b&c"}, {"args": [[]], "result": ""},
                 {"args": [["x&y"]], "result": "x%26y"}], terminates="always"))
 
+    # 50. RESPONSE-HEADER SHAPES — the GW14 pull (`http_full`: the response headers survive as a
+    # `Map string string`, names canonically lowercase). Like #47, the effectful call stays in
+    # spec/examples; the teachable mass is the pure consumption layer — the `.headers` projection
+    # feeding `map_get` (a field-then-map chain no other family emits), Maybe-casing with a
+    # default, presence predicates, status-guarded Location lookups, and joining a relative
+    # Location onto a base. Parameterized over header names, defaults, and redirect statuses.
+    _RESP50 = rec_t(status=INT, headers=map_of(STRING), body=STRING)
+    _R50_IN = [Rec(status=200, headers={"content-type": "application/json", "etag": '"v7"'}, body="ok"),
+               Rec(status=307, headers={"location": "/health", "retry-after": "1"}, body=""),
+               Rec(status=201, headers={"content-type": "text/plain", "location": "/things/th_1"}, body="made"),
+               Rec(status=404, headers={}, body="gone")]
+
+    def _h50(r, k):
+        return r.fields["headers"].get(k)
+
+    for k in ("location", "content-type", "etag", "retry-after"):
+        slug = k.replace("-", "_")
+        add(_cspec(f"hdr_{slug}", f'The "{k}" header of an HTTP response, if present.',
+                   f'map_get "{k}" r.headers — lowercase names; absence is None.',
+                   ["http", "record", "map", "header"], fn([_RESP50], maybe_t(STRING)),
+                   lam(["r"], bapp("map_get", str_lit(k), bfield(var("r"), "headers"))),
+                   [{"args": [r], "result": V("Just", _h50(r, k)) if _h50(r, k) is not None else V("None")}
+                    for r in _R50_IN], terminates="always"))
+    for k, d in (("content-type", "text/plain"), ("location", "/"), ("etag", "")):
+        slug = k.replace("-", "_")
+        add(_cspec(f"hdr_{slug}_or", f'The "{k}" header of an HTTP response, or "{d}" when absent.',
+                   f'case map_get "{k}" r.headers of Just(v) => v; None => "{d}".',
+                   ["http", "record", "map", "header", "case"], fn([_RESP50], STRING),
+                   lam(["r"], _case_of(bapp("map_get", str_lit(k), bfield(var("r"), "headers")),
+                                       (_vpat("Just", "v"), var("v")), (_vpat("None"), str_lit(d)))),
+                   [{"args": [r], "result": _h50(r, k) if _h50(r, k) is not None else d}
+                    for r in _R50_IN], terminates="always"))
+    for k in ("location", "etag", "x-request-id"):
+        slug = k.replace("-", "_")
+        add(_cspec(f"has_{slug}", f'Whether an HTTP response carries a "{k}" header.',
+                   f'case map_get "{k}" r.headers of Just(v) => true; None => false.',
+                   ["http", "record", "map", "header", "predicate"], fn([_RESP50], BOOL),
+                   lam(["r"], _case_of(bapp("map_get", str_lit(k), bfield(var("r"), "headers")),
+                                       (_vpat("Just", "v"), bool_lit(True)), (_vpat("None"), bool_lit(False)))),
+                   [{"args": [r], "result": _h50(r, k) is not None} for r in _R50_IN],
+                   terminates="always"))
+    for s in (301, 302, 307, 308):
+        add(_cspec(f"redirect_{s}", f"The redirect target of a {s} response — None for any other status.",
+                   f'case eq r.status {s} of true => map_get "location" r.headers; false => None.',
+                   ["http", "record", "map", "header", "case"], fn([_RESP50], maybe_t(STRING)),
+                   lam(["r"], case_bool(bapp("eq", bfield(var("r"), "status"), int_lit(s)),
+                                        bapp("map_get", str_lit("location"), bfield(var("r"), "headers")),
+                                        variant_expr("None"))),
+                   [{"args": [r], "result": (V("Just", _h50(r, "location")) if _h50(r, "location") is not None
+                                             else V("None")) if r.fields["status"] == s else V("None")}
+                    for r in _R50_IN], terminates="always"))
+    add(_cspec("follow_location", "The URL a response redirects to, joined onto a base — or the base itself.",
+               'case map_get "location" r.headers of Just(loc) => str_concat base loc; None => base.',
+               ["http", "record", "map", "header", "case", "format"], fn([STRING, _RESP50], STRING),
+               lam(["base", "r"], _case_of(bapp("map_get", str_lit("location"), bfield(var("r"), "headers")),
+                                           (_vpat("Just", "loc"), bapp("str_concat", var("base"), var("loc"))),
+                                           (_vpat("None"), var("base")))),
+               [{"args": ["http://h", r],
+                 "result": "http://h" + _h50(r, "location") if _h50(r, "location") is not None else "http://h"}
+                for r in _R50_IN], terminates="always"))
+    add(_cspec("location_or_self", "The URL to fetch next: a response's Location target, or the current URL.",
+               'case map_get "location" r.headers of Just(loc) => loc; None => u.',
+               ["http", "record", "map", "header", "case"], fn([STRING, _RESP50], STRING),
+               lam(["u", "r"], _case_of(bapp("map_get", str_lit("location"), bfield(var("r"), "headers")),
+                                        (_vpat("Just", "loc"), var("loc")), (_vpat("None"), var("u")))),
+               [{"args": ["/latest", r],
+                 "result": _h50(r, "location") if _h50(r, "location") is not None else "/latest"}
+                for r in _R50_IN], terminates="always"))
+
     return out
 
 
@@ -3914,7 +4055,7 @@ def all_specs():
             + more_arith() + more_laws() + bool_more() + recursive_more()
             + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion()
             + variant_consuming_funcs() + nested_hof_funcs() + string_funcs() + url_funcs()
-            + dispatch_funcs() + map_json_funcs())
+            + header_funcs() + dispatch_funcs() + map_json_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -4814,6 +4955,7 @@ def main():
                 "nested_hof_funcs": len(nested_hof_funcs()),
                 "string_funcs": len(string_funcs()),
                 "url_funcs": len(url_funcs()),
+                "header_funcs": len(header_funcs()),
                 "dispatch_funcs": len(dispatch_funcs()),
                 "map_json_funcs": len(map_json_funcs()),
                 "higher_order_funcs": len(higher_order_funcs()),
