@@ -242,6 +242,38 @@ def _is_boolish(node):
     return False
 
 
+def _test_from_py(test, strs, dicts, maybes, ints, lists):
+    """A Python TEST position (an `if`-statement test or a loop guard) as a boolean body expression.
+    A genuinely boolean test translates as before; non-bool TRUTHINESS desugars only where an
+    annotation PROVES the type — the falsy set is type-dependent, so guessing is mistranslation:
+        str -> x != ""    int -> x != 0    list -> not (null x)    dict -> map_size x != 0
+    `not` and `and`/`or` recurse over mixed truthy/boolean operands (strict connectives instead of
+    Python's short-circuit — unobservable in a pure total language, the established purity
+    argument). OPTIONAL truthiness is REFUSED: `if x:` over a Maybe conflates None with a falsy
+    payload — the `is None` narrowing idiom is the precise, already-supported form. Anything
+    unproven refuses rather than shipping a wrong falsy set."""
+    if _is_boolish(test):
+        return _expr_from_py(test, strs, dicts)
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        return _op_app("not", [_test_from_py(test.operand, strs, dicts, maybes, ints, lists)])
+    if isinstance(test, ast.BoolOp):
+        return _fold(_PY_BOOL[type(test.op)],
+                     [_test_from_py(v, strs, dicts, maybes, ints, lists) for v in test.values])
+    if isinstance(test, ast.Name):
+        if test.id in strs:
+            return _op_app("neq", [b_var(test.id), b_lit(_value(""))])
+        if test.id in ints:
+            return _op_app("neq", [b_var(test.id), b_lit(_value(0))])
+        if test.id in lists:
+            return _op_app("not", [b_app(b_var("null"), [b_var(test.id)])])
+        if test.id in dicts:
+            return _op_app("neq", [b_app(b_var("map_size"), [b_var(test.id)]), b_lit(_value(0))])
+        if test.id in maybes:
+            raise BodyError("Optional truthiness conflates None with a falsy payload — "
+                            "narrow with `is None` / `is not None` instead")
+    raise BodyError("non-boolean test (truthiness needs an annotation-proven str/int/list/dict)")
+
+
 def _expr_from_py(node, strs=frozenset(), dicts=frozenset()):
     if isinstance(node, ast.JoinedStr):
         # f-strings (spec/expressiveness.md phase 4): f"n={n}" -> str_concat("n=", to_string(n)).
@@ -420,11 +452,15 @@ def _expr_from_py(node, strs=frozenset(), dicts=frozenset()):
     raise BodyError(f"unsupported expression {type(node).__name__}")
 
 
-def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(), ret_maybe=False):
+def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(), ret_maybe=False,
+                   ints=frozenset(), lists=frozenset()):
     """Translate a statement sequence that must produce a value into an expression: `return r` is the
     result; `x = e; …` becomes `let x = e in …`; `if c: …`/`else`/early-return becomes `case`.
     `strs`/`dicts`/`maybes` carry the names known to hold STRINGS / DICTS / MAYBEs
-    (annotation-rooted, threaded through `let`s with shadowing). `ret_maybe` marks an
+    (annotation-rooted, threaded through `let`s with shadowing); `ints`/`lists` the names PROVEN
+    int/list, consumed only by the truthiness desugaring in test positions (`_test_from_py`) and
+    dropped conservatively on any rebinding — a name whose type is no longer proven refuses a
+    truthy test rather than desugaring with the wrong falsy set. `ret_maybe` marks an
     `-> Optional[T]` function: every returned value is wrapped at the None<->Maybe boundary
     (`return None` -> the None variant; an already-Maybe expression passes through; anything else
     -> Just(...)) — Python never wraps its optionals, so the wrapping is the annotation's."""
@@ -459,7 +495,8 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
         # The unpacked names are freshly bound; drop them from the type-inference sets.
         inner, inner_d, inner_m = strs - set(names), dicts - set(names), maybes - set(names)
         return {"kind": "case", "scrutinee": _expr_from_py(head.value, strs, dicts),
-                "arms": [{"pattern": pat, "body": _block_from_py(tail, inner, inner_d, inner_m, ret_maybe)}]}
+                "arms": [{"pattern": pat, "body": _block_from_py(tail, inner, inner_d, inner_m, ret_maybe,
+                                                                 ints - set(names), lists - set(names))}]}
     if isinstance(head, ast.Assign):
         if len(head.targets) != 1 or not isinstance(head.targets[0], ast.Name):
             raise BodyError("only single-name assignment targets are in subset")
@@ -468,7 +505,8 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
         inner_d = (dicts | {name}) if _is_dictish(head.value, dicts) else (dicts - {name})
         inner_m = (maybes | {name}) if _is_maybeish(head.value, maybes, dicts) else (maybes - {name})
         return b_let(name, _expr_from_py(head.value, strs, dicts),
-                     _block_from_py(tail, inner, inner_d, inner_m, ret_maybe))
+                     _block_from_py(tail, inner, inner_d, inner_m, ret_maybe,
+                                    ints - {name}, lists - {name}))
     if isinstance(head, ast.AnnAssign):
         if not isinstance(head.target, ast.Name) or head.value is None:
             raise BodyError("annotated assignment must be `name: T = value`")
@@ -479,8 +517,11 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
         inner_d = (dicts | {name}) if (annotated_dict or _is_dictish(head.value, dicts)) else (dicts - {name})
         inner_m = (maybes | {name}) if (_is_optional_ann(head.annotation)
                                         or _is_maybeish(head.value, maybes, dicts)) else (maybes - {name})
+        annotated_int = isinstance(head.annotation, ast.Name) and head.annotation.id == "int"
+        inner_i = (ints | {name}) if annotated_int else (ints - {name})
+        inner_l = (lists | {name}) if _is_list_ann(head.annotation) else (lists - {name})
         return b_let(name, _expr_from_py(head.value, strs, dicts),
-                     _block_from_py(tail, inner, inner_d, inner_m, ret_maybe))
+                     _block_from_py(tail, inner, inner_d, inner_m, ret_maybe, inner_i, inner_l))
     if isinstance(head, ast.AugAssign):
         # `acc += e` (or -=, *=, /=, %=) re-binds `acc` to `acc <op> e` — a `let` over the rest. `acc`
         # must already be bound (a parameter or a preceding assignment). `s += t` over a known string
@@ -491,12 +532,14 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
         if isinstance(head.op, ast.Add) and (name in strs or _is_stringish(head.value, strs)):
             update = b_app(b_var("str_concat"), [b_var(name), _expr_from_py(head.value, strs, dicts)])
             return b_let(name, update, _block_from_py(tail, strs | {name}, dicts - {name},
-                                                      maybes - {name}, ret_maybe))
+                                                      maybes - {name}, ret_maybe,
+                                                      ints - {name}, lists - {name}))
         if type(head.op) not in _PY_BIN:
             raise BodyError("unsupported augmented-assignment operator")
         update = _op_app(_PY_BIN[type(head.op)], [b_var(name), _expr_from_py(head.value, strs, dicts)])
         return b_let(name, update, _block_from_py(tail, strs - {name}, dicts - {name},
-                                                  maybes - {name}, ret_maybe))
+                                                  maybes - {name}, ret_maybe,
+                                                  ints - {name}, lists - {name}))
     if isinstance(head, ast.If):
         # Narrowing: `if x is None:` / `if x is not None:` over a known Maybe becomes a `case` on
         # it — the non-None branch REBINDS x to the Just payload (Python's type narrowing made
@@ -518,17 +561,19 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                 "arms": [
                     {"pattern": {"kind": "variant", "tag": "Just",
                                  "payload": {"kind": "bind", "name": name}},
-                     "body": _block_from_py(just_stmts, strs, dicts, narrowed, ret_maybe)},
+                     "body": _block_from_py(just_stmts, strs, dicts, narrowed, ret_maybe, ints, lists)},
                     {"pattern": {"kind": "variant", "tag": "None"},
-                     "body": _block_from_py(none_stmts, strs, dicts, narrowed, ret_maybe)},
+                     "body": _block_from_py(none_stmts, strs, dicts, narrowed, ret_maybe, ints, lists)},
                 ],
             }
-        if not _is_boolish(head.test):
-            raise BodyError("non-boolean `if` test (Python truthiness is not representable)")
-        then_expr = _block_from_py(head.body, strs, dicts, maybes, ret_maybe)
+        # A boolean test translates as before; a truthy non-bool test desugars via _test_from_py
+        # when an annotation proves its type, and refuses otherwise.
+        test_expr = _test_from_py(head.test, strs, dicts, maybes, ints, lists)
+        then_expr = _block_from_py(head.body, strs, dicts, maybes, ret_maybe, ints, lists)
         # An `else`/`elif` block is the false branch; without one, the rest of the function is.
-        else_expr = _block_from_py(head.orelse if head.orelse else tail, strs, dicts, maybes, ret_maybe)
-        return b_if(_expr_from_py(head.test, strs, dicts), then_expr, else_expr)
+        else_expr = _block_from_py(head.orelse if head.orelse else tail, strs, dicts, maybes,
+                                   ret_maybe, ints, lists)
+        return b_if(test_expr, then_expr, else_expr)
     if isinstance(head, ast.For):
         # A loop over `src`, its body optionally wrapped in one guard `if cond: …` (no else).
         # Four shapes:
@@ -566,6 +611,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                    for n in ast.walk(s)):
                 raise BodyError("loop variable read after a loop")
         loop_strs, loop_dicts, loop_maybes = strs - bound_elt, dicts - bound_elt, maybes - bound_elt
+        loop_ints, loop_lists = ints - bound_elt, lists - bound_elt
         src = _expr_from_py(head.iter, strs, dicts)
 
         def _welt(expr):
@@ -578,13 +624,15 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                                           "elems": [{"kind": "bind", "name": n} for n in elt_names]},
                               "body": expr}]}
 
-        # Peel one optional guard `if cond: <body>` (no else) off the loop body.
+        # Peel one optional guard `if cond: <body>` (no else) off the loop body. The guard is
+        # translated ONCE here (boolean as before; annotation-proven truthiness desugared) and the
+        # resulting expression reused by every loop shape below.
         body = head.body
-        guard = None
+        guard = guard_expr = None
         if len(body) == 1 and isinstance(body[0], ast.If) and not body[0].orelse:
-            if not _is_boolish(body[0].test):
-                raise BodyError("non-boolean loop guard (Python truthiness is not representable)")
             guard = body[0].test
+            guard_expr = _test_from_py(guard, loop_strs, loop_dicts, loop_maybes,
+                                       loop_ints, loop_lists)
             body = body[0].body
         stmt = body[0] if len(body) == 1 else None
 
@@ -598,8 +646,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                 raise BodyError("bare `return` in a loop (no value)")
             hits_src = src
             if guard is not None:
-                hits_src = b_app(b_var("filter"),
-                                 [b_lambda([x], _welt(_expr_from_py(guard, loop_strs, loop_dicts))), hits_src])
+                hits_src = b_app(b_var("filter"), [b_lambda([x], _welt(guard_expr)), hits_src])
             used = bound_elt | {x} | {n.id for s in stmts for n in ast.walk(s) if isinstance(n, ast.Name)}
             hits = "hits"
             while hits in used:
@@ -622,7 +669,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                     found_branch = b_variant("Just", found_branch)
             return b_let(hits, hits_src,
                          b_if(b_app(b_var("null"), [b_var(hits)]),
-                              _block_from_py(tail, strs, dicts, maybes, ret_maybe),
+                              _block_from_py(tail, strs, dicts, maybes, ret_maybe, ints, lists),
                               found_branch))
 
         # Shape: list-building via `acc.append(e)`.
@@ -633,8 +680,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
             acc = stmt.value.func.value.id
             src2 = src
             if guard is not None:
-                src2 = b_app(b_var("filter"),
-                             [b_lambda([x], _welt(_expr_from_py(guard, loop_strs, loop_dicts))), src2])
+                src2 = b_app(b_var("filter"), [b_lambda([x], _welt(guard_expr)), src2])
             elt = _expr_from_py(stmt.value.args[0], loop_strs, loop_dicts)
             mapped = src2 if (elt_names is None and elt == b_var(x)) \
                 else b_app(b_var("map"), [b_lambda([x], _welt(elt)), src2])
@@ -642,7 +688,8 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
             # build is just the mapped/filtered list, and a non-empty seed is honored.
             rebind = b_app(b_var("append"), [b_var(acc), mapped])
             return b_let(acc, rebind, _block_from_py(tail, strs - {acc}, dicts - {acc},
-                                                     maybes - {acc}, ret_maybe))
+                                                     maybes - {acc}, ret_maybe,
+                                                     ints - {acc}, lists - {acc}))
 
         # Shape: nested list-building loop `for x in xss: for i in <inner(x)>: acc.append(e)` —
         # flatten / flatMap. The sequential appends are a left fold over the outer source, each
@@ -658,11 +705,11 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
             in_strs, in_dicts = loop_strs - {i}, loop_dicts - {i}
             inner_src = _expr_from_py(stmt.iter, loop_strs, loop_dicts)
             ibody = stmt.body
-            iguard = None
+            iguard = iguard_expr = None
             if len(ibody) == 1 and isinstance(ibody[0], ast.If) and not ibody[0].orelse:
-                if not _is_boolish(ibody[0].test):
-                    raise BodyError("non-boolean loop guard (Python truthiness is not representable)")
                 iguard = ibody[0].test
+                iguard_expr = _test_from_py(iguard, in_strs, in_dicts, loop_maybes - {i},
+                                            loop_ints - {i}, loop_lists - {i})
                 ibody = ibody[0].body
             if not (len(ibody) == 1 and isinstance(ibody[0], ast.Expr)
                     and isinstance(ibody[0].value, ast.Call)
@@ -679,19 +726,18 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                     raise BodyError("nested loop reads its accumulator mid-loop")
             batch = inner_src
             if iguard is not None:
-                batch = b_app(b_var("filter"),
-                              [b_lambda([i], _expr_from_py(iguard, in_strs, in_dicts)), batch])
+                batch = b_app(b_var("filter"), [b_lambda([i], iguard_expr), batch])
             elt = _expr_from_py(ibody[0].value.args[0], in_strs, in_dicts)
             if elt != b_var(i):
                 batch = b_app(b_var("map"), [b_lambda([i], elt), batch])
             outer_src = src
             if guard is not None:
-                outer_src = b_app(b_var("filter"),
-                                  [b_lambda([x], _welt(_expr_from_py(guard, loop_strs, loop_dicts))), outer_src])
+                outer_src = b_app(b_var("filter"), [b_lambda([x], _welt(guard_expr)), outer_src])
             step = b_lambda([acc, x], _welt(b_app(b_var("append"), [b_var(acc), batch])))
             fold = b_app(b_var("foldl"), [step, b_var(acc), outer_src])
             return b_let(acc, fold, _block_from_py(tail, strs - {acc}, dicts - {acc},
-                                                   maybes - {acc}, ret_maybe))
+                                                   maybes - {acc}, ret_maybe,
+                                                   ints - {acc}, lists - {acc}))
 
         # Shape: numeric/string/structural accumulator statements `acc = update` / `acc <op>= e` —
         # one, or SEVERAL over distinct accumulators. Each becomes its own foldl over `src`;
@@ -762,21 +808,23 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                         update = b_if(b_var(gvar), update, b_var(acc))
                     step = b_let(acc, update, step)
                 if guard is not None:
-                    step = b_let(gvar, _expr_from_py(guard, loop_strs, loop_dicts), step)
+                    step = b_let(gvar, guard_expr, step)
                 destructure = {"kind": "case", "scrutinee": b_var(accp),
                                "arms": [{"pattern": acc_pat, "body": step}]}
                 seed = {"kind": "tuple", "elems": [b_var(a) for a in accs]}
                 fold = b_app(b_var("foldl"), [b_lambda([accp, x], _welt(destructure)), seed, src])
-                result = _block_from_py(tail, strs, dicts, maybes - accset, ret_maybe)
+                result = _block_from_py(tail, strs, dicts, maybes - accset, ret_maybe,
+                                        ints - accset, lists - accset)
                 unpack = {"kind": "case", "scrutinee": b_var(foldvar),
                           "arms": [{"pattern": acc_pat, "body": result}]}
                 return b_let(foldvar, fold, unpack)
 
-            result = _block_from_py(tail, strs, dicts, maybes - accset, ret_maybe)
+            result = _block_from_py(tail, strs, dicts, maybes - accset, ret_maybe,
+                                    ints - accset, lists - accset)
             for acc, update in reversed(list(zip(accs, updates))):
                 # A guarded step keeps the accumulator unchanged on the false branch.
                 if guard is not None:
-                    update = b_if(_expr_from_py(guard, loop_strs, loop_dicts), update, b_var(acc))
+                    update = b_if(guard_expr, update, b_var(acc))
                 fold = b_app(b_var("foldl"), [b_lambda([acc, x], _welt(update)), b_var(acc), src])
                 result = b_let(acc, fold, result)
             return result
@@ -840,6 +888,31 @@ def _dict_annotated_params(func):
                      if is_dict_ann(p.annotation))
 
 
+_LIST_ANNOTATIONS = ("list", "List", "Sequence")
+
+
+def _is_list_ann(ann):
+    if isinstance(ann, ast.Name):
+        return ann.id in _LIST_ANNOTATIONS
+    return isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name) \
+        and ann.value.id in _LIST_ANNOTATIONS
+
+
+def _int_annotated_params(func):
+    """The parameter names annotated `int` — with `_list_annotated_params`, the roots of the
+    truthiness desugaring (the falsy set is type-dependent, so only a proven type may desugar)."""
+    a = func.args
+    return frozenset(p.arg for p in (list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs))
+                     if isinstance(p.annotation, ast.Name) and p.annotation.id == "int")
+
+
+def _list_annotated_params(func):
+    """The parameter names annotated as lists (`list`, `list[...]`, `List[...]`, `Sequence[...]`)."""
+    a = func.args
+    return frozenset(p.arg for p in (list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs))
+                     if _is_list_ann(p.annotation))
+
+
 def function_raises(func):
     """Whether the function's own body contains a `raise` — the trigger for raise-totalization
     (the lifted body returns `Maybe T` with raise-branches as `None`, and the adapter wraps the
@@ -867,7 +940,8 @@ def body_ast_from_py(func):
         return None
     try:
         expr = _block_from_py(stmts, _str_annotated_params(func), _dict_annotated_params(func),
-                              _optional_annotated_params(func), ret_opt or raises)
+                              _optional_annotated_params(func), ret_opt or raises,
+                              _int_annotated_params(func), _list_annotated_params(func))
         params = _fixed_param_names(func)
         # A 0-arg function is its bare result (applying it to [] still evaluates); else wrap in a
         # lambda so `run` can apply the example's arguments.

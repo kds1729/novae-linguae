@@ -648,6 +648,25 @@ awaiting a workflow.
   `sum_values`/`keys_over` (twenty-seven-function corpus) ingest, run, and certify; each shape was
   verified bit-for-bit against its Python reference. Residuals now are the honest tail: `while`
   (non-structural), a tuple-unpacking *inner* loop target, and deeper loop nesting.
+  *Truthiness (2026-07-10):* the next design decision from the measured boundary, taken the same
+  annotation-rooted way. A Python test position (`if x:`, a loop guard) over a NON-bool desugars
+  only where an annotation **proves** the type — the falsy set is type-dependent, so guessing is
+  mistranslation: `str` → `x != ""`, `int` → `x != 0`, `list`/`Sequence` → `not (null x)`,
+  `dict` → `map_size x != 0`. `not` and `and`/`or` recurse over mixed truthy/boolean operands
+  (strict connectives instead of Python's short-circuit — the established purity argument), and
+  provenness threads through rebinding like every other known set (a name rebound to an unproven
+  value refuses a later truthy test rather than desugaring with the wrong falsy set). Two
+  deliberate exclusions: **`Optional` truthiness is refused** — `if x:` over a Maybe conflates
+  `None` with a falsy payload, and the `is None` narrowing idiom is the precise form the subset
+  already has — and **ternary tests stay boolean-only** (truthiness is a statement-position
+  feature; the expression translator keeps the old rule). `label_of`/`batch_size`/`scaled`/
+  `ready` (thirty-one-function executable corpus) ingest, run, and certify, each verified
+  bit-for-bit against Python semantics incl. mixed `and`-chains and a truthy loop guard. The
+  measured stdlib boundary is UNMOVED (22 of 87) — as with raise-totalization, the stdlib's
+  truthy tests sit in *unannotated* functions (and co-occur with `while`/`try`/kwargs), so
+  truthiness serves clean annotated code, the kind agents and modern libraries write. The
+  remaining design frontier from the survey is now subscripting (`d[k]`/`xs[i]` — partiality
+  again) and `while`.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

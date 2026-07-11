@@ -391,3 +391,60 @@ def per_unit(total: int, count: int) -> int:
     if count == 0:
         raise ValueError("no boxes")
     return total // count
+
+
+def label_of(s: str) -> str:
+    """The string itself, or a placeholder when empty (str truthiness: `if s` desugars to
+    `s != ""` — the falsy set is annotation-proven).
+
+    >>> label_of("widget")
+    'widget'
+    >>> label_of("")
+    '(unnamed)'
+    """
+    if s:
+        return s
+    return "(unnamed)"
+
+
+def batch_size(xs: list[int]) -> int:
+    """How many items, or -1 for no batch at all (list truthiness: `if xs` is `not (null xs)`).
+
+    >>> batch_size([4, 5])
+    2
+    >>> batch_size([])
+    -1
+    """
+    if xs:
+        return len(xs)
+    return -1
+
+
+def scaled(n: int, factor: int) -> int:
+    """n scaled by factor, defaulting a zero factor to identity (int truthiness: `if factor`
+    is `factor != 0`).
+
+    >>> scaled(7, 3)
+    21
+    >>> scaled(7, 0)
+    7
+    """
+    if factor:
+        return n * factor
+    return n
+
+
+def ready(name: str, count: int) -> bool:
+    """Whether a named, non-empty order is ready (a MIXED test: truthy str `and` a comparison —
+    strict connectives, the purity argument).
+
+    >>> ready("box", 2)
+    True
+    >>> ready("", 2)
+    False
+    >>> ready("box", 0)
+    False
+    """
+    if name and count > 0:
+        return True
+    return False

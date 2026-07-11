@@ -281,6 +281,66 @@ class PythonBodyTests(unittest.TestCase):
         self.assertEqual(guarded["body"]["value"]["fn"], {"kind": "var", "name": "filter"})
 
 
+class TruthinessTests(unittest.TestCase):
+    """Annotation-rooted truthiness in test positions: the falsy set is type-dependent, so only a
+    PROVEN str/int/list/dict may desugar; everything else refuses rather than guessing."""
+
+    def test_str_truthiness_is_neq_empty(self):
+        body = py_body('def f(s: str):\n    if s:\n        return s\n    return "x"')
+        self.assertEqual(body["body"]["scrutinee"],
+                         {"kind": "app", "fn": {"kind": "var", "name": "neq"},
+                          "args": [{"kind": "var", "name": "s"},
+                                   {"kind": "lit", "value": {"kind": "string", "value": ""}}]})
+
+    def test_int_truthiness_is_neq_zero(self):
+        body = py_body("def f(n: int):\n    if n:\n        return 1\n    return 0")
+        self.assertEqual(body["body"]["scrutinee"],
+                         {"kind": "app", "fn": {"kind": "var", "name": "neq"},
+                          "args": [{"kind": "var", "name": "n"},
+                                   {"kind": "lit", "value": {"kind": "int", "value": 0}}]})
+
+    def test_list_truthiness_is_not_null(self):
+        body = py_body("def f(xs: list):\n    if xs:\n        return 1\n    return 0")
+        self.assertEqual(body["body"]["scrutinee"],
+                         {"kind": "app", "fn": {"kind": "var", "name": "not"},
+                          "args": [{"kind": "app", "fn": {"kind": "var", "name": "null"},
+                                    "args": [{"kind": "var", "name": "xs"}]}]})
+
+    def test_dict_truthiness_is_map_size_neq_zero(self):
+        body = py_body("def f(d: dict):\n    if d:\n        return 1\n    return 0")
+        scrut = body["body"]["scrutinee"]
+        self.assertEqual(scrut["fn"], {"kind": "var", "name": "neq"})
+        self.assertEqual(scrut["args"][0]["fn"], {"kind": "var", "name": "map_size"})
+
+    def test_mixed_truthy_and_boolean_chain(self):
+        # `s and n > 0` — a truthy name and a comparison mix in one strict connective.
+        body = py_body("def f(s: str, n: int):\n    if s and n > 0:\n        return 1\n    return 0")
+        scrut = body["body"]["scrutinee"]
+        self.assertEqual(scrut["fn"], {"kind": "var", "name": "and"})
+
+    def test_truthy_loop_guard(self):
+        body = py_body("def f(xs: list, k: int):\n    c = 0\n    for x in xs:\n        if k:\n"
+                   "            c += 1\n    return c")
+        self.assertIsNotNone(body)
+        self.assertIn('"neq"', json.dumps(body))
+
+    def test_optional_truthiness_refused(self):
+        # `if x:` over a Maybe conflates None with a falsy payload — narrowing is the precise form.
+        self.assertIsNone(py_body("def f(x: int | None):\n    if x:\n        return 1\n    return 0"))
+
+    def test_unannotated_truthiness_refused(self):
+        self.assertIsNone(py_body("def f(x):\n    if x:\n        return 1\n    return 0"))
+
+    def test_rebind_to_unproven_refuses(self):
+        # A rebound name whose new value proves nothing drops out of every known set.
+        self.assertIsNone(py_body("def f(n: int):\n    n = g(n)\n    if n:\n        return 1\n    return 0"))
+
+    def test_ternary_test_stays_boolish_only(self):
+        # Truthiness is a STATEMENT-position feature (if / loop guards); ternary tests keep the
+        # boolean-only rule.
+        self.assertIsNone(py_body('def f(s: str):\n    return 1 if s else 0'))
+
+
 class TokenBodyTests(unittest.TestCase):
     def test_haskell_bare_and_application_wrap_in_lambda(self):
         self.assertEqual(
@@ -291,7 +351,12 @@ class TokenBodyTests(unittest.TestCase):
             body_ast_from_hs("f", "f x = g x")["body"],
             {"kind": "app", "fn": {"kind": "var", "name": "g"}, "args": [{"kind": "var", "name": "x"}]},
         )
-        self.assertIsNone(body_ast_from_hs("f", "f x = x + 1"))         # operator: out of HS subset
+        # Infix operators are IN the HS subset since the executable-body deepening (94c1d67).
+        self.assertEqual(
+            body_ast_from_hs("f", "f x = x + 1")["body"],
+            {"kind": "app", "fn": {"kind": "var", "name": "add"},
+             "args": [{"kind": "var", "name": "x"}, {"kind": "lit", "value": {"kind": "int", "value": 1}}]},
+        )
         self.assertIsNone(body_ast_from_hs("f", "f x\n  | x > 0 = 1"))  # guard
 
     def test_typescript_arrow_reuses_python_expr(self):
@@ -313,7 +378,14 @@ class TokenBodyTests(unittest.TestCase):
             body_ast_from_ts("f", "export const f = (a, b) => a > b")["params"],
             [{"name": "a"}, {"name": "b"}],
         )
-        self.assertIsNone(body_ast_from_ts("f", "export function f(x) { return x; }"))  # block body
+        # A block single-`return` body is IN the TS subset since the deepening (94c1d67);
+        # a loop keeps a block body out.
+        self.assertEqual(
+            body_ast_from_ts("f", "export function f(x) { return x; }"),
+            {"kind": "lambda", "params": [{"name": "x"}], "body": {"kind": "var", "name": "x"}},
+        )
+        self.assertIsNone(
+            body_ast_from_ts("f", "export function f(x) { for (;;) {} return x; }"))
 
 
 @unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")

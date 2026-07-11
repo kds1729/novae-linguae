@@ -330,10 +330,12 @@ class TestExecutableCorpus(unittest.TestCase):
         # Just-wrapped returns, bare get, Maybe-returning search), per_unit
         # (raise-totalization: guard-raise -> the None arm, Traceback doctest -> None example),
         # add_sub / swap_diff / running_gap (tuples: construction, unpacking, and a DEPENDENT
-        # multi-accumulator loop via a tuple-accumulator fold), and sum_values / keys_over
-        # (tuple-unpacking `for (k, v) in …` — accumulator and guarded-append shapes).
-        self.assertEqual(len(records), 27)
-        self.assertEqual(len(bodies), 27)               # every body is in the executable subset
+        # multi-accumulator loop via a tuple-accumulator fold), sum_values / keys_over
+        # (tuple-unpacking `for (k, v) in …` — accumulator and guarded-append shapes), and
+        # label_of / batch_size / scaled / ready (annotation-rooted TRUTHINESS: str/list/int
+        # truthy tests + a mixed truthy-and-comparison chain).
+        self.assertEqual(len(records), 31)
+        self.assertEqual(len(bodies), 31)               # every body is in the executable subset
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
