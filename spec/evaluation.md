@@ -575,7 +575,10 @@ body) → {status, body}` — the effect is decided by the METHOD, `net.read` fo
 `net.write` for every other verb, so one builtin covers the whole verb surface without widening the
 read-only grant; the effects walker refines a literal method to the side actually performed and
 treats a dynamic one as both; the `{status, body}` record result is what a mutating workflow
-verifies against), `spawn` (`process.spawn`), and `replicate` (`alloc` — allocate a list of
+verifies against), its header-preserving sibling **`http_full`** (same call, same method-decided
+effect — the response headers survive as a canonical `Map string string`: names lowercased,
+values OWS-trimmed, duplicates comma-joined — so `Location`-driven workflows are expressible and
+redirect-following stays in-language), `spawn` (`process.spawn`), and `replicate` (`alloc` — allocate a list of
 `n` copies, the heap-allocating builtin with no external I/O) — gate on it, and each performed effect is
 appended to a structured **trace** (principle 9: an AI-ingestible record of what the body did). Adding
 an effect kind is just an entry in `builtin_effect`; enforcement, tracing, and inference follow

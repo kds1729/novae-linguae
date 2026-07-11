@@ -318,7 +318,8 @@ and a granted one **re-ran the whole cycle live and CONFIRMED**. `run` needed no
 it already grants exactly the record's declared effects (its examples are its own tests) — only
 `--secret`. Wire-format details deliberately unpulled at the time: response headers, redirects,
 query-parameter encoding, multipart bodies — no workflow had needed them (GW10 has since pulled
-query-parameter encoding; the rest remain unpulled).
+query-parameter encoding and GW14 response headers + in-language redirects; multipart remains
+unpulled).
 
 **GW7 — records from an API description (2026-07-07): ingestion at the description layer.** With
 the general `http` core in place, a **machine-readable API description is an ingestion source**:
@@ -347,7 +348,8 @@ arity-1 one), applied it live → status 200, published the assert; a grantless 
 reported it undecidable (testimony) and a granted one re-ran it live and CONFIRMED. Wire-format
 depth (response headers, `$ref` schema resolution, query/multipart encoding, non-Bearer auth)
 stayed unpulled — the description-to-record path, not full OpenAPI coverage, was the pull
-(GW10 has since pulled `$ref` resolution, query/header parameters, and apiKey auth).
+(GW10 has since pulled `$ref` resolution, query/header parameters, and apiKey auth; GW13
+client-credentials OAuth; GW14 response headers).
 
 **GW3 — dispatch on message content (2026-07-07): the zero-pull workflow.** The last of the
 three original golden workflows — *split a command string, compare its head against known
@@ -442,7 +444,53 @@ adapter. Corpus follow-through same day: curated `url_funcs` rows (`encode_term`
 family **#49** (near-bare encodes, single/chained query pairs, int params via `to_string`, the
 join-encoded list; corpus19 = 3,195 specs, 0 drops; ftdata19 staged). Residual description
 depth — response headers/redirects, multipart, non-local `$ref`s, oauth flows — stays refused,
-awaiting a workflow.
+awaiting a workflow (GW13 has since pulled the client-credentials OAuth flow and GW14 response
+headers + in-language redirects; multipart, non-local `$ref`s, and the interactive OAuth flows
+remain refused).
+
+**GW14 — response headers (2026-07-11): server-assigned identity pulls `http_full`, and
+redirects stay in-language.** The GW6 fake service deliberately used CLIENT-chosen names because
+the real REST idiom — *POST, and the server tells you where the resource lives* — was
+inexpressible: the `Location` answer arrives in a response HEADER, and `http`'s
+`{status, body}` result drops headers on the floor. Changing `http`'s result shape was a
+non-starter (that shape is baked into certified records, observed asserts, and exact-consumption
+traces already published — a shape change silently re-semantics content-addressed artifacts), so
+the pull is a SECOND general request builtin,
+**`http_full : (string, string, Map string string, string) → {status: int, headers: Map string
+string, body: string}`** — the same wire call (same method-decided effect split, host-scoped
+grants, secret/oauth placeholders; the effects walker refines its literal methods identically)
+with the response headers surviving as a canonical map: names lowercased (HTTP names are
+case-insensitive; lowercase is what `str_lt`'s code-point order sorts sanely), values
+OWS-trimmed, duplicates comma-joined in arrival order. **Redirects are deliberately NOT builtin
+machinery**: exposing headers makes redirect-following ordinary in-language code — as are
+pagination (`Link`), caching (`ETag`), and rate limiting (`Retry-After`) later — so the builtin
+returns a 3xx as-is. Everything above the builtin is certified records:
+[`examples/location-of.v0.2.json`](examples/location-of.v0.2.json) (the pure header projection —
+`map_get "location" r.headers`, absence is `None` not an error),
+[`examples/create-thing.v0.2.json`](examples/create-thing.v0.2.json) (POST → `Just` the assigned
+Location on 201), [`examples/follow-redirect.v0.2.json`](examples/follow-redirect.v0.2.json)
+(**bounded** recursive following — `nat` depth, 301/302/303/307/308 with a `location` present,
+else the response's own status; `net.read` only), and
+[`examples/thing-roundtrip.v0.2.json`](examples/thing-roundtrip.v0.2.json) (`(string, string) →
+bool` — POST → project Location → GET it (status + body must match) → DELETE → verify-gone: the
+self-cleaning predicate whose middle leg is REACHABLE ONLY by reading a header). The fake
+service grew the GW14 surface: `POST /things` assigns `th_<sha256(body)[:12]>` — genuinely
+server-chosen yet deterministic, so runs replay byte-identically — answering 201 +
+`Location`, plus `GET /latest` → 307 → `/health` (the one-hop redirect). All four records
+certify (the per-verb effect split reads SOUND through `http_full`) and are published to Arca
+with signed certifications; their effectful examples carry **traces** (GW12), so `run` checks
+them offline — verified with the service dead. The remote loop closed in production:
+`orchestrate --node … --intent predicate --verify --require-certified --publish` discovered
+`thing_roundtrip` among 21 candidates (the only two-string-argument predicate), certified it,
+applied it live → `true`, and published the observed assert
+(`msg_c190883f…` + `trc_84829263…`); a grantless, secretless `verify-claim` by address **with
+the service killed** replays it CONFIRMED (GW11 scope: deterministic consequence of the
+publisher's observations). Corpus follow-through same day: curated `header_funcs` rows
+(`location_of` / `header_of` / `header_or` / `is_redirect` / `next_url` — eval 394 → 404, oracle
+404/404) plus combinatorial family **#50** (near-bare `.headers`-then-`map_get` chains,
+Maybe-cased defaults, presence predicates, status-guarded Location lookups, base-joins; corpus20
+= 3,211 specs, 0 drops; ftdata20 staged). Residual wire-format depth: multipart bodies,
+non-local `$ref`s, interactive OAuth flows — still refused, awaiting a workflow.
 
 **GW13 — OAuth2 client-credentials (2026-07-11, same day): the largest refused auth style joins
 the effect-boundary doctrine.** Real machine-to-machine APIs overwhelmingly authenticate by
