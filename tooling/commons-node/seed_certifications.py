@@ -60,11 +60,13 @@ def _validator_hash(validator, path):
     return out.stdout.strip() if out.returncode == 0 else None
 
 
-def _certify(validator, record_path, body_path, seed):
+def _certify(validator, record_path, body_path, seed, records_dir):
     # `certify` exits 1 when the record is NOT certified but still prints the (negative) certificate on
-    # stdout, so accept either exit code and key off whether we got a JSON certificate.
+    # stdout, so accept either exit code and key off whether we got a JSON certificate. The records
+    # directory resolves `fn_ref` callees, so a COMPOSED record's effects certify SOUND, not
+    # UNVERIFIABLE-by-unresolved-callee.
     out = subprocess.run(
-        [validator, "certify", record_path, "--body", body_path, "--sign", seed],
+        [validator, "certify", record_path, "--body", body_path, "--records", records_dir, "--sign", seed],
         capture_output=True, text=True,
     )
     if not out.stdout.strip():
@@ -107,7 +109,7 @@ def main(argv=None):
         body_path = bodies.get(rec.get("body_hash"))
         if not body_path:
             continue  # no body available → can't certify this record here
-        cert = _certify(args.validator, rf, body_path, args.seed)
+        cert = _certify(args.validator, rf, body_path, args.seed, args.records)
         if cert is None:
             print(f"skip  {rec['hash'][:20]}  (certify produced no certificate)")
             skipped += 1

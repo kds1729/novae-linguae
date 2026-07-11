@@ -197,6 +197,11 @@ enum Commands {
         /// reference it from an `observed` claim by its trc_… content-address.
         #[arg(long = "trace-out")]
         trace_out: Option<PathBuf>,
+        /// Directory of records/bodies to resolve `fn_ref`s against, so a COMPOSED body — one that
+        /// applies commons functions by content-address — evaluates (and its trace can be captured)
+        /// exactly as `run --records` executes it.
+        #[arg(long = "records")]
+        records: Option<PathBuf>,
     },
     /// Run a function record's worked `examples[]` through its `body`: bind each
     /// example's args, evaluate the body, and check the result equals the claimed
@@ -840,12 +845,12 @@ fn main() -> ExitCode {
         Commands::CheckProperties { record, body, generate, cases } => {
             (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases)), true)
         }
-        Commands::Eval { body, args, grants, secrets, oauth, replay, trace_out } => {
+        Commands::Eval { body, args, grants, secrets, oauth, replay, trace_out, records } => {
             match parse_secrets(&secrets).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
                 Ok((s, o)) => {
                     nl_validator::set_effect_secrets(s);
                     nl_validator::set_effect_oauth(o);
-                    (cmd_eval(&body, &args, &grants, replay.as_ref(), trace_out.as_ref()), false)
+                    (cmd_eval(&body, &args, &grants, replay.as_ref(), trace_out.as_ref(), records.as_ref()), false)
                 }
                 Err(e) => (Err(e), false),
             }
@@ -2094,9 +2099,15 @@ fn cmd_eval(
     grants: &[String],
     replay: Option<&PathBuf>,
     trace_out: Option<&PathBuf>,
+    records: Option<&PathBuf>,
 ) -> Result<()> {
     let body = nl_validator::read_json(body)?;
     let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
+    if let Some(dir) = records {
+        // Link: a composed body applies commons functions by `fn_ref`; resolve them from the
+        // directory so composition evaluates (and traces) like `run --records`.
+        nl_validator::set_resolver(nl_validator::build_link_map(dir)?);
+    }
     // Effect sandbox: the body may only perform effects in the granted set.
     nl_validator::set_effect_grants(grants.iter().cloned());
     if let Some(rp) = replay {
@@ -2113,6 +2124,7 @@ fn cmd_eval(
     let result = nl_validator::eval_body(&body, &argv);
     let trace = nl_validator::take_effect_trace();
     nl_validator::clear_effects();
+    nl_validator::clear_resolver();
     let result = result?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     if let Some(out) = trace_out {
