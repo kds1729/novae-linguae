@@ -2,15 +2,15 @@
 
 This pins the current best fine-tuned models for *Nova Lingua*. Per the project finding that **the corpus
 teaches the shapes and model capacity supplies the headroom to apply them**, the reference is a LoRA adapter
-over a code-pretrained Qwen2.5-Coder base. The eval is the **380-task** curated set (189 write tasks —
-incl. the expressiveness-phase string/map/JSON tasks, the corpus13 sort/case rows, and the GW5 float
-rows); **all three tiers are on `corpus14`** (the first time every pin shares one corpus):
+over a code-pretrained Qwen2.5-Coder base. The write/read counts below are per-pin against the eval that
+round ran (the pool grows with the language — 380 tasks at c14, **416 at c21**); cross-round claims are
+made on **shared tasks**, never raw totals:
 
-| tier | base | write (held-out, s0 / s1) | notes |
+| tier | base | pin | notes |
 |---|---|---|---|
-| **best write** | **Coder-7B** (corpus14) | **176 / 185 of 189 (97.9% best, 95.5% mean)** | best ever by a wide margin; seed-1 passes **every historical residual** (`insert_sorted`, `modulo`, `pow2`, `is_int_string`, the full reverse + GW5 float families) — its only misses are 4 long-known churn tasks |
-| **best total / read** | Coder-14B (corpus14) | 181 of 189 (95.8%, seed 1) | **total semantic 95.8% (best ever), read semantic 95.5%** — re-baselined after four corpora behind; write now ties the best 3B seed |
-| **efficient** | Coder-3B (corpus14) | 181 / 173 of 189 (95.8% best, 93.7% mean) | best 3B ever — **seed 0** is the pin this round; passes all 5 GW5 float rows + `insert_sorted` |
+| **best write** | **Coder-7B** (corpus14, s1) | **176 / 185 of 189 (97.9% best, 95.5% mean)** on the 380-task eval | best ever by a wide margin; seed-1 passes **every historical residual** — its only misses are 4 long-known churn tasks. c21-7B-s0 came within −1 of it on shared tasks (and is the best post-c14 7B: +4 vs r18, +6 vs r19) but does not displace it |
+| **best total / read** | **Coder-14B (corpus21, s1)** | **total semantic 396/416 = 95.2%, read 189/197 = 95.9%, write 195/207** | **re-pinned in round 20 (2026-07-11)**: beats the c14-14B pin **+2 on the 378 shared tasks** AND covers the GW14/15 header/link families (13/16 first-contact) the c14 pins never saw |
+| **efficient** | Coder-3B (corpus14, s0) | 181 / 173 of 189 (95.8% best, 93.7% mean) on the 380-task eval | best 3B ever; c21 3B seeds are −7/−9 on shared tasks — the pin stands |
 
 > **The capacity boundary (2026-07-03, Coder-14B 2-seed).** 14B moved the total to **96.2%** but taught the sharpest lesson: **capacity fixes *reading*, not *writing*.** `read` climbed 91→98.6% (the off-by-one / sign / absorption-law arithmetic errors are capacity-bound and mostly gone), and the two genuine reasoning-*write* residuals `foldr_with`/`member` cracked on both seeds — yet the `write` count is **dead-stable at 147/157 across both seeds AND across 7B↔14B**. The remaining write misses are not capacity-bound: they are the dialect's **totality by design** (no `^`, no `!!`, no `error`). Two of them were a missing-*idiom* gap, closed at $0/local: adding **`last`/`init`** list builtins made the model's already-correct `reverse` valid, and **corpus family #38** (index recursion) flipped `nth` `.`→`P` at 14B (`min_of_list` too, via #37). Genuinely stuck: `pow2` (its exact gold is the already-covered `rec_pow` shape → leakage-dropped → a generalization limit, not a coverage gap) and a small arithmetic core (`fib`, sign). Adapters (275 MB each) pulled to `/var/tmp/claude/adapter-coder14b-c{7,8}-s*`.
 
@@ -186,10 +186,27 @@ rows); **all three tiers are on `corpus14`** (the first time every pin shares on
 > re-armed); no adapter beats the c14 pins on shared tasks, so no re-pin, no republish. The loop
 > re-parks until the next capability pull.** Adapters+evals in `/var/tmp/claude/round19/`.
 
+> **The round20 measurement (2026-07-11 night, RTX PRO 6000 Blackwell, 3B/7B 2-seed + 14B-s1,
+> corpus21/ftdata21, 2 epochs, ~1h45m ≈ $3.70 — the GW14/15 pulls' first-contact round; eval now
+> 416 tasks shots-0 incl. 16 header/link tasks from families #50/#51).** First-contact was the
+> **strongest ever for a pull: 7B-s0 hits 15/16 new-family tasks** (3B 10–11, 7B-s1 12, 14B 13);
+> the one miss common to every tier is `write/link_target` — a hallucinated-API failure
+> (`parse_link_header`, Haskell `>>=`) on the extract-between-delimiters composite, which family
+> **#51 does not emit** (only the held-out curated row has it) — the next corpus touch should add
+> that shape. On shared tasks: 7B-s0 is the best post-c14 7B (**+4 vs round18, +6 vs round19**)
+> but −1 vs the lucky-seed c14-7B-s1 pin → 7B pin stands; 3B −7/−9 → stands; **14B-s1 beats its
+> c14 pin +2 on the 378 shared tasks** (gains incl. `read/implies`, `write/checked_sub`,
+> `write/sum2_spec`; losses are churn) with total semantic **396/416 = 95.2%**, read 189/197 =
+> 95.9% → **the 14B best-total/read tier re-pins to c21-s1**. Recurring watch: `write/reverse`
+> lost at 7B both seeds again (the c13 #44 sweep does not hold across corpora — churn, not
+> regression). Adapters+evals in `/var/tmp/claude/round20/` (names `c21-*`).
+
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
 `adapter-coder7b-c14-s1`, sha256 `91d8940345630806…`, seed 1; the 14B read-champion weights are
-`adapter-coder14b-c14-s1`, sha256 `479de8563d78da0c…`, seed 1).
+now `adapter-c21-14b-s1` — round 20's re-pin, in `/var/tmp/claude/round20/`; the prior
+`adapter-coder14b-c14-s1`, sha256 `479de8563d78da0c…`, remains the last *hosted* 14B pin until
+the c21 weights record supersedes it on the commons).
 
 A LoRA adapter is small, but the *recipe* is what makes it a checkpoint: the run is **deterministic**
 (fixed seed, greedy eval, no RNG in the data path), so this manifest reproduces the adapter bit-for-bit
