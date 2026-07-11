@@ -258,7 +258,8 @@ the goal over a commons containing a prior `double_then_add` composite (whose bo
   grant as its base effect). A bare `net.write` still means any host; a scoped grant alone refuses
   every other host by name. Still designed-but-not-built, waiting for a workflow to pull them:
   per-function trust-gated grants (they discriminate on the wrong variable — the function, not the
-  arguments), path-level constraints, and trace-conditioned `observed` claims (below).
+  arguments) and path-level constraints. Trace-conditioned `observed` claims are now **built**
+  (pulled by GW11 — see below).
 - **Credentials are effect-boundary configuration, not data (pulled by GW6).** An authenticated
   workflow needs a secret the commons must never see: records, asserts, and traces are public,
   content-addressed artifacts. So a secret never exists as a language value at all — an `http`
@@ -270,12 +271,25 @@ the goal over a commons containing a prior `double_then_add` composite (whose bo
   credential would be a silent auth failure. A verifier re-running an authenticated claim under
   grants authenticates with its OWN `--secret` values — the claim names *what* to authenticate as
   (symbolically), never the credential itself.
-  **Effectful asserts are observations.** `eq(fetch(url), result)` is not a stably re-runnable
-  equation: `verify-claim` without matching grants reports it undecidable — the honest verdict.
-  *CONFIRMED-by-re-execution is the pure-claim guarantee; an effectful claim is the signer's
-  testimony*, priced like any testimony by the trust model. (The record/replay machinery could later
-  make effectful claims deterministically checkable — a claim conditioned on an attached effect
-  trace — if a workflow ever needs third-party-verifiable observations.) An unresolvable target or
+  **Effectful asserts are observations — and now carry their observations (GW11).** `eq(fetch(url),
+  result)` is not a stably re-runnable equation, so a fulfilment that performed effects emits an
+  **`observed` claim** (claim-expression.schema.json): the same predicate, conditioned on the run's
+  recorded effect trace by `trc_…` content-address (spec/trace.schema.json — a hashless,
+  self-addressing artifact like a body; the node stores and serves it through the same gate). Any
+  receiver — `verify-claim`, including by bare `msg_…` address against a node — resolves the trace,
+  hash-verifies it, and REPLAYS the computation with every effect served from the record: **no
+  effect grants, no secrets** (the trace keeps `{{secret:NAME}}` placeholders), strict order, and
+  the trace must be consumed exactly (a leftover or mismatched entry fails the claim rather than
+  confirming a prefix). The verdict is honestly scoped: *replay-CONFIRMED means the asserted result
+  follows deterministically from the recorded observations* — whether the world really said that is
+  still the signer's testimony, priced like any testimony by the trust model (a forged trace is just
+  a different content-address; what replay removes is any doubt about the computation *over* the
+  observations, which is what makes claims about e.g. an authenticated API's response body
+  third-party-checkable at all — the GW7/GW11 body-projection records). A pure fulfilment still
+  emits the plain re-runnable `predicate` claim: purity is observable, nothing changes. The trace
+  artifact travels with the assert (`respond --trace-out`; orchestrate carries a `trace` step that
+  `--publish` ships to the node before the assert) — an `observed` claim whose trace nobody can
+  fetch is unverifiable, and `verify-claim` says so by name. An unresolvable target or
   args that don't decode remain an honest error, never a silent empty assert.
 - **`predicate` claims.** The responder emits — and `verify-claim` re-runs — a `predicate` claim. The
   `satisfies` / `verified` claim kinds are descriptive and not re-run here.

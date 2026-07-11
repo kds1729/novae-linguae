@@ -444,6 +444,37 @@ join-encoded list; corpus19 = 3,195 specs, 0 drops; ftdata19 staged). Residual d
 depth — response headers/redirects, multipart, non-local `$ref`s, oauth flows — stays refused,
 awaiting a workflow.
 
+**GW11 — observed claims (2026-07-11): effectful asserts become replay-verifiable, and the
+description layer projects response bodies.** Two prior milestones pointed at the same missing
+piece: GW6 left an effectful assert as the signer's *testimony* (grantless `verify-claim` =
+undecidable, the honest verdict), and GW7 deliberately returned only the response `.status`
+because a claim about a body was unverifiable words. The pull is at the *message* layer, not the
+language: the **`observed` claim kind** (claim-expression.schema.json) — the ordinary result
+predicate *conditioned on the run's recorded effect trace* by content-address — plus the **trace
+as a first-class commons artifact** (`spec/trace.schema.json`, `trc_…`, hashless and
+self-addressing like a body; the node gates and serves it like one). The machinery was already
+sufficient: replay bypasses grants by construction, matches effects by name and sequence, and
+traces keep `{{secret:NAME}}` placeholders — so `verify-claim` on an `observed` claim resolves
+the trace (locally or over the node, hash-verified) and **replays the computation with no effect
+grants and no secrets**, requiring exact trace consumption (a leftover or mismatched observation
+fails the claim rather than confirming a prefix). The honest scope is stated everywhere:
+replay-CONFIRMED = *the result follows deterministically from the recorded observations*; the
+observations themselves remain testimony, priced by the trust model. Purity stays observable — a
+pure fulfilment emits the plain `predicate` claim, byte-identical to before. The unblocked GW7
+residual landed the same day: the OpenAPI adapter emits **body-projection records** — an
+operation whose documented 2xx response carries an `application/json` **example** (spec-time
+knowledge of the payload) yields `<opId>Body : … → Maybe Json`, `parse_json` over the response
+body, worked example `Just(<the documented payload>)`, emitted only where a deterministic
+success example is constructible from the spec alone (a bodyless GET without path parameters);
+field access composes in-language via the certified `json_get`/`json_path` records (principle 4
+— expose the payload as data, never enumerate fields). Exit gate: `getversionbody` certifies and
+its example passes live; applied under `--grant net.read@127.0.0.1 --secret api_key=…` it yields
+an `observed` assert of `Just(JObj({version: JStr "1.0.0"}))` whose trace keeps the placeholder —
+and a verifier with **no grants and no secrets** replays it CONFIRMED. No new language surface,
+no new corpus family (the message layer isn't corpus material; parse/projection shapes are
+already families #40/#47). Residual: `observed` claims for `orchestrate`'s multi-stage pipelines
+carry one trace per stage (built); trust-gated grants and path constraints stay designed-not-built.
+
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.
 - **Ingestion**: map source-language string/dict idioms onto the new builtins in
