@@ -1916,6 +1916,61 @@ def header_funcs():
     ]
 
 
+def link_funcs():
+    # LINK-PARSING rows (GW15 — pagination, the second zero-pull): an RFC 8288 `Link` header value
+    # is DATA (`<url>; rel="next", …`), and parsing it composes taught pieces — but the composite
+    # shapes (filter with an inline str_contains lambda over split segments, extract-between-
+    # delimiters with null guards) appear in no other family. Verify by validate + typecheck + run.
+    return [
+        {"name": "link_target", "intent": "The URL between < and > of a Link-header segment, if present.",
+         "summary": 'tail (str_split "<" seg) — empty means no "<"; then head (str_split ">" …) '
+                    "guarded by str_contains — total through Maybe.",
+         "tags": ["string", "list", "case", "url"],
+         "type_ast": fn([STRING], maybe_t(STRING)),
+         "body_ast": lam(["seg"], {
+             "kind": "let", "name": "after",
+             "value": bapp("tail", bapp("str_split", str_lit("<"), var("seg"))),
+             "body": case_bool(
+                 bapp("null", var("after")),
+                 variant_expr("None"),
+                 case_bool(bapp("str_contains", str_lit(">"), bapp("head", var("after"))),
+                           variant_expr("Just", bapp("head", bapp("str_split", str_lit(">"),
+                                                                 bapp("head", var("after"))))),
+                           variant_expr("None")))}),
+         "examples": [{"args": ['</list?page=3>; rel="next"'], "result": V("Just", "/list?page=3")},
+                      {"args": [' </a>; rel="prev"'], "result": V("Just", "/a")},
+                      {"args": ['rel="next" but no url'], "result": V("None")}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "segments_with", "intent": "The comma-separated segments of a string that contain a needle.",
+         "summary": 'filter (\\x -> str_contains needle x) (str_split "," s).',
+         "tags": ["string", "list", "filter", "lambda"],
+         "type_ast": fn([STRING, STRING], list_of(STRING)),
+         "body_ast": lam(["needle", "s"], bapp("filter",
+                                               lam(["x"], bapp("str_contains", var("needle"), var("x"))),
+                                               bapp("str_split", str_lit(","), var("s")))),
+         "examples": [{"args": ["rel=\"next\"", '</a>; rel="prev", </b>; rel="next"'],
+                       "result": [' </b>; rel="next"']},
+                      {"args": ["x", "ax,by,cx"], "result": ["ax", "cx"]},
+                      {"args": ["z", "a,b"], "result": []}],
+         "properties": [], "prove": False, "terminates": "always"},
+        {"name": "first_with", "intent": "The first comma-separated segment containing a needle, if any.",
+         "summary": 'let ms = filter (\\x -> str_contains needle x) (str_split "," s) in '
+                    "case null ms of true => None; false => Just (head ms).",
+         "tags": ["string", "list", "filter", "lambda", "case"],
+         "type_ast": fn([STRING, STRING], maybe_t(STRING)),
+         "body_ast": lam(["needle", "s"], {
+             "kind": "let", "name": "ms",
+             "value": bapp("filter", lam(["x"], bapp("str_contains", var("needle"), var("x"))),
+                           bapp("str_split", str_lit(","), var("s"))),
+             "body": case_bool(bapp("null", var("ms")), variant_expr("None"),
+                               variant_expr("Just", bapp("head", var("ms"))))}),
+         "examples": [{"args": ["next", 'a; rel="prev", b; rel="next"'], "result": V("Just", ' b; rel="next"')},
+                      {"args": ["q", "aq,bq"], "result": V("Just", "aq")},
+                      {"args": ["z", "a,b"], "result": V("None")}],
+         "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
 def dispatch_funcs():
     # GW3 rows (spec/expressiveness.md — dispatch on message content, the zero-pull workflow):
     # route on a command string with string-literal case patterns, split "cmd n" text into head
@@ -4044,6 +4099,49 @@ def combinatorial_specs(exclude_names=()):
                  "result": _h50(r, "location") if _h50(r, "location") is not None else "/latest"}
                 for r in _R50_IN], terminates="always"))
 
+    # 51. SEGMENT-FILTER SHAPES — GW15 (pagination, the second zero-pull). Parsing a Link-style
+    # header composes taught pieces, but the composite — split on a separator, filter with an
+    # inline str_contains lambda, null-guarded head — appears in no other family (str_contains
+    # only ever occurred as a bare predicate). Parameterized over separators and needles.
+    _S51_IN = ["ax,by,cx", "x", "", "a, b, c", 'p; rel="prev", n; rel="next"']
+
+    def _segs(s, sep, needle):
+        return [seg for seg in s.split(sep) if needle in seg]
+
+    for sep, needle in ((",", "x"), (";", "a"), (",", "rel=")):
+        slug = f"segs_{needle.rstrip('=')}_{'comma' if sep == ',' else 'semi'}"
+        add(_cspec(slug, f'The "{sep}"-separated segments of a string that contain "{needle}".',
+                   f'filter (\\s -> str_contains "{needle}" s) (str_split "{sep}" text)',
+                   ["string", "list", "filter", "lambda"], fn([STRING], list_of(STRING)),
+                   lam(["text"], bapp("filter", lam(["s"], bapp("str_contains", str_lit(needle), var("s"))),
+                                      bapp("str_split", str_lit(sep), var("text")))),
+                   [{"args": [v], "result": _segs(v, sep, needle)} for v in _S51_IN],
+                   terminates="always"))
+    for needle in ("x", "rel="):
+        add(_cspec(f"first_{needle.rstrip('=')}_seg",
+                   f'The first comma-separated segment containing "{needle}", if any.',
+                   f'let ms = filter (\\s -> str_contains "{needle}" s) (str_split "," text) in '
+                   "case null ms of true => None; false => Just (head ms)",
+                   ["string", "list", "filter", "lambda", "case"], fn([STRING], maybe_t(STRING)),
+                   lam(["text"], {
+                       "kind": "let", "name": "ms",
+                       "value": bapp("filter", lam(["s"], bapp("str_contains", str_lit(needle), var("s"))),
+                                     bapp("str_split", str_lit(","), var("text"))),
+                       "body": case_bool(bapp("null", var("ms")), variant_expr("None"),
+                                         variant_expr("Just", bapp("head", var("ms"))))}),
+                   [{"args": [v], "result": (V("Just", _segs(v, ",", needle)[0]) if _segs(v, ",", needle)
+                                             else V("None"))} for v in _S51_IN],
+                   terminates="always"))
+    for needle in ("x", "b"):
+        add(_cspec(f"count_{needle}_segs", f'How many comma-separated segments contain "{needle}".',
+                   f'length (filter (\\s -> str_contains "{needle}" s) (str_split "," text))',
+                   ["string", "list", "filter", "lambda"], fn([STRING], NAT),
+                   lam(["text"], bapp("length",
+                                      bapp("filter", lam(["s"], bapp("str_contains", str_lit(needle), var("s"))),
+                                           bapp("str_split", str_lit(","), var("text"))))),
+                   [{"args": [v], "result": len(_segs(v, ",", needle))} for v in _S51_IN],
+                   terminates="always"))
+
     return out
 
 
@@ -4055,7 +4153,7 @@ def all_specs():
             + more_arith() + more_laws() + bool_more() + recursive_more()
             + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion()
             + variant_consuming_funcs() + nested_hof_funcs() + string_funcs() + url_funcs()
-            + header_funcs() + dispatch_funcs() + map_json_funcs())
+            + header_funcs() + link_funcs() + dispatch_funcs() + map_json_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -4956,6 +5054,7 @@ def main():
                 "string_funcs": len(string_funcs()),
                 "url_funcs": len(url_funcs()),
                 "header_funcs": len(header_funcs()),
+                "link_funcs": len(link_funcs()),
                 "dispatch_funcs": len(dispatch_funcs()),
                 "map_json_funcs": len(map_json_funcs()),
                 "higher_order_funcs": len(higher_order_funcs()),
