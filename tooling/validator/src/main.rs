@@ -1916,12 +1916,14 @@ fn publish_final_assert(node: &str, steps: &[nl_validator::Step]) -> Result<()> 
     for trace in steps.iter().filter(|s| s.message.get("kind").and_then(|k| k.as_str()) == Some("trace")) {
         let t = nl_validator::commons_client::publish_artifact(node, &trace.message)?;
         let addr = nl_validator::hash_artifact_with_kind(&trace.message, nl_validator::ArtifactKind::Trace)?;
-        println!("published  {}… -> node accepted ({})", &addr[..addr.len().min(18)],
+        println!("published  {addr} -> node accepted ({})",
                  t.get("status").and_then(|s| s.as_str()).unwrap_or("stored"));
     }
     let resp = nl_validator::commons_client::publish_artifact(node, &assert.message)?;
     let h = assert.message.get("hash").and_then(|h| h.as_str()).unwrap_or("");
-    println!("published  {}… -> node accepted ({})", &h[..h.len().min(18)],
+    // The FULL address, deliberately: this line is the handoff — a third party re-verifies with
+    // exactly `verify-claim <this address> --node <url>`, so a truncated print is unusable.
+    println!("published  {h} -> node accepted ({})",
              resp.get("status").and_then(|s| s.as_str()).unwrap_or("stored"));
     Ok(())
 }
