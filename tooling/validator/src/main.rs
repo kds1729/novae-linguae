@@ -180,12 +180,15 @@ enum Commands {
         /// trace keeps the placeholder) and replay needs no secrets at all. Repeatable.
         #[arg(long = "secret")]
         secrets: Vec<String>,
-        /// Replay a recorded effect trace (a JSON array from --trace-out): effectful builtins return
-        /// their recorded results instead of performing real I/O — deterministic re-execution (P5).
+        /// Replay a recorded effect trace (a trace artifact from --trace-out, or a legacy bare
+        /// JSON array): effectful builtins return their recorded results instead of performing
+        /// real I/O — deterministic re-execution (P5).
         #[arg(long)]
         replay: Option<PathBuf>,
-        /// Write the effect trace (a JSON array of {effect, detail, result}) here instead of to
-        /// stderr — feed it back to a later `--replay`.
+        /// Write the recorded effect trace here as a first-class trace ARTIFACT ({kind: "trace",
+        /// version, ops: [{effect, detail, result}, …]}, spec/trace.schema.json) instead of dumping
+        /// events to stderr — feed it back to a later `--replay`, publish it to the commons, or
+        /// reference it from an `observed` claim by its trc_… content-address.
         #[arg(long = "trace-out")]
         trace_out: Option<PathBuf>,
     },
@@ -500,6 +503,11 @@ enum Commands {
         /// values — effect-boundary configuration, never a language value, never in the trace.
         #[arg(long = "secret")]
         secret: Vec<String>,
+        /// Where to write the recorded trace artifact when the reply carries an `observed` claim
+        /// (an effectful fulfilment). The claim references the trace by `trc_…` content-address;
+        /// the artifact itself must accompany the assert or no receiver can replay-verify it.
+        #[arg(long = "trace-out")]
+        trace_out: Option<PathBuf>,
     },
     /// Autonomous orchestration (spec/agent-loop.md): drive a full `query → propose → commit →
     /// assert → verify` conversation. The orchestrator discovers a commons function by `--intent`,
@@ -814,12 +822,12 @@ fn main() -> ExitCode {
         Commands::AttestWeights { record, eval, results, sign, timestamp } => {
             (cmd_attest_weights(&record, &eval, &results, &sign, timestamp.as_deref()), false)
         }
-        Commands::Respond { request, records, seed, timestamp, grant, secret } => {
+        Commands::Respond { request, records, seed, timestamp, grant, secret, trace_out } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
             match parse_secrets(&secret) {
                 Ok(s) => {
                     nl_validator::set_effect_secrets(s);
-                    (cmd_respond(&request, &records, &seed, timestamp.as_deref()), false)
+                    (cmd_respond(&request, &records, &seed, timestamp.as_deref(), trace_out.as_ref()), false)
                 }
                 Err(e) => (Err(e), false),
             }
@@ -944,6 +952,11 @@ fn cmd_verify(record: &PathBuf, kind_override: Option<nl_validator::ArtifactKind
             "body expressions have no stored `hash` field to verify against; use `hash` to compute the body's content-hash, then compare externally to whichever `body_hash` field references it"
         ));
     }
+    if matches!(kind, nl_validator::ArtifactKind::Trace) {
+        return Err(anyhow::anyhow!(
+            "traces are self-addressing and have no stored `hash` field; use `hash` to compute the trc_… address, then compare externally to the `observed` claim's `trace` reference"
+        ));
+    }
 
     let v = nl_validator::verify_artifact_hash_with_kind(&value, kind)?;
 
@@ -989,9 +1002,9 @@ fn cmd_verify(record: &PathBuf, kind_override: Option<nl_validator::ArtifactKind
                 false
             }
         },
-        nl_validator::ArtifactKind::BodyExpression => unreachable!(
-            "body expressions are refused above"
-        ),
+        nl_validator::ArtifactKind::BodyExpression | nl_validator::ArtifactKind::Trace => {
+            unreachable!("body expressions and traces are refused above")
+        }
     };
 
     if hash_pass && sig_pass {
@@ -1297,6 +1310,7 @@ fn cmd_respond(
     records: &PathBuf,
     seed: &str,
     timestamp: Option<&str>,
+    trace_out: Option<&PathBuf>,
 ) -> Result<()> {
     use std::io::Write;
     let message = nl_validator::read_json(request)?;
@@ -1304,6 +1318,23 @@ fn cmd_respond(
     let record_map = nl_validator::build_record_map(records)?;
     let key = nl_validator::signing_key_from_seed(seed);
     let reply = nl_validator::respond_to_message(&message, link_map, record_map, &key, timestamp)?;
+    // An effectful fulfilment produced an `observed` claim + its recorded trace. The claim only
+    // references the trace by trc_… address — persist the artifact or nobody can replay-verify it.
+    if let Some(trace) = nl_validator::take_trace_artifact() {
+        let addr = nl_validator::hash_artifact_with_kind(&trace, nl_validator::ArtifactKind::Trace)?;
+        match trace_out {
+            Some(path) => {
+                let pretty = serde_json::to_string_pretty(&trace)
+                    .map_err(|e| anyhow::anyhow!("serializing trace artifact: {e}"))?;
+                std::fs::write(path, pretty)
+                    .map_err(|e| anyhow::anyhow!("writing {}: {e}", path.display()))?;
+                eprintln!("trace artifact {addr} written to {}", path.display());
+            }
+            None => eprintln!(
+                "note: the reply's `observed` claim references trace {addr}, which was NOT saved — pass --trace-out <path> to keep the artifact receivers need for replay-verification"
+            ),
+        }
+    }
     let pretty = serde_json::to_string_pretty(&reply)
         .map_err(|e| anyhow::anyhow!("serializing reply: {e}"))?;
     std::io::stdout().write_all(pretty.as_bytes())?;
@@ -1709,8 +1740,13 @@ fn cmd_verify_claim(assert: &str, records: Option<&PathBuf>, node: Option<&str>)
         }
         _ => anyhow::bail!("supply exactly one of --records / --node"),
     };
+    let observed = assert.pointer("/body/claim/kind").and_then(|k| k.as_str()) == Some("observed");
     if nl_validator::verify_claim(&assert, link_map)? {
-        println!("CONFIRMED  the claim re-ran true against the commons");
+        if observed {
+            println!("CONFIRMED  the claim replayed true against its recorded observations (the observations themselves are the signer's testimony)");
+        } else {
+            println!("CONFIRMED  the claim re-ran true against the commons");
+        }
         Ok(())
     } else {
         Err(anyhow::anyhow!("REFUTED  the claim re-ran false"))
@@ -1869,13 +1905,20 @@ fn commons_view(
 }
 
 /// With `--publish`, send the run's final signed `assert` (the result claim) back to the node —
-/// through its verify-then-store gate, like any other artifact.
+/// through its verify-then-store gate, like any other artifact. Any recorded trace artifacts go
+/// FIRST: an `observed` claim is unverifiable by a third party who cannot fetch its trace.
 fn publish_final_assert(node: &str, steps: &[nl_validator::Step]) -> Result<()> {
     let assert = steps
         .iter()
         .rev()
         .find(|s| s.message.get("kind").and_then(|k| k.as_str()) == Some("assert"))
         .ok_or_else(|| anyhow::anyhow!("no assert step to publish"))?;
+    for trace in steps.iter().filter(|s| s.message.get("kind").and_then(|k| k.as_str()) == Some("trace")) {
+        let t = nl_validator::commons_client::publish_artifact(node, &trace.message)?;
+        let addr = nl_validator::hash_artifact_with_kind(&trace.message, nl_validator::ArtifactKind::Trace)?;
+        println!("published  {}… -> node accepted ({})", &addr[..addr.len().min(18)],
+                 t.get("status").and_then(|s| s.as_str()).unwrap_or("stored"));
+    }
     let resp = nl_validator::commons_client::publish_artifact(node, &assert.message)?;
     let h = assert.message.get("hash").and_then(|h| h.as_str()).unwrap_or("");
     println!("published  {}… -> node accepted ({})", &h[..h.len().min(18)],
@@ -1909,6 +1952,7 @@ fn cmd_orchestrate(
             "ack" => format!("matches {}", m.pointer("/body/result/matches").map(|v| v.to_string()).unwrap_or_default()),
             "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
             "commit" => format!("commit apply {}", m.pointer("/body/commitment/fn").and_then(|t| t.as_str()).unwrap_or_default()),
+            "trace" => format!("{} recorded observation(s)", m.get("ops").and_then(|o| o.as_array()).map(|a| a.len()).unwrap_or(0)),
             "assert" => format!("result {}", m.pointer("/body/claim/expr/args/1/value").map(|v| v.to_string()).unwrap_or_default()),
             other => other.to_string(),
         };
@@ -1960,6 +2004,7 @@ fn cmd_orchestrate_verified(
             "certify" => format!("certified={} {}", m.get("certified").map(|v| v.to_string()).unwrap_or_default(), m.get("failed").map(|v| v.to_string()).unwrap_or_default()),
             "prove" => format!("property `{}` proved={}", m.get("property").and_then(|p| p.as_str()).unwrap_or(""), m.get("proved").map(|v| v.to_string()).unwrap_or_default()),
             "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
+            "trace" => format!("{} recorded observation(s)", m.get("ops").and_then(|o| o.as_array()).map(|a| a.len()).unwrap_or(0)),
             "assert" => format!("result {}", m.pointer("/body/claim/expr/args/1/value").map(|v| v.to_string()).unwrap_or_default()),
             other => other.to_string(),
         };
@@ -2000,9 +2045,13 @@ fn cmd_eval(
     nl_validator::set_effect_grants(grants.iter().cloned());
     if let Some(rp) = replay {
         let entries = nl_validator::read_json(rp)?;
+        // Accept both the bare-array form (legacy --trace-out) and the trace ARTIFACT form
+        // ({kind: "trace", version, ops: […]} — spec/trace.schema.json, what --trace-out now writes).
         let arr = entries
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("replay file must be a JSON array of trace entries"))?;
+            .get("ops")
+            .and_then(|o| o.as_array())
+            .or_else(|| entries.as_array())
+            .ok_or_else(|| anyhow::anyhow!("replay file must be a trace artifact ({{kind: \"trace\", ops: […]}}) or a JSON array of trace entries"))?;
         nl_validator::set_effect_replay(arr.clone());
     }
     let result = nl_validator::eval_body(&body, &argv);
@@ -2011,9 +2060,14 @@ fn cmd_eval(
     let result = result?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     if let Some(out) = trace_out {
-        let pretty = serde_json::to_string_pretty(&serde_json::Value::Array(trace))
+        // Written as a first-class trace ARTIFACT — self-describing (principle 1), self-addressing
+        // as trc_…, publishable to the commons, and referenceable by an `observed` claim.
+        let artifact = serde_json::json!({ "kind": "trace", "version": "0.1.0", "ops": trace });
+        let addr = nl_validator::hash_artifact_with_kind(&artifact, nl_validator::ArtifactKind::Trace)?;
+        let pretty = serde_json::to_string_pretty(&artifact)
             .map_err(|e| anyhow::anyhow!("serializing trace: {e}"))?;
         std::fs::write(out, format!("{pretty}\n")).map_err(|e| anyhow::anyhow!("writing {}: {e}", out.display()))?;
+        eprintln!("trace artifact {addr} written to {}", out.display());
     } else if !trace.is_empty() {
         eprintln!("effect trace ({} event{}):", trace.len(), if trace.len() == 1 { "" } else { "s" });
         for ev in &trace {
@@ -2225,6 +2279,11 @@ fn cmd_sign(record: &PathBuf, seed: &str, in_place: bool) -> Result<()> {
         nl_validator::ArtifactKind::EvalAttestation => {
             return Err(anyhow::anyhow!(
                 "an eval attestation is signed by `attest-weights --sign <seed>`, not `sign`"
+            ));
+        }
+        nl_validator::ArtifactKind::Trace => {
+            return Err(anyhow::anyhow!(
+                "a trace is unsigned — it is content-addressed evidence referenced by a *signed* `observed` assert"
             ));
         }
     }

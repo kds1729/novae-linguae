@@ -2,12 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://novae-linguae.org/spec/v0.1/claim-expression.schema.json",
   "title": "Nova Locutio Claim Expression",
-  "description": "Structured AST for claims made by the `assert` speech act. The v0.1 message schema's `assert.claim` is a string in surface syntax; this schema defines the structured form that v0.2+ of the message schema will require. Kinds: `predicate` (wraps an arbitrary predicate-expression), `satisfies` (subject satisfies a named property — the common case, sugar for a `predicate` with the equivalent `app('satisfies', subject, property)` shape), `verified` (subject artifact has been verified by some agent, optionally with a proof certificate), and `attestation` (a trust statement *about an agent or artifact* — the building block of the trust graph; see trust-model.md). The predicate sub-tree is opaque at this layer; it must validate independently against predicate-expression.schema.json. Higher-level reasoning over claims (e.g. consequence-of, contradicts-with, supports) is the verifier's job and not part of this schema.",
+  "description": "Structured AST for claims made by the `assert` speech act. The v0.1 message schema's `assert.claim` is a string in surface syntax; this schema defines the structured form that v0.2+ of the message schema will require. Kinds: `predicate` (wraps an arbitrary predicate-expression), `observed` (a predicate conditioned on a recorded effect trace — the effectful counterpart of `predicate`: any receiver replays the computation against the trace, no effect grants or secrets needed, and confirms the result follows deterministically from the recorded observations; the observations themselves remain the signer's testimony, priced by the trust model), `satisfies` (subject satisfies a named property — the common case, sugar for a `predicate` with the equivalent `app('satisfies', subject, property)` shape), `verified` (subject artifact has been verified by some agent, optionally with a proof certificate), and `attestation` (a trust statement *about an agent or artifact* — the building block of the trust graph; see trust-model.md). The predicate sub-tree is opaque at this layer; it must validate independently against predicate-expression.schema.json. Higher-level reasoning over claims (e.g. consequence-of, contradicts-with, supports) is the verifier's job and not part of this schema.",
   "$ref": "#/$defs/claim",
   "$defs": {
     "claim": {
       "oneOf": [
         { "$ref": "#/$defs/predicate" },
+        { "$ref": "#/$defs/observed" },
         { "$ref": "#/$defs/satisfies" },
         { "$ref": "#/$defs/verified" },
         { "$ref": "#/$defs/attestation" }
@@ -25,6 +26,24 @@
         }
       },
       "description": "An arbitrary predicate. Use when no more specific kind fits."
+    },
+    "observed": {
+      "type": "object",
+      "required": ["kind", "expr", "trace"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "observed" },
+        "expr": {
+          "type": "object",
+          "description": "A predicate-expression AST, exactly as in a `predicate` claim. Must validate against predicate-expression.schema.json; checked structurally only here."
+        },
+        "trace": {
+          "type": "string",
+          "pattern": "^trc_[0-9a-f]{64}$",
+          "description": "Content-address of the recorded effect trace (trace.schema.json) this claim is conditioned on. The trace is a hashless self-addressing artifact; a verifier fetches it by this address, hash-verifies it, and replays the claim's computation with every effect served from the record — the trace must be consumed exactly."
+        }
+      },
+      "description": "An effectful computation's result claim, conditioned on its recorded observations: 'expr holds, given that the world responded as trace records.' Emitted by the responder whenever a fulfilment performed effects (an effectful equation is not stably re-runnable — spec/agent-loop.md §Scope). Replay-CONFIRMED means deterministic consequence of the trace, NOT that the world was as recorded — trusting the observations is a trust-model judgment about the signer."
     },
     "satisfies": {
       "type": "object",

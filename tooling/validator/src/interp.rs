@@ -106,6 +106,20 @@ pub fn set_effect_replay(entries: Vec<J>) {
     EFFECTS.with(|e| e.borrow_mut().replay = Some(entries.into_iter().collect()));
 }
 
+/// Leave replay mode (back to live). Pairs with [`set_effect_replay`] so a caller that installed a
+/// recorded trace for one evaluation (e.g. verifying an `observed` claim) doesn't leave the thread
+/// replaying into the next.
+pub fn clear_effect_replay() {
+    EFFECTS.with(|e| e.borrow_mut().replay = None);
+}
+
+/// How many recorded entries the installed replay trace still holds (`None` = not in replay mode).
+/// A verifier uses this to require that a claim's computation consumed its trace EXACTLY — leftover
+/// entries mean the trace does not correspond to this computation.
+pub fn effect_replay_remaining() -> Option<usize> {
+    EFFECTS.with(|e| e.borrow().replay.as_ref().map(|q| q.len()))
+}
+
 /// Install the operator's named secrets (`--secret NAME=VALUE`). Credentials are effect-boundary
 /// configuration, not data: an `http` header value may carry a `{{secret:NAME}}` placeholder, and
 /// the substitution happens only inside the live effect — symbolic form in the trace, real value on

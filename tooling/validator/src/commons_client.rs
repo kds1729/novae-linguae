@@ -27,6 +27,7 @@ fn kind_for_address(addr: &str) -> Result<ArtifactKind> {
         "expr" => ArtifactKind::BodyExpression,
         "msg" => ArtifactKind::Message,
         "cert" => ArtifactKind::Certification,
+        "trc" => ArtifactKind::Trace,
         other => bail!("unknown content-address prefix `{other}` in {addr}"),
     })
 }
@@ -99,7 +100,7 @@ pub fn publish_artifact(node: &str, artifact: &J) -> Result<J> {
 fn referenced_addresses(v: &J, out: &mut Vec<String>) {
     match v {
         J::String(s) => {
-            let looks = (s.starts_with("fn_") || s.starts_with("expr_"))
+            let looks = (s.starts_with("fn_") || s.starts_with("expr_") || s.starts_with("trc_"))
                 && s.len() > 5
                 && s[s.find('_').unwrap() + 1..].chars().all(|c| c.is_ascii_hexdigit());
             if looks {
@@ -179,8 +180,8 @@ fn crawl(node: &str, seeds: &[String], lenient: bool, max_fetches: usize) -> Res
         if !seen.insert(addr.clone()) {
             continue;
         }
-        if !(addr.starts_with("fn_") || addr.starts_with("expr_")) {
-            continue; // messages/certs aren't part of the runnable closure
+        if !(addr.starts_with("fn_") || addr.starts_with("expr_") || addr.starts_with("trc_")) {
+            continue; // messages/certs aren't part of the runnable closure (traces ARE — replay needs them)
         }
         if fetched >= max_fetches {
             bail!("remote closure exceeded {max_fetches} artifacts — refusing an unbounded crawl");

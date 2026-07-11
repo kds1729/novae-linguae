@@ -94,7 +94,8 @@ pub use policy::{CapabilityVerdict, CertificationVerdict, Policy, TrustVerdict};
 pub mod commons_client;
 pub mod respond;
 pub use respond::{
-    respond_to_message, respond_to_message_with_trust, respond_to_request, verify_claim, TrustPolicy,
+    respond_to_message, respond_to_message_with_trust, respond_to_request, take_trace_artifact,
+    verify_claim, TrustPolicy,
 };
 
 pub mod orchestrate;
@@ -262,6 +263,11 @@ pub enum ArtifactKind {
     /// statement about a weights record; the weights analogue of a certification. Hashed and signed
     /// like a message.
     EvalAttestation,
+    /// A recorded **effect trace** (spec/trace.schema.json): the ordered `{effect, detail, result}`
+    /// observations of one effectful run, wrapped as `{kind: "trace", version, ops: […]}`. Hashless
+    /// and self-addressing like a body expression — the whole artifact IS the hashed content — so an
+    /// `observed` claim can reference it by `trc_…` address and any verifier can replay against it.
+    Trace,
 }
 
 impl ArtifactKind {
@@ -274,7 +280,7 @@ impl ArtifactKind {
             ArtifactKind::Message | ArtifactKind::Certification | ArtifactKind::EvalAttestation => {
                 &["hash", "signature"]
             }
-            ArtifactKind::BodyExpression => &[],
+            ArtifactKind::BodyExpression | ArtifactKind::Trace => &[],
         }
     }
 
@@ -287,6 +293,7 @@ impl ArtifactKind {
             ArtifactKind::Certification => "cert",
             ArtifactKind::Weights => "wgt",
             ArtifactKind::EvalAttestation => "evl",
+            ArtifactKind::Trace => "trc",
         }
     }
 
@@ -326,6 +333,9 @@ impl ArtifactKind {
             }
             if kind_str == "eval-attestation" {
                 return Ok(ArtifactKind::EvalAttestation);
+            }
+            if kind_str == "trace" {
+                return Ok(ArtifactKind::Trace);
             }
             // The nine body-expression kinds (spec/body-expression.schema.json) — incl. the
             // construction forms `variant`/`tuple` a bare 0-argument body can top out at.
@@ -429,6 +439,11 @@ pub fn build_link_map(dir: &Path) -> Result<std::collections::HashMap<String, Va
             records.push(v);
         } else if v.get("kind").and_then(|k| k.as_str()).is_some_and(|k| BODY_KINDS.contains(&k)) {
             let addr = hash_artifact_with_kind(&v, ArtifactKind::BodyExpression)?;
+            bodies_by_expr.insert(addr, v);
+        } else if v.get("kind").and_then(|k| k.as_str()) == Some("trace") {
+            // A recorded effect trace, indexed by its trc_… self-address so an `observed` claim's
+            // trace reference resolves the same way a body reference does.
+            let addr = hash_artifact_with_kind(&v, ArtifactKind::Trace)?;
             bodies_by_expr.insert(addr, v);
         }
     }

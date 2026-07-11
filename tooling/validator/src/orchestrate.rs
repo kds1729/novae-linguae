@@ -60,6 +60,7 @@ pub fn orchestrate_with_maps(
     responder: &SigningKey,
     timestamp: Option<&str>,
 ) -> Result<Run> {
+    let mut link = link;
     let responder_did = did_nova_from_pubkey(&responder.verifying_key());
     let mut steps = Vec::new();
     let mut stage_args = args; // stage 0 gets the initial args; each later stage gets [prev result]
@@ -105,6 +106,15 @@ pub fn orchestrate_with_maps(
             return Ok(Run { steps, confirmed: false });
         }
         let assert = respond_to_message(&commit, link.clone(), records.clone(), responder, timestamp)?;
+
+        // An effectful fulfilment produced an OBSERVED claim + its trace artifact: index the trace
+        // (so the re-verify below replays it) and carry it as a step (so --publish ships it — the
+        // claim is unverifiable by anyone who can't fetch the trace).
+        if let Some(trace) = crate::respond::take_trace_artifact() {
+            let addr = crate::hash_artifact_with_kind(&trace, crate::ArtifactKind::Trace)?;
+            link.insert(addr, trace.clone());
+            steps.push(Step { label: format!("{pfx}trace"), message: trace });
+        }
 
         // Verify this stage's claim, and thread its result into the next stage.
         confirmed = confirmed && verify_claim(&assert, link.clone()).unwrap_or(false);
@@ -506,6 +516,15 @@ pub fn orchestrate_verified_with_maps(
         return Ok(VerifiedRun { steps, trusted, certified, property, confirmed: false });
     }
     let assert = respond_to_message(&commit, link.clone(), records.clone(), responder, timestamp)?;
+
+    // An effectful fulfilment produced an OBSERVED claim + its trace artifact: index the trace so
+    // the re-verify below replays it, and carry it as a step so --publish ships it with the assert.
+    let mut link = link;
+    if let Some(trace) = crate::respond::take_trace_artifact() {
+        let addr = crate::hash_artifact_with_kind(&trace, crate::ArtifactKind::Trace)?;
+        link.insert(addr, trace.clone());
+        steps.push(Step { label: "trace".into(), message: trace });
+    }
 
     // RE-VERIFY the result by re-running the claim (trust nothing — principle 3).
     let confirmed = verify_claim(&assert, link.clone()).unwrap_or(false);

@@ -1,0 +1,16 @@
+{
+  "kind": "trace",
+  "ops": [
+    {
+      "detail": {
+        "kind": "string",
+        "value": "commons"
+      },
+      "effect": "io.console",
+      "result": {
+        "kind": "unit"
+      }
+    }
+  ],
+  "version": "0.1.0"
+}

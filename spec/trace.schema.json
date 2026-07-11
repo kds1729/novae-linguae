@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/trace.schema.json",
+  "title": "Nova Lingua Effect Trace",
+  "description": "A recorded effect trace: the ordered observations of one effectful run. Each entry is what one effectful builtin performed (`effect`, an op-specific `detail`) and what the world answered (`result`, a value-expression AST — the same encoding as everywhere else, so replay decodes it directly). A trace is a HASHLESS, SELF-ADDRESSING artifact like a body expression: the whole object is JCS-canonicalized and BLAKE3-hashed to a `trc_…` content-address, which is how an `observed` claim (claim-expression.schema.json) references it. Traces are unsigned — they are content-addressed evidence referenced by a *signed* assert; forging a trace only produces a different address. Secrets never appear: an `http` header carrying `{{secret:NAME}}` is recorded in placeholder form (credentials are effect-boundary configuration, spec/agent-loop.md §Scope), so a trace is publishable and replay needs no secrets. Determinism: replay serves each effect from the next entry in order (strict FIFO, effect names must match, the trace must be consumed exactly), which makes an effectful run re-executable by anyone — principle 5 — without granting any capability.",
+  "type": "object",
+  "required": ["kind", "version", "ops"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "trace" },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Trace format version (semver). Current: 0.1.0."
+    },
+    "ops": {
+      "type": "array",
+      "description": "The run's observations, in execution order. May be empty in principle, but an empty trace never occurs in practice: a run that performed no effects yields an ordinary `predicate` claim, not an `observed` one.",
+      "items": {
+        "type": "object",
+        "required": ["effect"],
+        "additionalProperties": false,
+        "properties": {
+          "effect": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9._-]*$",
+            "description": "The capability the op exercised (io.console, time, random, alloc, fs.read, fs.write, net.read, net.write, process.spawn, …) — the same vocabulary as signature.effects."
+          },
+          "detail": {
+            "description": "Op-specific description of WHAT was performed (e.g. an http op's method/url/headers/body, with any secret header value still in `{{secret:NAME}}` placeholder form). Advisory for readers; replay matches on `effect` and sequence."
+          },
+          "result": {
+            "type": "object",
+            "description": "What the effect returned, as a value-expression AST (value-expression.schema.json). Absent means the op returned unit."
+          }
+        }
+      }
+    }
+  }
+}

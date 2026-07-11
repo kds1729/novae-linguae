@@ -26,9 +26,25 @@
 use anyhow::{anyhow, bail, Context, Result};
 use ed25519_dalek::SigningKey;
 use serde_json::{json, Value as J};
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::{clear_resolver, eval_body, set_resolver, sign_message, verify_delegation_chain};
+
+thread_local! {
+    /// The trace artifact behind the most recent `observed` assert (see [`assert_application`]).
+    /// The claim carries only the trace's `trc_…` content-address; the artifact itself must travel
+    /// alongside the assert (published to the node, written next to the message) or nobody can
+    /// replay it — the caller drains this after each respond.
+    static PENDING_TRACE: RefCell<Option<J>> = const { RefCell::new(None) };
+}
+
+/// Drain the trace artifact produced by the most recent assert, if that assert's claim was
+/// `observed` (i.e. the run performed effects). `None` = the last assert was a pure `predicate`
+/// claim. The artifact is `{kind: "trace", version, ops: […]}`, self-addressed as `trc_…`.
+pub fn take_trace_artifact() -> Option<J> {
+    PENDING_TRACE.with(|t| t.borrow_mut().take())
+}
 
 /// A responder's **local trust policy** for verifying presented capabilities (spec/trust-model.md).
 /// When `roots` is non-empty the capability gate switches from possession-only ("did the request list
@@ -103,9 +119,11 @@ fn assert_application(
         .cloned()
         .ok_or_else(|| anyhow!("cannot resolve target `{target}`: no body for it in the provided records"))?;
     set_resolver(link_map);
+    let _ = crate::take_effect_trace(); // drop observations from any earlier run this thread did
     let computed = eval_body(&target_body, args);
     clear_resolver();
     let result = computed.with_context(|| format!("running target `{target}` on the arguments"))?;
+    let ops = crate::take_effect_trace();
 
     // The predicate claim: eq( target(arg0, …), result ). Each arg is a value-expression `lit`; the
     // target is an `app` op by content-address.
@@ -116,32 +134,80 @@ fn assert_application(
             { "kind": "lit", "value": result }
         ]
     });
+    // A run that performed effects is an OBSERVATION, not a stably re-runnable equation. The claim
+    // becomes `observed`, conditioned on the recorded trace by content-address: any receiver can
+    // replay the computation against the trace — no grants, no secrets — and confirm the result
+    // follows deterministically from the recorded observations. (The observations themselves remain
+    // the signer's testimony; the trust model prices that, spec/agent-loop.md §Scope.)
+    let claim = if ops.is_empty() {
+        PENDING_TRACE.with(|t| *t.borrow_mut() = None);
+        json!({ "kind": "predicate", "expr": claim_expr })
+    } else {
+        let trace_artifact = json!({ "kind": "trace", "version": "0.1.0", "ops": ops });
+        let trace_addr = crate::hash_artifact_with_kind(&trace_artifact, crate::ArtifactKind::Trace)
+            .context("hashing the recorded effect trace")?;
+        PENDING_TRACE.with(|t| *t.borrow_mut() = Some(trace_artifact));
+        json!({ "kind": "observed", "expr": claim_expr, "trace": trace_addr })
+    };
     let mut assert = build_envelope("assert", requester, in_reply_to, timestamp,
-        json!({ "subject": target, "claim": { "kind": "predicate", "expr": claim_expr }, "evidence": null }));
+        json!({ "subject": target, "claim": claim, "evidence": null }));
     sign_message(&mut assert, signing_key).context("signing the assert reply")?;
     Ok(assert)
 }
 
-/// Verify an `assert`'s `predicate` claim by RE-RUNNING it. Installs `link_map` so the claim's
+/// Verify an `assert`'s claim by RE-RUNNING it. Installs `link_map` so the claim's
 /// content-addressed functions resolve, evaluates the predicate, and returns whether it holds.
 ///
 /// This is the *verifier half* of the agent loop: the receiver confirms the asserted computation by
 /// re-executing it rather than trusting the asserter (principle 3 — verification is re-execution;
 /// principle 7 — no privileged party). `Ok(true)` = the claim re-ran true. Errors if the claim is
-/// not a runnable `predicate` claim, or the predicate is undecidable / non-boolean.
+/// not a runnable `predicate`/`observed` claim, or the predicate is undecidable / non-boolean.
+///
+/// An **`observed`** claim is verified by REPLAY: its `trace` address is resolved (from the same
+/// `link_map`), the recorded trace is installed, and the computation re-runs with every effect
+/// served from the record — no grants, no secrets. The trace must be consumed EXACTLY (a leftover
+/// or mismatched entry means the trace does not correspond to this computation). `Ok(true)` here
+/// means the result follows deterministically from the recorded observations; whether the world
+/// really said that is the signer's testimony, priced by the trust model.
 pub fn verify_claim(assert: &J, link_map: HashMap<String, J>) -> Result<bool> {
     let expr = assert
         .pointer("/body/claim/expr")
-        .ok_or_else(|| anyhow!("assert has no `body.claim.expr` to re-run (not a `predicate` claim?)"))?
+        .ok_or_else(|| anyhow!("assert has no `body.claim.expr` to re-run (not a `predicate`/`observed` claim?)"))?
         .clone();
-    set_resolver(link_map);
+    let kind = assert.pointer("/body/claim/kind").and_then(|k| k.as_str()).unwrap_or("predicate");
+    let replaying = kind == "observed";
+    if replaying {
+        let trace_addr = assert
+            .pointer("/body/claim/trace")
+            .and_then(|t| t.as_str())
+            .ok_or_else(|| anyhow!("`observed` claim has no `trace` content-address"))?;
+        let trace = link_map.get(trace_addr).ok_or_else(|| {
+            anyhow!("cannot resolve the claim's trace `{trace_addr}`: not in the provided records/node — without the recorded observations an observed claim cannot be replayed")
+        })?;
+        let ops = trace
+            .get("ops")
+            .and_then(|o| o.as_array())
+            .ok_or_else(|| anyhow!("trace `{trace_addr}` has no `ops` array"))?
+            .clone();
+        crate::interp::set_effect_replay(ops);
+    }
+    set_resolver(link_map.clone());
     let verdict = crate::interp::eval_claim(&expr);
+    let leftover = crate::interp::effect_replay_remaining().unwrap_or(0);
+    crate::interp::clear_effect_replay();
     clear_resolver();
     match verdict {
+        Some(_) if replaying && leftover > 0 => bail!(
+            "observed claim's trace was not fully consumed ({leftover} recorded observation{} left over) — the trace does not correspond to this computation",
+            if leftover == 1 { "" } else { "s" }
+        ),
         Some(crate::interp::Val::Bool(b)) => Ok(b),
         Some(other) => bail!(
             "claim predicate did not evaluate to a boolean: {}",
             crate::interp::encode_value(&other)
+        ),
+        None if replaying => bail!(
+            "observed claim is undecidable under replay (unresolved function, malformed, or the recorded trace mismatches the computation)"
         ),
         None => bail!("claim predicate is undecidable (unresolved function, malformed, or effectful)"),
     }
@@ -854,6 +920,100 @@ mod tests {
         assert_eq!(reply["kind"], "reject");
         assert_eq!(reply["body"]["code"], "constraint_violated");
         assert!(reply["body"]["reason"].as_str().unwrap().contains("under-declared"), "{reply}");
+    }
+
+    #[test]
+    fn effectful_apply_emits_observed_claim_with_trace() {
+        // GW11: a fulfilment that performed effects is an OBSERVATION — the claim comes out
+        // `observed`, conditioned on the recorded trace by trc_… content-address, and the trace
+        // artifact itself is retrievable by the caller (it must travel with the assert).
+        crate::interp::set_effect_grants(vec!["io.console".to_string()]);
+        let req = json!({ "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null,
+            "body": { "action": "apply", "target": greet_addr(), "args": [{ "kind": "string", "value": "hi" }] } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&req, link, recs, &key, None).unwrap();
+        crate::interp::clear_effects();
+        assert_eq!(reply["kind"], "assert", "{reply}");
+        assert_eq!(reply["body"]["claim"]["kind"], "observed", "{reply}");
+        let trace_addr = reply["body"]["claim"]["trace"].as_str().unwrap().to_string();
+        assert!(trace_addr.starts_with("trc_"), "{trace_addr}");
+        let trace = take_trace_artifact().expect("the observed assert left its trace artifact");
+        assert_eq!(trace["kind"], "trace");
+        assert_eq!(trace["ops"].as_array().unwrap().len(), 1, "{trace}");
+        assert_eq!(trace["ops"][0]["effect"], "io.console");
+        let recomputed =
+            crate::hash_artifact_with_kind(&trace, crate::ArtifactKind::Trace).unwrap();
+        assert_eq!(recomputed, trace_addr, "the claim references the trace's self-address");
+        assert!(take_trace_artifact().is_none(), "the stash drains on take");
+        verify_signature(&reply).unwrap();
+    }
+
+    #[test]
+    fn observed_claim_verifies_by_replay_without_grants() {
+        // The receiver's half: with the trace resolvable, verify_claim replays the computation —
+        // NO grants, NO secrets — and confirms the result follows from the recorded observations.
+        crate::interp::set_effect_grants(vec!["io.console".to_string()]);
+        let req = json!({ "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null,
+            "body": { "action": "apply", "target": greet_addr(), "args": [{ "kind": "string", "value": "hi" }] } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&req, link.clone(), recs, &key, None).unwrap();
+        let trace = take_trace_artifact().unwrap();
+        crate::interp::clear_effects(); // the verifier grants NOTHING
+
+        let trace_addr = reply["body"]["claim"]["trace"].as_str().unwrap().to_string();
+        let mut verifier_link = link.clone();
+        verifier_link.insert(trace_addr.clone(), trace.clone());
+        assert!(verify_claim(&reply, verifier_link).unwrap(), "replay-confirms grantlessly");
+
+        // Tampered result → the replay refutes it (deterministically, still grantless).
+        let mut bad = reply.clone();
+        bad["body"]["claim"]["expr"]["args"][1]["value"] = json!({ "kind": "string", "value": "not what happened" });
+        let mut verifier_link = link.clone();
+        verifier_link.insert(trace_addr.clone(), trace);
+        assert!(!verify_claim(&bad, verifier_link).unwrap(), "tampered observed claim refutes");
+
+        // Without the trace, the observed claim cannot be replayed — an honest error naming it.
+        let err = verify_claim(&reply, link).unwrap_err().to_string();
+        assert!(err.contains(&trace_addr) && err.contains("cannot resolve"), "{err}");
+    }
+
+    #[test]
+    fn observed_claim_must_consume_its_trace_exactly() {
+        // A trace with observations the computation never used does NOT correspond to it — the
+        // strict-consumption rule fails such a claim instead of quietly confirming a prefix.
+        let trace = json!({ "kind": "trace", "version": "0.1.0",
+            "ops": [{ "effect": "io.console", "detail": { "line": "stray" }, "result": { "kind": "unit" } }] });
+        let trace_addr = crate::hash_artifact_with_kind(&trace, crate::ArtifactKind::Trace).unwrap();
+        // A pure equation wrapped as `observed` over that unrelated trace.
+        let assert = json!({ "kind": "assert", "body": { "subject": null, "claim": {
+            "kind": "observed", "trace": trace_addr.clone(),
+            "expr": { "kind": "app", "op": "eq", "args": [
+                { "kind": "lit", "value": { "kind": "int", "value": 1 } },
+                { "kind": "lit", "value": { "kind": "int", "value": 1 } } ] } } } });
+        let link: HashMap<String, J> = [(trace_addr, trace)].into();
+        let err = verify_claim(&assert, link).unwrap_err().to_string();
+        assert!(err.contains("not fully consumed"), "{err}");
+    }
+
+    #[test]
+    fn pure_apply_stays_a_predicate_claim_even_under_grants() {
+        // Purity is observable: no effects performed → ordinary re-runnable `predicate` claim,
+        // no trace artifact left behind.
+        crate::interp::set_effect_grants(vec!["net.read".to_string()]);
+        let req = json!({ "schema_version": "0.2.0", "kind": "request", "from": REQUESTER, "hash": A_MSG,
+            "to": null, "in_reply_to": null,
+            "body": { "action": "apply", "target": double_addr(), "args": [{ "kind": "nat", "value": 21 }] } });
+        let (link, recs) = maps();
+        let key = signing_key_from_seed("novae-linguae-example-responder");
+        let reply = respond_to_message(&req, link, recs, &key, None).unwrap();
+        crate::interp::clear_effects();
+        assert_eq!(reply["body"]["claim"]["kind"], "predicate", "{reply}");
+        assert!(reply["body"]["claim"].get("trace").is_none());
+        assert!(take_trace_artifact().is_none());
     }
 
     #[test]

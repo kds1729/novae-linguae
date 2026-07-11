@@ -1,0 +1,21 @@
+{
+  "body": {
+    "action": "apply",
+    "args": [
+      {
+        "kind": "string",
+        "value": "commons"
+      }
+    ],
+    "target": "fn_ae0ec70dade48ea2aaf3366278a5eb8248e3feb3b10a38c28b2078041c604ec9"
+  },
+  "constraints": null,
+  "from": "did:nova:c54f75344689ca7b47450144083dc26acccf1d8509080417286834b59d564d92",
+  "hash": "msg_31f3e70ee38ff5170e6c0c3fff34707b90fb31b1679fc43586bf2ce9eeb9de18",
+  "in_reply_to": null,
+  "kind": "request",
+  "schema_version": "0.2.0",
+  "signature": "ed25519:VN4QYONVKt5Ni5/BCraTE5ACiwPRm8Ckjy3XFZTCGpvaIX1JyqUbPi6/EAPutyNoRrltmWDFlCLZLtiFNHtkBQ==",
+  "timestamp": "2026-07-11T12:00:00Z",
+  "to": "did:nova:16efab1d73f507584ef08f79c72b16b988d02868e2eb02686a61a9db0076518a"
+}
