@@ -33,16 +33,33 @@ The GW13 surface adds a THIRD auth style, OAuth2 client-credentials:
 The issued token is deliberately DISTINCT from --token, so a passing gate proves the client
 really exchanged credentials at /token rather than replaying the static bearer secret.
 
+The GW14 surface (spec/expressiveness.md — response headers) is the piece the client-chosen
+/items API deliberately avoided: SERVER-assigned identity, delivered in a response header.
+
+    POST   /things          Bearer-authed; stores the body under an id the SERVER derives
+                            (th_<sha256(body)[:12]> — server-assigned yet deterministic, so
+                            runs still replay byte-identically); always 201 + `Location:
+                            /things/{id}` (idempotent create-or-replace)
+    GET    /things/{id}     200 + the stored body, or 404 (Bearer-authed)
+    DELETE /things/{id}     204 if it existed, 404 otherwise (Bearer-authed)
+    GET    /latest          307 + `Location: /health` — unauthenticated; the one-hop redirect
+                            a bounded in-language follower resolves
+
+A client that drops response headers cannot find a POSTed thing at all — the documented 200
+on the follow-up GET proves the Location header was read.
+
     python3 fake_service.py [--port 8878] [--token test-token] [--oauth-client id:secret]
 """
 
 import argparse
+import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
 
 class Handler(BaseHTTPRequestHandler):
     store = {}
+    things = {}
     token = "test-token"
     oauth_client = ("gw13-client", "gw13-secret")
 
@@ -50,10 +67,12 @@ class Handler(BaseHTTPRequestHandler):
     def oauth_token(self):
         return f"{self.token}-oauth"
 
-    def _reply(self, status, body=b""):
+    def _reply(self, status, body=b"", headers=()):
         self.send_response(status)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Content-Type", "application/json")
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -70,6 +89,18 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def do_POST(self):
+        # GW14: server-assigned identity. The id is DERIVED from the body (sha256 prefix), so
+        # it is genuinely server-chosen (the client cannot name it) yet deterministic — a rerun
+        # replays byte-identically. Always 201 + Location (idempotent create-or-replace).
+        if self.path == "/things":
+            if not self._authed():
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length)
+            thing_id = "th_" + hashlib.sha256(body).hexdigest()[:12]
+            self.things[thing_id] = body
+            self._reply(201, body, headers=[("Location", f"/things/{thing_id}")])
+            return
         # GW13: the OAuth2 client-credentials token endpoint. Form-encoded per RFC 6749 §4.4.
         if self.path != "/token":
             self._reply(404, b'{"error":"not found"}')
@@ -109,6 +140,20 @@ class Handler(BaseHTTPRequestHandler):
         # smallest operation, and the one an API-description generator emits with no auth header.
         if self.path == "/health":
             self._reply(200, b'{"status":"ok"}')
+            return
+        # GW14: the one-hop redirect an in-language bounded follower resolves. 307 preserves
+        # the method; the target is the unauthenticated liveness probe.
+        if self.path == "/latest":
+            self._reply(307, b"", headers=[("Location", "/health")])
+            return
+        if self.path.startswith("/things/"):
+            if not self._authed():
+                return
+            body = self.things.get(self.path[len("/things/"):])
+            if body is None:
+                self._reply(404, b'{"error":"no such thing"}')
+            else:
+                self._reply(200, body)
             return
         if self.path == "/reports/summary":
             # GW13: protected by the /token-ISSUED bearer only — the static --token is refused
@@ -155,6 +200,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         if not self._authed():
+            return
+        if self.path.startswith("/things/"):
+            thing_id = self.path[len("/things/"):]
+            if thing_id in self.things:
+                del self.things[thing_id]
+                self._reply(204)
+            else:
+                self._reply(404, b'{"error":"no such thing"}')
             return
         name = self._name()
         if name is None:

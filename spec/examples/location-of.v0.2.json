@@ -1,0 +1,175 @@
+{
+ "schema_version": "0.2.0",
+ "hash": "fn_dc4d36734bf690380a4d966b39c6308b449ea58e1ef51e354318df0ed74f19b1",
+ "name_hints": [
+  "location_of",
+  "location_header"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "fields": [
+      {
+       "name": "status",
+       "type": {
+        "kind": "builtin",
+        "name": "int"
+       }
+      },
+      {
+       "name": "headers",
+       "type": {
+        "args": [
+         {
+          "kind": "builtin",
+          "name": "string"
+         },
+         {
+          "kind": "builtin",
+          "name": "string"
+         }
+        ],
+        "ctor": {
+         "kind": "builtin",
+         "name": "Map"
+        },
+        "kind": "apply"
+       }
+      },
+      {
+       "name": "body",
+       "type": {
+        "kind": "builtin",
+        "name": "string"
+       }
+      }
+     ],
+     "kind": "record"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "kind": "apply"
+   }
+  },
+  "refinements": [],
+  "effects": [],
+  "capabilities": [],
+  "terminates": "always",
+  "complexity": "O(n)"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "record",
+     "fields": [
+      {
+       "name": "body",
+       "value": {
+        "kind": "string",
+        "value": "{\"kind\":\"widget\",\"size\":3}"
+       }
+      },
+      {
+       "name": "headers",
+       "value": {
+        "kind": "map",
+        "entries": [
+         {
+          "key": "content-length",
+          "value": {
+           "kind": "string",
+           "value": "26"
+          }
+         },
+         {
+          "key": "location",
+          "value": {
+           "kind": "string",
+           "value": "/things/th_1"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "name": "status",
+       "value": {
+        "kind": "int",
+        "value": 201
+       }
+      }
+     ]
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "/things/th_1"
+    }
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "record",
+     "fields": [
+      {
+       "name": "body",
+       "value": {
+        "kind": "string",
+        "value": ""
+       }
+      },
+      {
+       "name": "headers",
+       "value": {
+        "kind": "map",
+        "entries": [
+         {
+          "key": "content-length",
+          "value": {
+           "kind": "string",
+           "value": "0"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "name": "status",
+       "value": {
+        "kind": "int",
+        "value": 204
+       }
+      }
+     ]
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  }
+ ],
+ "intent_tags": [
+  "query/lookup"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_1fcf201b0a8907a686de9720d2aeffdc8f44d38609576a9ea84a83512ff76c81"
+}

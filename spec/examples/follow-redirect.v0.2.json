@@ -1,0 +1,90 @@
+{
+ "schema_version": "0.2.0",
+ "hash": "fn_2f7064aaf55cff2fad424ce34590644e47470bfdde33f3a8c6aa19b79b2301a5",
+ "name_hints": [
+  "follow_redirect",
+  "resolve_redirect"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "int"
+   }
+  },
+  "refinements": [],
+  "effects": [
+   "net.read"
+  ],
+  "capabilities": [],
+  "terminates": "always",
+  "complexity": "O(n)"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 3
+    },
+    {
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
+    },
+    {
+     "kind": "string",
+     "value": "/latest"
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 200
+   },
+   "trace": "trc_08a43cfc5c92e67e636dae84d8cfeb4cb3cbb47f73a1622612c828a50e85cb3e"
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 0
+    },
+    {
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
+    },
+    {
+     "kind": "string",
+     "value": "/latest"
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 307
+   },
+   "trace": "trc_5ebae669d32e7283d260be12f73a224611aeb12d5cc3edca96c5a171c2606222"
+  }
+ ],
+ "intent_tags": [
+  "io",
+  "io/network/http",
+  "query/lookup"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_3f199245ec559a59ea2f61de71aef0417b2d16942fc4e10f72a2660e765d3290"
+}

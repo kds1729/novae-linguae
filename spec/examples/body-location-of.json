@@ -1,0 +1,37 @@
+{
+ "body": {
+  "args": [
+   {
+    "kind": "field",
+    "name": "headers",
+    "record": {
+     "kind": "var",
+     "name": "r"
+    }
+   }
+  ],
+  "fn": {
+   "args": [
+    {
+     "kind": "lit",
+     "value": {
+      "kind": "string",
+      "value": "location"
+     }
+    }
+   ],
+   "fn": {
+    "kind": "var",
+    "name": "map_get"
+   },
+   "kind": "app"
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "r"
+  }
+ ]
+}

@@ -1,0 +1,73 @@
+{
+ "schema_version": "0.2.0",
+ "hash": "fn_e9af0aa5c2c47654c6e311507cae27ab87bb44ab14777b664827a07e795dd9c5",
+ "name_hints": [
+  "create_thing",
+  "post_thing"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "kind": "apply"
+   }
+  },
+  "refinements": [],
+  "effects": [
+   "net.write"
+  ],
+  "capabilities": [],
+  "terminates": "always",
+  "complexity": "O(n)"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
+    },
+    {
+     "kind": "string",
+     "value": "{\"kind\":\"widget\",\"size\":3}"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "/things/th_38f2ad4dabfe"
+    }
+   },
+   "trace": "trc_d8eaf498e9f62dd004e6711b2911d9c96a847a8ad7e1701e96d57b0ae627fb2d"
+  }
+ ],
+ "intent_tags": [
+  "io",
+  "io/network/http"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_d58ab102a7257b399452181ddbdef6a46f782f07eee1ec26a74dd7f8d152504d"
+}

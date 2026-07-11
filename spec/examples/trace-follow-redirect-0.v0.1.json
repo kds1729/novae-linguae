@@ -1,0 +1,77 @@
+{
+  "kind": "trace",
+  "ops": [
+    {
+      "detail": {
+        "body": "",
+        "headers": [],
+        "method": "GET",
+        "url": "http://127.0.0.1:8878/latest"
+      },
+      "effect": "net.read",
+      "result": {
+        "fields": [
+          {
+            "name": "body",
+            "value": {
+              "kind": "string",
+              "value": ""
+            }
+          },
+          {
+            "name": "headers",
+            "value": {
+              "entries": [
+                {
+                  "key": "content-length",
+                  "value": {
+                    "kind": "string",
+                    "value": "0"
+                  }
+                },
+                {
+                  "key": "content-type",
+                  "value": {
+                    "kind": "string",
+                    "value": "application/json"
+                  }
+                },
+                {
+                  "key": "date",
+                  "value": {
+                    "kind": "string",
+                    "value": "Sat, 11 Jul 2026 19:34:06 GMT"
+                  }
+                },
+                {
+                  "key": "location",
+                  "value": {
+                    "kind": "string",
+                    "value": "/health"
+                  }
+                },
+                {
+                  "key": "server",
+                  "value": {
+                    "kind": "string",
+                    "value": "BaseHTTP/0.6 Python/3.10.12"
+                  }
+                }
+              ],
+              "kind": "map"
+            }
+          },
+          {
+            "name": "status",
+            "value": {
+              "kind": "int",
+              "value": 307
+            }
+          }
+        ],
+        "kind": "record"
+      }
+    }
+  ],
+  "version": "0.1.0"
+}

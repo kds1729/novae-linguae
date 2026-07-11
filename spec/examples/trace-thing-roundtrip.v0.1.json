@@ -1,0 +1,181 @@
+{
+  "kind": "trace",
+  "ops": [
+    {
+      "detail": {
+        "body": "{\"kind\":\"widget\",\"size\":3}",
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": "Bearer {{secret:api_token}}"
+          }
+        ],
+        "method": "POST",
+        "url": "http://127.0.0.1:8878/things"
+      },
+      "effect": "net.write",
+      "result": {
+        "fields": [
+          {
+            "name": "body",
+            "value": {
+              "kind": "string",
+              "value": "{\"kind\":\"widget\",\"size\":3}"
+            }
+          },
+          {
+            "name": "headers",
+            "value": {
+              "entries": [
+                {
+                  "key": "content-length",
+                  "value": {
+                    "kind": "string",
+                    "value": "26"
+                  }
+                },
+                {
+                  "key": "content-type",
+                  "value": {
+                    "kind": "string",
+                    "value": "application/json"
+                  }
+                },
+                {
+                  "key": "date",
+                  "value": {
+                    "kind": "string",
+                    "value": "Sat, 11 Jul 2026 19:34:02 GMT"
+                  }
+                },
+                {
+                  "key": "location",
+                  "value": {
+                    "kind": "string",
+                    "value": "/things/th_38f2ad4dabfe"
+                  }
+                },
+                {
+                  "key": "server",
+                  "value": {
+                    "kind": "string",
+                    "value": "BaseHTTP/0.6 Python/3.10.12"
+                  }
+                }
+              ],
+              "kind": "map"
+            }
+          },
+          {
+            "name": "status",
+            "value": {
+              "kind": "int",
+              "value": 201
+            }
+          }
+        ],
+        "kind": "record"
+      }
+    },
+    {
+      "detail": {
+        "body": "",
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": "Bearer {{secret:api_token}}"
+          }
+        ],
+        "method": "GET",
+        "url": "http://127.0.0.1:8878/things/th_38f2ad4dabfe"
+      },
+      "effect": "net.read",
+      "result": {
+        "fields": [
+          {
+            "name": "body",
+            "value": {
+              "kind": "string",
+              "value": "{\"kind\":\"widget\",\"size\":3}"
+            }
+          },
+          {
+            "name": "status",
+            "value": {
+              "kind": "int",
+              "value": 200
+            }
+          }
+        ],
+        "kind": "record"
+      }
+    },
+    {
+      "detail": {
+        "body": "",
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": "Bearer {{secret:api_token}}"
+          }
+        ],
+        "method": "DELETE",
+        "url": "http://127.0.0.1:8878/things/th_38f2ad4dabfe"
+      },
+      "effect": "net.write",
+      "result": {
+        "fields": [
+          {
+            "name": "body",
+            "value": {
+              "kind": "string",
+              "value": ""
+            }
+          },
+          {
+            "name": "status",
+            "value": {
+              "kind": "int",
+              "value": 204
+            }
+          }
+        ],
+        "kind": "record"
+      }
+    },
+    {
+      "detail": {
+        "body": "",
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": "Bearer {{secret:api_token}}"
+          }
+        ],
+        "method": "GET",
+        "url": "http://127.0.0.1:8878/things/th_38f2ad4dabfe"
+      },
+      "effect": "net.read",
+      "result": {
+        "fields": [
+          {
+            "name": "body",
+            "value": {
+              "kind": "string",
+              "value": "{\"error\":\"no such thing\"}"
+            }
+          },
+          {
+            "name": "status",
+            "value": {
+              "kind": "int",
+              "value": 404
+            }
+          }
+        ],
+        "kind": "record"
+      }
+    }
+  ],
+  "version": "0.1.0"
+}

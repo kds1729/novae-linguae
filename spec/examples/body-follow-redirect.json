@@ -1,0 +1,463 @@
+{
+ "body": {
+  "body": {
+   "arms": [
+    {
+     "body": {
+      "arms": [
+       {
+        "body": {
+         "args": [
+          {
+           "kind": "var",
+           "name": "loc"
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "kind": "var",
+            "name": "base"
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "lit",
+               "value": {
+                "kind": "nat",
+                "value": 1
+               }
+              }
+             ],
+             "fn": {
+              "args": [
+               {
+                "kind": "var",
+                "name": "depth"
+               }
+              ],
+              "fn": {
+               "kind": "var",
+               "name": "sub"
+              },
+              "kind": "app"
+             },
+             "kind": "app"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "self"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        },
+        "pattern": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": true
+         }
+        }
+       },
+       {
+        "body": {
+         "kind": "field",
+         "name": "status",
+         "record": {
+          "kind": "var",
+          "name": "r"
+         }
+        },
+        "pattern": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": false
+         }
+        }
+       }
+      ],
+      "kind": "case",
+      "scrutinee": {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "args": [
+                  {
+                   "kind": "lit",
+                   "value": {
+                    "kind": "nat",
+                    "value": 308
+                   }
+                  }
+                 ],
+                 "fn": {
+                  "args": [
+                   {
+                    "kind": "field",
+                    "name": "status",
+                    "record": {
+                     "kind": "var",
+                     "name": "r"
+                    }
+                   }
+                  ],
+                  "fn": {
+                   "kind": "var",
+                   "name": "eq"
+                  },
+                  "kind": "app"
+                 },
+                 "kind": "app"
+                }
+               ],
+               "fn": {
+                "args": [
+                 {
+                  "args": [
+                   {
+                    "kind": "lit",
+                    "value": {
+                     "kind": "nat",
+                     "value": 307
+                    }
+                   }
+                  ],
+                  "fn": {
+                   "args": [
+                    {
+                     "kind": "field",
+                     "name": "status",
+                     "record": {
+                      "kind": "var",
+                      "name": "r"
+                     }
+                    }
+                   ],
+                   "fn": {
+                    "kind": "var",
+                    "name": "eq"
+                   },
+                   "kind": "app"
+                  },
+                  "kind": "app"
+                 }
+                ],
+                "fn": {
+                 "kind": "var",
+                 "name": "or"
+                },
+                "kind": "app"
+               },
+               "kind": "app"
+              }
+             ],
+             "fn": {
+              "args": [
+               {
+                "args": [
+                 {
+                  "kind": "lit",
+                  "value": {
+                   "kind": "nat",
+                   "value": 303
+                  }
+                 }
+                ],
+                "fn": {
+                 "args": [
+                  {
+                   "kind": "field",
+                   "name": "status",
+                   "record": {
+                    "kind": "var",
+                    "name": "r"
+                   }
+                  }
+                 ],
+                 "fn": {
+                  "kind": "var",
+                  "name": "eq"
+                 },
+                 "kind": "app"
+                },
+                "kind": "app"
+               }
+              ],
+              "fn": {
+               "kind": "var",
+               "name": "or"
+              },
+              "kind": "app"
+             },
+             "kind": "app"
+            }
+           ],
+           "fn": {
+            "args": [
+             {
+              "args": [
+               {
+                "kind": "lit",
+                "value": {
+                 "kind": "nat",
+                 "value": 302
+                }
+               }
+              ],
+              "fn": {
+               "args": [
+                {
+                 "kind": "field",
+                 "name": "status",
+                 "record": {
+                  "kind": "var",
+                  "name": "r"
+                 }
+                }
+               ],
+               "fn": {
+                "kind": "var",
+                "name": "eq"
+               },
+               "kind": "app"
+              },
+              "kind": "app"
+             }
+            ],
+            "fn": {
+             "kind": "var",
+             "name": "or"
+            },
+            "kind": "app"
+           },
+           "kind": "app"
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "args": [
+             {
+              "kind": "lit",
+              "value": {
+               "kind": "nat",
+               "value": 301
+              }
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "field",
+               "name": "status",
+               "record": {
+                "kind": "var",
+                "name": "r"
+               }
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "eq"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "or"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "args": [
+           {
+            "kind": "lit",
+            "value": {
+             "kind": "nat",
+             "value": 0
+            }
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "kind": "var",
+             "name": "depth"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "gt"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "and"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      }
+     },
+     "pattern": {
+      "kind": "variant",
+      "payload": {
+       "kind": "bind",
+       "name": "loc"
+      },
+      "tag": "Just"
+     }
+    },
+    {
+     "body": {
+      "kind": "field",
+      "name": "status",
+      "record": {
+       "kind": "var",
+       "name": "r"
+      }
+     },
+     "pattern": {
+      "kind": "variant",
+      "tag": "None"
+     }
+    }
+   ],
+   "kind": "case",
+   "scrutinee": {
+    "args": [
+     {
+      "kind": "field",
+      "name": "headers",
+      "record": {
+       "kind": "var",
+       "name": "r"
+      }
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "lit",
+       "value": {
+        "kind": "string",
+        "value": "location"
+       }
+      }
+     ],
+     "fn": {
+      "kind": "var",
+      "name": "map_get"
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   }
+  },
+  "kind": "let",
+  "name": "r",
+  "value": {
+   "args": [
+    {
+     "kind": "lit",
+     "value": {
+      "kind": "string",
+      "value": ""
+     }
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "map_empty"
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "path"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "kind": "var",
+          "name": "base"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "str_concat"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "kind": "lit",
+        "value": {
+         "kind": "string",
+         "value": "GET"
+        }
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "http_full"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "depth"
+  },
+  {
+   "name": "base"
+  },
+  {
+   "name": "path"
+  }
+ ]
+}
