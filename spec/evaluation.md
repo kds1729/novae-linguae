@@ -11,6 +11,13 @@ It makes principle 3 ("verified by default") cover execution and type soundness,
 ("the runtime is AI-targeted too") concrete. The reference implementation is normative by example:
 the conformance is the committed examples running correctly.
 
+Concretely, the executable conformance suite for this semantic core is the **verified corpus**
+([`tooling/corpus/`](../tooling/corpus/)): every example is schema-validated, type-checked, executed
+against its worked examples, and its properties proved, all by `nl-validator` — and the negative
+examples are confirmed to be *rejected for their stated reason*. An independent implementation is
+conformant when it reproduces the corpus verdicts, including the rejections. That re-runnable oracle,
+not pseudocode, is what this spec offers a second implementer.
+
 ## Evaluation
 
 A call-by-value lambda calculus over the value-expression AST
