@@ -204,9 +204,10 @@ made on **shared tasks**, never raw totals:
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
 `adapter-coder7b-c14-s1`, sha256 `91d8940345630806…`, seed 1; the 14B read-champion weights are
-now `adapter-c21-14b-s1` — round 20's re-pin, in `/var/tmp/claude/round20/`; the prior
-`adapter-coder14b-c14-s1`, sha256 `479de8563d78da0c…`, remains the last *hosted* 14B pin until
-the c21 weights record supersedes it on the commons).
+now `adapter-c21-14b-s1` — round 20's re-pin, **hosted on the commons** as
+`wgt_2d1dcd3d78e6be98…` (safetensors sha256 `ec8045b6f2a33311…`, signed eval attestation
+`evl_1746bb29ed93b95d…`, superseding the c14 record `wgt_95885e217035dc18…`, which stays
+resolvable — append-only)).
 
 A LoRA adapter is small, but the *recipe* is what makes it a checkpoint: the run is **deterministic**
 (fixed seed, greedy eval, no RNG in the data path), so this manifest reproduces the adapter bit-for-bit

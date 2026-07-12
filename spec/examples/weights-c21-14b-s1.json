@@ -1,0 +1,78 @@
+{
+  "schema_version": "0.1.0",
+  "kind": "weights",
+  "hash": "wgt_2d1dcd3d78e6be985b4e3a04907e76700fd928438cbf3fbf9b317ebeb2a72065",
+  "name_hints": [
+    "nova-lingua-coder-14b",
+    "reference-best-read"
+  ],
+  "base": {
+    "model": "Qwen/Qwen2.5-Coder-14B-Instruct",
+    "license": "Apache-2.0"
+  },
+  "format": "lora-peft-safetensors",
+  "files": [
+    {
+      "name": "adapter_config.json",
+      "sha256": "f16150c3cac6a478eef4587a0b83b08db1ef040ad660bd0da35ece9f1526b3f8",
+      "bytes": 1110
+    },
+    {
+      "name": "adapter_model.safetensors",
+      "sha256": "ec8045b6f2a3331185cdc217b095b2ef4fc0399de09678635c370d084b010090",
+      "bytes": 275341720
+    }
+  ],
+  "recipe": {
+    "corpus": {
+      "sha256": "c96a114c5ebce55111ff2533e5ef802bf61be8f1ded70abfa89a207e49918c1d",
+      "description": "gen_corpus.py --combinatorial (verified synthetic training corpus)"
+    },
+    "train_split": {
+      "sha256": "a1bc157d88dcd0e75b941eb6ef21d0945cb56f9098a9b0b13d958ce38370cfea",
+      "examples": 6033,
+      "description": "export_finetune.py --conventions off --shots 0 --holdout-corpus (curated eval held out)"
+    },
+    "trainer": "tooling/eval/train_lora_cpu.py",
+    "seed": 1,
+    "epochs": 2,
+    "hyperparameters": {
+      "lora_r": 16,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "target_modules": "all attn+MLP proj",
+      "max_seq_len": 512,
+      "learning_rate": 0.0002,
+      "grad_accum": 8,
+      "dtype": "bfloat16"
+    }
+  },
+  "measured": {
+    "write": {
+      "pass": 195,
+      "semantic_pass": 195,
+      "total": 207
+    },
+    "read": {
+      "pass": 186,
+      "semantic_pass": 189,
+      "total": 197
+    },
+    "assemble": {
+      "pass": 12,
+      "semantic_pass": 12,
+      "total": 12
+    },
+    "total": {
+      "pass": 393,
+      "semantic_pass": 396,
+      "total": 416
+    }
+  },
+  "urls": [
+    "https://nl.1105software.com/v0/blobs/f16150c3cac6a478eef4587a0b83b08db1ef040ad660bd0da35ece9f1526b3f8",
+    "https://nl.1105software.com/v0/blobs/ec8045b6f2a3331185cdc217b095b2ef4fc0399de09678635c370d084b010090"
+  ],
+  "derived_from": null,
+  "supersedes": "wgt_95885e217035dc1837ed7663c672c6349d7ef030ad66ded168e751fce5bd6b83"
+}
