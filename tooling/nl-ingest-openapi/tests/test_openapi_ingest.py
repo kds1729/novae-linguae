@@ -141,10 +141,27 @@ class SearchServiceTest(unittest.TestCase):
     def _body(self, name):
         return json.dumps(json.load(open(Path(self.tmp) / f"body-{name}.json")))
 
-    def test_multipart_refused_others_generated(self):
-        # uploadArchive is multipart-only -> refused; the two $ref-parameterized reads generate,
-        # and getVersion's documented 200 example additionally yields a body-projection record.
-        self.assertEqual(set(self.recs), {"searchitems", "getversion", "getversionbody"})
+    def test_multipart_compiles_to_a_deterministic_form(self):
+        # uploadArchive is multipart-only — COMPILED now, not refused: the boundary is a
+        # spec-time constant riding in the Content-Type literal, the required string parts
+        # (archive, note) become caller parameters in declaration order, the optional `tag`
+        # part is omitted (the minimal documented call), and framing is all literal.
+        self.assertEqual(set(self.recs),
+                         {"searchitems", "getversion", "getversionbody", "uploadarchive"})
+        rec = json.load(open(self.recs["uploadarchive"]))
+        self.assertEqual([p["name"] for p in rec["signature"]["type"]["params"]],
+                         ["string", "string", "string"])  # base, archive, note
+        self.assertEqual(rec["signature"]["effects"], ["net.write"])
+        self.assertEqual(rec["examples"][0]["result"], {"kind": "int", "value": 201})
+        body = self._body("uploadarchive")
+        self.assertIn("multipart/form-data; boundary=nl-upload_archive-boundary", body)
+        self.assertIn('Content-Disposition: form-data; name=\\"archive\\"', body)
+        self.assertIn('Content-Disposition: form-data; name=\\"note\\"', body)
+        self.assertIn("--nl-upload_archive-boundary--", body)
+        self.assertNotIn('name=\\"tag\\"', body)  # the optional part is not in the form
+        # Part VALUES are variables (caller data), never literals.
+        ast = json.load(open(Path(self.tmp) / "body-uploadarchive.json"))
+        self.assertEqual([p["name"] for p in ast["params"]], ["base", "archive", "note"])
 
     def test_body_projection_from_documented_example(self):
         # getVersion documents `{"version": "1.0.0"}` on its 200 -> a second record
@@ -293,13 +310,46 @@ class RefusalBoundaryTest(unittest.TestCase):
         self.assertEqual(built, [])
         self.assertIn("base64", skipped[0][1])
 
-    def test_external_ref_refused(self):
+    def test_url_ref_refused(self):
+        # A URL $ref stays refused regardless of any base directory: no network at ingestion
+        # time — the description must be locally complete.
         built, skipped = self._walk({
             "paths": {"/x": {"get": {"operationId": "opC",
-                                     "parameters": [{"$ref": "other.json#/components/parameters/P"}],
+                                     "parameters": [{"$ref": "https://example.com/o.json#/P"}],
                                      "responses": {"200": {"description": "ok"}}}}}})
         self.assertEqual(built, [])
         self.assertIn("$ref", skipped[0][1])
+
+    def test_multipart_without_part_properties_refused(self):
+        # The old blanket multipart refusal narrowed to its honest core: with no declared part
+        # properties there are no spec-time part names to build the form from.
+        built, skipped = self._walk({
+            "paths": {"/u": {"post": {"operationId": "opU",
+                                      "requestBody": {"content": {"multipart/form-data": {
+                                          "schema": {"type": "object"}}}},
+                                      "responses": {"201": {"description": "ok"}}}}}})
+        self.assertEqual(built, [])
+        self.assertIn("part properties", skipped[0][1])
+
+    def test_multipart_without_required_parts_refused(self):
+        built, skipped = self._walk({
+            "paths": {"/u": {"post": {"operationId": "opV",
+                                      "requestBody": {"content": {"multipart/form-data": {
+                                          "schema": {"type": "object", "properties": {
+                                              "note": {"type": "string"}}}}}},
+                                      "responses": {"201": {"description": "ok"}}}}}})
+        self.assertEqual(built, [])
+        self.assertIn("required parts", skipped[0][1])
+
+    def test_multipart_non_string_part_refused(self):
+        built, skipped = self._walk({
+            "paths": {"/u": {"post": {"operationId": "opW",
+                                      "requestBody": {"content": {"multipart/form-data": {
+                                          "schema": {"type": "object", "required": ["n"],
+                                                     "properties": {"n": {"type": "integer"}}}}}},
+                                      "responses": {"201": {"description": "ok"}}}}}})
+        self.assertEqual(built, [])
+        self.assertIn("not a string", skipped[0][1])
 
     def test_cookie_param_refused(self):
         built, skipped = self._walk({
@@ -309,6 +359,56 @@ class RefusalBoundaryTest(unittest.TestCase):
                                      "responses": {"200": {"description": "ok"}}}}}})
         self.assertEqual(built, [])
         self.assertIn("cookie", skipped[0][1])
+
+    def test_relative_file_ref_resolves_and_matches_inline(self):
+        # The non-local-$ref pull: a RELATIVE-FILE reference resolves against the spec's own
+        # directory, nested refs resolve against the REFERENCED document, and — faithfulness —
+        # the generated record is byte-identical to the same description with the ref inlined
+        # by hand (the reference is pure factoring, not semantics).
+        tmp = tempfile.mkdtemp(prefix="nl-openapi-extref-")
+        shared = {"components": {
+            "parameters": {"Q": {"name": "q", "in": "query", "required": True,
+                                 "schema": {"$ref": "#/components/schemas/Str"}}},
+            "schemas": {"Str": {"type": "string"}}}}
+        json.dump(shared, open(Path(tmp) / "shared.json", "w"))
+        op = {"operationId": "opX", "responses": {"200": {"description": "ok"}}}
+        main_spec = {**self.BASE,
+                     "paths": {"/x": {"get": {**op,
+                                              "parameters": [{"$ref": "shared.json#/components/parameters/Q"}]}}}}
+        json.dump(main_spec, open(Path(tmp) / "main.json", "w"))
+        spec = oi.load_spec(str(Path(tmp) / "main.json"))
+        built, skipped = oi.walk(spec, None)
+        self.assertEqual(skipped, [])
+        record, body_ast, _ = built[0]
+
+        inline_spec = {**self.BASE,
+                       "paths": {"/x": {"get": {**op,
+                                                "parameters": [{"name": "q", "in": "query", "required": True,
+                                                                "schema": {"type": "string"}}]}}}}
+        built_inline, _ = oi.walk(inline_spec, None)
+        record_inline, body_inline, _ = built_inline[0]
+        self.assertEqual(json.dumps(body_ast, sort_keys=True), json.dumps(body_inline, sort_keys=True))
+        self.assertEqual(record["hash"], record_inline["hash"])
+
+    def test_directory_escaping_file_ref_refused(self):
+        # A file ref may not climb out of the spec's directory — the description is the unit
+        # of trust; it does not get to read the rest of the filesystem.
+        outer = tempfile.mkdtemp(prefix="nl-openapi-escape-")
+        inner = Path(outer) / "spec"
+        inner.mkdir()
+        json.dump({"components": {"parameters": {"P": {"name": "p", "in": "query",
+                                                       "required": True,
+                                                       "schema": {"type": "string"}}}}},
+                  open(Path(outer) / "outside.json", "w"))
+        main_spec = {**self.BASE,
+                     "paths": {"/x": {"get": {"operationId": "opY",
+                                              "parameters": [{"$ref": "../outside.json#/components/parameters/P"}],
+                                              "responses": {"200": {"description": "ok"}}}}}}
+        json.dump(main_spec, open(inner / "main.json", "w"))
+        spec = oi.load_spec(str(inner / "main.json"))
+        built, skipped = oi.walk(spec, None)
+        self.assertEqual(built, [])
+        self.assertIn("$ref", skipped[0][1])
 
     def test_path_item_level_parameters_merge(self):
         # A path-item-level $ref parameter is shared by the operation (no op-level params at all).

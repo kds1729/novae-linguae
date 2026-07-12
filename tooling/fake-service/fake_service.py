@@ -19,6 +19,10 @@ SECOND auth style, `X-Api-Key: <token>`, on two read endpoints:
 
     GET /search?q=<term>&limit=<n>   200 if q non-empty and limit an integer, else 400
     GET /version                     200 if an X-Client-Id header is present, else 400
+    POST /upload                     X-Api-Key-authed multipart/form-data: 201 iff the body
+                                     parses against the Content-Type boundary and carries the
+                                     required parts (archive, note), else 400 — the exit gate
+                                     for the adapter's compiled multipart forms
 
 Both 400 on an unencoded character in the request target — so a worked example whose query
 value contains a space passes ONLY IF the client percent-encoded it (the url_encode gate).
@@ -110,6 +114,37 @@ class Handler(BaseHTTPRequestHandler):
             thing_id = "th_" + hashlib.sha256(body).hexdigest()[:12]
             self.things[thing_id] = body
             self._reply(201, body, headers=[("Location", f"/things/{thing_id}")])
+            return
+        # Multipart exit gate: a compiled form must really parse — boundary from the
+        # Content-Type, per-part names from Content-Disposition, framing delimiters intact.
+        if self.path == "/upload":
+            if not self._api_keyed():
+                return
+            ctype = self.headers.get("Content-Type") or ""
+            boundary = ""
+            for piece in ctype.split(";"):
+                piece = piece.strip()
+                if piece.startswith("boundary="):
+                    boundary = piece[len("boundary="):].strip('"')
+            if not ctype.startswith("multipart/") or not boundary:
+                self._reply(400, b'{"error":"not multipart"}')
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length).decode("utf-8", "replace")
+            delim = "--" + boundary
+            if not raw.startswith(delim) or delim + "--" not in raw:
+                self._reply(400, b'{"error":"bad framing"}')
+                return
+            names = []
+            for part in raw.split(delim)[1:]:
+                head = part.split("\r\n\r\n", 1)[0]
+                for line in head.split("\r\n"):
+                    if line.lower().startswith("content-disposition:") and 'name="' in line:
+                        names.append(line.split('name="', 1)[1].split('"', 1)[0])
+            if {"archive", "note"} <= set(names):
+                self._reply(201, ('{"received":' + str(len(names)) + "}").encode())
+            else:
+                self._reply(400, b'{"error":"missing required parts"}')
             return
         # GW13: the OAuth2 client-credentials token endpoint. Form-encoded per RFC 6749 §4.4.
         if self.path != "/token":

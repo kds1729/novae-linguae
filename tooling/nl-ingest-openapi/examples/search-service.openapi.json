@@ -3,7 +3,7 @@
   "info": {
     "title": "Search Service",
     "version": "1.0.0",
-    "description": "The GW10 reference description: $ref-factored components, query and header parameters, apiKey-in-header auth, an optional parameter (omitted with a note), and a multipart operation (refused honestly)."
+    "description": "The GW10 reference description: $ref-factored components, query and header parameters, apiKey-in-header auth, an optional parameter (omitted with a note), and a multipart operation (compiled to a deterministic form)."
   },
   "servers": [
     {
@@ -119,13 +119,19 @@
     "/upload": {
       "post": {
         "operationId": "uploadArchive",
-        "summary": "Multipart upload — deliberately outside the description subset (a refusal case).",
+        "summary": "Multipart upload — required string parts compile to a deterministic form body.",
         "requestBody": {
           "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "required": ["archive", "note"],
+                "properties": {
+                  "archive": { "type": "string", "format": "binary" },
+                  "note": { "type": "string" },
+                  "tag": { "type": "string" }
+                }
               }
             }
           }

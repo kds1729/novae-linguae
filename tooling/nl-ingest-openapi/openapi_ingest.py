@@ -18,8 +18,13 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
                     OPTIONAL query/header params are omitted with a printed note — the record is
                     the minimal documented call, never a silent truncation
     header params -> required ones become string parameters, `map_put` into the header map
-    requestBody  -> a `body` string parameter (omitted for bodyless verbs); a multipart-only
-                    body REFUSES the operation (no deterministic boundary construction)
+    requestBody  -> a `body` string parameter (omitted for bodyless verbs); a MULTIPART-only
+                    body compiles to a deterministic form: the boundary is a spec-time constant
+                    riding in the Content-Type literal, part names are description data, and each
+                    REQUIRED string part (incl. format: binary) becomes a caller parameter —
+                    framing is literal, only part values are caller data (the url_encode split).
+                    Optional parts are omitted with a note. Refused honestly: a multipart body
+                    with no declared part properties, no required parts, or a non-string part
     security     -> `http`/`bearer` -> an `Authorization: Bearer {{secret:NAME}}` header;
                     `apiKey` in `header` -> a `<name>: {{secret:NAME}}` header. apiKey in
                     query/cookie is REFUSED: a secret placeholder substitutes only inside a
@@ -27,8 +32,12 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
                     the URL, hence the record and the trace. HTTP basic (needs base64 — no
                     builtin) and oauth2/openIdConnect flows are refused too
     $ref         -> local `#/...` references (parameters, requestBodies, responses, security
-                    schemes, path-item-level shared parameters) are resolved; an external or
-                    dangling reference refuses the operation honestly
+                    schemes, path-item-level shared parameters) are resolved, and so are
+                    RELATIVE-FILE references (`schemas.json#/...`) against the spec's own
+                    directory — the referenced document's refs resolve against *that* document
+                    and the imported subtree comes back fully inlined. URL references (no network
+                    at ingestion time), absolute paths, paths escaping the spec's directory, and
+                    dangling/cyclic references refuse the operation honestly
     responses    -> the documented status the worked example asserts; a 2xx response that
                     documents an application/json EXAMPLE additionally yields a body-projection
                     record `<opId>Body : … -> Maybe Json` (`parse_json` over the response body —
@@ -88,16 +97,122 @@ def s_lit(text):
     return b_lit({"kind": "string", "value": text})
 
 
+# Relative-file $ref support: the directory of the top-level spec (set by `load_spec`) and a cache
+# of referenced documents. `None` base = no file context (an in-memory spec), so file refs refuse.
+_BASE_DIR = None
+_DOC_CACHE = {}
+
+
+def load_spec(path):
+    """Load the top-level spec and remember its directory as the base for RELATIVE file $refs.
+    Use this instead of a bare json.load so `other.json#/...` references resolve."""
+    global _BASE_DIR
+    _BASE_DIR = os.path.dirname(os.path.abspath(path))
+    _DOC_CACHE.clear()
+    return json.load(open(path))
+
+
+def _resolve_pointer(doc, frag):
+    """A JSON Pointer fragment (`/components/...`, RFC 6901 `~0`/`~1` escaping) against `doc`.
+    An empty fragment is the whole document. Returns None when dangling."""
+    if frag in ("", "/"):
+        return doc
+    cur = doc
+    for raw in frag.lstrip("/").split("/"):
+        key = raw.replace("~1", "/").replace("~0", "~")
+        if not isinstance(cur, dict) or key not in cur:
+            return None
+        cur = cur[key]
+    return cur
+
+
+def _external_deref(ref, base_dir, depth):
+    """Resolve a RELATIVE-FILE $ref (`other.json`, `./sub/x.json#/Foo`) against `base_dir` and
+    return a FULLY-INLINED snapshot of the target — every $ref inside the referenced document is
+    resolved against *that* document (per JSON Reference semantics) before anything is returned,
+    so callers never hold a node whose refs belong to a different file. Refused (None): URL refs
+    (no network at ingestion time — the description must be locally complete), absolute paths, and
+    any path escaping the top-level spec's directory (the description is the unit of trust; it
+    does not get to read the rest of the filesystem)."""
+    if _BASE_DIR is None or depth > 32:
+        return None
+    file_part, _, frag = ref.partition("#")
+    if "://" in file_part or file_part.startswith(("http:", "https:", "//", "/")):
+        return None
+    path = os.path.normpath(os.path.join(base_dir, file_part))
+    root = os.path.realpath(_BASE_DIR)
+    real = os.path.realpath(path)
+    if real != root and not real.startswith(root + os.sep):
+        return None
+    if path not in _DOC_CACHE:
+        try:
+            with open(path) as fh:
+                _DOC_CACHE[path] = json.load(fh)
+        except (OSError, ValueError):
+            return None
+    doc = _DOC_CACHE[path]
+    node = _resolve_pointer(doc, frag)
+    return _inline(doc, os.path.dirname(path), node, depth)
+
+
+def _inline(doc, doc_dir, node, depth):
+    """Deep-copy `node`, resolving every $ref it contains: local refs against `doc` (the document
+    the node came from), file refs against `doc_dir` (a nested file ref is relative to its
+    CONTAINING document). Any dangling/cyclic/refused ref poisons the whole snapshot to None —
+    the operation then refuses honestly rather than shipping a half-resolved description."""
+    if depth > 32 or node is None:
+        return None
+    while isinstance(node, dict) and "$ref" in node:
+        ref = node["$ref"]
+        if not isinstance(ref, str):
+            return None
+        if ref.startswith("#"):
+            node = _resolve_pointer(doc, ref[1:])
+            depth += 1
+            if node is None:
+                return None
+        else:
+            return _external_deref(ref, doc_dir, depth + 1)
+    if isinstance(node, dict):
+        out = {}
+        for k, v in node.items():
+            if isinstance(v, (dict, list)):
+                iv = _inline(doc, doc_dir, v, depth + 1)
+                if iv is None:
+                    return None
+                out[k] = iv
+            else:
+                out[k] = v
+        return out
+    if isinstance(node, list):
+        out = []
+        for v in node:
+            if isinstance(v, (dict, list)):
+                iv = _inline(doc, doc_dir, v, depth + 1)
+                if iv is None:
+                    return None
+                out.append(iv)
+            else:
+                out.append(v)
+        return out
+    return node
+
+
 def deref(spec, node, _depth=0):
-    """Resolve a local `#/...` $ref chain (JSON Pointer, RFC 6901 `~0`/`~1` escaping) against the
-    spec document. Returns None for an external, dangling, or cyclic reference — the caller
-    refuses the operation honestly rather than guessing."""
+    """Resolve a $ref chain against the spec document: a local `#/...` reference (JSON Pointer,
+    RFC 6901 `~0`/`~1` escaping) walks the spec in place; a RELATIVE-FILE reference
+    (`other.json#/...`) resolves against the top-level spec's directory and returns a
+    fully-inlined snapshot of the referenced subtree (see `_external_deref`). Returns None for a
+    URL, absolute-path, directory-escaping, dangling, or cyclic reference — the caller refuses
+    the operation honestly rather than guessing."""
     while isinstance(node, dict) and "$ref" in node:
         if _depth > 32:
             return None
         ref = node["$ref"]
-        if not isinstance(ref, str) or not ref.startswith("#/"):
+        if not isinstance(ref, str):
             return None
+        if not ref.startswith("#/"):
+            return _external_deref(ref, _BASE_DIR, _depth) if _BASE_DIR else None
         cur = spec
         for raw in ref[2:].split("/"):
             key = raw.replace("~1", "/").replace("~0", "~")
@@ -339,14 +454,48 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
     query_ps, header_ps = by_kind["query"], by_kind["header"]
 
     body_spec = None
+    mp_parts, mp_ct, mp_boundary = [], None, None
     if "requestBody" in op:
         body_spec = deref(spec, op["requestBody"])
         if not isinstance(body_spec, dict):
             return ("skip", op_id, "unresolvable requestBody $ref (external or dangling)")
         content = body_spec.get("content") or {}
-        if content and all(ct.startswith("multipart/") for ct in content):
-            return ("skip", op_id, "multipart-only request body — no deterministic "
-                                   "boundary construction")
+        mp_types = sorted(ct for ct in content if ct.startswith("multipart/"))
+        if content and len(mp_types) == len(content):
+            # MULTIPART-ONLY body: compiled, not refused. The old refusal ("no deterministic
+            # boundary construction") dissolves the same way url_encode's did — the boundary is a
+            # SPEC-TIME constant (like a percent-encoded query-parameter name), the part names are
+            # description data, and only the part VALUES are caller parameters. Required string
+            # parts become parameters in declaration order; optional parts are omitted with a note
+            # (the record is the minimal documented call). Honest limits keep refusing below.
+            mp_ct = mp_types[0]
+            schema = deref(spec, (content.get(mp_ct) or {}).get("schema") or {})
+            props = (schema or {}).get("properties") or {}
+            if not isinstance(schema, dict) or not props:
+                return ("skip", op_id, "multipart body without declared part properties — "
+                                       "no spec-time part names to build the form from")
+            required = schema.get("required") or []
+            if not required:
+                return ("skip", op_id, "multipart body declares no required parts — an "
+                                       "all-optional form has no minimal documented call")
+            for pname in required:
+                pschema = deref(spec, props.get(pname)) if pname in props else None
+                if not isinstance(pschema, dict):
+                    return ("skip", op_id, f"multipart required part `{pname}` undeclared or "
+                                           "unresolvable")
+                if pschema.get("type") != "string":
+                    return ("skip", op_id, f"multipart part `{pname}` is not a string — only "
+                                           "string parts (incl. format: binary) are representable")
+            for pname in props:
+                if pname not in required:
+                    notes.append(f"optional multipart part `{pname}` omitted "
+                                 "(the record is the minimal documented call)")
+            mp_parts = [p for p in props if p in required]  # declaration order
+            mp_boundary = f"nl-{_param_name(op_id)}-boundary"
+            notes.append(f"multipart form: spec-time boundary `{mp_boundary}` rides in the "
+                         "Content-Type literal; a part value containing the boundary delimiter "
+                         "line would break framing (no escaping builtin — the caller's contract)")
+            body_spec = None
     has_body = body_spec is not None
 
     auth = resolve_auth(spec, op, global_security, secret_name)
@@ -356,7 +505,7 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
     query_names = [_param_name(p["name"]) for p in query_ps]
     header_names = [_param_name(p["name"]) for p in header_ps]
     lam_params = (["base"] + path_param_names + query_names + header_names
-                  + (["body"] if has_body else []))
+                  + (["body"] if has_body else [_param_name(p) for p in mp_parts]))
     for name in lam_params:
         if lam_params.count(name) > 1:
             return ("skip", op_id, f"parameter name collision on `{name}`")
@@ -381,8 +530,26 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
     for p in reversed(header_ps):  # first-declared outermost — a stable, readable order
         headers = curried_app(b_var("map_put"), s_lit(p["name"]),
                               b_var(_param_name(p["name"])), headers)
+    if mp_ct:
+        headers = curried_app(b_var("map_put"), s_lit("Content-Type"),
+                              s_lit(f"{mp_ct}; boundary={mp_boundary}"), headers)
 
-    body_arg = b_var("body") if has_body else s_lit("")
+    if has_body:
+        body_arg = b_var("body")
+    elif mp_parts:
+        # The RFC 2046 form body as a str_concat chain: framing (boundary lines, per-part
+        # Content-Disposition with the SPEC-TIME part name) is literal; only part VALUES are
+        # caller parameters — the same literal-scaffold/caller-data split as the URL builder.
+        tokens = []
+        for pname in mp_parts:
+            tokens.append(s_lit(f"--{mp_boundary}\r\n"
+                                f'Content-Disposition: form-data; name="{pname}"\r\n\r\n'))
+            tokens.append(b_var(_param_name(pname)))
+            tokens.append(s_lit("\r\n"))
+        tokens.append(s_lit(f"--{mp_boundary}--\r\n"))
+        body_arg = str_concat_chain(tokens)
+    else:
+        body_arg = s_lit("")
     call = curried_app(b_var("http"), s_lit(verb), url, headers, body_arg)
     body_ast = {"kind": "lambda",
                 "params": [{"name": p} for p in lam_params],
@@ -394,7 +561,8 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
     effect = "net.read" if verb in _READ_VERBS else "net.write"
 
     example = _example_for(base_url, verb, path_param_names, has_body, op,
-                           query_ps=query_ps, header_ps=header_ps, int_params=int_params, spec=spec)
+                           query_ps=query_ps, header_ps=header_ps, int_params=int_params, spec=spec,
+                           mp_parts=mp_parts)
     intent = ["io", "io/network/http"] + (["query/lookup"] if verb in _READ_VERBS else [])
 
     record = build_v2_record(
@@ -482,7 +650,7 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
 
 
 def _example_for(base_url, verb, path_param_names, has_body, op,
-                 query_ps=(), header_ps=(), int_params=frozenset(), spec=None):
+                 query_ps=(), header_ps=(), int_params=frozenset(), spec=None, mp_parts=()):
     """One worked example whose expected status is a DOCUMENTED, deterministic outcome: a read/delete
     on a guaranteed-absent name is the documented 404; a create is the documented 2xx; a bodyless
     probe is its single documented status. Verified live with `--verify-against`. A string query
@@ -503,6 +671,8 @@ def _example_for(base_url, verb, path_param_names, has_body, op,
         args.append({"kind": "string", "value": "gw10-client"})
     if has_body:
         args.append({"kind": "string", "value": "{}"})
+    for pname in mp_parts:
+        args.append({"kind": "string", "value": f"{pname} bytes"})
     if verb in ("GET", "DELETE"):
         want = 404 if 404 in codes else (codes[0] if codes else 200)
     elif verb in ("PUT", "POST"):
@@ -625,7 +795,7 @@ def main(argv=None):
                          "the tokenUrl comes from the description itself")
     args = ap.parse_args(argv)
 
-    spec = json.load(open(args.spec))
+    spec = load_spec(args.spec)
     # The record-side default is the security-scheme KEY (per scheme, in resolve_auth);
     # --secret-name overrides. The live check supplies `--secret NAME=token` for each.
     schemes = (spec.get("components") or {}).get("securitySchemes") or {}

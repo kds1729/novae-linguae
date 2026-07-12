@@ -24,6 +24,8 @@ description, not the generated client plumbing.
 | **required query parameters** (GW10) | record parameters: a string value rides through the **`url_encode`** builtin (RFC 3986 strict — raw concatenation of caller data into a URL is unsound); an `integer` schema becomes an `int` parameter through `to_string`; parameter *names* are spec-time literals, percent-encoded at generation time |
 | **required header parameters** (GW10) | `string` parameters, `map_put` into the header map by literal name |
 | `requestBody` | a `body` `string` parameter (omitted for bodyless verbs) |
+| **multipart-only `requestBody`** | a deterministic form: the boundary is a **spec-time constant** riding in the `Content-Type` literal, part names are description data, and each *required* `string` part (incl. `format: binary`) becomes a caller parameter — framing is literal, only part values are caller data (the `url_encode` split, applied to RFC 2046). Optional parts are omitted with a note |
+| **relative-file `$ref`s** (`schemas.json#/…`) | resolved against the spec's own directory; the referenced document's refs resolve against *that* document and the imported subtree comes back fully inlined — pure factoring, byte-identical to the inlined description |
 | `security` (Bearer) | an `Authorization: Bearer {{secret:NAME}}` header; operation-level `security: []` = no auth |
 | `security` (**apiKey in header**, GW10) | a `<name>: {{secret:NAME}}` header (placeholder name defaults to the scheme key) |
 | `security` (**oauth2 clientCredentials**, GW13) | an `Authorization: Bearer {{oauth:NAME}}` header — the record names the identity symbolically; at run time `--oauth NAME=token_url|client_id|client_secret` exchanges credentials at the description's token endpoint inside the live effect (token never in the record or trace; replay needs no identity). Every other oauth2 flow refuses — interactive flows need a principal the effect boundary cannot supply |
@@ -45,15 +47,23 @@ at all (see agent-loop.md §Scope).
 ## Honest refusals
 
 What the language (or determinism) can't carry refuses the operation with a printed reason rather
-than generating something subtly wrong: an **external or dangling `$ref`**, a **multipart-only
-request body** (no deterministic boundary construction), **apiKey in query/cookie** (a secret
-placeholder substitutes only inside a *header* value at the effect boundary — in a query string the
-credential would enter the URL, hence the record and the trace), **HTTP basic** (no base64
-builtin), **oauth2/openIdConnect** flows, and **cookie parameters**. An *optional* query/header
-parameter is omitted with a note — the record is the minimal documented call, never a silent
-truncation. [`examples/search-service.openapi.json`](examples/search-service.openapi.json) is the
+than generating something subtly wrong: a **URL `$ref`** (no network at ingestion time — the
+description must be locally complete), an **absolute-path or directory-escaping file `$ref`** (the
+description is the unit of trust; it does not get to read the rest of the filesystem), a
+**dangling/cyclic `$ref`**, a **multipart body without declared part properties / without required
+parts / with a non-string part** (no spec-time part names, no minimal documented call, or a value
+the form cannot carry), **apiKey in query/cookie** (a secret placeholder substitutes only inside a
+*header* value at the effect boundary — in a query string the credential would enter the URL, hence
+the record and the trace), **HTTP basic** (no base64 builtin), **oauth2/openIdConnect** interactive
+flows, and **cookie parameters**. An *optional* query/header parameter — and an *optional*
+multipart part — is omitted with a note: the record is the minimal documented call, never a silent
+truncation. A compiled multipart form carries one honest caveat, printed as a note: the boundary is
+a spec-time constant, and a part value containing the boundary delimiter line would break framing
+(there is no escaping builtin — that contract is the caller's).
+[`examples/search-service.openapi.json`](examples/search-service.openapi.json) is the
 GW10 reference description exercising all of it (`$ref`-factored components, `?q=&limit=` query
-building, a header parameter, apiKey auth, and a refused multipart upload).
+building, a header parameter, apiKey auth, and the compiled multipart upload — live-gated against
+the fake service's `POST /upload`, which really parses the form).
 
 ## Verified by default
 
