@@ -318,8 +318,8 @@ and a granted one **re-ran the whole cycle live and CONFIRMED**. `run` needed no
 it already grants exactly the record's declared effects (its examples are its own tests) — only
 `--secret`. Wire-format details deliberately unpulled at the time: response headers, redirects,
 query-parameter encoding, multipart bodies — no workflow had needed them (GW10 has since pulled
-query-parameter encoding and GW14 response headers + in-language redirects; multipart remains
-unpulled).
+query-parameter encoding, GW14 response headers + in-language redirects, and 2026-07-12 multipart
+bodies — every wire-format detail named here is now carried).
 
 **GW7 — records from an API description (2026-07-07): ingestion at the description layer.** With
 the general `http` core in place, a **machine-readable API description is an ingestion source**:
@@ -425,7 +425,9 @@ time), **required header parameters** (`map_put` by literal name, variable value
 **apiKey-in-header auth** (`<name>: {{secret:NAME}}`, the placeholder name defaulting to the
 scheme key). The refusal boundary is explicit and tested: an *optional* query/header parameter
 is omitted with a printed note (the record is the minimal documented call — never a silent
-truncation); a multipart-only request body (no deterministic boundary construction),
+truncation); a multipart-only request body (no deterministic boundary construction — since
+narrowed 2026-07-12: multipart now COMPILES with a spec-time boundary constant, and only
+no-part-properties / no-required-parts / non-string-part forms refuse),
 apiKey-in-query/cookie (a secret placeholder substitutes only inside a *header* value at the
 effect boundary — in a query string the credential would enter the URL, hence the record and the
 trace), HTTP basic (no base64 builtin), and oauth2/openIdConnect flows all refuse the operation
@@ -444,9 +446,9 @@ adapter. Corpus follow-through same day: curated `url_funcs` rows (`encode_term`
 family **#49** (near-bare encodes, single/chained query pairs, int params via `to_string`, the
 join-encoded list; corpus19 = 3,195 specs, 0 drops; ftdata19 staged). Residual description
 depth — response headers/redirects, multipart, non-local `$ref`s, oauth flows — stays refused,
-awaiting a workflow (GW13 has since pulled the client-credentials OAuth flow and GW14 response
-headers + in-language redirects; multipart, non-local `$ref`s, and the interactive OAuth flows
-remain refused).
+awaiting a workflow (GW13 has since pulled the client-credentials OAuth flow, GW14 response
+headers + in-language redirects, and 2026-07-12 multipart bodies + relative-file `$ref`s; only
+the interactive OAuth flows — and URL/escaping refs — remain refused).
 
 **GW16 — description-layer response headers (2026-07-11, same day): the GW7 move applied to
 GW14.** With `http_full` in the language, a header the API description *documents* is
@@ -475,7 +477,8 @@ argument-signature filter can split), yielding the observed assert `msg_54361c9d
 `trc_42025dcf…`; a grantless, secretless `verify-claim` by address with the service killed
 replays it CONFIRMED. No corpus change (the description layer isn't corpus material — the
 header-consumption shapes are already family #50, the GW7 rationale). Residual: multipart
-bodies, non-local `$ref`s, interactive OAuth flows — unchanged.
+bodies, non-local `$ref`s, interactive OAuth flows — unchanged (multipart + relative-file
+`$ref`s since pulled, 2026-07-12; interactive flows remain the honest boundary).
 
 **GW15 — pagination (2026-07-11, same day): the Link header is data, and the zero-pull proves
 it.** GW14's design bet — exposing headers makes the header-driven wire idioms *in-language
@@ -553,7 +556,8 @@ publisher's observations). Corpus follow-through same day: curated `header_funcs
 404/404) plus combinatorial family **#50** (near-bare `.headers`-then-`map_get` chains,
 Maybe-cased defaults, presence predicates, status-guarded Location lookups, base-joins; corpus20
 = 3,211 specs, 0 drops; ftdata20 staged). Residual wire-format depth: multipart bodies,
-non-local `$ref`s, interactive OAuth flows — still refused, awaiting a workflow.
+non-local `$ref`s, interactive OAuth flows — still refused, awaiting a workflow (the first two
+since pulled, 2026-07-12).
 
 **GW13 — OAuth2 client-credentials (2026-07-11, same day): the largest refused auth style joins
 the effect-boundary doctrine.** Real machine-to-machine APIs overwhelmingly authenticate by
