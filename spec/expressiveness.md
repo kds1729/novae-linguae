@@ -427,7 +427,10 @@ scheme key). The refusal boundary is explicit and tested: an *optional* query/he
 is omitted with a printed note (the record is the minimal documented call — never a silent
 truncation); a multipart-only request body (no deterministic boundary construction — since
 narrowed 2026-07-12: multipart now COMPILES with a spec-time boundary constant, and only
-no-part-properties / no-required-parts / non-string-part forms refuse),
+no-part-properties / no-required-parts / non-string-part forms refuse; the compiled
+`uploadArchive` is in production same day — record + body + example trace + signed cert on Arca
+(`fn_10e89106…`), a third-party consumer fetching by address alone replays the multipart POST
+offline, grantless/secretless/service-dead → 201),
 apiKey-in-query/cookie (a secret placeholder substitutes only inside a *header* value at the
 effect boundary — in a query string the credential would enter the URL, hence the record and the
 trace), HTTP basic (no base64 builtin), and oauth2/openIdConnect flows all refuse the operation
