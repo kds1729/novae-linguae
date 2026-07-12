@@ -14,10 +14,12 @@ use serde_json::{json, Value as J};
 use std::path::Path;
 
 use crate::{
-    build_link_map, build_record_map, certify_record, did_nova_from_pubkey,
-    prove_by_induction_with_exploration, prove_property, respond_to_message, sign_message, verify_claim,
-    AttestationGraph, InductionOutcome, Policy, ProofOutcome, TrustVerdict, DEFAULT_LEMMA_DEPTH,
+    analyze_termination, build_link_map, build_record_map, certify_record, clear_resolver,
+    did_nova_from_pubkey, eval_body, infer_effects, prove_by_induction_with_exploration, prove_property,
+    respond_to_message, set_resolver, sign_message, verify_claim, AttestationGraph, InductionOutcome,
+    Policy, ProofOutcome, TerminationOutcome, TrustVerdict, DEFAULT_LEMMA_DEPTH,
 };
+use crate::interp::{decode_value, val_eq};
 
 /// One message in the orchestrated conversation.
 pub struct Step {
@@ -340,6 +342,128 @@ fn signature_fits(record: &J, args: &[J], records: &std::collections::HashMap<St
     params.iter().zip(args).all(|(p, a)| arg_fits(p, a, records, &mut subst))
 }
 
+/// Does the record's declared *result* type unify with the coarse sort of `expect` — the caller's
+/// expected result value? Discovery matches by intent and the signature filter by ARGUMENT fit, so
+/// nothing constrains what a candidate *returns*: a `(string, string) -> bool` predicate and a
+/// `(string, string) -> Maybe string` builder both survive a two-string application (the GW16
+/// unsplittable-fits residual). A caller-stated expectation pins the result sort too.
+fn result_fits(record: &J, expect: &J) -> bool {
+    let Some(mut t) = record.pointer("/signature/type") else { return false };
+    if t.get("kind").and_then(|k| k.as_str()) == Some("forall") {
+        match t.get("body") {
+            Some(b) => t = b,
+            None => return false,
+        }
+    }
+    let Some(res) = t.get("result") else { return false };
+    unify_ty(res, &value_ty(expect), &mut std::collections::HashMap::new())
+}
+
+/// How a candidate's dry-run against the caller's expected result came out.
+#[derive(Clone, Copy, PartialEq)]
+enum DryRun {
+    /// Evaluated on the actual arguments and produced exactly the expected value.
+    Match,
+    /// Evaluated and produced something else — the wrong function for this goal.
+    Mismatch,
+    /// Evaluation failed on these arguments.
+    Error,
+    /// No expectation given, or the body isn't statically pure + terminating, so it was not run.
+    NotRun,
+}
+
+impl DryRun {
+    fn score(self) -> i64 {
+        match self {
+            DryRun::Match => 2,
+            DryRun::NotRun => 1,
+            DryRun::Mismatch | DryRun::Error => 0,
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            DryRun::Match => "match",
+            DryRun::Mismatch => "mismatch",
+            DryRun::Error => "error",
+            DryRun::NotRun => "not-run",
+        }
+    }
+}
+
+/// A candidate's fit against the caller's GOAL, beyond argument fit: dry-run outcome against the
+/// expected result, intent-tag specificity, and name-hint affinity with the queried intent.
+struct GoalScore {
+    dry: DryRun,
+    tags: i64,
+    name: i64,
+}
+
+impl GoalScore {
+    fn key(&self) -> (i64, i64, i64) {
+        (self.dry.score(), self.tags, self.name)
+    }
+}
+
+fn intent_tokens(intent: &str) -> Vec<&str> {
+    intent.split(['/', '-', '_']).filter(|t| !t.is_empty()).collect()
+}
+
+/// Score one candidate against the goal. Deterministic and local — every signal is either the
+/// caller's own input (the intent, the expected result) or the candidate record's declared metadata.
+///
+/// The dry-run only executes a body this node can STATICALLY verify pure (no effects, nothing
+/// opaque/unresolved) and terminating — running arbitrary discovered code before certification would
+/// be an effect/divergence hole, so anything unverifiable simply isn't run (`NotRun`), the same
+/// verify-before-run discipline as everywhere else. An effectful candidate is never executed for
+/// ranking; it keeps its neutral score and is disambiguated by the declared-metadata signals.
+fn goal_score(
+    record: &J,
+    body: Option<&J>,
+    intent: &str,
+    expect: Option<&J>,
+    args: &[J],
+    records: &std::collections::HashMap<String, J>,
+) -> GoalScore {
+    let dry = match (body, expect) {
+        (Some(b), Some(e)) => {
+            let inf = infer_effects(b, records);
+            let safe = inf.effects.is_empty()
+                && !inf.opaque
+                && !inf.unresolved
+                && matches!(analyze_termination(b), TerminationOutcome::Always);
+            if !safe {
+                DryRun::NotRun
+            } else {
+                match eval_body(b, args) {
+                    Ok(got) => match (decode_value(&got), decode_value(e)) {
+                        (Ok(g), Ok(w)) if val_eq(&g, &w) => DryRun::Match,
+                        _ => DryRun::Mismatch,
+                    },
+                    Err(_) => DryRun::Error,
+                }
+            }
+        }
+        _ => DryRun::NotRun,
+    };
+    // Tag specificity: tags that EXTEND the queried intent (`intent/…`) mark a more specific fit.
+    // The exact tag itself is shared by every discovered candidate, so it carries no signal.
+    let prefix = format!("{intent}/");
+    let tags = record.get("intent_tags").and_then(|t| t.as_array()).map_or(0, |ts| {
+        ts.iter().filter_map(|t| t.as_str()).filter(|t| t.starts_with(&prefix)).count() as i64
+    });
+    // Name affinity: token overlap between the queried intent and the best of the record's name_hints.
+    let want = intent_tokens(intent);
+    let name = record.get("name_hints").and_then(|n| n.as_array()).map_or(0, |hints| {
+        hints
+            .iter()
+            .filter_map(|h| h.as_str())
+            .map(|h| h.split('_').filter(|t| want.contains(t)).count() as i64)
+            .max()
+            .unwrap_or(0)
+    });
+    GoalScore { dry, tags, name }
+}
+
 /// Try to prove a `forall` law: first-order SMT, then induction with lemma discovery (mirrors `prove`).
 fn prove_law(expr: &J, body: Option<&J>, solver: &str) -> bool {
     match prove_property(expr, body, solver).0 {
@@ -370,11 +494,13 @@ pub fn orchestrate_verified(
     attestations: &[J],
     timestamp: Option<&str>,
     require_certified: bool,
+    expect: Option<J>,
 ) -> Result<VerifiedRun> {
     let link = build_link_map(records_dir)?;
     let records = build_record_map(records_dir)?;
     orchestrate_verified_with_maps(
         link, records, intent, args, orchestrator, responder, solver, policy, attestations, timestamp, require_certified,
+        expect,
     )
 }
 
@@ -393,6 +519,7 @@ pub fn orchestrate_verified_with_maps(
     attestations: &[J],
     timestamp: Option<&str>,
     require_certified: bool,
+    expect: Option<J>,
 ) -> Result<VerifiedRun> {
     let responder_did = did_nova_from_pubkey(&responder.verifying_key());
     let mut steps = Vec::new();
@@ -416,9 +543,16 @@ pub fn orchestrate_verified_with_maps(
     // SIGNATURE FILTER: discovery matches by intent only, so drop candidates whose signature doesn't fit
     // this application *before* trust-ranking the rest — arity AND parameter types must accept the
     // arguments (a binary function, or one expecting a list where an int is passed, is no candidate,
-    // however trusted it is).
-    let compatible: Vec<String> =
-        matches.into_iter().filter(|m| records.get(m).is_some_and(|r| signature_fits(r, &args, &records))).collect();
+    // however trusted it is). A caller-stated expected result additionally pins the RESULT sort — the
+    // argument-only filter cannot split two same-argument candidates that return different things.
+    let compatible: Vec<String> = matches
+        .into_iter()
+        .filter(|m| {
+            records.get(m).is_some_and(|r| {
+                signature_fits(r, &args, &records) && expect.as_ref().map_or(true, |e| result_fits(r, e))
+            })
+        })
+        .collect();
     if compatible.is_empty() {
         return Ok(VerifiedRun { steps, trusted: None, certified: None, property: None, confirmed: false });
     }
@@ -465,6 +599,35 @@ pub fn orchestrate_verified_with_maps(
         }
         None => (compatible.clone(), None),
     };
+
+    // GOAL RANK: order the surviving candidates by fit against the caller's GOAL — dry-run outcome
+    // against the expected result (statically pure + terminating bodies only), then intent-tag
+    // specificity, then name-hint affinity. The sort is stable, so the trust order (or, without a
+    // policy, the discovery order) remains the tie-break: trust decides WHETHER a candidate may be
+    // used, the goal decides WHICH to try first. The scores go into the transcript — the choice is
+    // auditable, not oracular.
+    let mut ordered = ordered;
+    if ordered.len() > 1 {
+        set_resolver(link.clone());
+        let scores: std::collections::HashMap<String, GoalScore> = ordered
+            .iter()
+            .map(|m| (m.clone(), goal_score(&records[m], link.get(m), intent, expect.as_ref(), &args, &records)))
+            .collect();
+        clear_resolver();
+        ordered.sort_by(|a, b| scores[b].key().cmp(&scores[a].key()));
+        steps.push(Step {
+            label: "rank".into(),
+            message: json!({
+                "goal": { "intent": intent, "expected_result": expect.is_some() },
+                "ordered": ordered,
+                "scores": ordered.iter().map(|m| {
+                    let s = &scores[m];
+                    json!({ "function": m, "dry_run": s.dry.label(),
+                            "tag_specificity": s.tags, "name_affinity": s.name })
+                }).collect::<Vec<J>>(),
+            }),
+        });
+    }
 
     let mut link = link;
     let total = ordered.len();
@@ -726,7 +889,7 @@ mod tests {
         let run = orchestrate_verified(
             &examples(), "arithmetic",
             vec![json!({ "kind": "int", "value": 2 }), json!({ "kind": "int", "value": 3 })],
-            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"), s, Some(&pol), &atts, None, true,
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"), s, Some(&pol), &atts, None, true, None,
         ).unwrap();
         assert_eq!(run.trusted, Some(true));
         assert_eq!(run.certified, Some(true), "the chosen function certified (require_certified passed)");
@@ -746,7 +909,7 @@ mod tests {
         let pol = policy(&[&did(root)]);
         let run = orchestrate_verified(
             &examples(), "arithmetic", vec![json!({ "kind": "nat", "value": 21 })],
-            &orch, &resp, s, Some(&pol), &atts, None, true,
+            &orch, &resp, s, Some(&pol), &atts, None, true, None,
         ).unwrap();
 
         assert_eq!(run.trusted, Some(true), "the vouched function is trusted");
@@ -821,12 +984,12 @@ mod tests {
         let run = orchestrate_verified_with_maps(
             link, records, "retrytest", vec![json!({ "kind": "string", "value": "hello" })],
             &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
-            "z3", None, &[], None, false,
+            "z3", None, &[], None, false, None,
         ).unwrap();
 
         assert!(run.confirmed, "the pure second candidate must confirm after the effectful first is rejected");
         let labels: Vec<&str> = run.steps.iter().map(|x| x.label.as_str()).collect();
-        assert_eq!(labels, ["query", "ack", "certify", "propose", "reject", "retry",
+        assert_eq!(labels, ["query", "ack", "rank", "certify", "propose", "reject", "retry",
                             "certify", "propose", "commit", "assert"]);
         let retry = run.steps.iter().find(|s| s.label == "retry").unwrap();
         assert_eq!(retry.message.get("after").unwrap().as_str().unwrap(), fn_eff);
@@ -834,6 +997,144 @@ mod tests {
         // The winning claim is about the PURE candidate: str_length("hello") = 5.
         let result = run.steps.last().unwrap().message.pointer("/body/claim/expr/args/1/value").unwrap();
         assert_eq!(result, &json!({ "kind": "int", "value": 5 }));
+    }
+
+    /// A minimal pure record/body pair for ranking tests: `hash`, `name_hints`, string→? signature.
+    fn rank_rec(hash: &str, name: &str, tags: &[&str], params: &[&str], result: &str, body_hash: &str) -> J {
+        json!({
+            "schema_version": "0.2.0", "hash": hash, "name_hints": [name],
+            "signature": { "type": { "kind": "fn",
+                                     "params": params.iter().map(|p| json!({ "kind": "builtin", "name": p })).collect::<Vec<J>>(),
+                                     "result": { "kind": "builtin", "name": result } },
+                           "refinements": [], "effects": [], "capabilities": [],
+                           "terminates": "always" },
+            "examples": [{ "args": [{ "kind": "int", "value": 1 }],
+                           "result": { "kind": "int", "value": 1 } }],
+            "intent_tags": tags, "derived_from": null, "supersedes": null,
+            "body_hash": body_hash })
+    }
+
+    #[test]
+    fn expected_result_sort_drops_wrong_return_type() {
+        // Both candidates take one string; one RETURNS bool (a predicate), the other nat. The
+        // argument-only filter cannot split them (the GW16 unsplittable-fits residual) — an expected
+        // result of int sort must drop the predicate before ranking, so only the length function runs.
+        let (fn_pred, fn_len) = (format!("fn_{}", "a".repeat(64)), format!("fn_{}", "b".repeat(64)));
+        let (expr_pred, expr_len) = (format!("expr_{}", "a".repeat(64)), format!("expr_{}", "b".repeat(64)));
+        let body_pred = json!({ "kind": "lambda", "params": [{ "name": "u" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "gt" },
+                      "args": [{ "kind": "app", "fn": { "kind": "var", "name": "str_length" },
+                                 "args": [{ "kind": "var", "name": "u" }] },
+                               { "kind": "lit", "value": { "kind": "int", "value": 5 } }] } });
+        let body_len = json!({ "kind": "lambda", "params": [{ "name": "u" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "str_length" },
+                      "args": [{ "kind": "var", "name": "u" }] } });
+        let records: std::collections::HashMap<String, J> = [
+            (fn_pred.clone(), rank_rec(&fn_pred, "is_long", &["sorttest"], &["string"], "bool", &expr_pred)),
+            (fn_len.clone(), rank_rec(&fn_len, "len_of", &["sorttest"], &["string"], "nat", &expr_len)),
+        ].into();
+        let link: std::collections::HashMap<String, J> = [
+            (expr_pred, body_pred.clone()), (fn_pred.clone(), body_pred),
+            (expr_len, body_len.clone()), (fn_len.clone(), body_len),
+        ].into();
+
+        let run = orchestrate_verified_with_maps(
+            link, records, "sorttest", vec![json!({ "kind": "string", "value": "hello" })],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+            "z3", None, &[], None, false, Some(json!({ "kind": "int", "value": 5 })),
+        ).unwrap();
+
+        assert!(run.confirmed);
+        // The predicate never survives the filter: ONE candidate remains, so no rank step, no retry.
+        let labels: Vec<&str> = run.steps.iter().map(|x| x.label.as_str()).collect();
+        assert_eq!(labels, ["query", "ack", "certify", "propose", "commit", "assert"]);
+        let target = run.steps.iter().find(|s| s.label == "propose").unwrap().message.pointer("/body/target").unwrap();
+        assert_eq!(target.as_str().unwrap(), fn_len, "only the int-sorted candidate survives an int expectation");
+    }
+
+    #[test]
+    fn dry_run_against_expected_result_orders_candidates() {
+        // Two pure (int)->int candidates share intent, signature, AND result sort — only executing
+        // them can split them. With expect square(3)=9, the lexicographically-SECOND candidate must
+        // rank first (blind order would propose double). Both bodies are statically pure+terminating,
+        // so the dry-run is allowed to run them before certification.
+        let (fn_double, fn_square) = (format!("fn_{}", "a".repeat(64)), format!("fn_{}", "b".repeat(64)));
+        let (expr_double, expr_square) = (format!("expr_{}", "a".repeat(64)), format!("expr_{}", "b".repeat(64)));
+        let body_double = json!({ "kind": "lambda", "params": [{ "name": "n" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "mul" },
+                      "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 2 } }] } });
+        let body_square = json!({ "kind": "lambda", "params": [{ "name": "n" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "mul" },
+                      "args": [{ "kind": "var", "name": "n" }, { "kind": "var", "name": "n" }] } });
+        let records: std::collections::HashMap<String, J> = [
+            (fn_double.clone(), rank_rec(&fn_double, "double_it", &["dryruntest"], &["int"], "int", &expr_double)),
+            (fn_square.clone(), rank_rec(&fn_square, "square_it", &["dryruntest"], &["int"], "int", &expr_square)),
+        ].into();
+        let link: std::collections::HashMap<String, J> = [
+            (expr_double, body_double.clone()), (fn_double.clone(), body_double),
+            (expr_square, body_square.clone()), (fn_square.clone(), body_square),
+        ].into();
+
+        let run = orchestrate_verified_with_maps(
+            link, records, "dryruntest", vec![json!({ "kind": "int", "value": 3 })],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+            "z3", None, &[], None, false, Some(json!({ "kind": "int", "value": 9 })),
+        ).unwrap();
+
+        assert!(run.confirmed);
+        let rank = run.steps.iter().find(|s| s.label == "rank").expect("two candidates must produce a rank step");
+        assert_eq!(rank.message.pointer("/ordered/0").unwrap().as_str().unwrap(), fn_square,
+            "the dry-run match outranks the lexicographically-first mismatch");
+        assert_eq!(rank.message.pointer("/scores/0/dry_run").unwrap(), "match");
+        assert_eq!(rank.message.pointer("/scores/1/dry_run").unwrap(), "mismatch");
+        // The FIRST propose goes to square — no wasted reject/retry on the wrong fit.
+        let target = run.steps.iter().find(|s| s.label == "propose").unwrap().message.pointer("/body/target").unwrap();
+        assert_eq!(target.as_str().unwrap(), fn_square);
+        let result = run.steps.last().unwrap().message.pointer("/body/claim/expr/args/1/value").unwrap();
+        assert_eq!(result, &json!({ "kind": "int", "value": 9 }));
+    }
+
+    #[test]
+    fn name_affinity_orders_ties_without_an_expectation() {
+        // No expectation, identical bodies and tags: the record whose name_hint shares tokens with the
+        // queried intent ranks first, even though blind (lexicographic) order would pick the other.
+        let (fn_other, fn_affine) = (format!("fn_{}", "a".repeat(64)), format!("fn_{}", "b".repeat(64)));
+        let (expr_a, expr_b) = (format!("expr_{}", "a".repeat(64)), format!("expr_{}", "b".repeat(64)));
+        let body = json!({ "kind": "lambda", "params": [{ "name": "u" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "str_length" },
+                      "args": [{ "kind": "var", "name": "u" }] } });
+        let records: std::collections::HashMap<String, J> = [
+            (fn_other.clone(), rank_rec(&fn_other, "frobnicate", &["length-of-thing"], &["string"], "nat", &expr_a)),
+            (fn_affine.clone(), rank_rec(&fn_affine, "thing_length", &["length-of-thing"], &["string"], "nat", &expr_b)),
+        ].into();
+        let link: std::collections::HashMap<String, J> = [
+            (expr_a, body.clone()), (fn_other.clone(), body.clone()),
+            (expr_b, body.clone()), (fn_affine.clone(), body),
+        ].into();
+
+        let run = orchestrate_verified_with_maps(
+            link, records, "length-of-thing", vec![json!({ "kind": "string", "value": "hey" })],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+            "z3", None, &[], None, false, None,
+        ).unwrap();
+
+        assert!(run.confirmed);
+        let target = run.steps.iter().find(|s| s.label == "propose").unwrap().message.pointer("/body/target").unwrap();
+        assert_eq!(target.as_str().unwrap(), fn_affine, "name-hint affinity with the intent breaks the tie");
+    }
+
+    #[test]
+    fn goal_score_reads_tag_specificity_and_name_affinity() {
+        let records = std::collections::HashMap::new();
+        let specific = json!({ "name_hints": ["fetch_pages"], "intent_tags": ["query", "query/pages", "query/pages/all"] });
+        let plain = json!({ "name_hints": ["unrelated"], "intent_tags": ["query"] });
+        let s = goal_score(&specific, None, "query", None, &[], &records);
+        let p = goal_score(&plain, None, "query", None, &[], &records);
+        assert_eq!(s.tags, 2, "two tags extend `query/`");
+        assert_eq!(p.tags, 0);
+        assert_eq!(goal_score(&specific, None, "fetch-pages", None, &[], &records).name, 2,
+            "intent tokens match both name_hint tokens");
+        assert!(s.key() > p.key());
     }
 
     #[test]
@@ -844,7 +1145,7 @@ mod tests {
         let pol = policy(&[&did("lonely-root")]);
         let run = orchestrate_verified(
             &examples(), "arithmetic", vec![json!({ "kind": "nat", "value": 21 })],
-            &orch, &resp, "z3", Some(&pol), &[], None, false,
+            &orch, &resp, "z3", Some(&pol), &[], None, false, None,
         ).unwrap();
 
         assert_eq!(run.trusted, Some(false));

@@ -132,14 +132,40 @@ to use is the consumer's trust decision, not the order they came back in.) It th
 function's own
 declared property over the unbounded domain (don't trust the record's claim — re-prove it with the SMT
 + induction + lemma-discovery engine), then **apply** it and **re-verify** the result by re-running
-(principle 3). The transcript gains `trust` and `prove` steps between `ack` and `propose`.
+(principle 3). The transcript gains `trust`, `rank`, and `prove` steps between `ack` and `propose`.
 The candidates are an **ordered list, not a single pick**: the argument-signature filter is coarse (two
 functions over the same argument types are indistinguishable to it), so a wrong first fit is expected —
 when a candidate fails the certify gate or the responder answers a signed `reject` (e.g. "effect not
-granted"), the run **advances to the next candidate** (trust order under a policy, discovery order
-without one) rather than ending; every reject stays in the transcript, and only the last candidate's
-failure ends the run. Which of several *semantically different* same-signature functions the caller
-meant remains the caller's problem — say it with a sharper intent tag. Worked: with
+granted"), the run **advances to the next candidate** rather than ending; every reject stays in the
+transcript, and only the last candidate's failure ends the run.
+
+Which of several *semantically different* same-signature functions the caller meant is answered by
+**goal-aware ranking**: the surviving candidates are ordered by fit against the caller's *goal*, not
+just their argument fit, with the trust order (or, without a policy, the discovery order) as the
+tie-break — trust decides *whether* a candidate may be used, the goal decides *which to try first*.
+The signals, strongest first, all deterministic and local:
+
+- **Expected result (`--expect <value>`)** — the caller states the result value it wants. Its coarse
+  sort extends the signature filter to the RESULT position (a `(string, string) -> bool` predicate is
+  no candidate when a `Maybe string` is expected — the argument-only filter cannot see that), and each
+  candidate whose body this node can **statically verify pure and terminating** is then **dry-run on
+  the actual arguments**: an exact match ranks first, a mismatch or error last. The dry-run only
+  executes what static effect inference + the termination checker clear — running arbitrary discovered
+  code before certification would be an effect/divergence hole, so an unverifiable (e.g. effectful)
+  body simply isn't run and keeps its neutral rank (the same verify-before-run discipline as
+  everywhere else; effectful candidates are split by the declared-metadata signals below and, failing
+  that, by the reject-and-retry loop).
+- **Intent-tag specificity** — tags that *extend* the queried intent (`query/pages` when `query` was
+  asked) mark a more specific fit; the exact queried tag is shared by every candidate and carries no
+  signal.
+- **Name-hint affinity** — token overlap between the queried intent and the record's `name_hints`.
+
+The per-candidate scores land in the transcript's `rank` step — the ordering is auditable, not
+oracular. Honest scope: ranking chooses what to *try first*; correctness still comes only from the
+certify gate, the responder's own re-execution, and the final re-verify. Worked: `--intent arithmetic`
+over `[21]` with `--expect 42` dry-runs the three signature-compatible candidates and proposes
+`double` first (`rank: match/mismatch/mismatch`); the same run with `--expect 441` reorders — `square`
+jumps past two lexicographically-earlier candidates and confirms `441` with no wasted reject. Worked: with
 a trusted root vouching for `double`, `--verify --intent arithmetic` over `[21]` discovers `double`,
 confirms it trusted, proves its `doubles` property, applies it, and re-verifies `21 → 42` (CONFIRMED);
 drop the vouching attestation and the same run ABORTS at the trust gate.

@@ -581,6 +581,13 @@ enum Commands {
         /// before applying it, and ABORT if it isn't certified — "assemble only from verified parts".
         #[arg(long)]
         require_certified: bool,
+        /// With `--verify`: the EXPECTED result value (a value-expression JSON file) — goal-aware
+        /// discovery ranking. Candidates whose declared result type cannot produce it are dropped
+        /// (the argument-only filter can't split same-argument fits that return different sorts),
+        /// and statically pure+terminating candidates are dry-run on the arguments: an exact match
+        /// ranks first, a mismatch last. The per-candidate scores land in the `rank` step.
+        #[arg(long, requires = "verify")]
+        expect: Option<PathBuf>,
         /// Grant an effect the responder half of this loop will perform (e.g. `net.read`). Repeatable.
         /// Default NONE (pure-only). The orchestrator's own verify step re-runs under the same grants.
         /// Granting `net.read` means this machine fetches URLs chosen by the discovered function's
@@ -922,7 +929,7 @@ fn main() -> ExitCode {
         Commands::Authorize { policy, capability, grantee, delegations, at } => {
             (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
-        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, grant, secret, oauth } => {
+        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, expect, grant, secret, oauth } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
             match parse_secrets(&secret).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
                 Err(e) => (Err(e), false),
@@ -930,7 +937,7 @@ fn main() -> ExitCode {
                     nl_validator::set_effect_secrets(s);
                     nl_validator::set_effect_oauth(o);
                     if verify {
-                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified), false)
+                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified, expect.as_ref()), false)
                     } else {
                         (cmd_orchestrate(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
                     }
@@ -2044,6 +2051,7 @@ fn cmd_orchestrate_verified(
     attestations: &[PathBuf],
     solver: &str,
     require_certified: bool,
+    expect: Option<&PathBuf>,
 ) -> Result<()> {
     if intents.len() != 1 {
         anyhow::bail!("--verify supports exactly one --intent (got {})", intents.len());
@@ -2053,8 +2061,9 @@ fn cmd_orchestrate_verified(
     let resp = nl_validator::signing_key_from_seed(responder_seed);
     let pol = policy.map(|p| nl_validator::read_json(p).and_then(|j| nl_validator::Policy::from_json(&j))).transpose()?;
     let atts = attestations.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
+    let exp = expect.map(|p| nl_validator::read_json(p)).transpose()?;
     let (link, recs) = commons_view(records, node, intents)?;
-    let run = nl_validator::orchestrate_verified_with_maps(link, recs, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified)?;
+    let run = nl_validator::orchestrate_verified_with_maps(link, recs, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp)?;
 
     for step in &run.steps {
         let m = &step.message;
@@ -2062,6 +2071,11 @@ fn cmd_orchestrate_verified(
             "query" => format!("intent {}", m.pointer("/body/pattern/intent_tags").map(|v| v.to_string()).unwrap_or_default()),
             "ack" => format!("matches {}", m.pointer("/body/result/matches").map(|v| v.to_string()).unwrap_or_default()),
             "trust" => format!("trusted={} — {}", m.get("trusted").map(|v| v.to_string()).unwrap_or_default(), m.get("reason").and_then(|r| r.as_str()).unwrap_or("")),
+            "rank" => format!(
+                "goal-ordered {} candidate(s): {}",
+                m.get("ordered").and_then(|o| o.as_array()).map(|a| a.len()).unwrap_or(0),
+                m.get("scores").map(|v| v.to_string()).unwrap_or_default()
+            ),
             "certify" => format!("certified={} {}", m.get("certified").map(|v| v.to_string()).unwrap_or_default(), m.get("failed").map(|v| v.to_string()).unwrap_or_default()),
             "prove" => format!("property `{}` proved={}", m.get("property").and_then(|p| p.as_str()).unwrap_or(""), m.get("proved").map(|v| v.to_string()).unwrap_or_default()),
             "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
