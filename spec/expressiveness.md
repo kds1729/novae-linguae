@@ -450,6 +450,30 @@ awaiting a workflow (GW13 has since pulled the client-credentials OAuth flow, GW
 headers + in-language redirects, and 2026-07-12 multipart bodies + relative-file `$ref`s; only
 the interactive OAuth flows — and URL/escaping refs — remain refused).
 
+**Goal-aware discovery in production (2026-07-12): the GW16 skip becomes unnecessary.** GW16
+had to *skip discovery* — Arca holds a dozen `(string, string)` fits (status lookups, deleters,
+builders, a predicate, the α-equivalent twins) that no argument-signature filter can split — and
+the candidate-retry mechanism could only make the blind walk survivable, not smart. With
+`--expect` (goal-aware ranking, [agent-loop.md](agent-loop.md)) the same blind command now
+discovers correctly on the first pick, demonstrated against production: the baseline run
+(`orchestrate --node … --intent io/network/http --verify --require-certified --arg <base> --arg
+<body> --grant net.write@127.0.0.1 --secret api_token=…`) ranked **12 signature-compatible
+candidates all neutral** (effectful bodies are never dry-run — verify-before-run — and the broad
+intent gives no tag/name signal), burned two signed `reject`s on `net.read` fits, and reached a
+Location-builder third **by hash order** — right answer, by luck. Adding `--expect
+'Just "/things/th_38f2ad4dabfe"'` (the content-derived id is *computable in advance* — the GW14
+server-assigned-identity design paying off) extended the signature filter to the **result
+position**: 12 candidates → 4 (every int-status and bool fit dropped before any propose — exactly
+the ones that had drawn rejects or would have confidently confirmed a wrong-goal result),
+`createThingLocation` proposed first, **zero retries**, applied live → CONFIRMED, the observed
+assert published (`msg_46dff4e1…` + `trc_696b4bf0…`); a grantless, secretless `verify-claim` by
+address **with the service killed** replays it CONFIRMED. The `rank` step records the whole
+ordering in the transcript, so the first-pick is auditable, not oracular. Two honest notes: the
+survivors include the `Maybe Json` body-projections (a `string` payload *is* a JSON value at the
+coarse-sort level), and among the four the winner is still hash-order — both α-twins are correct
+(equal normal forms), so the tie is harmless here; splitting same-sort effectful survivors would
+need dry-run, which verify-before-run forbids — the designed boundary, not a gap.
+
 **GW16 — description-layer response headers (2026-07-11, same day): the GW7 move applied to
 GW14.** With `http_full` in the language, a header the API description *documents* is
 compilable knowledge: [`nl-ingest-openapi`](../tooling/nl-ingest-openapi/) now reads
