@@ -453,6 +453,32 @@ awaiting a workflow (GW13 has since pulled the client-credentials OAuth flow, GW
 headers + in-language redirects, and 2026-07-12 multipart bodies + relative-file `$ref`s; only
 the interactive OAuth flows — and URL/escaping refs — remain refused).
 
+**Ingestion sweep, first increment (2026-07-12, same day): a real-world API description
+enters the commons.** Every prior description-layer record came from the in-repo reference
+descriptions; the sweep's first real target is the **Frankfurter API** (open-source ECB
+foreign-exchange rates — public, unauthenticated, a genuinely useful primitive for agents).
+Its production OpenAPI 3.1 description compiles **5/5 operations** on first contact — path
+parameters (`/{date}`, `/{start_date}..{end_date}`) included — all five certify, and records
++ bodies + signed certifications are on Arca (`fn_35611a01…` `get_currencies` et al.). Two
+findings worth their ink: (1) **real-world descriptions document schemas, not examples** —
+Frankfurter declares response schemas but no response examples, so the example-conditioned
+depth (GW11 body projections, GW12 live-gated traces) honestly refuses and the compiled
+records are status-projections; schema-derived depth is a named future pull, *not* silently
+faked from a schema the service never promised as a value. (2) **Content-address dedup
+crossed the fake/real boundary**: `get_latest`'s compiled body hashes identically to the
+reference item-store's `getlatest` (`expr_6cf3240c…` — same `GET {base}/latest` status
+projection), so the node already had it — two unrelated descriptions, one artifact. The
+loop closed live against the real API: `orchestrate --node … --intent query/lookup --expect
+200 --grant net.read@api.frankfurter.dev` ranked 7 candidates, applied `get_latest` against
+the live ECB service → CONFIRMED, published the observed assert (`msg_bf0dd092…` +
+`trc_3a861566…`), and a grantless, secretless `verify-claim` replays it — the commons' first
+third-party-checkable claim about a **real production service**. Residuals for the sweep's
+next increments: schema-derived response depth (the examples gap above), the 57 v0.1
+surface-typed stdlib records (uncertifiable as-is; `--v2` re-ingestion needs annotated
+sources — the measured stdlib boundary says the pull is annotated *library* code, not
+CPython), and scale-out to a large description (e.g. GitHub's ~900-operation description —
+mechanical, deferred until a consumer wants it rather than publishing 900 thin records).
+
 **Goal-aware discovery in production (2026-07-12): the GW16 skip becomes unnecessary.** GW16
 had to *skip discovery* — Arca holds a dozen `(string, string)` fits (status lookups, deleters,
 builders, a predicate, the α-equivalent twins) that no argument-signature filter can split — and
