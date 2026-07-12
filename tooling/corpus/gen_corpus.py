@@ -4142,6 +4142,88 @@ def combinatorial_specs(exclude_names=()):
                    [{"args": [v], "result": len(_segs(v, ",", needle))} for v in _S51_IN],
                    terminates="always"))
 
+    # 52. EXTRACT-BETWEEN-DELIMITERS — the round-20 named coverage gap: #51 taught segment
+    # FILTERING, but the extract-BETWEEN composite (split on the opener, tail, null guard,
+    # str_contains-the-closer guard, head (str_split closer …)) existed only as the held-out
+    # curated `link_target` gold — so no training example ever taught it, and every tier's
+    # write attempt hallucinated an API (`parse_link_header`, `>>=`). There is no str_find/
+    # substring builtin: this split/head/tail walk is the ONLY expressible shape. The #42
+    # device: other delimiter pairs bare + transformed heads for the curated `<`/`>` pair keep
+    # every generated gold structurally distinct, so the curated row still leakage-drops.
+    def _between(s, a, b):
+        after = s.split(a)[1:]
+        if not after or b not in after[0]:
+            return None
+        return after[0].split(b)[0]
+
+    def _s52_in(a, b):
+        return [f"pre {a}inner{b} post", f"{a}open only", "no delimiters here",
+                f"{a}one{b}; {a}two{b}", ""]
+
+    def _between_body(a, b, head_expr):
+        # \s -> let after = tail (str_split a s) in case null after of
+        #       true => None; false => case str_contains b (head after) of
+        #                              true => Just(<head_expr>); false => None
+        return lam(["s"], {
+            "kind": "let", "name": "after",
+            "value": bapp("tail", bapp("str_split", str_lit(a), var("s"))),
+            "body": case_bool(
+                bapp("null", var("after")), variant_expr("None"),
+                case_bool(bapp("str_contains", str_lit(b), bapp("head", var("after"))),
+                          variant_expr("Just", head_expr), variant_expr("None")))})
+
+    _extracted = lambda a, b: bapp("head", bapp("str_split", str_lit(b), bapp("head", var("after"))))
+    for a, b, slug in (("[", "]", "bracket"), ("(", ")", "paren"), ("{", "}", "brace")):
+        add(_cspec(f"between_{slug}", f'The text between the first "{a}" and its "{b}", if present.',
+                   f'let after = tail (str_split "{a}" s) in case null after of true => None; '
+                   f'false => case str_contains "{b}" (head after) of '
+                   f'true => Just (head (str_split "{b}" (head after))); false => None',
+                   ["string", "list", "let", "case"], fn([STRING], maybe_t(STRING)),
+                   _between_body(a, b, _extracted(a, b)),
+                   [{"args": [v], "result": (V("Just", _between(v, a, b))
+                                             if _between(v, a, b) is not None else V("None"))}
+                    for v in _s52_in(a, b)],
+                   terminates="always"))
+    # The curated pair `<`/`>` appears only with a TRANSFORMED head (lowercased / measured), so
+    # these train the Link-header delimiters without ever equalling the curated gold body.
+    add(_cspec("between_angle_lower", 'The text between "<" and ">", lowercased, if present.',
+               'let after = tail (str_split "<" s) in case null after of true => None; '
+               'false => case str_contains ">" (head after) of '
+               'true => Just (str_lower (head (str_split ">" (head after)))); false => None',
+               ["string", "list", "let", "case"], fn([STRING], maybe_t(STRING)),
+               _between_body("<", ">", bapp("str_lower", _extracted("<", ">"))),
+               [{"args": [v], "result": (V("Just", _between(v, "<", ">").lower())
+                                         if _between(v, "<", ">") is not None else V("None"))}
+                for v in _s52_in("<", ">") + ["</List?Page=3>; rel=\"next\""]],
+               terminates="always"))
+    add(_cspec("between_angle_len", 'How many characters sit between "<" and ">", if present.',
+               'let after = tail (str_split "<" s) in case null after of true => None; '
+               'false => case str_contains ">" (head after) of '
+               'true => Just (str_length (head (str_split ">" (head after)))); false => None',
+               ["string", "list", "let", "case"], fn([STRING], maybe_t(NAT)),
+               _between_body("<", ">", bapp("str_length", _extracted("<", ">"))),
+               [{"args": [v], "result": (V("Just", len(_between(v, "<", ">")))
+                                         if _between(v, "<", ">") is not None else V("None"))}
+                for v in _s52_in("<", ">")],
+               terminates="always"))
+    # Default-instead-of-Maybe: same walk, empty-string fallback (a string-returning variant).
+    for a, b, slug in (("[", "]", "bracket"), ("<", ">", "angle")):
+        add(_cspec(f"target_or_empty_{slug}",
+                   f'The text between the first "{a}" and its "{b}", or "" when absent.',
+                   f'let after = tail (str_split "{a}" s) in case null after of true => ""; '
+                   f'false => case str_contains "{b}" (head after) of '
+                   f'true => head (str_split "{b}" (head after)); false => ""',
+                   ["string", "list", "let", "case"], fn([STRING], STRING),
+                   lam(["s"], {
+                       "kind": "let", "name": "after",
+                       "value": bapp("tail", bapp("str_split", str_lit(a), var("s"))),
+                       "body": case_bool(
+                           bapp("null", var("after")), str_lit(""),
+                           case_bool(bapp("str_contains", str_lit(b), bapp("head", var("after"))),
+                                     _extracted(a, b), str_lit("")))}),
+                   [{"args": [v], "result": (_between(v, a, b) or "")} for v in _s52_in(a, b)],
+                   terminates="always"))
+
     return out
 
 

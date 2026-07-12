@@ -109,7 +109,7 @@ comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
 parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,180 generated
-function records (3,421 examples total with the curated set)** across forty-eight template families
+function records (3,479 examples total with the curated set)** across fifty-two template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
 teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — #39, **strings as data**
 (`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
@@ -150,7 +150,16 @@ the valid case `Just`-wraps — a shape that had only three curated instances in
 (`safe_div`/`safe_mod`/`first`), the single-example under-teaching the loop keeps hitting; #48
 mass-produces it (one- and two-argument checked ops over guard-comparison/constant/operation
 sets, plus the `Just`-on-valid mirror), structurally distinct golds so the curated ones
-leakage-drop, every one through the same validate →
+leakage-drop — and #49, **encoded-URL shapes** (the GW10 `url_encode` pull's day-one mass) — and
+#50, **response-header shapes** (GW14: `.headers`-then-`map_get` chains, `Maybe`-cased defaults,
+presence predicates, status-guarded `Location` lookups, base-joins) — and #51, **segment-filter
+shapes** (GW15: split on a separator, filter with an inline `str_contains` lambda, null-guarded
+head/count) — and #52, **extract-between-delimiters** (the round-20 named coverage gap: the
+split-on-opener / `tail` / null-guard / `str_contains`-closer / `head (str_split closer …)`
+composite existed only as the held-out curated `link_target` gold, so every tier hallucinated an
+API for `write/link_target`; #52 teaches it over bracket/paren/brace pairs bare, the curated
+`<`/`>` pair only with transformed heads (`str_lower`/`str_length`) and an empty-string-default
+string variant, so the curated gold keeps leakage-dropping), every one through the same validate →
 typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,

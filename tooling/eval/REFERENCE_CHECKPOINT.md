@@ -200,6 +200,16 @@ made on **shared tasks**, never raw totals:
 > 95.9% → **the 14B best-total/read tier re-pins to c21-s1**. Recurring watch: `write/reverse`
 > lost at 7B both seeds again (the c13 #44 sweep does not hold across corpora — churn, not
 > regression). Adapters+evals in `/var/tmp/claude/round20/` (names `c21-*`).
+>
+> **The named coverage gap is closed in-corpus (2026-07-12): combinatorial family #52
+> (extract-between-delimiters)** emits the split-on-opener / `tail` / null-guard /
+> `str_contains`-closer / `head (str_split closer …)` composite — bracket/paren/brace pairs bare,
+> the curated `<`/`>` pair only with transformed heads so `link_target`'s gold keeps
+> leakage-dropping (22 training pairs carry the shape; before, zero). corpus22 = **3,225 specs, 0
+> drops** (sha256 `de605b8eb32b3e5f…`), oracle 410/410 unchanged (no curated/eval change),
+> ftdata22 staged at `/var/tmp/claude/ftdata22` (6,364 pairs, train 6,046/valid 318, guard
+> excluded 466). **Retrain deliberately not run** (pod = user decision) — the next round measures
+> whether #52 flips `write/link_target` the way #42 flipped `take_rec`/`drop_rec`.
 
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
