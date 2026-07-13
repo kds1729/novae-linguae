@@ -359,6 +359,7 @@
       "oneOf": [
         { "$ref": "#/$defs/pe_var" },
         { "$ref": "#/$defs/pe_lit" },
+        { "$ref": "#/$defs/pe_lit_blob" },
         { "$ref": "#/$defs/pe_app" },
         { "$ref": "#/$defs/pe_forall" },
         { "$ref": "#/$defs/pe_exists" }
@@ -380,6 +381,16 @@
       "properties": {
         "kind": { "const": "lit" },
         "value": {}
+      }
+    },
+    "pe_lit_blob": {
+      "type": "object",
+      "required": ["kind", "sha256", "bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "lit_blob" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "bytes": { "type": "integer", "minimum": 1 }
       }
     },
     "pe_app": {

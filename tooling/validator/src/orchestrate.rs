@@ -118,9 +118,15 @@ pub fn orchestrate_with_maps(
             steps.push(Step { label: format!("{pfx}trace"), message: trace });
         }
 
-        // Verify this stage's claim, and thread its result into the next stage.
+        // Verify this stage's claim, and thread its result into the next stage. A result the claim
+        // carries BY ADDRESS (`lit_blob`) is drained as the actual value the responder just
+        // computed — the claim pins it by sha256, the pipeline threads the value itself.
         confirmed = confirmed && verify_claim(&assert, link.clone()).unwrap_or(false);
-        match assert.pointer("/body/claim/expr/args/1/value").cloned() {
+        match assert
+            .pointer("/body/claim/expr/args/1/value")
+            .cloned()
+            .or_else(crate::respond::take_result_value)
+        {
             Some(result) => stage_args = vec![result],
             None => confirmed = false,
         }

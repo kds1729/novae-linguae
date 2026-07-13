@@ -352,6 +352,14 @@ the goal over a commons containing a prior `double_then_add` composite (whose bo
   `--publish` ships to the node before the assert) — an `observed` claim whose trace nobody can
   fetch is unverifiable, and `verify-claim` says so by name. An unresolvable target or
   args that don't decode remain an honest error, never a silent empty assert.
+  **A result too large to inline rides in the claim BY ADDRESS.** Above 64 KiB of canonical
+  value-expression bytes the `eq`'s right-hand side becomes a `lit_blob` — the sha256 + byte count
+  of the result's JCS-canonical bytes (predicate-expression.schema.json) — so an assert about a
+  multi-MB observed document stays publishable through a node's record-size cap. Unlike a record's
+  `examples[].result_blob`, NOTHING ships out-of-band: `verify-claim` decides
+  `eq(<computation>, lit_blob)` by recomputing the computation (replaying the trace when the claim
+  is `observed`) and comparing the sha256 of its canonical bytes to the claimed address — the hash
+  pins the claim, and re-execution reconstructs the value itself for any consumer who wants it.
 - **`predicate` claims.** The responder emits — and `verify-claim` re-runs — a `predicate` claim. The
   `satisfies` / `verified` claim kinds are descriptive and not re-run here.
 - **Example-exact, not proven.** A CONFIRMED verdict means the claim's equation evaluated true on the

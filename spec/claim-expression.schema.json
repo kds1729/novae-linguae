@@ -43,7 +43,7 @@
           "description": "Content-address of the recorded effect trace (trace.schema.json) this claim is conditioned on. The trace is a hashless self-addressing artifact; a verifier fetches it by this address, hash-verifies it, and replays the claim's computation with every effect served from the record — the trace must be consumed exactly."
         }
       },
-      "description": "An effectful computation's result claim, conditioned on its recorded observations: 'expr holds, given that the world responded as trace records.' Emitted by the responder whenever a fulfilment performed effects (an effectful equation is not stably re-runnable — spec/agent-loop.md §Scope). Replay-CONFIRMED means deterministic consequence of the trace, NOT that the world was as recorded — trusting the observations is a trust-model judgment about the signer."
+      "description": "An effectful computation's result claim, conditioned on its recorded observations: 'expr holds, given that the world responded as trace records.' Emitted by the responder whenever a fulfilment performed effects (an effectful equation is not stably re-runnable — spec/agent-loop.md §Scope). Replay-CONFIRMED means deterministic consequence of the trace, NOT that the world was as recorded — trusting the observations is a trust-model judgment about the signer. A result too large to inline rides in `expr` BY ADDRESS (`lit_blob`, predicate-expression.schema.json): the claim pins the value by the sha256 of its canonical value-expression bytes, and a verifier decides `eq(<computation>, lit_blob)` by recomputing the computation and comparing hashes — no blob travels with the message, and replay reconstructs the value for any consumer who wants it."
     },
     "satisfies": {
       "type": "object",

@@ -9,6 +9,7 @@
       "oneOf": [
         { "$ref": "#/$defs/var" },
         { "$ref": "#/$defs/lit" },
+        { "$ref": "#/$defs/lit_blob" },
         { "$ref": "#/$defs/app" },
         { "$ref": "#/$defs/forall" },
         { "$ref": "#/$defs/exists" }
@@ -42,6 +43,17 @@
         }
       },
       "description": "A literal value. The value sub-language (spec/value-expression.schema.json) is the structured alternative when the literal needs to be a compound value."
+    },
+    "lit_blob": {
+      "type": "object",
+      "required": ["kind", "sha256", "bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "lit_blob" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "bytes": { "type": "integer", "minimum": 1 }
+      },
+      "description": "A literal value BY ADDRESS: the sha256 (+ byte count) of the value's JCS-canonical value-expression bytes, for values too large to inline — the predicate-layer twin of a function record's `examples[].result_blob`. Primary use: an assert claim `eq(target(args…), lit_blob)` whose observed result is a multi-MB document. Verification needs NO blob: the verifier recomputes the computation side and compares the sha256 of its canonical bytes to this address, and replay reconstructs the value itself for any consumer who wants it (respond.rs verify_claim in the reference validator). When the bytes ARE available (e.g. the same value is hosted in a node's gate-free /v0/blobs store), an evaluator MAY resolve this node to its value directly. In refinement/property position the static verifiers treat it as opaque (UNVERIFIABLE) — it is a claim-layer form."
     },
     "app": {
       "type": "object",

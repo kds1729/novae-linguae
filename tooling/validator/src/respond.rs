@@ -46,6 +46,30 @@ pub fn take_trace_artifact() -> Option<J> {
     PENDING_TRACE.with(|t| t.borrow_mut().take())
 }
 
+/// Above this many JCS-canonical bytes an assert's result rides in the claim BY ADDRESS: the
+/// `eq(target(args…), <result>)` right-hand side becomes a `lit_blob` (predicate-expression
+/// schema) — the sha256 + byte count of the result's canonical value-expression bytes — instead
+/// of an inline `lit`. A multi-MB observed document must not blow a node's record-store cap when
+/// the assert publishes (the message-layer twin of `examples[].result_blob`; same 64 KiB default
+/// as the adapter's example threshold). Unlike example blobs, NOTHING ships out-of-band: a
+/// verifier recomputes the application and compares hashes, and replay reconstructs the value
+/// itself for anyone who wants it — the pointer alone carries the claim.
+const CLAIM_BLOB_THRESHOLD: usize = 65536;
+
+thread_local! {
+    /// The full result value behind the most recent assert whose claim carried its result by
+    /// address (`lit_blob`). The claim pins the value by sha256; the caller that just computed it
+    /// (the orchestrator threading a pipeline stage, or a CLI printing the answer) drains the
+    /// value itself here. Verifiers never need this — they recompute and hash-compare.
+    static PENDING_RESULT: RefCell<Option<J>> = const { RefCell::new(None) };
+}
+
+/// Drain the full result value behind the most recent assert, if that assert's claim carried it
+/// by address (`lit_blob`). `None` = the last assert inlined its result.
+pub fn take_result_value() -> Option<J> {
+    PENDING_RESULT.with(|r| r.borrow_mut().take())
+}
+
 /// A responder's **local trust policy** for verifying presented capabilities (spec/trust-model.md).
 /// When `roots` is non-empty the capability gate switches from possession-only ("did the request list
 /// the string?") to chain-verified ("can the sender exhibit a signed `delegate` chain back to a root I
@@ -126,12 +150,23 @@ fn assert_application(
     let ops = crate::take_effect_trace();
 
     // The predicate claim: eq( target(arg0, …), result ). Each arg is a value-expression `lit`; the
-    // target is an `app` op by content-address.
+    // target is an `app` op by content-address. A result too large to inline rides BY ADDRESS
+    // (`lit_blob`, see CLAIM_BLOB_THRESHOLD): the claim then states the sha256 of the result's
+    // canonical bytes, which a verifier checks by recomputing — no blob travels anywhere.
     let app_args: Vec<J> = args.iter().map(|a| json!({ "kind": "lit", "value": a })).collect();
+    let canonical = crate::canonicalize(&result).context("canonicalizing the result value")?;
+    let rhs = if canonical.len() > CLAIM_BLOB_THRESHOLD {
+        let sha = crate::sha256_hex(&canonical);
+        PENDING_RESULT.with(|r| *r.borrow_mut() = Some(result.clone()));
+        json!({ "kind": "lit_blob", "sha256": sha, "bytes": canonical.len() })
+    } else {
+        PENDING_RESULT.with(|r| *r.borrow_mut() = None);
+        json!({ "kind": "lit", "value": result })
+    };
     let claim_expr = json!({
         "kind": "app", "op": "eq", "args": [
             { "kind": "app", "op": target, "args": app_args },
-            { "kind": "lit", "value": result }
+            rhs
         ]
     });
     // A run that performed effects is an OBSERVATION, not a stably re-runnable equation. The claim
@@ -169,6 +204,11 @@ fn assert_application(
 /// or mismatched entry means the trace does not correspond to this computation). `Ok(true)` here
 /// means the result follows deterministically from the recorded observations; whether the world
 /// really said that is the signer's testimony, priced by the trust model.
+///
+/// A claim whose result rides **by address** — `eq(<computation>, lit_blob{sha256})` — is decided
+/// by recomputing the computation side and comparing the sha256 of its canonical value-expression
+/// bytes to the claimed address. The blob itself is never fetched and need not exist anywhere:
+/// re-execution reconstructs the value, the hash pins the claim.
 pub fn verify_claim(assert: &J, link_map: HashMap<String, J>) -> Result<bool> {
     let expr = assert
         .pointer("/body/claim/expr")
@@ -192,7 +232,16 @@ pub fn verify_claim(assert: &J, link_map: HashMap<String, J>) -> Result<bool> {
         crate::interp::set_effect_replay(ops);
     }
     set_resolver(link_map.clone());
-    let verdict = crate::interp::eval_claim(&expr);
+    let verdict = if let Some((computation, sha)) = blob_eq_parts(&expr) {
+        // By-address result: evaluate the computation side (under replay, when observed) and
+        // hash-compare its canonical bytes to the claimed address.
+        crate::interp::eval_claim(&computation).and_then(|v| {
+            let bytes = crate::canonicalize(&crate::interp::encode_value(&v)).ok()?;
+            Some(crate::interp::Val::Bool(crate::sha256_hex(&bytes) == sha))
+        })
+    } else {
+        crate::interp::eval_claim(&expr)
+    };
     let leftover = crate::interp::effect_replay_remaining().unwrap_or(0);
     crate::interp::clear_effect_replay();
     clear_resolver();
@@ -211,6 +260,26 @@ pub fn verify_claim(assert: &J, link_map: HashMap<String, J>) -> Result<bool> {
         ),
         None => bail!("claim predicate is undecidable (unresolved function, malformed, or effectful)"),
     }
+}
+
+/// The `eq(<computation>, lit_blob)` decomposition of a by-address result claim, either side.
+/// Returns the computation sub-expression and the claimed sha256, or `None` when the claim is an
+/// ordinary inline predicate.
+fn blob_eq_parts(expr: &J) -> Option<(J, String)> {
+    if expr.get("kind")?.as_str()? != "app" || expr.get("op")?.as_str()? != "eq" {
+        return None;
+    }
+    let args = expr.get("args")?.as_array()?;
+    if args.len() != 2 {
+        return None;
+    }
+    for (blob_side, comp_side) in [(0usize, 1usize), (1, 0)] {
+        if args[blob_side].get("kind").and_then(|k| k.as_str()) == Some("lit_blob") {
+            let sha = args[blob_side].get("sha256")?.as_str()?.to_string();
+            return Some((args[comp_side].clone(), sha));
+        }
+    }
+    None
 }
 
 /// The common reply envelope; `sign_message` fills `from`/`hash`/`signature`.
@@ -773,6 +842,74 @@ mod tests {
             &json!({ "kind": "list", "elems": [
                 { "kind": "int", "value": 2 }, { "kind": "int", "value": 4 }, { "kind": "int", "value": 6 }] })
         );
+    }
+
+    #[test]
+    fn oversized_result_claim_rides_by_address_and_verifies_blob_free() {
+        // A result past CLAIM_BLOB_THRESHOLD leaves the claim: the eq's right-hand side becomes a
+        // `lit_blob` (sha256 + bytes of the canonical value-expression), the assert stays small,
+        // and verify_claim decides it by recomputing the application and hash-comparing — the blob
+        // never exists anywhere. The caller drains the actual value via take_result_value().
+        let big = json!({ "kind": "list", "elems":
+            (0..4000).map(|i| json!({ "kind": "int", "value": i })).collect::<Vec<_>>() });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "x" }],
+                           "body": { "kind": "lit", "value": big } });
+        let target = format!("fn_{}", "ab".repeat(32));
+        let mut link: HashMap<String, J> = HashMap::new();
+        link.insert(target.clone(), body);
+        let req = apply_request(
+            "did:nova:11112222333344445555666677778888999900001111222233334444555566aa",
+            "msg_2222222222222222222222222222222222222222222222222222222222222222",
+            &target,
+            json!([{ "kind": "unit" }]),
+        );
+        let key = signing_key_from_seed("test-responder");
+        let assert = respond_to_request(&req, link.clone(), &key, None).unwrap();
+
+        let rhs = &assert["body"]["claim"]["expr"]["args"][1];
+        assert_eq!(rhs["kind"], "lit_blob", "oversized result must ride by address");
+        assert!(rhs["bytes"].as_u64().unwrap() > 65536);
+        let sha = rhs["sha256"].as_str().unwrap().to_string();
+        // The pointer is the sha256 of the result's canonical bytes, and the value itself is
+        // drained by the caller that just computed it.
+        let value = take_result_value().expect("by-address assert leaves the value pending");
+        assert_eq!(sha, crate::sha256_hex(&crate::canonicalize(&value).unwrap()));
+        assert!(take_result_value().is_none(), "drained exactly once");
+        // The assert is small enough to publish through a 1 MiB record gate.
+        assert!(assert.to_string().len() < 65536, "the assert itself must stay small");
+
+        // Blob-free verification: recompute + hash-compare.
+        assert!(verify_claim(&assert, link.clone()).unwrap());
+
+        // Hash-is-the-truth: a claim naming a different address is refuted, not undecidable.
+        let mut tampered = assert.clone();
+        tampered["body"]["claim"]["expr"]["args"][1]["sha256"] = json!("00".repeat(32));
+        assert!(!verify_claim(&tampered, link).unwrap());
+    }
+
+    #[test]
+    fn resolvable_lit_blob_evaluates_to_its_value() {
+        // The generic evaluator arm: when the blob IS available through the installed resolver
+        // (e.g. hosted in a node's blob store), `lit_blob` evaluates to its value directly, so it
+        // composes in any predicate position — not just the eq-with-computation shape.
+        let value = json!({ "kind": "int", "value": 5 });
+        let sha = crate::sha256_hex(&crate::canonicalize(&value).unwrap());
+        let expr = json!({ "kind": "app", "op": "eq", "args": [
+            { "kind": "lit", "value": { "kind": "int", "value": 5 } },
+            { "kind": "app", "op": "add", "args": [
+                { "kind": "lit_blob", "sha256": sha, "bytes": 23 },
+                { "kind": "lit", "value": { "kind": "int", "value": 0 } } ] }
+        ] });
+        // Unresolvable: undecidable (the nested position is not the top-level eq shape).
+        crate::interp::clear_resolver();
+        assert!(crate::interp::eval_claim(&expr).is_none());
+        // Resolvable: the blob decodes and the predicate runs.
+        let mut map = HashMap::new();
+        map.insert(format!("blob_{sha}"), value);
+        set_resolver(map);
+        let verdict = crate::interp::eval_claim(&expr);
+        clear_resolver();
+        assert!(matches!(verdict, Some(crate::interp::Val::Bool(true))), "got {verdict:?}");
     }
 
     #[test]

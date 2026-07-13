@@ -1705,6 +1705,15 @@ fn eval_predicate(node: &J, env: &Env, self_fn: &Option<Val>) -> Option<Val> {
             let v = node.get("value")?;
             decode_pred_lit(v).or_else(|| decode_value(v).ok())
         }
+        "lit_blob" => {
+            // A value literal BY ADDRESS (sha256 of its canonical value-expression bytes,
+            // predicate-expression schema). Decodable only when the blob is available through the
+            // installed resolver; otherwise undecidable HERE — the claim verifier decides the
+            // `eq(<computation>, lit_blob)` shape by hash comparison without the blob
+            // (respond.rs verify_claim), so an unresolvable blob never blocks verification.
+            let sha = node.get("sha256")?.as_str()?;
+            decode_value(&resolver_lookup(&format!("blob_{sha}"))?).ok()
+        }
         "forall" | "exists" => {
             // Range the quantifier over THIS example: bind the bound vars positionally to arg0..argN.
             let mut env2 = env.clone();
