@@ -523,6 +523,34 @@ goal-aware section below records. No corpus change (the GW7 rationale: the narro
 are family #40's `case parse_json → JObj → map_get →` variant-case, the status-guarded call
 family #47/#50's).
 
+**Ingestion sweep, third increment (2026-07-12, same session): the v0.1 tier measured — types
+from stubs, examples by execution.** The 57 v0.1 surface-typed stdlib records (the commons'
+oldest holdings, 0% certifiable) named `--v2` re-ingestion as their fix, and the measured
+boundary said the pull needed *annotated sources*. The closure applies the second increment's
+license/observe split to **source code**, with a third source completing the assembly:
+**the type comes from the ecosystem's description layer** (`--stubs` — typeshed's `.pyi` grafts
+parameter/return annotations onto unannotated source defs, positionally; source annotations
+win, `@overload` sets are dropped rather than picked from), **the body comes from the source**
+(the existing statement-subset lifting), and **the example comes from a sanctioned execution**
+(`--exec-examples` — a fully-annotated, effect-free, lifted, doctest-less function runs once
+per type-synthesized argument set, two fixed deterministic palettes, and the real function's
+answers become the worked examples; a documented doctest always wins, a hang refuses under a
+2s alarm, and `panic` is tolerated only where the body raise-totalized — a raising run IS the
+`None`-case example). The faithfulness gate is the point: `run`/`certify` hold the **lifted
+body** to the **observed** answers, so a lifting that disagrees with CPython's real semantics
+fails rather than publishes — and the published example values are the source's true IEEE
+arithmetic (`rgb_to_yiq(0.5, 0.5, 0.5)` = `(0.49999999999999994, 2.6090241078691177e-17, …)`,
+which the lifted body reproduces bit-for-bit, 2/2). Production: **`colorsys.rgb_to_yiq` is the
+tier's certifiable slice** — stub-typed, source-bodied, execution-observed, certified, and on
+Arca (`fn_30fb6b15…`) **superseding its v0.1 twin** (`fn_59b0d6da…`). The rest of the tier is
+now *boundary, not backlog*, measured per-function: 10 **body-no-type** (base64's nine lift
+but typeshed honestly types them `ReadableBuffer` — a buffer-protocol alias the language does
+not carry — and `string.capwords`' stub is genuinely polymorphic, a TypeVar that determines no
+value), 10 **doctest-no-body** (statistics — real documented examples over bodies the subset
+cannot lift: generators, raising validation), 36 **no-body** (classes, IO, comprehension and
+multi-assignment shapes). Adapter tests 35 → 44. The sweep's remaining residual is
+large-description scale-out alone (deferred until a consumer wants it).
+
 **Goal-aware discovery in production (2026-07-12): the GW16 skip becomes unnecessary.** GW16
 had to *skip discovery* — Arca holds a dozen `(string, string)` fits (status lookups, deleters,
 builders, a predicate, the α-equivalent twins) that no argument-signature filter can split — and

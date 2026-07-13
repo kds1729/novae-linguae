@@ -52,7 +52,8 @@ With `--v2`, a function that has **usable doctests** is emitted as a **v0.2** re
   `forall`-bound type variables (no `unknown` builtin exists).
 - `examples` are **real** input/output pairs extracted from the function's Python **doctests** (via
   [`ingest-common/nl_examples.py`](../ingest-common/nl_examples.py)), encoded as value ASTs — never
-  fabricated or executed.
+  fabricated, and never executed unless the operator explicitly sanctions an observation run with
+  `--exec-examples` (below).
 - `signature.refinements` gains a **precondition** (`{kind: "pre", expr}`) for each leading `assert`
   statement whose condition is an expressible predicate (via
   [`ingest-common/nl_predicates.py`](../ingest-common/nl_predicates.py)); e.g. `assert b != 0` →
@@ -60,9 +61,42 @@ With `--v2`, a function that has **usable doctests** is emitted as a **v0.2** re
 
 Functions without usable doctests fall back to a **v0.1** record (so none are dropped); a single run
 can emit a mix. Float example values are canonicalized per JCS / ECMAScript Number-to-String (matching
-the Rust validator, pinned by `spec/conformance/` canonicalization vectors). Current limit: `body_hash`
-is still the normalised-source hash, not a body AST. Every `--v2` record passes `nl-validator validate`
+the Rust validator, pinned by `spec/conformance/` canonicalization vectors). A function whose body is
+inside the statement subset gets a real body-expression AST as its `body_hash` (written by
+`--emit-dir` so `nl-validator run` can execute it); outside the subset the normalised-source hash
+stands. Every `--v2` record passes `nl-validator validate`
 against `function-record.v0.2.schema.json` and `nl-validator verify`.
+
+### `--exec-examples` — observed examples for the doctest-less (the license/observe split)
+
+Real-world code rarely carries doctests, so the honest v0.2 path above starves on exactly the
+sources that matter. `--exec-examples` (implies `--v2`) closes that the way the OpenAPI adapter's
+schema-derived projections do (`spec/expressiveness.md`): **the annotation licenses the record —
+it promises a shape, not a value — and a sanctioned execution observes the value.** A function
+that is fully annotated (a concrete type: no `forall`, no type variables), **effect-free**, lifted
+(its body is in the statement subset), and doctest-less runs once per type-synthesized argument
+set ([`ingest-common/nl_synth.py`](../ingest-common/nl_synth.py) — two fixed, deterministic value
+palettes; records stay byte-reproducible), and the real function's answers become the record's
+worked examples. The lifted body is then **held to the observation** by `nl-validator run` /
+`certify`: a lifting that disagrees with the source's real semantics fails rather than publishes —
+the faithfulness gate, per record. Honest bounds: a documented doctest always wins (spec-time
+knowledge needs no execution); only pure functions run (`panic` is tolerated only on a
+raise-totalized body, where a raising run IS the `None`-case example); every call runs under a 2s
+alarm (a hang is a refusal, not a wait); a type that does not determine an inhabitant — a type
+variable, an unresolvable alias, a `Set`, a function — refuses synthesis. Opt-in because it
+executes the code being ingested — the source-code counterpart of `--verify-against`.
+
+### `--stubs` — types from the ecosystem's description layer
+
+Most Python source is unannotated, but its types are often described *elsewhere* — typeshed being
+the canonical case for the stdlib. `--stubs <file.pyi | dir>` (a directory resolves
+`<module>.pyi` via `--module`) grafts a stub's parameter/return annotations onto **unannotated**
+source defs, positionally: the stub supplies the type, the source supplies the body, and (under
+`--exec-examples`) an execution supplies the example — three sources, one record, every claim
+gated. Source annotations always win (the stub is secondary description); an `@overload` set or
+duplicate stub name is dropped rather than picked from; a positional-arity mismatch refuses the
+graft. A genuinely polymorphic stub (e.g. `string.capwords`' `StrOrLiteralStr` TypeVar) refuses
+example synthesis honestly — a type variable determines no value.
 
 ### What counts as "public"
 

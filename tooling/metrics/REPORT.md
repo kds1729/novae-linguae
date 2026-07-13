@@ -75,7 +75,11 @@ certified **189 records from the node's own hosted bodies** (fetch closure → h
 residuals: 3 v0.2 records whose bodies were never hosted (early samples — `clamp`,
 `sign`, `abs_diff`), and the 57 v0.1 surface-typed bulk-ingested records, which are not
 certifiable as-is — they need `--v2` re-ingestion (structured types + executable bodies),
-which is exactly the planned ingestion-sweep work.
+which is exactly the planned ingestion-sweep work. *(Since measured and dispatched — the
+sweep's third increment, 2026-07-12: types-from-stubs + examples-by-execution upgraded the
+tier's one certifiable function (`colorsys.rgb_to_yiq`, certified, superseding its v0.1
+twin on the node) and itemized the remaining 56 as boundary, not backlog: 10 body-no-type,
+10 doctest-no-body, 36 no-body — see `spec/expressiveness.md`.)*
 
 ## Verdict
 
@@ -86,4 +90,5 @@ current scale — first-contact assembly costs ~1.3× a perfect author's context
 chain — with the honest qualifiers that reuse inverts it (3.4×) and perfect authorship is
 a floor no measured model achieves. The two named gaps: `cost` metadata absent from
 production records (precise composition unrealized), and the v0.1 tier awaiting `--v2`
-re-ingestion.
+re-ingestion (since dispatched — see the coverage section's addendum: 1 upgraded, 56
+measured as boundary).
