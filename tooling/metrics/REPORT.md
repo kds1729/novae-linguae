@@ -73,7 +73,11 @@ alongside specific workflows, never swept across the node's full holdings. The s
 certified **189 records from the node's own hosted bodies** (fetch closure → hash-verify →
 `certify --sign` → publish through the verify-then-store gate) in one run. The named
 residuals: 3 v0.2 records whose bodies were never hosted (early samples — `clamp`,
-`sign`, `abs_diff`), and the 57 v0.1 surface-typed bulk-ingested records, which are not
+`sign`, `abs_diff`; since investigated, 2026-07-12: the bodies predate the
+host-the-body-with-the-record invariant and are unrecoverable — absent from every local
+corpus vintage and from all 54 historical `corpus.jsonl` git blobs — so these three stay
+permanently uncertifiable in the append-only store; newer certified twins of all three
+names are hosted, so no capability is lost), and the 57 v0.1 surface-typed bulk-ingested records, which are not
 certifiable as-is — they need `--v2` re-ingestion (structured types + executable bodies),
 which is exactly the planned ingestion-sweep work. *(Since measured and dispatched — the
 sweep's third increment, 2026-07-12: types-from-stubs + examples-by-execution upgraded the
