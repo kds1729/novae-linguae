@@ -363,6 +363,13 @@ node decides a record is unwelcome on grounds other than "it does not verify."
 - A node replicates from a peer by polling `GET /v0/sync` and resolving unknown hashes, verifying
   each. Because records are self-verifying, **you can replicate from anyone** — a malicious peer can
   withhold records but cannot inject false ones.
+- **Blobs replicate alongside records.** A mirrored record whose content lives partly in the blob
+  store — a by-address example value (`examples[].result_blob`), a weights manifest (`files[]`) —
+  is only *checkable* if the replica also holds those bytes, so a replicating node SHOULD pull the
+  blobs its mirrored records reference from the peer's `/v0/blobs` store, verifying each download
+  against the sha256 it was requested by (same untrusted-peer boundary: lying bytes are discarded,
+  never stored under the address). The reference node does this self-healingly — no cursor;
+  anything still missing is re-counted next run.
 - There is no canonical node. A bootstrap peer list (in `/v0/info` or out-of-band) seeds discovery;
   it is convenience, not authority. The commons is the *union* of what nodes hold.
 - **Absence is not non-existence.** A `404` means "not here"; the record may live on another node.

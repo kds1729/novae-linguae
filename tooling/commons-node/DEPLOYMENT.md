@@ -79,6 +79,15 @@ only thing that can run away. The content-addressed design makes egress unusuall
   which silently missed 12 records): an *unverifiable* record is a permanent skip (a bad peer can't
   wedge the cursor), but a *transient fetch failure* stops the run without committing the durable
   cursor past its page — the next interval retries, so the mirror converges to complete.
+  `replicate_all` also runs **blob replication** (`replicate_blobs`): the blobs mirrored records
+  reference — by-address example values (`examples[].result_blob`), weights manifests (`files[]`)
+  — are pulled from the peer's `/v0/blobs`, each download sha256-verified against the address it
+  was requested by (lying bytes discarded, never stored). Self-healing by design: no cursor —
+  each run rescans for referenced-but-missing blobs and fetches up to `COMMONS_REPLICATE_BLOB_BATCH`
+  (default 16; blobs can be hundreds of MB, so runs are small and convergence is gradual), and a
+  blob write is temp-file + rename so a crashed download never serves a half blob. This is what
+  keeps a mirrored record *checkable* — `run`'s example replay, weights fetch — and not merely
+  resolvable, when the origin node is gone.
 - CDN for `resolve`: `resolve` already emits `Cache-Control: public, max-age=…, immutable`; front it with
   any CDN at ~100% hit rate (off-box, so it also absorbs metered egress). No code change.
 

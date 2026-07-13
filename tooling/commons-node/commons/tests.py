@@ -175,6 +175,67 @@ class CommonsProtocolTests(TestCase):
         self.assertTrue(Record.objects.filter(hash=trace_addr).exists())
         cache.delete(f"replicate_cursor:{peer}")
 
+    def test_replicate_blobs_mirrors_referenced_blobs_hash_verified(self):
+        # The blob half of replication: a mirrored record whose example value is by address
+        # (result_blob) must stay CHECKABLE on the replica, so the blobs its records reference
+        # are pulled from the peer's /v0/blobs and sha256-verified. Lying bytes are refused (and
+        # re-counted next run — self-healing, no cursor); honest bytes land under their address.
+        import hashlib as _hashlib
+        import shutil as _shutil
+
+        from . import tasks
+
+        blob_dir = Path(tempfile.mkdtemp(prefix="nl-blobrepl-"))
+        good_bytes = json.dumps({"kind": "int", "value": 10}).encode()
+        good_sha = _hashlib.sha256(good_bytes).hexdigest()
+
+        # A gate-valid record referencing the blob by address, stored locally (the mirror step).
+        rec = _load("double-second-field.v0.2.json")
+        ex = rec["examples"][0]
+        del ex["result"]
+        ex["result_blob"] = {"sha256": good_sha, "bytes": len(good_bytes)}
+        rec.pop("hash")
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(rec, f)
+        rec["hash"] = subprocess.run([str(VALIDATOR), "hash", f.name],
+                                     capture_output=True, text=True).stdout.strip()
+        self.assertEqual(self._publish(rec).status_code, 201)
+
+        lying = {"n": 0}
+
+        def fake_fetch(url, dest_tmp, timeout=300):
+            self.assertIn(f"/v0/blobs/{good_sha}", url)
+            lying["n"] += 1
+            data = b"not the blob" if lying["n"] == 1 else good_bytes
+            Path(dest_tmp).write_bytes(data)
+            return _hashlib.sha256(data).hexdigest()
+
+        try:
+            with override_settings(COMMONS_BLOB_DIR=str(blob_dir)):
+                with mock.patch.object(tasks, "_fetch_blob", side_effect=fake_fetch):
+                    first = tasks.replicate_blobs("https://peer.example")
+                    self.assertEqual(first["failures"], 1, first)   # lying bytes refused
+                    self.assertEqual(first["fetched"], 0, first)
+                    self.assertFalse((blob_dir / good_sha).exists(),
+                                     "mismatched bytes must never be stored under the address")
+                    second = tasks.replicate_blobs("https://peer.example")
+                    self.assertEqual(second["fetched"], 1, second)  # re-counted and retried
+                self.assertEqual((blob_dir / good_sha).read_bytes(), good_bytes)
+                # Idempotent: nothing missing, nothing fetched.
+                third = tasks.replicate_blobs("https://peer.example")
+                self.assertEqual((third["missing"], third["fetched"]), (0, 0), third)
+        finally:
+            _shutil.rmtree(blob_dir, ignore_errors=True)
+
+    def test_referenced_blobs_covers_examples_and_weights_manifests(self):
+        from . import tasks
+
+        weights = _load("weights-c21-14b-s1.json")
+        shas = tasks._referenced_blobs(weights)
+        self.assertEqual(shas, {f["sha256"] for f in weights["files"]})
+        fn = _load("double-second-field.v0.2.json")
+        self.assertEqual(tasks._referenced_blobs(fn), set(), "inline examples reference no blobs")
+
     def test_resolve_returns_exact_record(self):
         rec = _load("map.json")
         self._publish(rec)

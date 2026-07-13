@@ -113,3 +113,8 @@ COMMONS_REPLICATE_INTERVAL = float(os.environ.get("COMMONS_REPLICATE_INTERVAL", 
 COMMONS_EMBED_INTERVAL = float(os.environ.get("COMMONS_EMBED_INTERVAL", "120"))  # backfill null embeddings
 COMMONS_REPLICATE_BATCH = int(os.environ.get("COMMONS_REPLICATE_BATCH", "200"))  # records per peer per run
 COMMONS_SYNC_PER_PEER_LIMIT = int(os.environ.get("COMMONS_SYNC_PER_PEER_LIMIT", "500"))  # /v0/sync page
+# Blobs the mirrored records reference (examples[].result_blob, weights files[]) are pulled from the
+# peer's gate-free /v0/blobs store, sha256-verified, up to this many per peer per run. A blob can be
+# hundreds of MB (adapter weights), so the per-run bound is small; the scan is self-healing (no
+# cursor — anything still missing is re-counted next run).
+COMMONS_REPLICATE_BLOB_BATCH = int(os.environ.get("COMMONS_REPLICATE_BLOB_BATCH", "16"))
