@@ -16,7 +16,7 @@ use serde_json::Value as J;
 use std::collections::HashMap;
 
 use crate::{
-    analyze_complexity, analyze_output_size, analyze_termination, check_refinements, infer_effects,
+    analyze_complexity, analyze_output_size, check_refinements, infer_effects,
     parse_class, parse_output_size, typecheck_record, ComplexityOutcome, OutputSize, RefinementOutcome,
     TerminationOutcome,
 };
@@ -129,7 +129,7 @@ pub fn certify_record(record: &J, body: &J, records: &HashMap<String, J>, solver
 
     // 4. Termination.
     let declared_term = sig.and_then(|s| s.get("terminates")).and_then(|t| t.as_str()).unwrap_or("unknown");
-    match analyze_termination(body) {
+    match crate::terminate::analyze_termination_typed(body, &crate::terminate::nat_param_positions(record)) {
         TerminationOutcome::Always if declared_term == "always" => {
             checks.push(CertCheck::new("termination", "SOUND", "provably always-terminates", false))
         }

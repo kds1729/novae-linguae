@@ -671,10 +671,11 @@ const MAX_STRIDE: usize = 12;
 /// so the minimal realigning stride is known to be exactly `lcm(stride_f, stride_g)` and the prover makes a
 /// *single* attempt at it (not a search). Because it is one attempt, this cap can be much larger than the
 /// blind-search `MAX_STRIDE` at no cost to common pairs: raising it only affects a genuinely-submitted
-/// large-lcm pair (e.g. 3-vs-5 = 15, 4-vs-5 = 20), which then checks `0..k` base cases and one step. Pairs
-/// whose alignment period exceeds this (or that recurse at a non-constant stride) report UNKNOWN — never a
-/// false verdict.
-const MAX_TARGETED_STRIDE: usize = 24;
+/// large-lcm pair, which then checks `0..k` base cases and one step. Measured 2026-07-13: the old cap of
+/// 24 was purely conservative — 5-vs-6 (lcm 30) proves in ~1 s and 7-vs-8 (lcm 56) in ~2.3 s on z3, so
+/// the cap now sits at 60 with the solver timeout still the backstop. Pairs whose alignment period
+/// exceeds this (or that recurse at a non-constant stride) report UNKNOWN — never a false verdict.
+const MAX_TARGETED_STRIDE: usize = 60;
 
 /// Greatest common divisor (Euclid).
 fn gcd(a: usize, b: usize) -> usize {
@@ -2136,6 +2137,21 @@ mod tests {
         // Two sums peeling 3 vs 4 elements per step — alignment period lcm(3,4) = 12. Closes now that the
         // stride cap is 12 (was UNKNOWN at the old cap of 6); z3 discharges the stride-12 step directly.
         assert_eq!(prove_equiv_by_induction(&sumk_body(3), &sumk_body(4), solver), InductionOutcome::Proved);
+    }
+
+    #[test]
+    fn inhouse_proves_stride_5_vs_6_sum_lcm30() {
+        let Some(solver) = solver() else { return };
+        // The named residual pair: sums peeling 5 vs 6 elements — alignment period lcm(5,6) = 30,
+        // beyond the old cap of 24. One targeted attempt at stride 30 (31 base cases + one step).
+        assert_eq!(prove_equiv_by_induction(&sumk_body(5), &sumk_body(6), solver), InductionOutcome::Proved);
+    }
+
+    #[test]
+    fn inhouse_proves_stride_7_vs_8_sum_lcm56() {
+        let Some(solver) = solver() else { return };
+        // Near the new cap: lcm(7,8) = 56 — 57 base cases + one stride-56 step, still one attempt.
+        assert_eq!(prove_equiv_by_induction(&sumk_body(7), &sumk_body(8), solver), InductionOutcome::Proved);
     }
 
     #[test]

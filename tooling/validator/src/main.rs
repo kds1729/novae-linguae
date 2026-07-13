@@ -1200,7 +1200,7 @@ fn cmd_check_termination(record: &PathBuf, body: &PathBuf) -> Result<()> {
     let record = nl_validator::read_json(record)?;
     let body = nl_validator::read_json(body)?;
     let declared = record.pointer("/signature/terminates").and_then(|v| v.as_str()).unwrap_or("unknown");
-    match nl_validator::analyze_termination(&body) {
+    match nl_validator::analyze_termination_typed(&body, &nl_validator::nat_param_positions(&record)) {
         TerminationOutcome::Always => match declared {
             "always" => println!("SOUND        the body provably always terminates (matches declared `always`)"),
             other => {

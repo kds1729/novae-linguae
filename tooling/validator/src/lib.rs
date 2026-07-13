@@ -56,7 +56,7 @@ pub mod refine;
 pub use refine::{check_nat_refinement, check_refinements, RefinementOutcome, RefinementReport};
 
 pub mod terminate;
-pub use terminate::{analyze_termination, TerminationOutcome};
+pub use terminate::{analyze_termination, analyze_termination_typed, nat_param_positions, TerminationOutcome};
 
 pub mod complexity;
 pub use complexity::{
