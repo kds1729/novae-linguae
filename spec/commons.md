@@ -416,8 +416,10 @@ and cannot suppress content that another node will serve.
 - **Untrusted node.** Covered above — a node cannot forge or alter records; the worst it can do is
   omit, which federation routes around.
 - **Hash collisions.** BLAKE3-256; second-preimage resistance makes address collisions infeasible.
-- **Resource exhaustion.** Bodies and embeddings dominate storage; a node bounds its own footprint
-  via local policy and tiering. None of this is protocol-visible.
+- **Resource exhaustion.** Blobs dominate storage on any node that hosts them (a single adapter
+  weights file outweighs the whole record index); bodies and embeddings dominate the record store
+  itself. A node bounds its own footprint via local policy and tiering. None of this is
+  protocol-visible.
 
 ## Engine-agnostic: the reference node
 
@@ -443,7 +445,9 @@ conformant if it speaks the protocol above. The engine choice MUST NOT leak into
    timestamp. This is an add-on for auditability, never the store itself.
 3. **Embedding portability** — a recommended embedding model (or a way to publish embeddings as
    `proof`-like derived artifacts) so semantic search is more comparable across nodes.
-4. **Body storage tiering** — a normative split between the metadata index and a blob/CDN layer for
-   large bodies.
+4. **Body storage tiering** — the blob/CDN layer itself now exists (`GET /v0/blobs/{sha256}`, above:
+   gate-free, CDN-frontable, carrying weights and by-address example values). What remains open is
+   the narrower question of routing large `expr_` *bodies* through it — bodies are still ordinary
+   records in the metadata index.
 5. **Query over structured ASTs** — richer `type_contains` matching against the v0.2 type AST
    (unification, subtyping) rather than substring hints.

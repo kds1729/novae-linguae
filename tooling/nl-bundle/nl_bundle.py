@@ -26,6 +26,7 @@ from pathlib import Path
 FORMAT_VERSION = "nlb/1"
 MANIFEST_NAME = "manifest.json"
 RECORDS_NAME = "records.jsonl"
+BLOB_PREFIX = "blobs/"
 
 
 def _crypto():
@@ -53,13 +54,17 @@ def _jsonl(records):
     return [json.dumps(r, sort_keys=True, separators=(",", ":")) for r in ordered]
 
 
-def build_manifest(records, source=None, producer=None):
+def build_manifest(records, source=None, producer=None, blob_sizes=None):
     manifest = {
         "format_version": FORMAT_VERSION,
         "count": len(records),
         "schema_versions": sorted({r["schema_version"] for r in records if r.get("schema_version")}),
         "bundle_digest": bundle_digest([r["hash"] for r in records]),
     }
+    if blob_sizes:
+        # Advisory totals; blob members are self-verifying by name, and a blobless manifest is
+        # byte-identical to the pre-blob-carriage format.
+        manifest["blobs"] = {"count": len(blob_sizes), "bytes": sum(blob_sizes)}
     if source:
         manifest["source"] = source
     if producer:
@@ -77,12 +82,23 @@ def _add(tar, name, data):
     tar.addfile(info, io.BytesIO(data))
 
 
-def write_bundle(dest, records, source=None, producer=None, sign_seed=None):
+def write_bundle(dest, records, source=None, producer=None, sign_seed=None, blobs=None):
     """Write records (raw dicts) to an `.nlb`. dest is a path or binary file object. If sign_seed is
-    given, the manifest is signed (advisory provenance). Returns the manifest. Byte-identical to
-    commons/bundle.py:write_bundle (the signing path shares the same nl_crypto module)."""
+    given, the manifest is signed (advisory provenance). `blobs` is an optional mapping
+    ``sha256 -> bytes | Path`` — the blobs the records reference (by-address example values, weights
+    files), re-hashed here so a lying bundle is never produced. Returns the manifest. Byte-identical
+    to commons/bundle.py:write_bundle (the signing path shares the same nl_crypto module)."""
     records = list(records)
-    manifest = build_manifest(records, source=source, producer=producer)
+    blob_items = []
+    for sha in sorted(blobs or {}):
+        data = blobs[sha]
+        if not isinstance(data, (bytes, bytearray)):
+            data = Path(data).read_bytes()
+        if hashlib.sha256(data).hexdigest() != sha:
+            raise SystemExit(f"nl-bundle: blob {sha} content hashes elsewhere — refusing to write a lying bundle")
+        blob_items.append((sha, bytes(data)))
+    manifest = build_manifest(records, source=source, producer=producer,
+                              blob_sizes=[len(d) for _, d in blob_items])
     if sign_seed:
         manifest = _crypto().sign_manifest(manifest, sign_seed)
     manifest_bytes = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
@@ -93,6 +109,8 @@ def write_bundle(dest, records, source=None, producer=None, sign_seed=None):
     with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tar:
         _add(tar, MANIFEST_NAME, manifest_bytes)
         _add(tar, RECORDS_NAME, records_bytes)
+        for sha, data in blob_items:
+            _add(tar, BLOB_PREFIX + sha, data)
     gz = gzip.compress(buf.getvalue(), mtime=0)
 
     if hasattr(dest, "write"):
@@ -133,15 +151,30 @@ def main(argv=None):
     ap.add_argument("--source-repo", help="provenance: source repository URL")
     ap.add_argument("--source-release", help="provenance: release tag/version")
     ap.add_argument("--sign-seed", help="sign the manifest with the did:nova derived from this seed")
+    ap.add_argument("--blob", action="append", default=[], metavar="FILE",
+                    help="carry a referenced blob (repeatable): a `blob-<sha256>.json` sidecar as the "
+                         "nl-ingest-* adapters emit for by-address example values, or a bare "
+                         "`<sha256>`-named file; the name's sha256 is verified against the content")
     args = ap.parse_args(argv)
 
     records = _read_records(args.files)
+    blobs = {}
+    for name in args.blob:
+        p = Path(name)
+        stem = p.name
+        if stem.startswith("blob-") and stem.endswith(".json"):
+            stem = stem[len("blob-"):-len(".json")]
+        if not (len(stem) == 64 and all(c in "0123456789abcdef" for c in stem)):
+            raise SystemExit(f"nl-bundle: --blob {name}: the filename must carry the sha256 "
+                             "(blob-<sha256>.json or <sha256>)")
+        blobs[stem] = p
     source = {k: v for k, v in (("repo", args.source_repo), ("release", args.source_release)) if v} or None
 
     dest = sys.stdout.buffer if args.output == "-" else args.output
-    manifest = write_bundle(dest, records, source=source, sign_seed=args.sign_seed)
+    manifest = write_bundle(dest, records, source=source, sign_seed=args.sign_seed, blobs=blobs)
     signed = f"  signed-by={manifest['producer']}" if manifest.get("signature") else ""
-    sys.stderr.write(f"nl-bundle: packaged {manifest['count']} records  "
+    blob_note = f"  blobs={manifest['blobs']['count']}" if manifest.get("blobs") else ""
+    sys.stderr.write(f"nl-bundle: packaged {manifest['count']} records{blob_note}  "
                      f"schema_versions={manifest['schema_versions']}  "
                      f"digest={manifest['bundle_digest']}{signed}\n")
 

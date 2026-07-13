@@ -18,7 +18,7 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 | `GET /v0/records/{hash}` — resolve · `HEAD` — exists | ✅ |
 | `GET /v0/records/{hash}/certifications` — the signed certifications about a function | ✅ |
 | `GET /v0/records/{hash}/attestations` — the signed eval attestations about a weights record | ✅ |
-| `GET /v0/blobs/{sha256}` — content-addressed binary blobs (gate-free; the weights manifest hash is the boundary) | ✅ |
+| `GET /v0/blobs/{sha256}` — content-addressed binary blobs (gate-free; the referencing record's sha256 — a weights manifest, a by-address example value — is the boundary) | ✅ |
 | `POST /v0/query` — typed (exact) discovery | ✅ |
 | `GET /v0/sync` — replication feed (cursor) | ✅ |
 | `GET /v0/info` — node metadata | ✅ |
@@ -227,7 +227,10 @@ mounts the `commons_blobs` volume at `/blobs`), and `GET /v0/blobs/{sha256}` ser
 There is deliberately no gate on blobs: the pointer's `files[].sha256` is the security boundary — a client
 hashes the download and rejects a mismatch, so any host (including a hostile mirror or a plain CDN) is safe
 to fetch from. The pinned reference adapters (`tooling/eval/REFERENCE_CHECKPOINT.md`) are published this
-way on Arca.
+way on Arca. The blob store is a **shared facility**: a function record's by-address example value
+(`examples[].result_blob` — an observed multi-MB document that must not blow the record-store cap) lives
+in the same store under the same boundary, replicated to peers by `replicate_blobs` and carried by
+`.nlb` bundles so mirrored/restored records stay checkable.
 
 ## Seed bundles (`.nlb`)
 

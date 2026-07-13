@@ -44,8 +44,9 @@ not survival.
 |---|---|---|
 | Content-addressed verification | **have** | every record/message verified locally; supplier untrusted |
 | Federation via `sync` | **have** | nodes mirror each other; no node is authoritative |
-| Seed bundles | **have** (node) | offline / out-of-band redistribution; cold-start & disaster recovery |
-| Standard `.nlb` bundle format (`nlb/1`) | **have** (format + node export/import) | any project publishes a commons-ready release artifact |
+| Blob replication | **have** | mirrored records stay **checkable** (by-address example values, weights) — referenced blobs pulled from the peer's `/v0/blobs`, sha256-verified, self-healing |
+| Seed bundles | **have** (node) | offline / out-of-band redistribution; cold-start & disaster recovery — records **and** their referenced blobs |
+| Standard `.nlb` bundle format (`nlb/1`) | **have** (format + node export/import + standalone packager) | any project publishes a commons-ready release artifact |
 | Pluggable censorship-resistant bootstrap | **have** (HTTPS · IPNS · DNS-over-HTTPS · Nostr · chain-anchor · Tor onion · mirror; per-channel redundancy) | find live data when the usual entry points are blocked |
 
 ### Seed bundles
@@ -58,9 +59,16 @@ the distributor is untrusted: a bundle can be *withheld* but not *poisoned*.
   (`commons/bundle.py` + the two management commands). Filtered exports reuse the typed `query`
   language; incremental **delta** exports use `--since <cursor>` (the `/v0/sync` id cursor), and
   `exportbundle` prints the next cursor for chaining.
+- **Blobs travel too**: a record whose content lives partly in the blob store — a by-address example
+  value (`examples[].result_blob`), a weights manifest file — is only *checkable* if the blobs come
+  along, so `exportbundle` carries the referenced blobs present in the local store by default
+  (`--no-blobs` opts out; absent ones are named on stderr, never silently dropped) as
+  `blobs/<sha256>` members, self-verifying by name on write and read, and `loadbundle` restores them
+  into `COMMONS_BLOB_DIR`. A blobless bundle is byte-identical to the pre-blob-carriage `nlb/1`.
 - **Distribute over anything**: HTTP mirrors, IPFS, BitTorrent, a git repo, email, physical media. If
   Arca is down or blocked, a node bootstraps from a bundle obtained by any means — verified records
-  exported from a Postgres node restore cleanly into a fresh zero-dependency SQLite node.
+  exported from a Postgres node restore cleanly into a fresh zero-dependency SQLite node, and a
+  restored by-address record replays its examples offline from the bundle's own blobs.
 
 ### The standard commons-bundle format (`.nlb`)
 

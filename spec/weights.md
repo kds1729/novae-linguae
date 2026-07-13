@@ -63,7 +63,10 @@ Static file serving keyed by content hash: `GET /blobs/<sha256>` — no gate, no
 node's edge (or any mirror, including a plain web server or an object store) can serve it. Ingest of the
 *pointer record* goes through the normal verify-then-store gate (schema + `wgt_` hash check); the node
 does not fetch or verify the blobs it points at. Blob egress is metered like everything else on a public
-node; mirrors exist precisely so one node's budget is not the artifact's availability.
+node; mirrors exist precisely so one node's budget is not the artifact's availability. The store this
+section designed is now a **shared facility**: the same `/v0/blobs/{sha256}` also carries by-address
+example values (`examples[].result_blob`, [`commons.md`](commons.md)) under the identical
+hash-is-the-truth boundary — weights were simply the first tenant.
 
 ## Verification — three rungs
 

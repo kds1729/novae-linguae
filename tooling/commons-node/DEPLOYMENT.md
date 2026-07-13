@@ -44,7 +44,11 @@ only thing that can run away. The content-addressed design makes egress unusuall
 1. **Self-host the embedding model.** A hosted embedding *API* bills per token on every publish *and*
    every search, plus egress — the runaway path. A self-hosted model has **zero per-call network cost**;
    inference is on the flat-fee CPU. (This is the cost-decisive choice and matches the local ethos.)
-2. **`sync` is the biggest egress risk, not search.** If you become a public origin, other nodes mirroring
+2. **Blobs are the biggest egress payload; `sync` the biggest record-egress risk.** A single weights
+   blob is hundreds of MB — one replicating peer's `replicate_blobs` run can move more bytes than a
+   month of record traffic — so the egress governor meters streaming blob responses too (by
+   `Content-Length`, or by counting the streamed bytes when a later layer strips it): the budget is a
+   ceiling only if it counts the largest class. On the record side, other nodes mirroring
    your whole corpus serve your data ×N. Search returns *hashes* (tiny) by default; `include=record` is
    opt-in; **embeddings never leave the node.** Bound `sync` with pagination (have) + per-peer
    bandwidth caps.

@@ -10,12 +10,15 @@ can be passed around any channel (mirror, IPFS, torrent, USB) and re-ingested wi
 
 import json
 import sys
+from pathlib import Path
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from commons.bundle import write_bundle
 from commons.models import Record
 from commons.query import candidate_records
+from commons.tasks import _referenced_blobs
 
 
 class Command(BaseCommand):
@@ -31,6 +34,10 @@ class Command(BaseCommand):
         parser.add_argument("--source-release", help="provenance: release tag/version")
         parser.add_argument("--sign-seed", help="sign the manifest with the did:nova derived from "
                                                 "this seed (advisory provenance)")
+        parser.add_argument("--no-blobs", action="store_true",
+                            help="records only — omit the referenced blobs (by-address example "
+                                 "values, weights files) the bundle carries by default so restored "
+                                 "records stay checkable")
 
     def handle(self, *args, **options):
         since = options.get("since")
@@ -55,10 +62,31 @@ class Command(BaseCommand):
         source = {k: v for k, v in (("repo", options.get("source_repo")),
                                     ("release", options.get("source_release"))) if v} or None
 
+        # Carry the blobs the exported records reference (present in the local store), so a
+        # restored by-address example or weights record is CHECKABLE, not merely resolvable.
+        blobs, absent = {}, []
+        if not options.get("no_blobs"):
+            blob_dir = Path(settings.COMMONS_BLOB_DIR)
+            for sha in sorted({s for r in records for s in _referenced_blobs(r)}):
+                path = blob_dir / sha
+                if path.is_file():
+                    blobs[sha] = path
+                else:
+                    absent.append(sha)
+
         dest = sys.stdout.buffer if options["output"] == "-" else options["output"]
-        manifest = write_bundle(dest, records, source=source, sign_seed=options.get("sign_seed"))
+        manifest = write_bundle(dest, records, source=source, sign_seed=options.get("sign_seed"),
+                                blobs=blobs)
         # Summary to stderr so stdout stays pure bundle bytes when output is "-".
         signed = f"  signed-by={manifest['producer']}" if manifest.get("signature") else ""
-        self.stderr.write(f"exported {manifest['count']} records  "
+        blob_note = ""
+        if blobs:
+            b = manifest["blobs"]
+            blob_note = f"  blobs={b['count']} ({b['bytes']} bytes)"
+        for sha in absent:
+            self.stderr.write(f"note: referenced blob {sha} not in the local store — NOT carried "
+                              "(the restored record resolves but its by-address content must come "
+                              "from a peer)")
+        self.stderr.write(f"exported {manifest['count']} records{blob_note}  "
                           f"schema_versions={manifest['schema_versions']}  "
                           f"digest={manifest['bundle_digest']}  next-cursor={next_cursor}{signed}")

@@ -15,7 +15,10 @@ Config (settings, all env-driven):
 
 Only egress is metered — incoming traffic is free on every cloud — so request bodies are never counted.
 Immutable ``resolve`` responses fronted by an off-box CDN never reach this middleware, so CDN-absorbed
-traffic correctly does not count against the budget.
+traffic correctly does not count against the budget. Streaming responses — the blob store's
+``FileResponse``, the single largest egress class (adapter weights run to hundreds of MB) — are
+metered by their ``Content-Length`` up front, falling back to counting the streamed bytes when a
+later layer strips the header; a budget that skipped them would be no ceiling at all.
 """
 
 import datetime
@@ -25,6 +28,16 @@ from django.core.cache import cache
 from django.http import JsonResponse
 
 _TTL = 35 * 24 * 3600  # > 1 month, so the calendar-month key always outlives its window
+
+
+def _counted(chunks):
+    """Pass a streaming body through while counting what actually leaves; metered at stream end."""
+    n = 0
+    for c in chunks:
+        n += len(c)
+        yield c
+    if n:
+        _add(n)
 
 
 def _window_key(now=None):
@@ -71,14 +84,28 @@ class EgressBudgetMiddleware:
         return self._meter(self.get_response(request))
 
     def _meter(self, response):
-        if not getattr(response, "streaming", False):
-            try:
-                n = len(response.content)
-            except Exception:
-                n = 0
-            if n:
-                total = _add(n)
+        if getattr(response, "streaming", False):
+            # Streaming responses are the blob store (FileResponse) — the LARGEST egress class
+            # (adapter weights run to hundreds of MB), so a budget that skipped them would be no
+            # ceiling at all. FileResponse knows its size up front (Content-Length); when a later
+            # layer strips it (e.g. gzip re-framing), fall back to counting the bytes that
+            # actually leave as the stream is consumed.
+            length = int(response.get("Content-Length") or 0)
+            if length:
+                total = _add(length)
                 if self.budget:
                     response["X-Egress-Budget"] = str(self.budget)
                     response["X-Egress-Used"] = str(total)
+            else:
+                response.streaming_content = _counted(response.streaming_content)
+            return response
+        try:
+            n = len(response.content)
+        except Exception:
+            n = 0
+        if n:
+            total = _add(n)
+            if self.budget:
+                response["X-Egress-Budget"] = str(self.budget)
+                response["X-Egress-Used"] = str(total)
         return response

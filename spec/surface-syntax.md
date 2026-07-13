@@ -166,7 +166,9 @@ Any other `Tag` token in a type position is a type variable that happens to star
 
 ## 2. Predicate expressions
 
-**Schema:** `predicate-expression.schema.json` — five kinds: `var`, `lit`, `app`, `forall`, `exists`.
+**Schema:** `predicate-expression.schema.json` — six kinds: `var`, `lit`, `lit_blob`, `app`,
+`forall`, `exists`. (`lit_blob` — a value literal by sha256 address, the claim-layer form for
+results too large to inline — has no surface form; it appears only in machine-built claim ASTs.)
 
 ### Grammar
 

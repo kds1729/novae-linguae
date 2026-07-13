@@ -42,10 +42,14 @@ requester                         responder                        any receiver
    ```
 
    — the target applied (an `app` op by content-address) to the request's args (each carried as a
-   `lit`), equated to the produced `result` value-expression. The reply is addressed `to` the
+   `lit`), equated to the produced `result` value-expression (a result too large to inline rides as
+   a `lit_blob` pointer instead, and an effectful run's claim is `observed`, conditioned on its
+   trace — both in §Scope). The reply is addressed `to` the
    requester and threaded by `in_reply_to` to the request's hash. `subject` is the target.
 4. **Verify.** Because the claim is an ordinary predicate over a content-addressed function, **any**
-   receiver re-runs it: resolve the claim's functions from the commons and evaluate. A `request` is
+   receiver re-runs it: resolve the claim's functions from the commons and evaluate — replaying the
+   recorded trace for an `observed` claim, and hash-comparing the recomputed result for a
+   `lit_blob` one. A `request` is
    not needed to verify — the `assert` is self-contained. Verification is re-execution, so no one has
    to trust the responder (principles 3, 6, 7). A tampered result re-runs false and is refuted.
 
@@ -132,7 +136,10 @@ to use is the consumer's trust decision, not the order they came back in.) It th
 function's own
 declared property over the unbounded domain (don't trust the record's claim — re-prove it with the SMT
 + induction + lemma-discovery engine), then **apply** it and **re-verify** the result by re-running
-(principle 3). The transcript gains `trust`, `rank`, and `prove` steps between `ack` and `propose`.
+(principle 3). The transcript gains `trust`, `rank`, `certify`, and `prove` steps between `ack` and
+`propose` (`certify` runs on every candidate — the `--require-certified` flag only decides whether a
+failed certification aborts), plus a `grants` step when `--grant-certified` is in play and `retry`
+steps between candidates.
 The candidates are an **ordered list, not a single pick**: the argument-signature filter is coarse (two
 functions over the same argument types are indistinguishable to it), so a wrong first fit is expected —
 when a candidate fails the certify gate or the responder answers a signed `reject` (e.g. "effect not
@@ -360,8 +367,10 @@ the goal over a commons containing a prior `double_then_add` composite (whose bo
   `eq(<computation>, lit_blob)` by recomputing the computation (replaying the trace when the claim
   is `observed`) and comparing the sha256 of its canonical bytes to the claimed address — the hash
   pins the claim, and re-execution reconstructs the value itself for any consumer who wants it.
-- **`predicate` claims.** The responder emits — and `verify-claim` re-runs — a `predicate` claim. The
-  `satisfies` / `verified` claim kinds are descriptive and not re-run here.
+- **`predicate` and `observed` claims.** The responder emits — and `verify-claim` re-runs — a
+  `predicate` claim for a pure fulfilment and an `observed` claim (replayed against its recorded
+  trace) for an effectful one. The `satisfies` / `verified` claim kinds are descriptive and not
+  re-run here.
 - **Example-exact, not proven.** A CONFIRMED verdict means the claim's equation evaluated true on the
   concrete values asserted. It is a re-execution of *that* computation, not a proof over all inputs
   (that is the generative property-testing engine, still the next rung — see the project README).

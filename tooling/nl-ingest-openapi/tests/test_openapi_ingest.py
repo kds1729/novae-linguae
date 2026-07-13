@@ -562,6 +562,37 @@ class SchemaObservationGateTest(unittest.TestCase):
                             "--records", tmp], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_documented_example_blobifies_without_the_live_gate(self):
+        # The write path must not depend on --verify-against: a large DOCUMENTED example (the
+        # description carries the payload, no live gate involved) also goes by address, and the
+        # record is re-addressed to match. Certify + offline example check still pass from the
+        # emitted sidecar.
+        import hashlib
+        tmp = tempfile.mkdtemp(prefix="nl-openapi-docblob-")
+        spec = SchemaDerivedTest._health_spec("http://127.0.0.1:1", {"type": "object"})
+        media = spec["paths"]["/health"]["get"]["responses"]["200"]["content"]["application/json"]
+        media["example"] = {"status": "x" * 300}
+        sp = Path(tmp) / "spec.json"
+        json.dump(spec, open(sp, "w"))
+        code = 0
+        try:
+            oi.main([str(sp), "--out", tmp, "--blob-threshold", "64"])
+        except SystemExit as e:
+            code = e.code
+        self.assertEqual(code, 0)
+        rec = json.load(open(Path(tmp) / "gethealthbody.v0.2.json"))
+        ex = rec["examples"][0]
+        self.assertNotIn("result", ex)
+        sha = ex["result_blob"]["sha256"]
+        raw = (Path(tmp) / f"blob-{sha}.json").read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), sha)
+        # The record was re-addressed after blobifying: its embedded hash must verify. (No offline
+        # example replay here — an effectful documented-example record carries no trace without
+        # the live gate; that is the pre-GW12 reality, not a blob property.)
+        r = subprocess.run([str(VALIDATOR), "verify", str(Path(tmp) / "gethealthbody.v0.2.json")],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr or r.stdout)
+
     def test_oversized_example_value_goes_by_address(self):
         # Above --blob-threshold the observed expected value leaves the record: a result_blob
         # pointer (sha256 + bytes) plus a blob-<sha256>.json sidecar of the JCS-canonical

@@ -33,6 +33,25 @@ class NlBundleTests(unittest.TestCase):
         nb.write_bundle(b, [R1, R2])
         self.assertEqual(a.getvalue(), b.getvalue())
 
+    def test_blob_carriage_matches_node_module_byte_for_byte(self):
+        # Blob members (by-address example values) ride as blobs/<sha256>, verified on write; the
+        # standalone packager and the node's commons/bundle.py must stay byte-identical for the
+        # same content — now including carried blobs.
+        import hashlib
+        node_dir = Path(__file__).resolve().parents[2] / "commons-node" / "commons"
+        sys.path.insert(0, str(node_dir.parent))
+        from commons import bundle as node_bundle
+        data = b'{"kind":"int","value":10}'
+        sha = hashlib.sha256(data).hexdigest()
+        a, b = io.BytesIO(), io.BytesIO()
+        ours = nb.write_bundle(a, [R1], blobs={sha: data})
+        theirs = node_bundle.write_bundle(b, [R1], blobs={sha: data})
+        self.assertEqual(ours, theirs)
+        self.assertEqual(a.getvalue(), b.getvalue(), "standalone and node bundles must stay byte-identical")
+        self.assertEqual(ours["blobs"], {"count": 1, "bytes": len(data)})
+        with self.assertRaises(SystemExit):
+            nb.write_bundle(io.BytesIO(), [R1], blobs={sha: b"lying bytes"})
+
 
 if __name__ == "__main__":
     unittest.main()

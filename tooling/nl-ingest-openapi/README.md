@@ -28,7 +28,7 @@ description, not the generated client plumbing.
 | **relative-file `$ref`s** (`schemas.json#/…`) | resolved against the spec's own directory; the referenced document's refs resolve against *that* document and the imported subtree comes back fully inlined — pure factoring, byte-identical to the inlined description |
 | `security` (Bearer) | an `Authorization: Bearer {{secret:NAME}}` header; operation-level `security: []` = no auth |
 | `security` (**apiKey in header**, GW10) | a `<name>: {{secret:NAME}}` header (placeholder name defaults to the scheme key) |
-| `security` (**oauth2 clientCredentials**, GW13) | an `Authorization: Bearer {{oauth:NAME}}` header — the record names the identity symbolically; at run time `--oauth NAME=token_url|client_id|client_secret` exchanges credentials at the description's token endpoint inside the live effect (token never in the record or trace; replay needs no identity). Every other oauth2 flow refuses — interactive flows need a principal the effect boundary cannot supply |
+| `security` (**oauth2 clientCredentials**, GW13) | an `Authorization: Bearer {{oauth:NAME}}` header — the record names the identity symbolically; at run time the *validator's* `--oauth NAME=token_url\|client_id\|client_secret` exchanges credentials at the description's token endpoint inside the live effect (token never in the record or trace; replay needs no identity). The adapter's live gate supplies this itself: pass `--oauth-client id:secret` — the tokenUrl comes from the description, never the operator. Every other oauth2 flow refuses — interactive flows need a principal the effect boundary cannot supply |
 | **local `$ref`s** (GW10) | resolved (parameters, requestBodies, responses, security schemes, path-item-level shared parameters; cycle-bounded) |
 | documented `responses` | the status code the worked example asserts |
 | documented 2xx JSON **example** (GW11; `application/json` or any RFC 6839 `+json` subtype — `ld+json`/`geo+json`/`hal+json`, the NWS finding, ingestion-sweep increment 5) | a second **body-projection record** `<opId>Body : … -> Maybe Json` — `parse_json` over the response body, worked example = `Just(<the documented payload>)` |
@@ -96,10 +96,23 @@ The adapter then re-checks the examples by **replay with no secrets**: the check
 consumer can perform offline — no credentials, no reachable service — with the usual honest scope
 (the trace is the publisher's testimony; replay proves the documented result follows from it).
 
+**Large expected values ride by address.** Above `--blob-threshold` JCS-canonical bytes (default
+64 KiB) an example's expected value — an observed multi-MB document (the NWS glossary), or an
+equally large *documented* example — leaves the record: the example carries a
+`result_blob` `{sha256, bytes}` pointer (function-record v0.2) and the value's canonical bytes are
+written as a `blob-<sha256>.json` sidecar destined for a node's gate-free `/v0/blobs` store
+(`manage.py addblob`), so the record never blows a node's record-size cap. The run report marks such
+records `example=BY-ADDRESS(<n> bytes)`, and offline replay resolves the sidecar from the records
+directory, sha256-verified.
+
 ```
 python3 openapi_ingest.py examples/item-store.openapi.json --out /tmp/recs \
     --secret-name api_token --verify-against http://127.0.0.1:8878 --token test-token
 ```
+
+Known limit: the live gate supplies the **same `--token` value to every security scheme** the
+description declares, so a spec whose operations need *different* credentials for different schemes
+cannot be live-gated in one run (gate per-slice instead).
 
 ## Faithfulness
 

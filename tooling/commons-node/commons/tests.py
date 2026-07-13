@@ -227,6 +227,85 @@ class CommonsProtocolTests(TestCase):
         finally:
             _shutil.rmtree(blob_dir, ignore_errors=True)
 
+    def test_blob_egress_is_metered(self):
+        # The blob store is the LARGEST egress class, and FileResponse is a streaming response —
+        # which the governor used to skip entirely, exempting exactly the payloads the budget
+        # exists to bound. Blob bytes now count (by Content-Length), and an exhausted budget
+        # 503s the next request like any other.
+        import shutil as _shutil
+
+        from django.core.cache import cache
+
+        from . import egress
+
+        blob_dir = Path(tempfile.mkdtemp(prefix="nl-egress-"))
+        payload = b"x" * 4096
+        src = blob_dir / "payload.bin"
+        src.write_bytes(payload)
+        cache.delete(egress._window_key())
+        try:
+            with override_settings(COMMONS_BLOB_DIR=str(blob_dir),
+                                   COMMONS_EGRESS_BUDGET_BYTES=6000):
+                out = io.StringIO()
+                call_command("addblob", str(src), stdout=out)
+                sha = out.getvalue().split()[0]
+                before, _, _ = egress.usage()
+                resp = self.client.get(f"/v0/blobs/{sha}")
+                self.assertEqual(resp.status_code, 200)
+                b"".join(resp.streaming_content)  # drain like a real client
+                after, _, _ = egress.usage()
+                self.assertGreaterEqual(after - before, len(payload),
+                                        "blob bytes must count against the budget")
+                # The budget is now exhausted (4096 >= 6000 - overheads is false; fetch again).
+                resp = self.client.get(f"/v0/blobs/{sha}")
+                if resp.status_code == 200:
+                    b"".join(resp.streaming_content)
+                    resp = self.client.get(f"/v0/blobs/{sha}")
+                self.assertEqual(resp.status_code, 503, "an exhausted budget must throttle blobs too")
+                self.assertEqual(resp.json()["error"], "egress_budget_exhausted")
+        finally:
+            cache.delete(egress._window_key())
+            _shutil.rmtree(blob_dir, ignore_errors=True)
+
+    def test_bundle_export_import_carries_referenced_blobs(self):
+        # Disaster recovery end to end: exportbundle carries the blobs the exported records
+        # reference; loadbundle restores them into a FRESH blob store — so the restored
+        # by-address record is checkable, not merely resolvable.
+        import hashlib as _hashlib
+        import shutil as _shutil
+
+        data = json.dumps({"kind": "int", "value": 10}).encode()
+        sha = _hashlib.sha256(data).hexdigest()
+        rec = _load("double-second-field.v0.2.json")
+        ex = rec["examples"][0]
+        del ex["result"]
+        ex["result_blob"] = {"sha256": sha, "bytes": len(data)}
+        rec.pop("hash")
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(rec, f)
+        rec["hash"] = subprocess.run([str(VALIDATOR), "hash", f.name],
+                                     capture_output=True, text=True).stdout.strip()
+        self.assertEqual(self._publish(rec).status_code, 201)
+
+        src_dir = Path(tempfile.mkdtemp(prefix="nl-bundleblob-src-"))
+        dst_dir = Path(tempfile.mkdtemp(prefix="nl-bundleblob-dst-"))
+        bundle_path = src_dir / "out.nlb"
+        (src_dir / sha).write_bytes(data)
+        try:
+            with override_settings(COMMONS_BLOB_DIR=str(src_dir)):
+                call_command("exportbundle", str(bundle_path),
+                             stdout=io.StringIO(), stderr=io.StringIO())
+            with override_settings(COMMONS_BLOB_DIR=str(dst_dir)):
+                out = io.StringIO()
+                call_command("loadbundle", str(bundle_path), "--quiet",
+                             stdout=out, stderr=io.StringIO())
+            self.assertIn("blobs_stored=1/1", out.getvalue())
+            self.assertEqual((dst_dir / sha).read_bytes(), data,
+                             "the restored blob store must hold the referenced value")
+        finally:
+            _shutil.rmtree(src_dir, ignore_errors=True)
+            _shutil.rmtree(dst_dir, ignore_errors=True)
+
     def test_referenced_blobs_covers_examples_and_weights_manifests(self):
         from . import tasks
 
@@ -963,6 +1042,46 @@ class BundleFormatTests(TestCase):
         from .bundle import BundleError, read_bundle
         with self.assertRaises(BundleError):
             read_bundle(io.BytesIO(b"not a gzip"))
+
+    def test_blob_carriage_round_trips_hash_verified(self):
+        # A bundle may carry the blobs its records reference (blobs/<sha256> members), so a
+        # restored by-address record is CHECKABLE on a node that never saw the origin. Members are
+        # self-verifying by name on write AND read; a blobless bundle stays byte-identical to the
+        # pre-blob-carriage format.
+        import gzip
+        import hashlib as _hashlib
+        import tarfile
+
+        from .bundle import BundleError, read_bundle_full, write_bundle
+        data = b'{"kind":"int","value":10}'
+        sha = _hashlib.sha256(data).hexdigest()
+        buf = io.BytesIO()
+        manifest = write_bundle(buf, [_R1], blobs={sha: data})
+        self.assertEqual(manifest["blobs"], {"count": 1, "bytes": len(data)})
+        m2, records, blobs = read_bundle_full(io.BytesIO(buf.getvalue()))
+        self.assertEqual(blobs, {sha: data})
+        self.assertEqual(len(records), 1)
+        # Write-side refusal: content that hashes elsewhere never produces a bundle.
+        with self.assertRaises(BundleError):
+            write_bundle(io.BytesIO(), [_R1], blobs={sha: b"other bytes"})
+        # Read-side refusal: a tampered member fails the whole read.
+        raw = gzip.decompress(buf.getvalue())
+        tampered = io.BytesIO()
+        with tarfile.open(fileobj=io.BytesIO(raw)) as src_tar:
+            with tarfile.open(fileobj=tampered, mode="w") as dst_tar:
+                for m in src_tar.getmembers():
+                    content = src_tar.extractfile(m).read()
+                    if m.name == f"blobs/{sha}":
+                        content = content + b" "
+                        m.size = len(content)
+                    dst_tar.addfile(m, io.BytesIO(content))
+        with self.assertRaises(BundleError):
+            read_bundle_full(io.BytesIO(gzip.compress(tampered.getvalue())))
+        # No blobs -> byte-identical to the legacy layout (determinism preserved).
+        legacy, again = io.BytesIO(), io.BytesIO()
+        write_bundle(legacy, [_R1])
+        write_bundle(again, [_R1], blobs={})
+        self.assertEqual(legacy.getvalue(), again.getvalue())
 
 
 class BundleSigningTests(TestCase):

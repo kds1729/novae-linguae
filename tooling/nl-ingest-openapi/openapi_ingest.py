@@ -75,6 +75,12 @@ record is verified-by-default exactly like a hand-authored one.
 
     python3 openapi_ingest.py <spec.json> --out <dir> [--secret-name api_token]
                               [--verify-against http://127.0.0.1:8878 --token test-token]
+                              [--oauth-client id:secret] [--blob-threshold 65536]
+
+An example's expected value larger than --blob-threshold JCS-canonical bytes (observed OR
+documented) rides BY ADDRESS: a `result_blob` {sha256, bytes} pointer in the record + the value's
+canonical bytes as a `blob-<sha256>.json` sidecar for the node's gate-free /v0/blobs store — a
+multi-MB payload never blows a node's record-size cap.
 
 Vendor-neutral by construction: OpenAPI is the input dialect; nothing here is specific to any
 provider. Reuses ingest-common (BLAKE3+JCS core, body-AST builders).
@@ -92,7 +98,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "ingest-common")))
 
 from nl_body import b_app, b_field, b_let, b_lit, b_var  # noqa: E402
-from nl_core import build_v2_record, canonicalize, expr_address, sanitize_hint  # noqa: E402
+from nl_core import build_v2_record, canonicalize, content_hash, expr_address, sanitize_hint  # noqa: E402
 
 STRING = {"kind": "builtin", "name": "string"}
 INT = {"kind": "builtin", "name": "int"}
@@ -1028,7 +1034,14 @@ def attach_example_traces(record_path, body_path, record, out_dir, secret_names,
         if r.returncode != 0:
             return False, f"example {i} live run failed: {(r.stderr or '').strip()}"
         got = json.loads(r.stdout)
-        if got != ex.get("result"):
+        if "result_blob" in ex:
+            # The documented example already rides by address (blobified at write time): the live
+            # result is held to the pointer — same value, compared by canonical sha256.
+            digest = hashlib.sha256(canonicalize(got)).hexdigest()
+            if digest != ex["result_blob"]["sha256"]:
+                return False, (f"example {i} live result does not match the documented by-address "
+                               f"one: sha256 {digest} != {ex['result_blob']['sha256']}")
+        elif got != ex.get("result"):
             return False, (f"example {i} live result does not match the documented one: "
                            f"{json.dumps(got)} != {json.dumps(ex.get('result'))}")
         trc = subprocess.run([_VALIDATOR, "hash", trace_path],
@@ -1171,6 +1184,13 @@ def main(argv=None):
         name = record["name_hints"][0]
         for note in notes:
             print(f"{name:16} note: {note}")
+        # A large DOCUMENTED example goes by address on this path too — the live gates below only
+        # run under --verify-against, and an oversized inline value must never depend on them.
+        # The examples changed, so the content-address moves with them.
+        converted = [blobify_example(ex, args.out, args.blob_threshold)
+                     for ex in record.get("examples", [])]
+        if any(converted):
+            record["hash"] = content_hash(record, "fn", strip=("hash",))
         rp = os.path.join(args.out, f"{name}.v0.2.json")
         bp = os.path.join(args.out, f"body-{name}.json")
         json.dump(record, open(rp, "w"), indent=2)

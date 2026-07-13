@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://novae-linguae.org/spec/v0.1/bundle.schema.json",
   "title": "Novae Linguae Commons Bundle manifest (nlb/1)",
-  "description": "The `manifest.json` member of a `.nlb` (\"Nova Lingua Bundle\") — a gzipped tar carrying exactly `manifest.json` and `records.jsonl` (one content-addressed record per line, sorted by hash). A bundle is a portable, self-verifying archive for out-of-band redistribution (seed / disaster-recovery) and a release artifact any project can publish. The producer is UNTRUSTED: a node re-verifies every record by hash (and message signatures) on ingest, so the manifest is advisory metadata, never an admission gate (principle 7). `bundle_digest` is a cheap whole-payload integrity pre-check, not the security boundary. The optional `producer`/`signature` are advisory provenance (\"this bundle came from X\"), signed by the same canonical-serialization rules as a Nova Locutio message over the manifest with the `signature` field removed. Bundles are deterministic: the same record set always produces identical bytes (records sorted by hash, manifest keys sorted, fixed tar/gzip mtime). See spec/resilience.md and tooling/commons-node/commons/bundle.py.",
+  "description": "The `manifest.json` member of a `.nlb` (\"Nova Lingua Bundle\") — a gzipped tar carrying `manifest.json`, `records.jsonl` (one content-addressed record per line, sorted by hash), and optionally `blobs/<sha256>` members: the blobs the bundled records reference (a by-address example value `examples[].result_blob`, a weights manifest file), carried so a restored record is CHECKABLE — not merely resolvable — on a node that never saw the origin. Blob members are self-verifying by NAME: the sha256 is recomputed on both write and read, and a mismatch refuses the bundle. A bundle is a portable, self-verifying archive for out-of-band redistribution (seed / disaster-recovery) and a release artifact any project can publish. The producer is UNTRUSTED: a node re-verifies every record by hash (and message signatures) on ingest, so the manifest is advisory metadata, never an admission gate (principle 7). `bundle_digest` is a cheap whole-payload integrity pre-check, not the security boundary. The optional `producer`/`signature` are advisory provenance (\"this bundle came from X\"), signed by the same canonical-serialization rules as a Nova Locutio message over the manifest with the `signature` field removed. Bundles are deterministic: the same content always produces identical bytes (records sorted by hash, blobs sorted by sha256, manifest keys sorted, fixed tar/gzip mtime); a blobless bundle is byte-identical to the pre-blob-carriage format. See spec/resilience.md and tooling/commons-node/commons/bundle.py.",
   "type": "object",
   "required": ["format_version", "count", "schema_versions", "bundle_digest"],
   "additionalProperties": false,
@@ -27,6 +27,16 @@
       "type": "string",
       "pattern": "^blake2b:[0-9a-f]{64}$",
       "description": "A BLAKE2b-256 fingerprint of the record SET: the record hashes sorted, each followed by a newline, hashed in order. Order-independent (hashes are sorted first) so the digest depends only on membership. A cheap whole-payload integrity pre-check on read — NOT the security boundary (per-record hash verification on ingest is)."
+    },
+    "blobs": {
+      "type": "object",
+      "required": ["count", "bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 1 },
+        "bytes": { "type": "integer", "minimum": 1 }
+      },
+      "description": "Advisory totals for the `blobs/<sha256>` members, present only when the bundle carries blobs. The members themselves are the truth (self-verifying by name); this is a quick size read before extraction."
     },
     "source": {
       "type": "object",
