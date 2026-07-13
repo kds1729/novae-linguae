@@ -2051,6 +2051,28 @@ fn publish_final_assert(node: &str, steps: &[nl_validator::Step]) -> Result<()> 
 }
 
 #[allow(clippy::too_many_arguments)]
+/// The transcript line for an assert's claimed result: the inline value, or — when the claim
+/// carries it by address (`lit_blob`) — the pointer that pins it.
+fn assert_result_detail(m: &serde_json::Value) -> String {
+    let rhs = m.pointer("/body/claim/expr/args/1");
+    let shown = rhs
+        .and_then(|r| r.get("value"))
+        .map(|v| v.to_string())
+        .or_else(|| {
+            let r = rhs?;
+            if r.get("kind").and_then(|k| k.as_str()) != Some("lit_blob") {
+                return None;
+            }
+            Some(format!(
+                "by address sha256={} ({} bytes)",
+                r.get("sha256").and_then(|s| s.as_str()).unwrap_or("?"),
+                r.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0)
+            ))
+        })
+        .unwrap_or_default();
+    format!("result {shown}")
+}
+
 fn cmd_orchestrate(
     records: Option<&PathBuf>,
     node: Option<&str>,
@@ -2077,7 +2099,7 @@ fn cmd_orchestrate(
             "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
             "commit" => format!("commit apply {}", m.pointer("/body/commitment/fn").and_then(|t| t.as_str()).unwrap_or_default()),
             "trace" => format!("{} recorded observation(s)", m.get("ops").and_then(|o| o.as_array()).map(|a| a.len()).unwrap_or(0)),
-            "assert" => format!("result {}", m.pointer("/body/claim/expr/args/1/value").map(|v| v.to_string()).unwrap_or_default()),
+            "assert" => assert_result_detail(m),
             other => other.to_string(),
         };
         println!("{:>8}  {short}…  {detail}", step.label);
@@ -2143,7 +2165,7 @@ fn cmd_orchestrate_verified(
             "prove" => format!("property `{}` proved={}", m.get("property").and_then(|p| p.as_str()).unwrap_or(""), m.get("proved").map(|v| v.to_string()).unwrap_or_default()),
             "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
             "trace" => format!("{} recorded observation(s)", m.get("ops").and_then(|o| o.as_array()).map(|a| a.len()).unwrap_or(0)),
-            "assert" => format!("result {}", m.pointer("/body/claim/expr/args/1/value").map(|v| v.to_string()).unwrap_or_default()),
+            "assert" => assert_result_detail(m),
             other => other.to_string(),
         };
         println!("{:>8}  {detail}", step.label);
