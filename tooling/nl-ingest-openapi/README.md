@@ -32,6 +32,8 @@ description, not the generated client plumbing.
 | **local `$ref`s** (GW10) | resolved (parameters, requestBodies, responses, security schemes, path-item-level shared parameters; cycle-bounded) |
 | documented `responses` | the status code the worked example asserts |
 | documented 2xx `application/json` **example** (GW11) | a second **body-projection record** `<opId>Body : … -> Maybe Json` — `parse_json` over the response body, worked example = `Just(<the documented payload>)` |
+| documented response **header with an example** (GW16) | a **header-projection record** `<opId><Header> : … -> Maybe string` over `http_full` — the call bound once, status-guarded to the documented response, `map_get` of the lowercase name |
+| declared 2xx `application/json` **schema, no example** (ingestion-sweep increment 2) | **schema-derived projections**: `<opId>Body : … -> Maybe Json` plus one **typed field projection** per declared property that narrows soundly (`string` -> `Maybe string`, `boolean` -> `Maybe bool`, object/array/untyped -> `Maybe Json`; numeric properties noted, never projected). Materialized only through the **live observation gate** — see below |
 
 Each status record **returns the response `.status`** (an `int`) — the always-deterministic part of
 a response. A **body projection** is emitted only where the description itself documents the payload
@@ -43,6 +45,19 @@ does not enumerate fields). Applied under grants, a projection's assert is an **
 (trace-conditioned, spec/trace.schema.json): a third party replays it against the recorded trace —
 no effect grants, no secrets — which is what makes a verifiable claim about a response body possible
 at all (see agent-loop.md §Scope).
+
+**Schema-derived depth** (the real-world case: production descriptions overwhelmingly declare
+response *schemas*, not examples — the Frankfurter finding) splits the promise from the value: the
+declared schema **licenses** the projections and says what shape the answer must have; it does not
+supply a value, so without `--verify-against` nothing is emitted (a printed note, never an invented
+example). Under the gate, each projection body runs **once** — the observation becomes its worked
+example, trace-attached and offline-replayable — and the observed document is **held to the declared
+shape**: required properties present, every declared-type property that is present carries its
+declared type (exactly what the projections promise; enum/minProperties/nested constraints are
+deliberately out of scope). A description the service does not honor **fails the gate and publishes
+nothing**. Numeric properties are noted, never projected: `JNum` carries an int *or* a float, so a
+typed numeric promise cannot be narrowed soundly by pattern alone. A response documenting both an
+example and a schema takes the example path.
 
 ## Honest refusals
 

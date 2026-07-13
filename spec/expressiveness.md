@@ -464,7 +464,8 @@ findings worth their ink: (1) **real-world descriptions document schemas, not ex
 Frankfurter declares response schemas but no response examples, so the example-conditioned
 depth (GW11 body projections, GW12 live-gated traces) honestly refuses and the compiled
 records are status-projections; schema-derived depth is a named future pull, *not* silently
-faked from a schema the service never promised as a value. (2) **Content-address dedup
+faked from a schema the service never promised as a value (pulled by the second increment
+below, same day — the value comes from an observation, the schema only licenses and checks it). (2) **Content-address dedup
 crossed the fake/real boundary**: `get_latest`'s compiled body hashes identically to the
 reference item-store's `getlatest` (`expr_6cf3240c…` — same `GET {base}/latest` status
 projection), so the node already had it — two unrelated descriptions, one artifact. The
@@ -473,11 +474,54 @@ loop closed live against the real API: `orchestrate --node … --intent query/lo
 the live ECB service → CONFIRMED, published the observed assert (`msg_bf0dd092…` +
 `trc_3a861566…`), and a grantless, secretless `verify-claim` replays it — the commons' first
 third-party-checkable claim about a **real production service**. Residuals for the sweep's
-next increments: schema-derived response depth (the examples gap above), the 57 v0.1
+next increments: schema-derived response depth (the examples gap above — closed by the
+second increment below, same day), the 57 v0.1
 surface-typed stdlib records (uncertifiable as-is; `--v2` re-ingestion needs annotated
 sources — the measured stdlib boundary says the pull is annotated *library* code, not
 CPython), and scale-out to a large description (e.g. GitHub's ~900-operation description —
 mechanical, deferred until a consumer wants it rather than publishing 900 thin records).
+
+**Ingestion sweep, second increment (2026-07-12): schema-derived response depth — the
+examples gap closes.** The first increment's finding was that real-world descriptions
+declare response **schemas, not examples**, so the example-conditioned depth (GW11 body
+projections, GW16 header projections) honestly refused and Frankfurter's records stayed thin
+status-projections. The closure splits the description's promise from the observation's
+value, one per doctrine: **a declared 2xx object schema licenses the projections** —
+`<opId>Body : … → Maybe Json` plus one typed field projection per declared property that
+narrows *soundly* (`string` → `Maybe string` via a `JStr` case, `boolean` → `Maybe bool` via
+`JBool`, `object`/`array`/untyped → the raw sub-document as `Maybe Json`; **numeric
+properties are noted, never projected** — `JNum` carries an int *or* a float, so a typed
+numeric promise cannot be narrowed by pattern alone) — while **the live observation gate
+supplies the value** the schema never promised: the records exist only under
+`--verify-against` (a v0.2 record needs ≥1 example, and a schema gives nothing honest to put
+there), where one execution becomes the worked example, trace-attached and offline-replayable
+(the GW12 shape one rung deeper), and the observed document is **held to the declared
+shape** — required properties present, declared types match, exactly what the projections
+promise and nothing deeper. A description the service does not honor — a required property
+it never answers, a type it lies about — **fails the gate and publishes nothing** (both
+refusals locked in tests against the in-repo fake service). A response documenting both an
+example and a schema takes the example path (spec-time value, no gate needed); the schema
+path exists for the example-less reality. Production, against the live ECB service:
+**Frankfurter's `ratesOnDate`/`currencies` schemas compile to 5 typed projections**
+(`get_latestBody`/`Base`/`Date`/`Rates`, `get_currenciesBody`; `amount` skipped as numeric,
+`currencies` map-shaped → whole-document only), all observed, schema-checked, certified, and
+on Arca with traces — and the 5 re-gated base records **supersede** the first increment's
+ungated ones, because the gate immediately caught a real error: `_example_for` preferred a
+documented 404 for *every* GET, but a **no-path-param** GET has no absent-name to reach it —
+`get_latest`'s published example asserted a 404 the parameterless call can never produce
+(fixed: the minimal call asserts the documented success; path-param GETs keep the
+absent-name 404). Two content-address moments worth their ink: the field projections'
+observation trace hashes to `trc_3a861566…` — **the same artifact the first increment's
+observed assert published**, one observation shared by address across records and sessions —
+and the whole-loop close (`orchestrate --node … --intent parse --expect 'Just "EUR"' --grant
+net.read@api.frankfurter.dev`) ranked 23 matches down to 8, applied a schema-derived
+projection live → CONFIRMED, published `msg_e7757a5b…` + `trc_a8679efc…`, and a grantless,
+secretless `verify-claim` by address replays it. Honest note on that rank: all 8 survivors
+are effectful (never dry-run — verify-before-run), so fetch order picked
+`get_currenciesBody` over the `Maybe string` fits — the same designed boundary the
+goal-aware section below records. No corpus change (the GW7 rationale: the narrowing shapes
+are family #40's `case parse_json → JObj → map_get →` variant-case, the status-guarded call
+family #47/#50's).
 
 **Goal-aware discovery in production (2026-07-12): the GW16 skip becomes unnecessary.** GW16
 had to *skip discovery* — Arca holds a dozen `(string, string)` fits (status lookups, deleters,
