@@ -34,5 +34,15 @@ nl.1105software.com {
 		}
 	}
 
-	reverse_proxy web:8000
+	# The upstream transport must NOT inject its own Accept-Encoding (Go's transparent gzip is on
+	# by default): Caddy would fetch gzipped from Django and re-inflate for a non-gzip client, so
+	# the app-level egress meter would count compressed bytes while the billed wire carries the
+	# inflated ones (found live: a 1.49 MB blob metered as 252 KB). With compression off, Django
+	# sees the real client's Accept-Encoding and the meter matches what actually leaves the box;
+	# gzip-accepting clients still get Django's own gzip, passed through unchanged.
+	reverse_proxy web:8000 {
+		transport http {
+			compression off
+		}
+	}
 }
