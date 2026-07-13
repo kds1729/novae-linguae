@@ -75,6 +75,7 @@ class Handler(BaseHTTPRequestHandler):
     store = {}
     things = {}
     token = "test-token"
+    api_key = "test-token"  # the X-Api-Key credential; main() defaults it to --token
     oauth_client = ("gw13-client", "gw13-secret")
 
     @property
@@ -175,7 +176,10 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(200 if existed else 201, body)
 
     def _api_keyed(self):
-        if self.headers.get("X-Api-Key") == self.token:
+        # A separate credential from the Bearer token (defaults equal for back-compat): a client
+        # that binds credentials per scheme passes both surfaces in one run; one that reuses a
+        # single value across schemes fails whichever surface got the wrong one.
+        if self.headers.get("X-Api-Key") == self.api_key:
             return True
         self._reply(401, b'{"error":"unauthorized"}')
         return False
@@ -293,10 +297,15 @@ def main():
     ap = argparse.ArgumentParser(description="Reference fake HTTP service for effectful exit gates.")
     ap.add_argument("--port", type=int, default=8878)
     ap.add_argument("--token", default="test-token")
+    ap.add_argument("--api-key", default=None,
+                    help="the X-Api-Key value the keyed endpoints accept (default: same as --token, "
+                         "the historical single-credential behavior; set it differently to exercise "
+                         "a client's PER-SCHEME credential binding)")
     ap.add_argument("--oauth-client", default="gw13-client:gw13-secret",
                     help="the client-credentials pair /token accepts, as id:secret")
     args = ap.parse_args()
     Handler.token = args.token
+    Handler.api_key = args.api_key if args.api_key is not None else args.token
     Handler.oauth_client = tuple(args.oauth_client.split(":", 1))
     HTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
 

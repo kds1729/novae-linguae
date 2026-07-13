@@ -110,9 +110,12 @@ python3 openapi_ingest.py examples/item-store.openapi.json --out /tmp/recs \
     --secret-name api_token --verify-against http://127.0.0.1:8878 --token test-token
 ```
 
-Known limit: the live gate supplies the **same `--token` value to every security scheme** the
-description declares, so a spec whose operations need *different* credentials for different schemes
-cannot be live-gated in one run (gate per-slice instead).
+`--token` binds credentials **per security scheme**: `--token NAME=VALUE` (repeatable, NAME = the
+scheme key) gives each scheme its own credential, and a bare `--token VALUE` (at most one) is the
+default for every unbound scheme — so a description mixing schemes (apiKey + bearer) live-gates in
+one run, each operation authenticating with its own scheme's value. Binding a scheme the
+description doesn't declare refuses up front. (This closes the former known limit — one shared
+token for all schemes; the old single-value invocation still means what it always did.)
 
 ## Faithfulness
 

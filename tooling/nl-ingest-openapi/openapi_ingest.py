@@ -74,7 +74,8 @@ live service (a fake or a real one), the "gate = examples vs an emulator" step �
 record is verified-by-default exactly like a hand-authored one.
 
     python3 openapi_ingest.py <spec.json> --out <dir> [--secret-name api_token]
-                              [--verify-against http://127.0.0.1:8878 --token test-token]
+                              [--verify-against http://127.0.0.1:8878]
+                              [--token VALUE | --token SCHEME=VALUE ...]
                               [--oauth-client id:secret] [--blob-threshold 65536]
 
 An example's expected value larger than --blob-threshold JCS-canonical bytes (observed OR
@@ -1000,8 +1001,44 @@ def certify(record_path, body_path, out_dir):
     return r.returncode == 0, r.stdout.strip().splitlines()[-1] if r.stdout else r.stderr.strip()
 
 
-def attach_example_traces(record_path, body_path, record, out_dir, secret_names, token,
-                          oauth_ids=(), blob_threshold=BLOB_THRESHOLD_DEFAULT):
+def parse_tokens(values):
+    """`--token` bindings for the live gate. Each value is either `NAME=VALUE` (binds security
+    scheme NAME to its own credential) or a bare `VALUE` (the default for every scheme without an
+    explicit binding; at most one, and it may not contain `=` — use the NAME= form then). Returns
+    (mapping, default). No values at all keeps the historical default `test-token`, so single-scheme
+    invocations are unchanged."""
+    if not values:
+        return {}, "test-token"
+    mapping, default = {}, None
+    for v in values:
+        name, sep, val = v.partition("=")
+        if sep:
+            if not name:
+                sys.exit(f"--token {v!r}: empty scheme name")
+            mapping[name] = val
+        else:
+            if default is not None:
+                sys.exit("only one bare --token VALUE may be given — bind the rest per scheme "
+                         "with --token NAME=VALUE")
+            default = v
+    return mapping, default
+
+
+def bound_secrets(secret_names, token_map, token_default):
+    """The (name, value) secret pairs the live gate supplies: each scheme takes its own binding,
+    else the bare default. A scheme with neither is OMITTED — if an operation actually needs it,
+    eval refuses with a clear `secret NAME is not supplied`, which is the honest failure."""
+    out = []
+    for n in secret_names:
+        if n in token_map:
+            out.append((n, token_map[n]))
+        elif token_default is not None:
+            out.append((n, token_default))
+    return out
+
+
+def attach_example_traces(record_path, body_path, record, out_dir, secrets, oauth_ids=(),
+                          blob_threshold=BLOB_THRESHOLD_DEFAULT):
     """The live gate for an EFFECTFUL record, one execution per example (GW12): run each worked
     example once via `eval --trace-out` (grants = the record's declared effects, secrets supplied),
     require the live result to equal the documented one, and attach the observed trace to the
@@ -1023,8 +1060,8 @@ def attach_example_traces(record_path, body_path, record, out_dir, secret_names,
             cmd += ["--arg", p]
         for e in effects:
             cmd += ["--grant", e]
-        for n in secret_names:
-            cmd += ["--secret", f"{n}={token}"]
+        for n, v in secrets:
+            cmd += ["--secret", f"{n}={v}"]
         for oname, cfg in oauth_ids:
             cmd += ["--oauth", f"{oname}={cfg}"]
         cmd += ["--trace-out", trace_path]
@@ -1060,7 +1097,7 @@ def attach_example_traces(record_path, body_path, record, out_dir, secret_names,
     return True, new_hash
 
 
-def materialize_schema_projection(p, out_dir, secret_names, token, oauth_ids=(),
+def materialize_schema_projection(p, out_dir, secrets, oauth_ids=(),
                                   blob_threshold=BLOB_THRESHOLD_DEFAULT):
     """The live OBSERVATION gate for a schema-derived projection (the GW12 shape, one rung
     deeper): run the body once (`eval --trace-out`, grants + secrets), hold the observed value
@@ -1083,8 +1120,8 @@ def materialize_schema_projection(p, out_dir, secret_names, token, oauth_ids=(),
     for ap in argfiles:
         cmd += ["--arg", ap]
     cmd += ["--grant", p["effect"]]
-    for n in secret_names:
-        cmd += ["--secret", f"{n}={token}"]
+    for n, v in secrets:
+        cmd += ["--secret", f"{n}={v}"]
     for oname, cfg in oauth_ids:
         cmd += ["--oauth", f"{oname}={cfg}"]
     cmd += ["--trace-out", trace_path]
@@ -1143,7 +1180,11 @@ def main(argv=None):
                     help="secret placeholder name for Bearer auth (default: the security scheme name)")
     ap.add_argument("--verify-against", default=None,
                     help="run each record's examples against this live base URL (a fake or real service)")
-    ap.add_argument("--token", default="test-token", help="Bearer token for --verify-against")
+    ap.add_argument("--token", action="append", default=None,
+                    help="auth credential for --verify-against. `NAME=VALUE` binds security scheme "
+                         "NAME to its own value; a bare VALUE (at most one) is the default for every "
+                         "unbound scheme. Repeatable, so a description mixing schemes (apiKey + "
+                         "bearer) live-gates in one run. Default: test-token for all schemes.")
     ap.add_argument("--oauth-client", default="gw13-client:gw13-secret",
                     help="client-credentials pair (id:secret) for oauth2 schemes during --verify-against; "
                          "the tokenUrl comes from the description itself")
@@ -1162,6 +1203,12 @@ def main(argv=None):
     # OAuth2 client-credentials identities for the live gate: identity name = the scheme key
     # (matching the {{oauth:<key>}} the records carry), tokenUrl from the DESCRIPTION itself,
     # client id/secret from the operator (--oauth-client) — the same division as --secret.
+    token_map, token_default = parse_tokens(args.token)
+    secrets = bound_secrets(secret_names, token_map, token_default)
+    unknown = sorted(set(token_map) - set(secret_names))
+    if unknown:
+        sys.exit(f"--token binds scheme(s) the description does not declare: {', '.join(unknown)} "
+                 f"(declared: {', '.join(secret_names)})")
     cid, _, csec = args.oauth_client.partition(":")
     oauth_ids = []
     for key, sch in schemes.items():
@@ -1207,7 +1254,7 @@ def main(argv=None):
                   "promises shape, not a value; --verify-against observes one")
     elif pending:
         for p in pending:
-            m_ok, got = materialize_schema_projection(p, args.out, secret_names, args.token,
+            m_ok, got = materialize_schema_projection(p, args.out, secrets,
                                                       oauth_ids=oauth_ids,
                                                       blob_threshold=args.blob_threshold)
             if not m_ok:
@@ -1231,7 +1278,7 @@ def main(argv=None):
             # GW12: the live gate for an effectful record IS the trace capture — each example runs
             # exactly once (grants + secrets), must reproduce its documented result, and its
             # observed trace is attached by trc_… address (re-addressing the record).
-            att_ok, att_msg = attach_example_traces(rp, bp, record, args.out, secret_names, args.token,
+            att_ok, att_msg = attach_example_traces(rp, bp, record, args.out, secrets,
                                                     oauth_ids=oauth_ids,
                                                     blob_threshold=args.blob_threshold)
             if not att_ok:

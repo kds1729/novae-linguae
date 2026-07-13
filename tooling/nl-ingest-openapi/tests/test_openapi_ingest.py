@@ -649,5 +649,124 @@ class SchemaObservationGateTest(unittest.TestCase):
         self.assertFalse((Path(tmp) / "gethealthstatus.v0.2.json").exists())
 
 
+class TokenBindingTests(unittest.TestCase):
+    """parse_tokens / bound_secrets — the per-scheme credential grammar (offline)."""
+
+    def test_default_is_historical_single_token(self):
+        mapping, default = oi.parse_tokens(None)
+        self.assertEqual((mapping, default), ({}, "test-token"))
+        self.assertEqual(oi.bound_secrets(["a", "b"], mapping, default),
+                         [("a", "test-token"), ("b", "test-token")])
+
+    def test_name_bindings_and_bare_default_compose(self):
+        mapping, default = oi.parse_tokens(["keyAuth=tok-key", "fallback-tok"])
+        self.assertEqual(mapping, {"keyAuth": "tok-key"})
+        self.assertEqual(default, "fallback-tok")
+        self.assertEqual(oi.bound_secrets(["keyAuth", "other"], mapping, default),
+                         [("keyAuth", "tok-key"), ("other", "fallback-tok")])
+
+    def test_unbound_scheme_without_default_is_omitted(self):
+        mapping, default = oi.parse_tokens(["keyAuth=tok-key"])
+        self.assertIsNone(default)
+        self.assertEqual(oi.bound_secrets(["keyAuth", "other"], mapping, default),
+                         [("keyAuth", "tok-key")])
+
+    def test_two_bare_tokens_refuse(self):
+        with self.assertRaises(SystemExit):
+            oi.parse_tokens(["one", "two"])
+
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator not built")
+class MultiSchemeAuthGateTest(unittest.TestCase):
+    """The one-token-for-all-schemes limit, closed: a description mixing bearer and apiKey
+    live-gates in ONE run when each scheme gets its own --token binding — and the old behavior
+    (a single shared value) demonstrably fails the scheme it shortchanges."""
+
+    PORT = 18879
+    BEARER, KEY = "tok-bearer", "tok-key"
+
+    @classmethod
+    def setUpClass(cls):
+        import time
+        import urllib.request
+        cls.base = f"http://127.0.0.1:{cls.PORT}"
+        cls.svc = subprocess.Popen(
+            [sys.executable, str(REPO_ROOT / "tooling" / "fake-service" / "fake_service.py"),
+             "--port", str(cls.PORT), "--token", cls.BEARER, "--api-key", cls.KEY],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(f"{cls.base}/health", timeout=0.2)
+                break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("fake service did not come up")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.svc.terminate()
+        cls.svc.wait()
+
+    def _spec(self):
+        return {
+            "openapi": "3.0.0", "info": {"title": "two-scheme", "version": "1"},
+            "servers": [{"url": self.base}],
+            "components": {"securitySchemes": {
+                "itemsAuth": {"type": "http", "scheme": "bearer"},
+                "keyAuth": {"type": "apiKey", "in": "header", "name": "X-Api-Key"}}},
+            "paths": {
+                "/items/{name}": {"get": {
+                    "operationId": "getItemStatus", "security": [{"itemsAuth": []}],
+                    "parameters": [{"name": "name", "in": "path", "required": True,
+                                    "schema": {"type": "string"}}],
+                    "responses": {"200": {"description": "found"},
+                                  "404": {"description": "absent"}}}},
+                "/search": {"get": {
+                    "operationId": "searchItems", "security": [{"keyAuth": []}],
+                    "parameters": [
+                        {"name": "q", "in": "query", "required": True,
+                         "schema": {"type": "string"}},
+                        {"name": "limit", "in": "query", "required": True,
+                         "schema": {"type": "integer"}}],
+                    "responses": {"200": {"description": "results"}}}},
+            },
+        }
+
+    def _ingest(self, tokens):
+        tmp = tempfile.mkdtemp(prefix="nl-openapi-multischeme-")
+        sp = Path(tmp) / "spec.json"
+        json.dump(self._spec(), open(sp, "w"))
+        code = 0
+        try:
+            oi.main([str(sp), "--out", tmp, "--verify-against", self.base, *tokens])
+        except SystemExit as e:
+            code = e.code
+        return tmp, code
+
+    def test_per_scheme_bindings_gate_both_ops_in_one_run(self):
+        tmp, code = self._ingest(["--token", f"itemsAuth={self.BEARER}",
+                                  "--token", f"keyAuth={self.KEY}"])
+        self.assertEqual(code, 0)
+        for name in ("getitemstatus", "searchitems"):
+            rec = json.load(open(Path(tmp) / f"{name}.v0.2.json"))
+            self.assertTrue(rec["examples"][0]["trace"].startswith("trc_"), name)
+        # Each record carries ITS OWN scheme's placeholder — not one shared secret.
+        items = json.dumps(json.load(open(Path(tmp) / "body-getitemstatus.json")))
+        search = json.dumps(json.load(open(Path(tmp) / "body-searchitems.json")))
+        self.assertIn("{{secret:itemsAuth}}", items)
+        self.assertIn("{{secret:keyAuth}}", search)
+
+    def test_single_shared_token_fails_the_other_scheme(self):
+        # The pre-close behavior, now an honest failure: the bearer value reused for the apiKey
+        # scheme draws the service's 401 and the live gate refuses that record.
+        tmp, code = self._ingest(["--token", self.BEARER])
+        self.assertNotEqual(code, 0)
+
+    def test_binding_an_undeclared_scheme_refuses(self):
+        tmp, code = self._ingest(["--token", "nosuch=x"])
+        self.assertNotEqual(code, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
