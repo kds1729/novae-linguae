@@ -61,14 +61,25 @@ def bundle_digest(record_hashes):
     return "blake2b:" + h.hexdigest()
 
 
+def _sort_key(r):
+    """Deterministic ordering: hash-carrying records by address; hashless SELF-ADDRESSING artifacts
+    (bare bodies, traces — computing their address needs the validator, which the bundle layer
+    deliberately does not) by their canonical serialization, after every address (`~` > `a-z`)."""
+    return r.get("hash") or "~" + json.dumps(r, sort_keys=True, separators=(",", ":"))
+
+
 def _jsonl(records):
-    """Records as compact, sorted-key JSON lines, ordered by hash (deterministic)."""
-    ordered = sorted(records, key=lambda r: r["hash"])
+    """Records as compact, sorted-key JSON lines, deterministically ordered (see `_sort_key`)."""
+    ordered = sorted(records, key=_sort_key)
     return [json.dumps(r, sort_keys=True, separators=(",", ":")) for r in ordered]
 
 
 def build_manifest(records, source=None, producer=None, blob_sizes=None):
-    hashes = [r["hash"] for r in records]
+    # The digest covers the hash-CARRYING record set — the reader recomputes it without a
+    # validator, so hashless self-addressing artifacts (bare bodies, traces) ride in the jsonl
+    # outside the digest; the ingest gate's self-addressing is what verifies them, exactly as it
+    # does for a network publish. A bundle without such artifacts is byte-identical to before.
+    hashes = [r["hash"] for r in records if isinstance(r, dict) and "hash" in r]
     manifest = {
         "format_version": FORMAT_VERSION,
         "count": len(records),

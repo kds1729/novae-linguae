@@ -34,6 +34,13 @@ class Record(models.Model):
     type_str = models.TextField(null=True, blank=True)
     body_hash = models.CharField(max_length=128, null=True, blank=True)
 
+    # Body storage tiering (spec/commons.md open question 4): a bare body larger than the record cap
+    # keeps only this POINTER in the metadata index — its canonical JSON bytes live in the blob store
+    # under their sha256 (`raw` is then `{}`). Resolve streams the blob; everything else about the
+    # gate (verify-then-store, self-addressing, idempotency) is unchanged. Null for inline rows.
+    blob_sha256 = models.CharField(max_length=64, null=True, blank=True)
+    blob_bytes = models.BigIntegerField(null=True, blank=True)
+
     # Semantic-search vector (spec/commons.md `POST /v0/search`). The L2-normalized embedding and the
     # id of the model that produced it (so a model change is detectable and rows can be re-embedded).
     # On a Postgres backend this becomes a pgvector column with an ANN index; here it is plain JSON

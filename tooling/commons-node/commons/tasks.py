@@ -177,7 +177,10 @@ def embed_pending(limit=500):
     from .vectorindex import store_vector
 
     emb = get_embedder()
-    chunk = list(Record.objects.exclude(embedding_model=emb.model_id).order_by("id")[:limit])
+    # Tiered bodies (blob-backed pointer rows) embed at ingest from the real content; their stored
+    # `raw` is a stub, so backfill skips them rather than embed the stub.
+    chunk = list(Record.objects.exclude(embedding_model=emb.model_id)
+                 .filter(blob_sha256__isnull=True).order_by("id")[:limit])
     if not chunk:
         return {"embedded": 0, "model": emb.model_id}
     vectors = emb.embed_batch([r.raw for r in chunk])

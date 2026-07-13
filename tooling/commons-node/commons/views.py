@@ -34,12 +34,23 @@ def records(request):
     """POST /v0/records — verify then store (idempotent by hash)."""
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
-    if len(request.body) > settings.COMMONS_MAX_RECORD_BYTES:
+    # Size gates: the record cap protects the metadata index; a BARE BODY may exceed it up to the
+    # body ceiling — it is tiered into the blob store on ingest (commons.md open question 4). The
+    # over-cap path is sniffed cheaply before parsing/verifying (a dict of a body kind with no
+    # embedded hash — exactly what verify's bare-body dispatch accepts), and the verified kind is
+    # re-checked below so nothing over the record cap but a genuine body ever stores.
+    oversized = len(request.body) > settings.COMMONS_MAX_RECORD_BYTES
+    if len(request.body) > max(settings.COMMONS_MAX_RECORD_BYTES, settings.COMMONS_MAX_BODY_BYTES):
         return JsonResponse({"error": "too_large"}, status=413)
     try:
         raw = json.loads(request.body)
     except ValueError as exc:
+        if oversized:
+            return JsonResponse({"error": "too_large"}, status=413)
         return JsonResponse({"error": "malformed_json", "detail": str(exc)}, status=400)
+    if oversized and not (isinstance(raw, dict) and "hash" not in raw
+                          and raw.get("kind") in V._BODY_EXPR_KINDS):
+        return JsonResponse({"error": "too_large"}, status=413)
 
     try:
         kind, version, address = V.verify_record(raw)
@@ -48,6 +59,8 @@ def records(request):
             return JsonResponse({"error": exc.code, "detail": exc.detail}, status=503)
         status = 422 if exc.code in _UNPROCESSABLE else 400
         return JsonResponse({"error": exc.code, "detail": exc.detail}, status=status)
+    if oversized and kind != "body":
+        return JsonResponse({"error": "too_large"}, status=413)
 
     if Record.objects.filter(hash=address).exists():
         return JsonResponse({"hash": address, "stored": False}, status=200)
@@ -67,6 +80,20 @@ def record(request, address):
     row = Record.objects.filter(hash=address).first()
     if row is None:
         return JsonResponse({"error": "absent"}, status=404)
+    if row.blob_sha256:
+        # A tiered body: the row is a pointer, the canonical JSON bytes live in the blob store.
+        # Streamed like /v0/blobs (FileResponse egress is metered); the wire shape is identical to
+        # an inline resolve — a client cannot tell (and must not care) which tier served it.
+        import os
+
+        from django.http import FileResponse
+
+        path = os.path.join(settings.COMMONS_BLOB_DIR, row.blob_sha256)
+        if not os.path.isfile(path):
+            return JsonResponse({"error": "absent", "detail": "tiered body's blob is missing"}, status=404)
+        resp = FileResponse(open(path, "rb"), content_type="application/json")
+        resp["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
     resp = JsonResponse(row.raw)
     # Content-addressed records are immutable, so this is safe to cache forever. Lets a CDN/edge front
     # `resolve` at ~100% hit rate and absorb traffic spikes off the origin's metered egress.

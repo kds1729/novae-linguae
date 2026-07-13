@@ -308,6 +308,7 @@ signature and bundle hash are the real checks.
 | `COMMONS_PROVE_MAX_PROPERTIES` | `32` | per-call cap on properties to prove |
 | `COMMONS_DB_PATH` | `./db.sqlite3` | SQLite file |
 | `COMMONS_MAX_RECORD_BYTES` | 1 MiB | local size cap (a permitted endpoint policy) |
+| `COMMONS_MAX_BODY_BYTES` | 8 MiB | ceiling for BARE BODIES past the record cap — verified as always, then tiered: pointer row in the index, canonical bytes in the blob store, resolve streams them back (commons.md open question 4) |
 | `COMMONS_PEERS` | empty | comma-separated peer hints for future replication |
 | `COMMONS_EMBEDDER` | `lexical-hashing-v0` | embedding model id; a non-lexical id selects the neural backend |
 | `COMMONS_EMBEDDING_DIM` | `256` | vector dimensionality (256 lexical / 384 bge-small) — part of model identity |

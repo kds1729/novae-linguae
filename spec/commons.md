@@ -490,10 +490,20 @@ conformant if it speaks the protocol above. The engine choice MUST NOT leak into
    timestamp. This is an add-on for auditability, never the store itself.
 3. **Embedding portability** — a recommended embedding model (or a way to publish embeddings as
    `proof`-like derived artifacts) so semantic search is more comparable across nodes.
-4. **Body storage tiering** — the blob/CDN layer itself now exists (`GET /v0/blobs/{sha256}`, above:
+4. ~~**Body storage tiering** — the blob/CDN layer itself now exists (`GET /v0/blobs/{sha256}`, above:
    gate-free, CDN-frontable, carrying weights and by-address example values). What remains open is
    the narrower question of routing large `expr_` *bodies* through it — bodies are still ordinary
-   records in the metadata index.
+   records in the metadata index.~~ **RESOLVED** — a bare body larger than the node's record cap is
+   still admitted (up to a separate body ceiling; the reference node's env knobs are
+   `COMMONS_MAX_RECORD_BYTES` / `COMMONS_MAX_BODY_BYTES`): it passes the same verify-then-store
+   gate, then only a thin pointer row enters the metadata index while the canonical JSON bytes live
+   in the blob store; `GET /v0/records/{expr_…}` streams them back byte-equivalently, so a client
+   cannot tell (and must not care) which tier served it. Applied only *above* the cap — every record
+   that could exist before tiering is stored exactly as before. Bodies are what makes the bigger
+   ceiling safe: pure self-addressing content, no signature, no queryable metadata. (`.nlb` bundles
+   materialize tiered bodies back to full records; the bundle digest covers the hash-carrying set —
+   hashless self-addressing artifacts are verified by the ingest gate's self-addressing, the same
+   boundary as a network publish.)
 5. ~~**Query over structured ASTs** — richer `type_contains` matching against the v0.2 type AST
    (unification, subtyping) rather than substring hints.~~ **RESOLVED** — `type_pattern` (above)
    matches the structured type AST by unification, with pattern wildcards, disjunction, and

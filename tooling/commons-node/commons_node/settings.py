@@ -88,6 +88,11 @@ COMMONS_PROVE_MAX_PROPERTIES = int(os.environ.get("COMMONS_PROVE_MAX_PROPERTIES"
 
 # Local mirroring policy (principle-7-permitted endpoint choices, never protocol gates).
 COMMONS_MAX_RECORD_BYTES = int(os.environ.get("COMMONS_MAX_RECORD_BYTES", str(1 << 20)))  # 1 MiB
+# Body storage tiering (spec/commons.md, open question 4): a BARE BODY larger than the record cap
+# is still admitted — verified as always, then stored in the blob store with only a thin pointer
+# row in the metadata index — up to this ceiling. Bodies are pure self-addressing content (no
+# signature, no queryable metadata), which is what makes the bigger ceiling safe.
+COMMONS_MAX_BODY_BYTES = int(os.environ.get("COMMONS_MAX_BODY_BYTES", str(8 << 20)))  # 8 MiB
 COMMONS_PEERS = [p for p in os.environ.get("COMMONS_PEERS", "").split(",") if p.strip()]
 
 # Semantic search (spec/commons.md `POST /v0/search`). The reference node ships a stdlib-only,

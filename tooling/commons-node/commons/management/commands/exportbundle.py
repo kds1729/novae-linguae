@@ -16,6 +16,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from commons.bundle import write_bundle
+from commons.ingest import materialized_raw
 from commons.models import Record
 from commons.query import candidate_records
 from commons.tasks import _referenced_blobs
@@ -49,15 +50,16 @@ class Command(BaseCommand):
             rows = candidate_records(flt, cap=10 ** 9)[0]
             if since is not None:
                 rows = [r for r in rows if r.id > since]
-            records = [r.raw for r in rows]
+            # materialized: a tiered body's row is a pointer — the bundle carries the real record.
+            records = [materialized_raw(r) for r in rows]
             next_cursor = max((r.id for r in rows), default=since or 0)
         else:
             qs = Record.objects.order_by("id")
             if since is not None:
                 qs = qs.filter(id__gt=since)
-            rows = list(qs.values_list("id", "raw"))
-            records = [raw for _id, raw in rows]
-            next_cursor = rows[-1][0] if rows else (since or 0)
+            rows = list(qs)
+            records = [materialized_raw(r) for r in rows]
+            next_cursor = rows[-1].id if rows else (since or 0)
 
         source = {k: v for k, v in (("repo", options.get("source_repo")),
                                     ("release", options.get("source_release"))) if v} or None

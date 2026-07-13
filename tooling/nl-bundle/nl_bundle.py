@@ -49,17 +49,26 @@ def bundle_digest(record_hashes):
     return "blake2b:" + h.hexdigest()
 
 
+def _sort_key(r):
+    # Hash-carrying records by address; hashless self-addressing artifacts (bare bodies, traces)
+    # by canonical serialization, after every address (`~` > `a-z`). Mirrors commons-node bundle.py.
+    return r.get("hash") or "~" + json.dumps(r, sort_keys=True, separators=(",", ":"))
+
+
 def _jsonl(records):
-    ordered = sorted(records, key=lambda r: r["hash"])
+    ordered = sorted(records, key=_sort_key)
     return [json.dumps(r, sort_keys=True, separators=(",", ":")) for r in ordered]
 
 
 def build_manifest(records, source=None, producer=None, blob_sizes=None):
+    # Digest = the hash-carrying record set only; hashless self-addressing artifacts ride outside
+    # it (the reader recomputes the digest without a validator; the ingest gate verifies them).
     manifest = {
         "format_version": FORMAT_VERSION,
         "count": len(records),
         "schema_versions": sorted({r["schema_version"] for r in records if r.get("schema_version")}),
-        "bundle_digest": bundle_digest([r["hash"] for r in records]),
+        "bundle_digest": bundle_digest([r["hash"] for r in records
+                                        if isinstance(r, dict) and "hash" in r]),
     }
     if blob_sizes:
         # Advisory totals; blob members are self-verifying by name, and a blobless manifest is

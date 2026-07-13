@@ -1876,3 +1876,83 @@ class EquivalenceClaimTests(TestCase):
     def test_equivalences_get_only(self):
         resp = self.client.post(f"/v0/records/{self.FN_A}/equivalences")
         self.assertEqual(resp.status_code, 405)
+
+
+# --- body storage tiering (commons.md open question 4) ---------------------------------------------
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class BodyTieringTests(TestCase):
+    """A bare body past the record cap is admitted, tiered into the blob store, and resolves
+    byte-equivalently; everything that is not a body keeps the record cap."""
+
+    def setUp(self):
+        self.client = Client()
+        self.blob_dir = tempfile.mkdtemp(prefix="nl-tier-blobs-")
+
+    @staticmethod
+    def _big_body(n=5000):
+        # A valid bare body (a string literal) whose canonical JSON exceeds the (overridden) cap.
+        return {"kind": "lit", "value": {"kind": "string", "value": "x" * n}}
+
+    def _publish(self, record):
+        return self.client.post("/v0/records", data=json.dumps(record),
+                                content_type="application/json")
+
+    def test_oversized_body_tiers_and_resolves(self):
+        with override_settings(COMMONS_MAX_RECORD_BYTES=2048, COMMONS_BLOB_DIR=self.blob_dir):
+            body = self._big_body()
+            resp = self._publish(body)
+            self.assertEqual(resp.status_code, 201, resp.content)
+            addr = resp.json()["hash"]
+            self.assertTrue(addr.startswith("expr_"))
+
+            row = Record.objects.get(hash=addr)
+            self.assertEqual(row.raw, {}, "the metadata index holds only a pointer row")
+            self.assertTrue(row.blob_sha256)
+            blob_path = Path(self.blob_dir) / row.blob_sha256
+            self.assertTrue(blob_path.is_file())
+            self.assertEqual(row.blob_bytes, blob_path.stat().st_size)
+
+            # Resolve is indistinguishable from an inline record.
+            got = self.client.get(f"/v0/records/{addr}")
+            self.assertEqual(got.status_code, 200)
+            self.assertEqual(json.loads(b"".join(got.streaming_content)), body)
+            self.assertEqual(self.client.head(f"/v0/records/{addr}").status_code, 200)
+
+            # Idempotent republish.
+            again = self._publish(body)
+            self.assertEqual(again.status_code, 200)
+            self.assertFalse(again.json()["stored"])
+
+    def test_oversized_non_body_still_413(self):
+        with override_settings(COMMONS_MAX_RECORD_BYTES=2048, COMMONS_BLOB_DIR=self.blob_dir):
+            rec = _load("map.json")
+            rec["_padding"] = "x" * 4096
+            resp = self._publish(rec)
+            self.assertEqual(resp.status_code, 413)
+
+    def test_body_ceiling_still_bounds(self):
+        with override_settings(COMMONS_MAX_RECORD_BYTES=1024, COMMONS_MAX_BODY_BYTES=2048,
+                               COMMONS_BLOB_DIR=self.blob_dir):
+            resp = self._publish(self._big_body(4096))
+            self.assertEqual(resp.status_code, 413)
+
+    def test_under_cap_body_stays_inline(self):
+        with override_settings(COMMONS_MAX_RECORD_BYTES=1 << 20, COMMONS_BLOB_DIR=self.blob_dir):
+            body = _load("body-double-second-field.json")
+            resp = self._publish(body)
+            self.assertEqual(resp.status_code, 201, resp.content)
+            row = Record.objects.get(hash=resp.json()["hash"])
+            self.assertIsNone(row.blob_sha256)
+            self.assertEqual(row.raw, body)
+
+    def test_exportbundle_materializes_tiered_bodies(self):
+        from commons.bundle import read_bundle
+
+        with override_settings(COMMONS_MAX_RECORD_BYTES=2048, COMMONS_BLOB_DIR=self.blob_dir):
+            body = self._big_body()
+            self.assertEqual(self._publish(body).status_code, 201)
+            out = Path(self.blob_dir) / "tiered.nlb"
+            call_command("exportbundle", str(out), stdout=io.StringIO(), stderr=io.StringIO())
+            _, records = read_bundle(str(out))
+            self.assertIn(body, records, "the bundle carries the real body, not the pointer stub")
