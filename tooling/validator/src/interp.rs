@@ -560,8 +560,8 @@ fn as_str_list(v: &Val) -> Result<Vec<String>> {
     }
 }
 
-/// The host component of an `http://` / `https://` URL — the scope a host-scoped net grant
-/// (`net.write@host`) is checked against.
+/// The host component of an `http://` / `https://` URL (see [`url_scope`] for the full
+/// `host[/path]` grant scope built on top of it).
 pub(crate) fn url_host(url: &str) -> Result<String> {
     let rest = url
         .strip_prefix("https://")
@@ -1466,7 +1466,7 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             // The general request (GW6): http(method, url, headers, body) -> {status, body}.
             // net.read for GET/HEAD, net.write for every other method — decided by the METHOD, so a
             // mutating call is gated by the mutating grant even through this one builtin. The grant
-            // check is HOST-scoped (net.write@host). Header values may carry {{secret:NAME}}
+            // check is scoped by host and path (net.write@host[/path]). Header values may carry {{secret:NAME}}
             // placeholders, substituted from the operator's secrets only inside the live effect —
             // the trace detail records the SYMBOLIC headers, so a credential never enters the trace
             // (and replay needs no secrets at all: the response is replayed from the record).

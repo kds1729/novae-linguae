@@ -48,6 +48,13 @@ Four more modules support **higher-fidelity, structured-AST ingestion** (toward 
   `assert` statements into refinement **preconditions** (`{kind: "pre", expr}`). Unsupported forms
   raise so they're skipped; *properties* (algebraic laws) remain agent-authored.
 
+- **`nl_canon.py`** — the **canonical iteration records** (`nth` / `range_from` / `range`,
+  2026-07-13): ordinary certified commons records in [`spec/examples`](../../spec/examples/) that
+  ingested bodies apply **by content-address** (subscript reads, `range` loops, counting `while`s
+  — see `nl_body.py`). The hashes are pinned here (a drifted `spec/examples` fails loudly), and
+  `canonical_dependency_artifacts()` is the record+body bundle adapters write into their emit
+  directory so `nl-validator run --records` links the emitted `fn_ref`s.
+
 A language adapter supplies only the *front end*: parse the source, extract each public function's
 name, type string, arity, and a body text to hash, then call `build_record`. Everything produced
 this way passes `nl-validator validate` and `verify`, and its hashes agree byte-for-byte with the

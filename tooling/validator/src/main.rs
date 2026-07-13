@@ -170,7 +170,8 @@ enum Commands {
         #[arg(long = "arg")]
         args: Vec<PathBuf>,
         /// Grant an effect the body may perform (e.g. `io.console`, `random`, `fs.read`, `fs.write`,
-        /// `net.write@api.example.com` — a net grant may be HOST-scoped with `@host`).
+        /// `net.write@api.example.com` — a grant may be scoped: `@host`, `@host/path/prefix`, or
+        /// `fs.read@/dir`, matched segment-aligned at the effect boundary).
         /// Repeatable. An effectful builtin whose effect is not granted is rejected at eval time;
         /// pure bodies need no grants. The performed effects are printed as a trace.
         #[arg(long = "grant")]

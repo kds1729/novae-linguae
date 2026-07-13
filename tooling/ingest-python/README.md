@@ -64,8 +64,14 @@ can emit a mix. Float example values are canonicalized per JCS / ECMAScript Numb
 the Rust validator, pinned by `spec/conformance/` canonicalization vectors). A function whose body is
 inside the statement subset gets a real body-expression AST as its `body_hash` (written by
 `--emit-dir` so `nl-validator run` can execute it); outside the subset the normalised-source hash
-stands. Every `--v2` record passes `nl-validator validate`
-against `function-record.v0.2.schema.json` and `nl-validator verify`.
+stands. Since 2026-07-13 the subset also covers **subscripts** (reads Maybe-totalize: `d[k]` →
+`map_get`, `xs[i]` → the canonical `nth` commons record by `fn_ref`, `xs[-1]` → a null-guarded
+`last`; the store `d[k] = v` is the total `map_put` rebind) and **counted iteration** (`for i in
+range(a, b)` and the counting `while`, over the canonical `range` record) — an emitted body may
+therefore apply commons records by content-address, so `--emit-dir` also writes the canonical
+`nth`/`range_from`/`range` records + bodies ([`ingest-common/nl_canon.py`](../ingest-common/nl_canon.py))
+into the directory, keeping it self-linking for `nl-validator run --records`. Every `--v2` record
+passes `nl-validator validate` against `function-record.v0.2.schema.json` and `nl-validator verify`.
 
 ### `--exec-examples` — observed examples for the doctest-less (the license/observe split)
 

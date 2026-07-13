@@ -425,7 +425,8 @@ fn effect_refusal(
         }
     }
     let granted = crate::interp::current_effect_grants();
-    // A host-scoped grant (`net.write@api.example.com`) satisfies the static gate for its BASE
+    // A scoped grant (`net.write@api.example.com`, `net.write@host/path`, `fs.read@/dir`)
+    // satisfies the static gate for its BASE
     // effect — which host a call actually targets is only known at the effect boundary, where
     // the sandbox enforces the scope (interp::effect_op_at).
     let granted_bases: std::collections::BTreeSet<String> =

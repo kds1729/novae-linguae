@@ -20,13 +20,20 @@ form, matching `spec/examples/body-double.json`) whose body is built from:
     `to_string`; `!r`-style conversions and format specs are out of subset). Unannotated code
     keeps its numeric/list reading, and a wrong guess fails the example gate rather than
     shipping wrong.
+  * subscripts (2026-07-13, the survey's last design frontiers) — READS ride the raise-totalization
+    boundary (the function's result Maybe-wraps): `d[k]` → `map_get`, `xs[i]` → the canonical `nth`
+    commons record by `fn_ref` (see `nl_canon`), the idiomatic `xs[-1]` → a null-guarded `last`;
+    STORES are total: `d[k] = v` → the `map_put` rebind;
+  * counted iteration — `for i in range(a, b)` and the **counting `while`** (`while i < n: …;
+    i += 1`, plus `<=` and the descending `>`/`>=` with `i -= 1`) desugar to the ordinary loop
+    shapes over the canonical `range` record applied by `fn_ref`.
 Conditionals (and comprehension filters) are only translated when the test is genuinely boolean (a
 comparison / boolean connective / `not` / bool literal) so Python truthiness is never silently
-mistranslated. Anything outside the subset (`while`, non-accumulator `for`, multi-generator / dict /
-set comprehensions, `with`/`try`, truthy non-bool tests, unrepresentable sub-expressions) yields
-None, and the adapter keeps its synthetic source-hash body — byte-identical to before. A
-zero-parameter function emits the bare result expression (no `lambda`), so applying it to `[]` still
-evaluates.
+mistranslated. Anything outside the subset (non-counting `while`, non-accumulator `for`,
+multi-generator / dict / set comprehensions, `with`/`try`, truthy non-bool tests, unrepresentable
+sub-expressions) yields None, and the adapter keeps its synthetic source-hash body — byte-identical
+to before. A zero-parameter function emits the bare result expression (no `lambda`), so applying it
+to `[]` still evaluates.
 
 Front-ends:
   * `body_ast_from_py` — real Python `ast` (nl-ingest-py): the executable subset above.

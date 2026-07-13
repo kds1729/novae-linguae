@@ -5,14 +5,25 @@
 //! Over the **first-order** fragment (the arithmetic/boolean/comparison builtins plus the first-order list
 //! ops `head`/`tail`/`cons`/`null`/`length`/`append`/`reverse`), a body provably terminates when either:
 //!   - it is **non-recursive** (no `self`-call) — every builtin halts on finite input; or
-//!   - it is **structurally recursive**: every `self`-call's recursion argument is `tail^k(p)` (`k ≥ 1`)
-//!     of one fixed parameter `p`. A list is a finite inductive structure and `tail` strictly shrinks it,
-//!     so the recursion is well-founded and halts (normally, or with an error at `nil` — either way it
-//!     terminates).
+//!   - some ONE argument position provably descends in EVERY `self`-call (a single well-founded
+//!     measure; any fixed position, not just the first — `nth(i, xs)` descends position 2), where a
+//!     position `j` descends when its argument is:
+//!       * `tail^k(params[j])` (`k ≥ 1`) — **structural**: a list is a finite inductive structure and
+//!         `tail` strictly shrinks it; the descent must feed its OWN position (`self(tail(xs), xs)`
+//!         descends nothing — the shrinking value lands in a slot whose parameter the guard never
+//!         watches), and a shadowing `let`/nested-lambda/pattern binding of the parameter's name
+//!         disqualifies it (a same-named binding is a different value); or
+//!       * `sub(params[j], c)` (`c ≥ 1`) under a dominating lower-bound guard `gt(p, lit)`/`ge(p, lit)`
+//!         (or the mirrored `lt`/`le`) — **guarded numeric**: a strictly decreasing integer sequence
+//!         over a constant floor is finite, sound for plain ints; or
+//!       * `sub(params[j], 1)` under a dominating `p != 0` guard (`eq(p, 0)`'s false arm / `neq(p, 0)`'s
+//!         true arm) when position `j` is `nat`-typed ([`analyze_termination_typed`]) — the type
+//!         supplies the floor, and the unit step keeps the value a nat (a larger step could tunnel
+//!         below zero and recurse forever, so it is refused).
 //!
 //! Anything else is reported `Unknown`, never a false `Always`: a recursion whose argument is *not* a
-//! strict structural descent (it might not be well-founded), `self`-calls descending on different
-//! parameters, or — crucially — any **higher-order / opaque** application (`map`/`filter`/`fold`, applying
+//! provable descent (it might not be well-founded), `self`-calls with no common descending position,
+//! or — crucially — any **higher-order / opaque** application (`map`/`filter`/`fold`, applying
 //! a parameter or an `fn_ref`), whose termination depends on a callee this local analysis cannot see (the
 //! same honesty stance `check-effects` takes for opaque callees). So `Always` here is sound but
 //! incomplete; the unverifiable cases are flagged, not waved through.

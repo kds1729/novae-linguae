@@ -457,7 +457,7 @@ recurse, both bodies are emitted as `define-fun-rec`s and `∀p0 ps…. f(p0, ps
 arity is not capped) threaded through both functions as a **spectator** — declared free in the goal and
 **∀-quantified in the induction hypothesis**, so both a *carried* spectator (append's second list, unchanged)
 and a *descending* one (zipWith's, tailed each step) close. The induction **stride** is `lcm(stride_f,
-stride_g)`: when both strides are read off the AST it is targeted directly in a single attempt (`lcm ≤ 24`,
+stride_g)`: when both strides are read off the AST it is targeted directly in a single attempt (`lcm ≤ 60`,
 so 3-vs-5 = 15 closes), and when a stride can't be read the prover *searches* `k = 1..12` — so
 recursions that misalign by a constant stride (length-by-1 vs length-by-2, 2-vs-3, 3-vs-5) still close, and
 when the bare step stalls the prover draws on the curated **list-algebra lemma catalog** (`append_nil`,
@@ -594,7 +594,15 @@ automatically. Two GW6 additions on top of the grant set: a **net grant may be h
 grant still means any host), and an `http` header value may carry a **`{{secret:NAME}}`
 placeholder** substituted from operator-supplied `--secret NAME=VALUE` values only inside the live
 effect — the trace records the placeholder, never the credential, so replay needs no secrets
-(spec/agent-loop.md §Scope has the doctrine).
+(spec/agent-loop.md §Scope has the doctrine). GW17 (2026-07-13) extended the scope grammar past
+the host: a grant scope may carry a **path prefix** (`net.write@api.example.com/v0/things`) and
+**fs grants scope by path** the same way (`fs.read@/data`), matched SEGMENT-ALIGNED at the effect
+boundary (`/v0` covers `/v0/things`, never `/v0things`; query/fragment/port stripped) — one rule
+for host, host+path, and fs scoping, and the legacy `http_get`/`http_post`/`read_file`/`write_file`
+builtins carry scopes too. A grant may also be **trust-gated per function**
+(`--grant-certified` on `respond`/`orchestrate --verify`): it counts only for a target certified
+by a certifier the operator's policy trusts, decided per candidate and recorded as an auditable
+`grants` transcript step (spec/agent-loop.md §Scope).
 
 **Record / replay (principle 5).** Every trace entry records its `result` (what the builtin
 returned), so a run is **replayable**: `nl-validator eval … --replay <trace>` makes the effectful
