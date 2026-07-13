@@ -16,6 +16,7 @@ from django.db import connection
 from django.db.models import Q
 
 from .models import Record
+from . import typematch
 
 _DB_SCAN_CAP = 2000  # bound the per-request scan for the MVP
 _CHARS_PER_TOKEN = 4  # rough, tokenizer-free heuristic; the budget is an estimate, documented as such
@@ -54,6 +55,11 @@ def validate_filter(flt):
                     raise QueryError(f"`{field}.none` must be a boolean")
             elif not isinstance(val, list):
                 raise QueryError(f"`{field}.{key}` must be an array")
+    if "type_pattern" in flt:
+        try:
+            typematch.validate_pattern(flt["type_pattern"])
+        except typematch.PatternError as exc:
+            raise QueryError(str(exc))
     if "token_budget" in flt:
         check_token_budget(flt["token_budget"])
     return flt
@@ -103,6 +109,13 @@ def _array_ok(record, flt):
 
     prefix = flt.get("name_hint_prefix")
     if prefix and not any(n.startswith(prefix) for n in record.name_hints):
+        return False
+
+    # Structured type matching (spec/commons.md `type_pattern`): unification against the stored
+    # v0.2 type AST. Runs in the Python confirm pass — it has no DB pushdown (the AST lives in a
+    # text column), so like the array predicates it narrows the bounded scan, exactly and portably.
+    pattern = flt.get("type_pattern")
+    if isinstance(pattern, dict) and not typematch.matches_type(pattern, record.type_str):
         return False
     return True
 

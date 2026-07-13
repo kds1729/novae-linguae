@@ -2007,14 +2007,26 @@ fn commons_view(
     records: Option<&PathBuf>,
     node: Option<&str>,
     intents: &[String],
+    type_pattern: Option<&serde_json::Value>,
 ) -> Result<(std::collections::HashMap<String, serde_json::Value>, std::collections::HashMap<String, serde_json::Value>)> {
     match (records, node) {
         (Some(dir), None) => Ok((nl_validator::build_link_map(dir)?, nl_validator::build_record_map(dir)?)),
         (None, Some(url)) => {
             let mut seeds: Vec<String> = Vec::new();
             for intent in intents {
-                let matched = nl_validator::commons_client::query_intent(url, intent, 25)?;
-                eprintln!("node query  intent {intent:?} -> {} match(es)", matched.len());
+                // Specificity travels IN the query: the application's argument/result sorts narrow
+                // the candidate page server-side (`type_pattern`, commons.md), so the page cap trims
+                // a set that is already argument-shaped. A node that predates the filter ignores the
+                // unknown field and returns the old (broader) page — strictly no worse.
+                let mut filter = serde_json::json!({ "intent_tags": { "any": [intent] }, "limit": 25 });
+                if let Some(tp) = type_pattern {
+                    filter["type_pattern"] = tp.clone();
+                }
+                let matched = nl_validator::commons_client::query(url, &filter)?;
+                match type_pattern {
+                    Some(_) => eprintln!("node query  intent {intent:?} + type pattern -> {} match(es)", matched.len()),
+                    None => eprintln!("node query  intent {intent:?} -> {} match(es)", matched.len()),
+                }
                 seeds.extend(matched);
             }
             let (record_map, link_map) = nl_validator::commons_client::maps_from_node(url, &seeds)?;
@@ -2086,7 +2098,7 @@ fn cmd_orchestrate(
     let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
     let orch = nl_validator::signing_key_from_seed(seed);
     let resp = nl_validator::signing_key_from_seed(responder_seed);
-    let (link, recs) = commons_view(records, node, intents)?;
+    let (link, recs) = commons_view(records, node, intents, None)?;
     let run = nl_validator::orchestrate_with_maps(link, recs, intents, argv, &orch, &resp, timestamp)?;
     for step in &run.steps {
         let m = &step.message;
@@ -2141,7 +2153,10 @@ fn cmd_orchestrate_verified(
     let pol = policy.map(|p| nl_validator::read_json(p).and_then(|j| nl_validator::Policy::from_json(&j))).transpose()?;
     let atts = attestations.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
     let exp = expect.map(|p| nl_validator::read_json(p)).transpose()?;
-    let (link, recs) = commons_view(records, node, intents)?;
+    // Server-side typed narrowing (commons.md `type_pattern`): the arguments' sorts — and the
+    // expected result's, when stated — shape the discovery page itself.
+    let pattern = nl_validator::discovery_type_pattern(&argv, exp.as_ref());
+    let (link, recs) = commons_view(records, node, intents, Some(&pattern))?;
     let run = nl_validator::orchestrate_verified_with_maps(link, recs, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp, grant_certified)?;
 
     for step in &run.steps {

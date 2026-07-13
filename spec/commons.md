@@ -195,6 +195,9 @@ Body: a structured filter. All fields are optional and combine with AND.
   "terminates": ["always", "conditional"],
   "name_hint_prefix": "map",
   "type_contains": "List",
+  "type_pattern": { "kind": "fn",
+                    "params": [ { "kind": "builtin", "name": "string" } ],
+                    "result": { "kind": "head", "names": ["Maybe"] } },
   "limit": 100,
   "cursor": "…",
   "token_budget": 4000
@@ -210,6 +213,31 @@ Returns content-addresses (the client resolves and verifies the ones it wants). 
 Typed query is **exact and node-portable**: it is computed from fields that are part of the record,
 so any correct node returns the same set for the same corpus (modulo what each node holds). Use
 `?include=record` to inline the records in the response as a fetch optimization (still verify them).
+
+**Structured type matching (`type_pattern`).** `type_contains` is a substring hint over the type's
+*rendering*; `type_pattern` matches the structured v0.2 type AST
+([`type-expression.schema.json`](type-expression.schema.json)) by **unification** — a Hoogle-style
+search that is exact and node-portable like the rest of typed query. The pattern grammar is the
+type-expression grammar plus three pattern-only forms:
+
+- `{"kind": "any"}` — wildcard, matches any type;
+- `{"kind": "any_of", "types": […]}` — disjunction (e.g. a caller who accepts `int` or `nat` says so);
+- `{"kind": "head", "names": […]}` — the type's head constructor is one of the named builtins
+  (matches a bare `builtin` or the ctor of an `apply` — "returns *some* `Maybe`").
+
+A `var` in the *pattern* is a named wildcard with consistency (`{a} -> {a}` finds
+`forall b. b -> b`, not `int -> string`); a `var` in the *record's* type is a unification variable
+(the record's own polymorphism — it matches any pattern subtree, consistently). `forall` is
+stripped on both sides (rank-1). Builtin names match exactly (`int` does not match `nat`);
+structural forms (`fn`/`apply`/`tuple`/`record`/`sum`/`ref`) match structurally. Only records with
+a structured type participate: a v0.1 string-typed record never matches a `type_pattern`.
+
+This is the **discovery-precision** lever found at ingestion scale: an agent loop's application
+carries its argument and result sorts *in the query* (`orchestrate --verify --node` sends them
+automatically), so the node's page is already argument-shaped BEFORE the page cap or token budget
+trims it — instead of a broad intent page that may have truncated the right candidate away. The
+receiver's local signature filter still confirms every fetched candidate; the pattern narrows,
+it never decides.
 
 **Discovery cost.** Resolving every candidate to a full record — body, examples, properties, proof
 certificates — just to read its signature is the dominant context cost of "assemble, don't write" at
@@ -449,5 +477,11 @@ conformant if it speaks the protocol above. The engine choice MUST NOT leak into
    gate-free, CDN-frontable, carrying weights and by-address example values). What remains open is
    the narrower question of routing large `expr_` *bodies* through it — bodies are still ordinary
    records in the metadata index.
-5. **Query over structured ASTs** — richer `type_contains` matching against the v0.2 type AST
-   (unification, subtyping) rather than substring hints.
+5. ~~**Query over structured ASTs** — richer `type_contains` matching against the v0.2 type AST
+   (unification, subtyping) rather than substring hints.~~ **RESOLVED** — `type_pattern` (above)
+   matches the structured type AST by unification, with pattern wildcards, disjunction, and
+   head-constructor sets; `orchestrate --verify --node` sends the application's argument/result
+   sorts as a pattern automatically. Subtyping is not part of the type system, so unification is
+   the whole of the question; what remains open is only matching *through* a `ref` into the
+   commons (the node matches the reference by address, it does not resolve and match its
+   definition).

@@ -120,7 +120,10 @@ composes `double` twice, confirming `double(double(21)) = 84` (ten messages).
 ### Verified orchestration (`--verify`)
 
 `nl-validator orchestrate --verify [--policy <p> --attestation <a>…]` folds verification into the loop —
-the project's thesis in one autonomous run: **discover** functions by intent (a query returns a *set*),
+the project's thesis in one autonomous run: **discover** functions by intent (a query returns a *set*;
+against a live `--node`, the application's argument and result sorts additionally travel *in* the
+query as a structured `type_pattern` — commons.md — so the node's capped page is already
+argument-shaped, instead of a broad intent page that may have truncated the right candidate away),
 keep only those whose **signature fits the application** — arity *and* parameter types must accept the
 arguments (a binary function is no candidate for a unary apply; a function over lists is no candidate for
 an integer argument), with polymorphic type variables unified consistently across the parameters — and a

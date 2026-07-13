@@ -427,6 +427,46 @@ fn variant_arm_fits(res: &J, tag: &str, payload: Option<&J>) -> bool {
     }
 }
 
+/// The `type_pattern` a coarse value sort licenses, for SERVER-SIDE discovery narrowing
+/// (`POST /v0/query`, spec/commons.md). Sound with respect to the local [`signature_fits`] filter
+/// on the closed builtin vocabulary: every pattern keeps at least the record types the local
+/// filter keeps (an int-sorted value maps to `any_of [int, nat]` because either declaration
+/// accepts it; a variant/function value maps to `any` — its declared forms are too many to
+/// enumerate; record-side type VARIABLES always match, the node unifies them). Exotic declared
+/// types the local filter keeps only by *can't-decide permissiveness* (e.g. a `Set a` parameter
+/// for a map argument) may be dropped server-side — those never survive typechecking anyway.
+fn sort_pattern(ty: &Ty) -> J {
+    match ty {
+        Ty::Int => json!({ "kind": "any_of", "types": [
+            { "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "nat" } ] }),
+        Ty::Bool => json!({ "kind": "builtin", "name": "bool" }),
+        Ty::Str => json!({ "kind": "builtin", "name": "string" }),
+        Ty::Float => json!({ "kind": "builtin", "name": "float" }),
+        Ty::Map => json!({ "kind": "head", "names": ["Map"] }),
+        Ty::Lst(e) => match **e {
+            // element sort unknown: any List-headed declaration fits
+            Ty::Any => json!({ "kind": "head", "names": ["List"] }),
+            ref elem => json!({ "kind": "any_of", "types": [
+                { "kind": "builtin", "name": "List" }, // a bare `List` declaration is element-agnostic
+                { "kind": "apply", "ctor": { "kind": "builtin", "name": "List" },
+                  "args": [sort_pattern(elem)] } ] }),
+        },
+        Ty::Sum | Ty::Fun | Ty::Any => json!({ "kind": "any" }),
+    }
+}
+
+/// The structured `type_pattern` this application licenses: parameter sorts from the actual
+/// arguments, result sort from the caller's expected value (when stated). This moves the coarse
+/// signature filter INTO the node's query — the fix for the GitHub-scale finding that the right
+/// candidate wasn't even on the capped discovery page: specificity travels in the query, so the
+/// page the node returns is already argument-shaped. The local [`signature_fits`]/[`result_fits`]
+/// pass still confirms every fetched candidate — the pattern narrows, it never decides.
+pub fn discovery_type_pattern(args: &[J], expect: Option<&J>) -> J {
+    let params: Vec<J> = args.iter().map(|a| sort_pattern(&value_ty(a))).collect();
+    let result = expect.map_or_else(|| json!({ "kind": "any" }), |e| sort_pattern(&value_ty(e)));
+    json!({ "kind": "fn", "params": params, "result": result })
+}
+
 /// How a candidate's dry-run against the caller's expected result came out.
 #[derive(Clone, Copy, PartialEq)]
 enum DryRun {
@@ -828,6 +868,38 @@ pub fn orchestrate_verified_with_maps(
 mod tests {
     use super::*;
     use crate::signing_key_from_seed;
+
+    #[test]
+    fn discovery_pattern_carries_argument_and_result_sorts() {
+        // Two string arguments and a boolean expectation — the GW16 unsplittable-fits shape. The
+        // pattern must pin the params to `string` and the result to `bool` (server-side, the node
+        // then splits the predicate from the same-argument builder before the page cap applies).
+        let args = vec![json!({ "kind": "string", "value": "a" }), json!({ "kind": "string", "value": "b" })];
+        let expect = json!({ "kind": "bool", "value": false });
+        let p = discovery_type_pattern(&args, Some(&expect));
+        assert_eq!(p, json!({ "kind": "fn",
+            "params": [ { "kind": "builtin", "name": "string" }, { "kind": "builtin", "name": "string" } ],
+            "result": { "kind": "builtin", "name": "bool" } }));
+
+        // An int argument stays ambiguous over int/nat (either declaration accepts the value); an
+        // absent expectation leaves the result unconstrained; a variant expectation is `any` too
+        // (its declared forms — Maybe/Result/structural sum/Json — are checked by the local filter).
+        let p = discovery_type_pattern(&[json!({ "kind": "int", "value": 3 })], None);
+        assert_eq!(p, json!({ "kind": "fn",
+            "params": [ { "kind": "any_of", "types": [
+                { "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "nat" } ] } ],
+            "result": { "kind": "any" } }));
+        let p = discovery_type_pattern(
+            &[json!({ "kind": "list", "elems": [ { "kind": "string", "value": "x" } ] })],
+            Some(&json!({ "kind": "variant", "tag": "Just", "payload": { "kind": "bool", "value": true } })),
+        );
+        assert_eq!(p, json!({ "kind": "fn",
+            "params": [ { "kind": "any_of", "types": [
+                { "kind": "builtin", "name": "List" },
+                { "kind": "apply", "ctor": { "kind": "builtin", "name": "List" },
+                  "args": [ { "kind": "builtin", "name": "string" } ] } ] } ],
+            "result": { "kind": "any" } }));
+    }
 
     #[test]
     fn orchestrate_discovers_and_runs_a_function() {

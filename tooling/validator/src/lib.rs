@@ -100,7 +100,8 @@ pub use respond::{
 
 pub mod orchestrate;
 pub use orchestrate::{
-    orchestrate, orchestrate_verified, orchestrate_verified_with_maps, orchestrate_with_maps, Run, Step, VerifiedRun,
+    discovery_type_pattern, orchestrate, orchestrate_verified, orchestrate_verified_with_maps, orchestrate_with_maps,
+    Run, Step, VerifiedRun,
 };
 
 pub mod assemble;

@@ -1673,3 +1673,146 @@ class EquivEndpointTests(TestCase):
 
     def test_get_not_allowed(self):
         self.assertEqual(self.client.get("/v0/equiv").status_code, 405)
+
+
+# --- structured type matching (`type_pattern`, commons.md open question 5) ------------------------
+
+def _B(n):
+    return {"kind": "builtin", "name": n}
+
+
+def _FN(ps, r):
+    return {"kind": "fn", "params": ps, "result": r}
+
+
+def _AP(c, args):
+    return {"kind": "apply", "ctor": _B(c), "args": args}
+
+
+def _V(n):
+    return {"kind": "var", "name": n}
+
+
+_STR_TO_MAYBE_BOOL = _FN([_B("string")], _AP("Maybe", [_B("bool")]))
+_TWO_STR_PREDICATE = _FN([_B("string"), _B("string")], _B("bool"))
+_TWO_STR_BUILDER = _FN([_B("string"), _B("string")], _AP("Maybe", [_B("string")]))
+_POLY_ID = {"kind": "forall", "vars": ["b"], "body": _FN([_V("b")], _V("b"))}
+_NAT_SUCC = _FN([_B("nat")], _B("nat"))
+
+
+class TypePatternMatchTests(TestCase):
+    """Unit semantics of typematch.matches_type — the unifier behind the `type_pattern` filter."""
+
+    def _m(self, pattern, ty):
+        from .typematch import matches_type
+        return matches_type(pattern, json.dumps(ty))
+
+    def test_exact_structural_match(self):
+        self.assertTrue(self._m(_STR_TO_MAYBE_BOOL, _STR_TO_MAYBE_BOOL))
+
+    def test_builtin_names_are_exact(self):
+        # `int` does not match a declared `nat` — a caller who accepts either says so with any_of.
+        self.assertFalse(self._m(_FN([_B("int")], _B("int")), _NAT_SUCC))
+        self.assertTrue(self._m(
+            _FN([{"kind": "any_of", "types": [_B("int"), _B("nat")]}],
+                {"kind": "any_of", "types": [_B("int"), _B("nat")]}),
+            _NAT_SUCC))
+
+    def test_any_wildcard(self):
+        self.assertTrue(self._m(_FN([{"kind": "any"}], {"kind": "any"}), _NAT_SUCC))
+        self.assertTrue(self._m(_FN([{"kind": "any"}], {"kind": "any"}), _STR_TO_MAYBE_BOOL))
+        # arity still binds: a 2-param pattern does not match a 1-param function
+        self.assertFalse(self._m(_FN([{"kind": "any"}, {"kind": "any"}], {"kind": "any"}), _NAT_SUCC))
+
+    def test_head_matches_bare_and_applied_ctor(self):
+        maybe_head = _FN([_B("string")], {"kind": "head", "names": ["Maybe"]})
+        self.assertTrue(self._m(maybe_head, _STR_TO_MAYBE_BOOL))
+        self.assertFalse(self._m(maybe_head, _FN([_B("string")], _B("bool"))))
+        # bare builtin head
+        self.assertTrue(self._m({"kind": "head", "names": ["Json", "Map"]}, _B("Json")))
+
+    def test_pattern_var_consistency(self):
+        # {a} -> {a} finds the polymorphic identity and a monomorphic endo, not int -> string.
+        endo = _FN([_V("a")], _V("a"))
+        self.assertTrue(self._m(endo, _POLY_ID))
+        self.assertTrue(self._m(endo, _FN([_B("int")], _B("int"))))
+        self.assertFalse(self._m(endo, _FN([_B("int")], _B("string"))))
+
+    def test_record_var_consistency(self):
+        # The record's `forall a. a -> a`: a pattern demanding different concrete ends must not match.
+        self.assertFalse(self._m(_FN([_B("int")], _B("string")), _POLY_ID))
+        self.assertTrue(self._m(_FN([_B("int")], _B("int")), _POLY_ID))
+
+    def test_forall_stripped_both_sides(self):
+        self.assertTrue(self._m({"kind": "forall", "vars": ["x"], "body": _FN([_V("x")], _V("x"))},
+                                _POLY_ID))
+
+    def test_v01_string_type_never_matches(self):
+        from .typematch import matches_type
+        self.assertFalse(matches_type({"kind": "any"}, "forall a. List a -> List a"))
+        self.assertFalse(matches_type({"kind": "any"}, None))
+
+    def test_splits_predicate_from_builder(self):
+        # The GW16 unsplittable-fits shape: two (string, string) functions split by RESULT type.
+        pred = _FN([_B("string"), _B("string")], _B("bool"))
+        self.assertTrue(self._m(pred, _TWO_STR_PREDICATE))
+        self.assertFalse(self._m(pred, _TWO_STR_BUILDER))
+
+    def test_sum_record_tuple_structural(self):
+        sum_t = {"kind": "sum", "variants": [{"tag": "None"}, {"tag": "Just", "type": _B("int")}]}
+        self.assertTrue(self._m(sum_t, sum_t))
+        self.assertFalse(self._m(sum_t, {"kind": "sum", "variants": [{"tag": "None"}]}))
+        rec_t = {"kind": "record", "fields": [{"name": "status", "type": _B("int")}]}
+        self.assertTrue(self._m(rec_t, rec_t))
+        self.assertFalse(self._m(rec_t, {"kind": "record", "fields": [{"name": "code", "type": _B("int")}]}))
+        tup = {"kind": "tuple", "elems": [_B("int"), _B("bool")]}
+        self.assertTrue(self._m(tup, tup))
+        self.assertFalse(self._m(tup, {"kind": "tuple", "elems": [_B("bool"), _B("int")]}))
+
+    def test_validate_rejects_malformed(self):
+        from .typematch import PatternError, validate_pattern
+        for bad in (["fn"], {"kind": "nope"}, {"kind": "any_of", "types": []},
+                    {"kind": "head", "names": []}, {"kind": "fn", "params": [], "result": None}):
+            with self.assertRaises(PatternError):
+                validate_pattern(bad)
+
+
+class TypePatternQueryTests(TestCase):
+    """`type_pattern` on POST /v0/query — server-side narrowing by structured type."""
+
+    def setUp(self):
+        self.client = Client()
+        Record.objects.create(hash="fn_" + "a" * 64, kind="function-record", schema_version="0.2.0",
+                              raw={}, terminates="always", intent_tags=["query"],
+                              type_str=json.dumps(_TWO_STR_PREDICATE))
+        Record.objects.create(hash="fn_" + "b" * 64, kind="function-record", schema_version="0.2.0",
+                              raw={}, terminates="always", intent_tags=["query"],
+                              type_str=json.dumps(_TWO_STR_BUILDER))
+        Record.objects.create(hash="fn_" + "c" * 64, kind="function-record", schema_version="0.1.0",
+                              raw={}, terminates="always", intent_tags=["query"],
+                              type_str="(string, string) -> bool")  # v0.1 surface string
+
+    def _q(self, flt):
+        return self.client.post("/v0/query", data=json.dumps(flt), content_type="application/json")
+
+    def test_pattern_narrows_to_result_sort(self):
+        resp = self._q({"intent_tags": {"any": ["query"]},
+                        "type_pattern": _FN([_B("string"), _B("string")], _B("bool"))})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["results"], ["fn_" + "a" * 64])
+
+    def test_pattern_with_head_result(self):
+        resp = self._q({"type_pattern": _FN([_B("string"), _B("string")],
+                                            {"kind": "head", "names": ["Maybe"]})})
+        self.assertEqual(resp.json()["results"], ["fn_" + "b" * 64])
+
+    def test_string_typed_record_excluded(self):
+        # All three records carry the intent; only the two structured ones can match any pattern.
+        resp = self._q({"intent_tags": {"any": ["query"]},
+                        "type_pattern": _FN([{"kind": "any"}, {"kind": "any"}], {"kind": "any"})})
+        self.assertEqual(set(resp.json()["results"]), {"fn_" + "a" * 64, "fn_" + "b" * 64})
+
+    def test_malformed_pattern_is_400(self):
+        resp = self._q({"type_pattern": {"kind": "nope"}})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("kind", resp.json().get("detail", "") + resp.json().get("error", ""))

@@ -50,6 +50,11 @@ curl http://127.0.0.1:8000/v0/records/$(python3 -c "import json;print(json.load(
 curl -X POST http://127.0.0.1:8000/v0/query -H 'content-type: application/json' \
      -d '{"intent_tags":{"any":["elementwise"]},"effects":{"none":true}}'
 
+# structured type matching: unification against the stored v0.2 type AST (commons.md `type_pattern`)
+curl -X POST http://127.0.0.1:8000/v0/query -H 'content-type: application/json' \
+     -d '{"type_pattern":{"kind":"fn","params":[{"kind":"builtin","name":"string"}],
+          "result":{"kind":"head","names":["Maybe"]}}}'
+
 # semantic search (free text, or "more like this" by hash)
 curl -X POST http://127.0.0.1:8000/v0/search -H 'content-type: application/json' \
      -d '{"query":"map a function over each element of a list","k":5}'
