@@ -47,6 +47,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest-common")
 from nl_body import body_ast_from_py, function_raises  # noqa: E402
 from nl_examples import examples_from_docstring  # noqa: E402
 from nl_effects import effects_from_py, terminates_from_py  # noqa: E402
+from nl_synth import SynthError, synth_args  # noqa: E402
+from nl_values import ValueEncodeError, to_value_ast  # noqa: E402
 from property_catalog import match_catalog  # noqa: E402
 from nl_predicates import PredicateError, predicate_from_py  # noqa: E402
 from nl_types import python_function_type  # noqa: E402
@@ -614,10 +616,127 @@ def _preconditions(func) -> list:
     return refs
 
 
-def build_v2_record(func, module_name: str | None, imports=None, with_properties=False) -> dict | None:
+def stub_annotations(stub_source: str) -> dict:
+    """name -> stub FunctionDef for every top-level, single-definition, non-overloaded function in
+    a .pyi stub. Overloaded names (typeshed's `@overload` sets, or plain duplicates) are dropped —
+    a set of overloads does not determine ONE type, and we never pick one silently."""
+    tree = ast.parse(stub_source)
+    seen: dict = {}
+    dropped = set()
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        overloaded = any((isinstance(d, ast.Name) and d.id == "overload")
+                         or (isinstance(d, ast.Attribute) and d.attr == "overload")
+                         for d in node.decorator_list)
+        if overloaded or node.name in seen:
+            dropped.add(node.name)
+        seen[node.name] = node
+    return {k: v for k, v in seen.items() if k not in dropped}
+
+
+def _graft_stub(func, stub) -> None:
+    """Copy parameter/return annotations from a stub def onto the SOURCE def, positionally, where
+    the source lacks them (a source annotation always wins — the stub is secondary description).
+    Refuses (no-op) on a positional-arity mismatch: pairing would be a guess."""
+    src_params = list(func.args.posonlyargs) + list(func.args.args)
+    stub_params = list(stub.args.posonlyargs) + list(stub.args.args)
+    if len(src_params) != len(stub_params):
+        return
+    for sp, tp in zip(src_params, stub_params):
+        if sp.annotation is None:
+            sp.annotation = tp.annotation
+    if func.returns is None:
+        func.returns = stub.returns
+
+
+_EXEC_MODULES: dict = {}
+
+
+def _exec_module(path):
+    """Import the source file being ingested (cached per path), for `--exec-examples` observation
+    runs. Returns None when the module cannot be imported standalone — the caller falls back to
+    v0.1 rather than guessing."""
+    import importlib.util
+
+    key = str(path)
+    if key not in _EXEC_MODULES:
+        try:
+            spec = importlib.util.spec_from_file_location(f"_nl_exec_{len(_EXEC_MODULES)}", key)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _EXEC_MODULES[key] = mod
+        except BaseException:
+            _EXEC_MODULES[key] = None
+    return _EXEC_MODULES[key]
+
+
+def _executed_examples(func, exec_path, param_types, result_type, totalized, effects):
+    """OBSERVED worked examples for an annotated, pure, lifted function with no doctest: the
+    annotation licenses the record (structured type), the source documents no value — so run the
+    REAL function once per synthesized argument set and record what it answers (the license/observe
+    split of spec/expressiveness.md, applied to source code; opt-in via --exec-examples exactly as
+    the OpenAPI adapter's live gate is via --verify-against). The lifted body is then held to the
+    observation by `run`/`certify`: a lifting that disagrees with the source's real semantics fails
+    rather than publishes. Honest bounds: only effect-free functions run (a `panic` effect is
+    allowed only when the body was raise-totalized — a raising run IS the None example then), every
+    call runs under a 2s alarm (a hang is a refusal, not a wait), and an exception from a
+    non-totalized function refuses that example."""
+    import signal
+
+    if effects not in ([], ["panic"]) or (effects == ["panic"] and not totalized):
+        return []
+    if result_type is None:
+        return []
+    try:
+        arg_sets = synth_args(param_types)
+    except SynthError:
+        return []
+    mod = _exec_module(exec_path)
+    fn = getattr(mod, func.name, None) if mod else None
+    if not callable(fn):
+        return []
+    out = []
+    for args in arg_sets:
+        def _timeout(signum, frame):
+            raise TimeoutError
+        old = signal.signal(signal.SIGALRM, _timeout)
+        signal.alarm(2)
+        try:
+            result_py = fn(*args)
+        except TimeoutError:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
+            return []                      # a hang refuses the whole synthesis, not just one example
+        except Exception:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
+            if totalized:                  # a raising run IS the None-case example
+                try:
+                    enc_args = [to_value_ast(a, t) for a, t in zip(args, param_types)]
+                except ValueEncodeError:
+                    continue
+                out.append({"args": enc_args, "result": {"kind": "variant", "tag": "None"}})
+            continue
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+        try:
+            enc_args = [to_value_ast(a, t) for a, t in zip(args, param_types)]
+            result = to_value_ast(result_py, result_type)
+        except ValueEncodeError:
+            continue
+        out.append({"args": enc_args, "result": result})
+    return out
+
+
+def build_v2_record(func, module_name: str | None, imports=None, with_properties=False,
+                    exec_path=None) -> dict | None:
     """Build a v0.2 record: a STRUCTURED type AST (nl_types) + REAL examples from the function's
     doctests (nl_examples). Returns None when there are no usable doctest examples — v0.2 requires
-    >=1 — so the caller falls back to a v0.1 record. ``imports`` is the (alias, fromimp) module-map
+    >=1 — so the caller falls back to a v0.1 record. With ``exec_path`` (--exec-examples), a
+    doctest-less function that is fully annotated, effect-free, and lifted instead gets OBSERVED
+    examples by executing the real source function on type-synthesized arguments (see
+    ``_executed_examples``). ``imports`` is the (alias, fromimp) module-map
     pair (see nl_effects) used to classify qualified calls when inferring effects. When
     ``with_properties`` is set, well-known functions get curated algebraic laws from the catalog."""
     type_ast = python_function_type(func)
@@ -632,13 +751,20 @@ def build_v2_record(func, module_name: str | None, imports=None, with_properties
         t["result"] = {"kind": "apply", "ctor": {"kind": "builtin", "name": "Maybe"},
                        "args": [t["result"]]}
     param_types, result_type = _fn_param_result_types(type_ast)
+    alias, fromimp = imports if imports else ({}, {})
+    effects = effects_from_py(func, alias, fromimp)
     examples = examples_from_docstring(func.name, ast.get_docstring(func), param_types, result_type)
+    if not examples and exec_path is not None and body_ast_from_py(func) is not None:
+        # No doctest, but the annotation licenses the record and --exec-examples sanctions an
+        # observation: the type AST must be concrete (synth_args refuses type variables) and the
+        # forall wrapper absent — a polymorphic signature has no synthesized inhabitant.
+        if type_ast.get("kind") != "forall":
+            examples = _executed_examples(func, exec_path, param_types, result_type,
+                                          totalized, effects)
     if not examples:
         return None
-    alias, fromimp = imports if imports else ({}, {})
     hints = _name_hints(func.name, module_name)
     properties, tags = match_catalog(hints, len(param_types)) if with_properties else ([], [])
-    effects = effects_from_py(func, alias, fromimp)
     if totalized:
         effects = [e for e in effects if e != "panic"]
     record = {
@@ -736,15 +862,23 @@ def iter_functions(tree: ast.Module, include_private: bool):
 
 
 def records_from_source(source: str, module_name: str | None, include_private: bool,
-                        v2: bool = False, with_properties: bool = False) -> list:
+                        v2: bool = False, with_properties: bool = False, exec_path=None,
+                        stubs=None) -> list:
     tree = ast.parse(source)
     module_tvars = _module_typevars(tree)
     imports = _module_imports(tree) if v2 else None
     out = []
     for fn in iter_functions(tree, include_private):
-        # In --v2 mode, emit a structured v0.2 record when the function has usable doctest examples;
-        # otherwise fall back to a v0.1 record so no function is dropped.
-        rec = build_v2_record(fn, module_name, imports, with_properties) if v2 else None
+        # A stub (.pyi) is secondary DESCRIPTION: its annotations graft onto an unannotated
+        # source def (source annotations always win), so the stub supplies the type, the source
+        # supplies the body, and (under --exec-examples) an execution supplies the example.
+        if stubs and fn.name in stubs:
+            _graft_stub(fn, stubs[fn.name])
+        # In --v2 mode, emit a structured v0.2 record when the function has usable doctest examples
+        # (or, under --exec-examples, observed ones); otherwise fall back to a v0.1 record so no
+        # function is dropped.
+        rec = build_v2_record(fn, module_name, imports, with_properties,
+                              exec_path=exec_path) if v2 else None
         if rec is None:
             rec = build_record(fn, module_name, module_tvars)
         out.append(rec)
@@ -788,6 +922,19 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="attach curated algebraic laws (property_catalog.json) to recognised functions "
                         "(map/filter/sort/reverse/id, ...) — implies --v2. Verify with "
                         "`nl-validator check-properties`")
+    p.add_argument("--exec-examples", action="store_true",
+                   help="observe worked examples by EXECUTING the ingested source (implies --v2): a "
+                        "fully-annotated, effect-free, lifted function with no doctest runs once per "
+                        "type-synthesized argument set and its real answers become the record's "
+                        "examples — the lifted body is then held to them by run/certify. Opt-in "
+                        "because it runs the code being ingested (the source-code counterpart of the "
+                        "OpenAPI adapter's --verify-against live gate)")
+    p.add_argument("--stubs", type=Path, default=None,
+                   help="a .pyi stub file (or a directory of them, resolved as <module>.pyi via "
+                        "--module) whose annotations graft onto UNANNOTATED source parameters/"
+                        "returns — the stub is secondary description (typeshed being the canonical "
+                        "source for the stdlib); source annotations always win, and overloaded stub "
+                        "names are dropped rather than picked from")
     p.add_argument("--emit-dir", dest="emit_dir", type=Path, default=None,
                    help="also write a runnable directory: each record as <fn_hash>.json and each "
                         "executable body as <expr_hash>.json, so `nl-validator run --records <dir>` "
@@ -809,10 +956,22 @@ def main(argv=None) -> int:
             print(f"nl-ingest-py: reading {path}: {e}", file=sys.stderr)
             exit_code = 1
             continue
+        stubs = None
+        if args.stubs is not None:
+            stub_path = args.stubs
+            if stub_path.is_dir():
+                stub_path = stub_path / f"{args.module or path.stem}.pyi"
+            try:
+                stubs = stub_annotations(stub_path.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError) as e:
+                print(f"nl-ingest-py: stubs {stub_path}: {e}", file=sys.stderr)
+                stubs = None
         try:
-            v2 = args.v2 or args.properties  # --properties implies --v2
+            v2 = args.v2 or args.properties or args.exec_examples  # both imply --v2
             records = records_from_source(source, args.module, args.include_private, v2=v2,
-                                          with_properties=args.properties)
+                                          with_properties=args.properties,
+                                          exec_path=path if args.exec_examples else None,
+                                          stubs=stubs)
         except SyntaxError as e:
             print(f"nl-ingest-py: parsing {path}: {e}", file=sys.stderr)
             exit_code = 1

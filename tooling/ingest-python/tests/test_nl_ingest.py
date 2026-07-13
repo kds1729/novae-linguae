@@ -12,6 +12,7 @@ The cross-implementation tests (against the Rust ``nl-validator``) are skipped a
 if the release binary has not been built.
 """
 
+import ast
 import json
 import subprocess
 import sys
@@ -581,6 +582,111 @@ class TestCrossAdapterAgreement(unittest.TestCase):
         # The documented asymmetry: Rust mines safe_div's None example, Python cannot.
         self.assertEqual(len(py["safe_div"]["examples"]), 1)
         self.assertEqual(len(rust["safe_div"]["examples"]), 2)
+
+
+class TestExecExamples(unittest.TestCase):
+    """--exec-examples: the license/observe split applied to source code. An annotation licenses
+    the v0.2 record; a sanctioned execution of the REAL function observes the worked example the
+    source never documented. Only annotated + effect-free + lifted functions run; everything else
+    falls back to v0.1 exactly as before."""
+
+    def _ingest(self, src, exec_on=True):
+        import tempfile
+        d = tempfile.mkdtemp(prefix="nl-exec-ex-")
+        p = Path(d) / "mod_under_test.py"
+        p.write_text(src, encoding="utf-8")
+        return n.records_from_source(src, None, False, v2=True,
+                                     exec_path=p if exec_on else None)
+
+    def test_annotated_pure_lifted_observes_examples(self):
+        recs = self._ingest("def double(n: int) -> int:\n    return n * 2\n")
+        rec = recs[0]
+        self.assertEqual(rec["schema_version"], "0.2.0")
+        self.assertEqual(len(rec["examples"]), 2)
+        # The observed answers are the REAL function's: 3*2 and -2*2 from the fixed palettes.
+        results = [e["result"] for e in rec["examples"]]
+        self.assertIn({"kind": "int", "value": 6}, results)
+        self.assertIn({"kind": "int", "value": -4}, results)
+
+    def test_flag_off_keeps_v01_fallback(self):
+        recs = self._ingest("def double(n: int) -> int:\n    return n * 2\n", exec_on=False)
+        self.assertEqual(recs[0]["schema_version"], "0.1.0")
+
+    def test_doctest_still_wins(self):
+        # A documented example is spec-time knowledge; execution is only the fallback.
+        src = ('def double(n: int) -> int:\n'
+               '    """\n    >>> double(21)\n    42\n    """\n'
+               '    return n * 2\n')
+        rec = self._ingest(src)[0]
+        self.assertEqual(rec["examples"],
+                         [{"args": [{"kind": "int", "value": 21}],
+                           "result": {"kind": "int", "value": 42}}])
+
+    def test_unannotated_and_polymorphic_refuse(self):
+        recs = self._ingest("def f(x):\n    return x\n")
+        self.assertEqual(recs[0]["schema_version"], "0.1.0")
+        recs = self._ingest("def g(xs: list) -> list:\n    return xs\n")  # list[T] — a type var
+        self.assertEqual(recs[0]["schema_version"], "0.1.0")
+
+    def test_effectful_never_executes(self):
+        src = ("def read_it(path: str) -> str:\n"
+               "    with open(path) as fh:\n"
+               "        return fh.read()\n")
+        recs = self._ingest(src)
+        self.assertEqual(recs[0]["schema_version"], "0.1.0")
+
+    def test_always_raising_totalizes_to_none_examples(self):
+        # A bare-raise function raise-totalizes (result becomes Maybe int, body -> None), and the
+        # raising observation runs honestly record the None case — a faithful always-None record.
+        src = ("def boom(n: int) -> int:\n"
+               "    raise RuntimeError('no')\n")
+        rec = self._ingest(src)[0]
+        self.assertEqual(rec["schema_version"], "0.2.0")
+        self.assertTrue(all(e["result"] == {"kind": "variant", "tag": "None"}
+                            for e in rec["examples"]))
+
+    def test_raise_totalized_observes_both_cases(self):
+        # A guarded raise (family #48's shape): the odd synthesized arg observes the None case,
+        # the even one the Just case — both branches of the totalization, from two fixed palettes.
+        src = ("def half_exact(n: int) -> int:\n"
+               "    if n % 2 != 0:\n"
+               "        raise ValueError('odd')\n"
+               "    return n // 2\n")
+        rec = self._ingest(src)[0]
+        self.assertEqual(rec["schema_version"], "0.2.0")
+        results = [e["result"] for e in rec["examples"]]
+        self.assertIn({"kind": "variant", "tag": "None"}, results)                 # 3 is odd
+        self.assertIn({"kind": "variant", "tag": "Just",
+                       "payload": {"kind": "int", "value": -1}}, results)          # -2 // 2
+
+    def test_float_observation_is_the_real_ieee_answer(self):
+        rec = self._ingest("def scale(x: float) -> float:\n    return x * 3.0\n")[0]
+        self.assertEqual(rec["schema_version"], "0.2.0")
+        self.assertEqual(rec["examples"][0]["result"], {"kind": "float", "value": 1.5})
+
+    @unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+    def test_observed_record_certifies_and_replays(self):
+        # End to end: the observed record certifies, and `run` holds the LIFTED body to the
+        # observation — the faithfulness gate.
+        import tempfile
+        d = Path(tempfile.mkdtemp(prefix="nl-exec-certify-"))
+        src = "def add3(a: int, b: int, c: int) -> int:\n    return a + b + c\n"
+        (d / "m.py").write_text(src, encoding="utf-8")
+        recs = n.records_from_source(src, None, False, v2=True, exec_path=d / "m.py")
+        rec = recs[0]
+        self.assertEqual(rec["schema_version"], "0.2.0")
+        body = n.body_ast_from_py(ast.parse(src).body[0])
+        bp = d / "body.json"
+        bp.write_text(json.dumps(body), encoding="utf-8")
+        rp = d / "rec.json"
+        rp.write_text(json.dumps(rec), encoding="utf-8")
+        c = subprocess.run([str(VALIDATOR), "certify", str(rp), "--body", str(bp),
+                            "--records", str(d)], capture_output=True, text=True)
+        self.assertEqual(c.returncode, 0, c.stdout + c.stderr)
+        (d / f"{rec['body_hash']}.json").write_text(json.dumps(body), encoding="utf-8")
+        r = subprocess.run([str(VALIDATOR), "run", str(rp), "--records", str(d)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
 if __name__ == "__main__":
