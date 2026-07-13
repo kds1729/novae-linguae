@@ -147,7 +147,13 @@ The signals, strongest first, all deterministic and local:
 
 - **Expected result (`--expect <value>`)** — the caller states the result value it wants. Its coarse
   sort extends the signature filter to the RESULT position (a `(string, string) -> bool` predicate is
-  no candidate when a `Maybe string` is expected — the argument-only filter cannot see that), and each
+  no candidate when a `Maybe string` is expected — the argument-only filter cannot see that). A
+  **variant-valued** expectation additionally carries payload depth the coarse sort erases: the
+  declared result must *offer the expected tag with a payload type matching the payload's sort* —
+  `Just false` can only come from a result whose Just-arm carries a bool, never from a `Maybe Json`
+  body (which answers `Just (JBool false)`, a different value; a caller who wants the Json encoding
+  states it, and then the Json fits — and only they — survive). Found at GitHub scale, where a
+  `Just false` goal had kept every `Maybe Json` projection in the pool. Then each
   candidate whose body this node can **statically verify pure and terminating** is then **dry-run on
   the actual arguments**: an exact match ranks first, a mismatch or error last. The dry-run only
   executes what static effect inference + the termination checker clear — running arbitrary discovered

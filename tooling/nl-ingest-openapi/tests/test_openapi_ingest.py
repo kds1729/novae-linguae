@@ -79,6 +79,17 @@ class OpenApiIngestTest(unittest.TestCase):
         self.assertEqual(eff("putitem"), ["net.write"])
         self.assertEqual(eff("deleteitem"), ["net.write"])
 
+    def test_extending_intent_tags(self):
+        # Discovery precision (the GitHub-scale finding): every record carries one tag extending
+        # its lead intent with its own snake name, so a precise query addresses it directly and
+        # the rank's tag-specificity/name-affinity signals engage under broad ones.
+        rec = json.load(open(self.recs["getitemstatus"]))
+        self.assertIn("query/lookup/get-item-status", rec["intent_tags"])
+        put = json.load(open(self.recs["putitem"]))
+        self.assertIn("io/network/http/put-item", put["intent_tags"])
+        loc = json.load(open(self.recs["createthinglocation"]))
+        self.assertIn("io/network/http/create-thing-location", loc["intent_tags"])
+
     def test_unauthenticated_op_has_no_secret(self):
         # /health declares `security: []` — no auth header, so no secret placeholder in its body.
         body = json.dumps(json.load(open(Path(self.tmp) / "body-healthcheck.json")))
@@ -524,6 +535,7 @@ class SchemaObservationGateTest(unittest.TestCase):
                                   "required": ["status"]}, "ok")
         self.assertEqual(code, 0)
         rec = json.load(open(Path(tmp) / "gethealthstatus.v0.2.json"))
+        self.assertIn("parse/get-health-status", rec["intent_tags"])
         ex = rec["examples"][0]
         self.assertEqual(ex["result"], {"kind": "variant", "tag": "Just",
                                         "payload": {"kind": "string", "value": "ok"}})

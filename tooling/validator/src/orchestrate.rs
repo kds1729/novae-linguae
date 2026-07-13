@@ -356,7 +356,69 @@ fn result_fits(record: &J, expect: &J) -> bool {
         }
     }
     let Some(res) = t.get("result") else { return false };
-    unify_ty(res, &value_ty(expect), &mut std::collections::HashMap::new())
+    if !unify_ty(res, &value_ty(expect), &mut std::collections::HashMap::new()) {
+        return false;
+    }
+    // A variant-valued expectation carries payload depth the coarse `Sum` sort erases (found at
+    // GitHub scale: a `Just false` goal kept every `Maybe Json` fit, and fetch order applied a
+    // wrong-goal projection). The declared result must OFFER the expected tag with a payload type
+    // that unifies with the payload's sort: `Just false` can only come from a Just-arm carrying a
+    // bool — a `Maybe Json` body answers `Just (JBool false)`, a different value. A caller who
+    // wants the Json encoding states it (the payload is then itself a variant, which a Json arm
+    // accepts). Unknown shapes stay permissive — under-rejection is caught by re-verification.
+    if expect.get("kind").and_then(|k| k.as_str()) == Some("variant") {
+        if let Some(tag) = expect.get("tag").and_then(|t| t.as_str()) {
+            return variant_arm_fits(res, tag, expect.get("payload"));
+        }
+    }
+    true
+}
+
+/// Does a declared result type offer variant `tag` with a payload whose declared type unifies
+/// with `payload`'s coarse sort? See `result_fits` — the variant-expectation tightening.
+fn variant_arm_fits(res: &J, tag: &str, payload: Option<&J>) -> bool {
+    let pay_ty = payload.map(value_ty);
+    let unifies = |arm_ty: Option<&J>| -> bool {
+        match (arm_ty, &pay_ty) {
+            (None, None) => true,
+            (Some(_), None) | (None, Some(_)) => false,
+            (Some(t), Some(p)) => unify_ty(t, p, &mut std::collections::HashMap::new()),
+        }
+    };
+    match res.get("kind").and_then(|k| k.as_str()) {
+        Some("sum") => res.get("variants").and_then(|v| v.as_array()).map_or(true, |arms| {
+            match arms.iter().find(|a| a.get("tag").and_then(|t| t.as_str()) == Some(tag)) {
+                Some(arm) => unifies(arm.get("type")),
+                None => false,
+            }
+        }),
+        Some("apply") => {
+            let args = res.get("args").and_then(|a| a.as_array());
+            match (res.pointer("/ctor/name").and_then(|n| n.as_str()), tag) {
+                (Some("Maybe"), "Just") => unifies(args.and_then(|a| a.first())),
+                (Some("Maybe"), "None") => pay_ty.is_none(),
+                (Some("Maybe"), _) => false,
+                (Some("Result"), "Ok") => unifies(args.and_then(|a| a.first())),
+                (Some("Result"), "Err") => unifies(args.and_then(|a| a.get(1))),
+                (Some("Result"), _) => false,
+                _ => true, // unknown constructor: permissive
+            }
+        }
+        Some("builtin") => match res.get("name").and_then(|n| n.as_str()) {
+            // A nominal Json result answers exactly the six J-constructors, payload-sorted.
+            Some("Json") => match tag {
+                "JNull" => pay_ty.is_none(),
+                "JBool" => matches!(pay_ty, Some(Ty::Bool)),
+                "JNum" => matches!(pay_ty, Some(Ty::Int) | Some(Ty::Float)),
+                "JStr" => matches!(pay_ty, Some(Ty::Str)),
+                "JList" => matches!(pay_ty, Some(Ty::Lst(_))),
+                "JObj" => matches!(pay_ty, Some(Ty::Map)),
+                _ => false,
+            },
+            _ => true, // other builtins were already filtered by unify_ty
+        },
+        _ => true, // var / forall / unknown shape: permissive
+    }
 }
 
 /// How a candidate's dry-run against the caller's expected result came out.
@@ -1050,6 +1112,55 @@ mod tests {
         assert_eq!(labels, ["query", "ack", "certify", "propose", "commit", "assert"]);
         let target = run.steps.iter().find(|s| s.label == "propose").unwrap().message.pointer("/body/target").unwrap();
         assert_eq!(target.as_str().unwrap(), fn_len, "only the int-sorted candidate survives an int expectation");
+    }
+
+    #[test]
+    fn variant_expectation_splits_maybe_payload_sorts() {
+        // The GitHub-scale finding: a `Just false` goal must NOT keep `Maybe Json` fits — their
+        // Just-arm answers `Just (JBool …)`, a different value. A caller who wants the Json
+        // encoding states it, and then the Json fit (and only it) survives.
+        let maybe_bool = json!({
+            "signature": { "type": { "kind": "fn", "params": [{ "kind": "builtin", "name": "string" }],
+                "result": { "kind": "sum", "variants": [
+                    { "tag": "Just", "type": { "kind": "builtin", "name": "bool" } },
+                    { "tag": "None" } ] } } } });
+        let maybe_json = json!({
+            "signature": { "type": { "kind": "fn", "params": [{ "kind": "builtin", "name": "string" }],
+                "result": { "kind": "sum", "variants": [
+                    { "tag": "Just", "type": { "kind": "builtin", "name": "Json" } },
+                    { "tag": "None" } ] } } } });
+        let maybe_bool_nominal = json!({
+            "signature": { "type": { "kind": "fn", "params": [{ "kind": "builtin", "name": "string" }],
+                "result": { "kind": "apply", "ctor": { "kind": "builtin", "name": "Maybe" },
+                            "args": [{ "kind": "builtin", "name": "bool" }] } } } });
+
+        let just_false = json!({ "kind": "variant", "tag": "Just",
+                                 "payload": { "kind": "bool", "value": false } });
+        assert!(result_fits(&maybe_bool, &just_false), "a bool Just-arm answers Just false");
+        assert!(result_fits(&maybe_bool_nominal, &just_false), "nominal Maybe bool too");
+        assert!(!result_fits(&maybe_json, &just_false),
+                "a Maybe Json body can never literally produce Just false");
+
+        let just_jbool = json!({ "kind": "variant", "tag": "Just",
+                                 "payload": { "kind": "variant", "tag": "JBool",
+                                              "payload": { "kind": "bool", "value": false } } });
+        assert!(result_fits(&maybe_json, &just_jbool),
+                "the Json-encoded expectation keeps the Json fit");
+        assert!(!result_fits(&maybe_bool, &just_jbool),
+                "…and drops the bare-bool fit (its Just-arm never holds a variant)");
+
+        // A nominal Json result answers exactly the J-constructors, payload-sorted.
+        let json_res = json!({
+            "signature": { "type": { "kind": "fn", "params": [{ "kind": "builtin", "name": "string" }],
+                "result": { "kind": "builtin", "name": "Json" } } } });
+        let jstr = json!({ "kind": "variant", "tag": "JStr",
+                           "payload": { "kind": "string", "value": "x" } });
+        assert!(result_fits(&json_res, &jstr));
+        assert!(!result_fits(&json_res, &just_false), "Just is not a Json constructor");
+        // The None case: a Maybe answers it, payloadless.
+        let none = json!({ "kind": "variant", "tag": "None" });
+        assert!(result_fits(&maybe_bool, &none));
+        assert!(result_fits(&maybe_json, &none));
     }
 
     #[test]

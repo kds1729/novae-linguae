@@ -283,6 +283,14 @@ def url_builder(base_var, path_template):
     return curried_app(b_var("str_concat"), base_var, str_concat_chain(tokens))
 
 
+def _intent_ext(lead, name):
+    """The extending discovery tag `<lead>/<name>` in the tag grammar (hyphenated lowercase
+    segments, 64 chars) — or nothing when the name would overflow the bound: an omission,
+    never a truncation (a truncated tag could collide with a different operation's)."""
+    tag = f"{lead}/{_param_name(name).replace('_', '-')}"
+    return [tag] if len(tag) <= 64 else []
+
+
 def _param_name(raw):
     """A path/operation identifier down to a valid lowercase body variable."""
     name = re.sub(r"[^a-zA-Z0-9]", "_", raw)
@@ -718,11 +726,18 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
                            query_ps=query_ps, header_ps=header_ps, int_params=int_params, spec=spec,
                            mp_parts=mp_parts)
     intent = ["io", "io/network/http"] + (["query/lookup"] if verb in _READ_VERBS else [])
+    # Discovery precision (the GitHub-scale finding: 10 same-sort effectful fits the rank could
+    # not split, because every generated record carried the SAME four tags): each record gets ONE
+    # extending tag — `<lead>/<its-own-hyphenated-name>` — so a caller can query precisely (the
+    # GW3 blessed-tag move, applied at generation time), the rank's tag-specificity rewards it
+    # under broad queries, and the specific intent's tokens feed the name-affinity signal.
+    lead = "query/lookup" if verb in _READ_VERBS else "io/network/http"
 
     record = build_v2_record(
         name=op_id, type_ast=type_ast, examples=[example], body_text=body_ast,
         module_name=None, extra_hints=[_param_name(op_id)],
-        effects=[effect], terminates="always", intent_tags=intent, complexity="O(n)",
+        effects=[effect], terminates="always",
+        intent_tags=intent + _intent_ext(lead, op_id), complexity="O(n)",
     )
     records = [(record, body_ast)]
 
@@ -754,7 +769,8 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
                                                "result": MAYBE_JSON},
                 examples=[proj_example], body_text=proj_body,
                 module_name=None, extra_hints=[_param_name(op_id + "Body")],
-                effects=[effect], terminates="always", intent_tags=intent + ["parse"],
+                effects=[effect], terminates="always",
+                intent_tags=intent + ["parse"] + _intent_ext("parse", op_id + "Body"),
                 complexity="O(n)",
             )
             records.append((proj_record, proj_body))
@@ -790,7 +806,8 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
                     "type_ast": {"kind": "fn", "params": param_types, "result": MAYBE_JSON},
                     "body_ast": _schema_projection_body(lam_params, call, s_code, None, None),
                     "args": example["args"], "effect": effect,
-                    "intent": intent + ["parse"], "field": None, "required_field": False,
+                    "intent": intent + ["parse"] + _intent_ext("parse", op_id + "Body"),
+                    "field": None, "required_field": False,
                     "check": check, "code": s_code,
                 })
                 kinds = {"string": MAYBE_STRING, "bool": MAYBE_BOOL, "json": MAYBE_JSON}
@@ -803,7 +820,8 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
                         "body_ast": _schema_projection_body(lam_params, call, s_code,
                                                             prop, kind),
                         "args": example["args"], "effect": effect,
-                        "intent": intent + ["parse"], "field": prop,
+                        "intent": intent + ["parse"] + _intent_ext("parse", op_id + suffix),
+                        "field": prop,
                         "required_field": prop in check["required"],
                         "check": check, "code": s_code,
                     })
@@ -847,7 +865,8 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
                                            "result": MAYBE_STRING},
             examples=[hdr_example], body_text=hdr_body,
             module_name=None, extra_hints=[_param_name(op_id + suffix)],
-            effects=[effect], terminates="always", intent_tags=intent, complexity="O(n)",
+            effects=[effect], terminates="always",
+            intent_tags=intent + _intent_ext(lead, op_id + suffix), complexity="O(n)",
         )
         records.append((hdr_record, hdr_body))
         notes.append(f"header projection: {op_id}{suffix} -> Maybe string "
