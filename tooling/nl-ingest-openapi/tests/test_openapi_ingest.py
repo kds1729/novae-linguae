@@ -1,4 +1,5 @@
-"""Offline tests for the OpenAPI ingestion adapter — no network, no live service.
+"""Tests for the OpenAPI ingestion adapter — no external network; the observation-gate tests
+run against the in-repo fake service on localhost, everything else is fully offline.
 
 Generates records from the reference item-store description and checks:
   1. every generated record CERTIFIES (typecheck / effects / termination / complexity);
@@ -292,7 +293,8 @@ class RefusalBoundaryTest(unittest.TestCase):
             "servers": [{"url": "http://127.0.0.1:1"}]}
 
     def _walk(self, spec):
-        return oi.walk({**self.BASE, **spec}, None)
+        built, skipped, _pending = oi.walk({**self.BASE, **spec}, None)
+        return built, skipped
 
     def test_api_key_in_query_refused(self):
         built, skipped = self._walk({
@@ -377,7 +379,7 @@ class RefusalBoundaryTest(unittest.TestCase):
                                               "parameters": [{"$ref": "shared.json#/components/parameters/Q"}]}}}}
         json.dump(main_spec, open(Path(tmp) / "main.json", "w"))
         spec = oi.load_spec(str(Path(tmp) / "main.json"))
-        built, skipped = oi.walk(spec, None)
+        built, skipped, _ = oi.walk(spec, None)
         self.assertEqual(skipped, [])
         record, body_ast, _ = built[0]
 
@@ -385,7 +387,7 @@ class RefusalBoundaryTest(unittest.TestCase):
                        "paths": {"/x": {"get": {**op,
                                                 "parameters": [{"name": "q", "in": "query", "required": True,
                                                                 "schema": {"type": "string"}}]}}}}
-        built_inline, _ = oi.walk(inline_spec, None)
+        built_inline, _, _ = oi.walk(inline_spec, None)
         record_inline, body_inline, _ = built_inline[0]
         self.assertEqual(json.dumps(body_ast, sort_keys=True), json.dumps(body_inline, sort_keys=True))
         self.assertEqual(record["hash"], record_inline["hash"])
@@ -406,7 +408,7 @@ class RefusalBoundaryTest(unittest.TestCase):
                                               "responses": {"200": {"description": "ok"}}}}}}
         json.dump(main_spec, open(inner / "main.json", "w"))
         spec = oi.load_spec(str(inner / "main.json"))
-        built, skipped = oi.walk(spec, None)
+        built, skipped, _ = oi.walk(spec, None)
         self.assertEqual(built, [])
         self.assertIn("$ref", skipped[0][1])
 
@@ -422,6 +424,135 @@ class RefusalBoundaryTest(unittest.TestCase):
         record, body_ast, _ = built[0]
         self.assertEqual(len(record["signature"]["type"]["params"]), 2)  # base, q
         self.assertIn("url_encode", json.dumps(body_ast))
+
+
+class SchemaDerivedTest(unittest.TestCase):
+    """Schema-derived projections (the Frankfurter finding: real descriptions declare response
+    SCHEMAS, not examples). Offline, a declared schema yields only PENDING projections — a schema
+    promises shape, not a value, so no record exists without the live observation gate. The gated
+    half runs against the in-repo fake service on localhost (hermetic — no external network)."""
+
+    BASE = {"openapi": "3.0.0", "info": {"title": "t", "version": "1"}}
+
+    @staticmethod
+    def _health_spec(base_url, schema):
+        return {**SchemaDerivedTest.BASE, "servers": [{"url": base_url}],
+                "paths": {"/health": {"get": {
+                    "operationId": "getHealth", "security": [],
+                    "responses": {"200": {"description": "ok", "content": {
+                        "application/json": {"schema": schema}}}}}}}}
+
+    def test_schema_yields_pending_not_records(self):
+        # No example anywhere: the base status record builds, the projections stay PENDING
+        # (typed per declared property, numeric skipped, required threaded through).
+        spec = self._health_spec("http://127.0.0.1:1", {
+            "type": "object",
+            "properties": {"status": {"type": "string"}, "ready": {"type": "boolean"},
+                           "detail": {"type": "object"}, "pid": {"type": "integer"}},
+            "required": ["status"]})
+        built, skipped, pending = oi.walk(spec, None)
+        self.assertEqual(skipped, [])
+        self.assertEqual([r["name_hints"][0] for r, _, _ in built], ["gethealth"])
+        by_name = {p["name"]: p for p in pending}
+        # pid (integer) is NOT pending: JNum carries int or float — no sound narrowing.
+        self.assertEqual(set(by_name), {"getHealthBody", "getHealthStatus",
+                                        "getHealthReady", "getHealthDetail"})
+        self.assertEqual(by_name["getHealthStatus"]["type_ast"]["result"], oi.MAYBE_STRING)
+        self.assertEqual(by_name["getHealthReady"]["type_ast"]["result"], oi.MAYBE_BOOL)
+        self.assertEqual(by_name["getHealthDetail"]["type_ast"]["result"], oi.MAYBE_JSON)
+        self.assertTrue(by_name["getHealthStatus"]["required_field"])
+        self.assertFalse(by_name["getHealthReady"]["required_field"])
+
+    def test_documented_example_wins_over_schema(self):
+        # A response documenting BOTH an example and a schema takes the example path (spec-time
+        # value, no live gate needed) — the schema path exists for the example-less reality.
+        spec = self._health_spec("http://127.0.0.1:1", {"type": "object"})
+        media = spec["paths"]["/health"]["get"]["responses"]["200"]["content"]["application/json"]
+        media["example"] = {"status": "ok"}
+        built, skipped, pending = oi.walk(spec, None)
+        self.assertEqual(pending, [])
+        self.assertIn("gethealthbody", [r["name_hints"][0] for r, _, _ in built])
+
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator not built")
+class SchemaObservationGateTest(unittest.TestCase):
+    """The live half: the observation gate materializes schema-derived records against the
+    in-repo fake service (GET /health answers {"status":"ok"}), and a description the service
+    does not honor REFUSES to publish."""
+
+    PORT = 18878
+
+    @classmethod
+    def setUpClass(cls):
+        import time
+        import urllib.request
+        cls.base = f"http://127.0.0.1:{cls.PORT}"
+        cls.svc = subprocess.Popen(
+            [sys.executable, str(REPO_ROOT / "tooling" / "fake-service" / "fake_service.py"),
+             "--port", str(cls.PORT)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(f"{cls.base}/health", timeout=0.2)
+                break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("fake service did not come up")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.svc.terminate()
+        cls.svc.wait()
+
+    def _ingest(self, schema, tag):
+        tmp = tempfile.mkdtemp(prefix=f"nl-openapi-schema-{tag}-")
+        sp = Path(tmp) / "spec.json"
+        json.dump(SchemaDerivedTest._health_spec(self.base, schema), open(sp, "w"))
+        code = 0
+        try:
+            oi.main([str(sp), "--out", tmp, "--verify-against", self.base])
+        except SystemExit as e:
+            code = e.code
+        return tmp, code
+
+    def test_observation_materializes_and_replays(self):
+        # An honest schema: one live execution supplies each record's worked example
+        # (trace-attached), certify passes, and `run` replays it offline.
+        tmp, code = self._ingest({"type": "object",
+                                  "properties": {"status": {"type": "string"}},
+                                  "required": ["status"]}, "ok")
+        self.assertEqual(code, 0)
+        rec = json.load(open(Path(tmp) / "gethealthstatus.v0.2.json"))
+        ex = rec["examples"][0]
+        self.assertEqual(ex["result"], {"kind": "variant", "tag": "Just",
+                                        "payload": {"kind": "string", "value": "ok"}})
+        self.assertTrue(ex["trace"].startswith("trc_"))
+        body = json.load(open(Path(tmp) / "body-gethealthstatus.json"))
+        self.assertIn('"JStr"', json.dumps(body))
+        r = subprocess.run([str(VALIDATOR), "run", str(Path(tmp) / "gethealthstatus.v0.2.json"),
+                            "--records", tmp], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_lying_required_property_refuses(self):
+        # The description promises a required property the service never answers: the observed
+        # document violates the declared schema -> the gate FAILS, nothing materializes.
+        tmp, code = self._ingest({"type": "object",
+                                  "properties": {"uptime": {"type": "string"}},
+                                  "required": ["uptime"]}, "lie")
+        self.assertEqual(code, 1)
+        self.assertFalse((Path(tmp) / "gethealthbody.v0.2.json").exists())
+        self.assertFalse((Path(tmp) / "gethealthuptime.v0.2.json").exists())
+
+    def test_lying_property_type_refuses(self):
+        # The service answers status as a string; a description declaring it boolean is held to
+        # its own words — whole-document conformance AND the required-field narrowing both fail.
+        tmp, code = self._ingest({"type": "object",
+                                  "properties": {"status": {"type": "boolean"}},
+                                  "required": ["status"]}, "type")
+        self.assertEqual(code, 1)
+        self.assertFalse((Path(tmp) / "gethealthbody.v0.2.json").exists())
+        self.assertFalse((Path(tmp) / "gethealthstatus.v0.2.json").exists())
 
 
 if __name__ == "__main__":

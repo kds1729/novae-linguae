@@ -45,6 +45,18 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
                     commons records, principle 4). Emitted only when a deterministic success
                     example is constructible from the spec alone (a GET with no path parameters);
                     anything else gets a printed note, never a silent guess.
+                    A 2xx response that declares only a SCHEMA (no example — how real-world
+                    descriptions overwhelmingly document responses) yields SCHEMA-DERIVED
+                    projections: `<opId>Body : … -> Maybe Json` plus one typed field projection
+                    per declared property that narrows soundly (`string` -> Maybe string via
+                    JStr, `boolean` -> Maybe bool via JBool, object/array/untyped -> Maybe Json;
+                    numeric properties are noted, not projected — JNum carries int OR float, so
+                    a typed numeric promise cannot be narrowed by pattern alone). A schema
+                    promises SHAPE, not a value, so these records exist only through the live
+                    observation gate (--verify-against): one execution supplies the worked
+                    example (trace-attached, offline-replayable), and the observed document is
+                    HELD TO the declared shape — required properties present, declared types
+                    match — so a description the service does not honor refuses to publish.
     resp headers -> a header the documented response DECLARES with an example (Location being
                     the canonical case — server-assigned identity, redirect targets) yields a
                     header-projection record `<opId><Header> : … -> Maybe string` over the
@@ -79,14 +91,17 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "ingest-common")))
 
 from nl_body import b_app, b_field, b_let, b_lit, b_var  # noqa: E402
-from nl_core import build_v2_record, expr_address  # noqa: E402
+from nl_core import build_v2_record, expr_address, sanitize_hint  # noqa: E402
 
 STRING = {"kind": "builtin", "name": "string"}
 INT = {"kind": "builtin", "name": "int"}
+BOOL = {"kind": "builtin", "name": "bool"}
 JSON_T = {"kind": "builtin", "name": "Json"}
 # The structural sum {Just Json, None} — how a Maybe result is declared (the json_get precedent).
 MAYBE_JSON = {"kind": "sum", "variants": [{"tag": "Just", "type": JSON_T}, {"tag": "None"}]}
 MAYBE_STRING = {"kind": "sum", "variants": [{"tag": "Just", "type": STRING}, {"tag": "None"}]}
+MAYBE_BOOL = {"kind": "sum", "variants": [{"tag": "Just", "type": BOOL}, {"tag": "None"}]}
+NONE_V = {"kind": "variant", "tag": "None"}
 _VALIDATOR = os.path.normpath(
     os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator")
 )
@@ -419,8 +434,147 @@ def _response_json_example(spec, op):
     return None
 
 
+def _response_json_schema(spec, op):
+    """The declared application/json SCHEMA of the operation's first 2xx response, as
+    (status_code, resolved_schema), or None. Consulted only when no documented example exists —
+    real-world descriptions overwhelmingly declare schemas, not examples (the Frankfurter
+    finding, spec/expressiveness.md). A schema promises SHAPE, not a value: it licenses a
+    projection record, but the record's worked example must come from a live observation."""
+    responses = op.get("responses", {})
+    for code in sorted(c for c in responses if c.isdigit() and 200 <= int(c) < 300):
+        resp = deref(spec, responses[code])
+        if not isinstance(resp, dict):
+            continue
+        media = (resp.get("content") or {}).get("application/json") or {}
+        schema = deref(spec, media.get("schema")) if isinstance(media.get("schema"), dict) else None
+        if isinstance(schema, dict):
+            return int(code), schema
+    return None
+
+
+def _schema_object_fields(spec, schema):
+    """Split an object schema's declared properties into (projectable, skipped, check):
+    projectable = [(prop, kind)] with kind `string` (JStr-narrowed to Maybe string), `bool`
+    (JBool-narrowed to Maybe bool), or `json` (object/array/untyped — the raw sub-document as
+    Maybe Json); skipped = [(prop, why)] — numeric properties are NOT projected: JNum carries an
+    int or a float, so a typed numeric promise cannot be narrowed soundly by pattern alone.
+    check = the conformance data the live gate holds the observed document to (required-present
+    plus declared-type-per-present-property — exactly the shape the projections promise)."""
+    props = schema.get("properties") or {}
+    required = [r for r in (schema.get("required") or []) if isinstance(r, str)]
+    projectable, skipped, types = [], [], {}
+    for prop in props:  # declaration order
+        psch = deref(spec, props[prop])
+        if not isinstance(psch, dict):
+            skipped.append((prop, "unresolvable property schema"))
+            continue
+        t = psch.get("type")
+        if t:
+            types[prop] = t
+        if t == "string":
+            projectable.append((prop, "string"))
+        elif t == "boolean":
+            projectable.append((prop, "bool"))
+        elif t in ("integer", "number"):
+            skipped.append((prop, f"declared `{t}` — JNum carries int or float, so a typed "
+                                  "numeric promise cannot be narrowed soundly by pattern alone"))
+        else:
+            projectable.append((prop, "json"))
+    return projectable, skipped, {"required": required, "types": types}
+
+
+def _narrow_case(value_var, tag, bind_name):
+    """`case v of { Tag(x) => Just x; _ => None }` — the sound narrowing from a Json variant to
+    its payload type (JStr -> Maybe string, JBool -> Maybe bool)."""
+    return {"kind": "case", "scrutinee": b_var(value_var),
+            "arms": [
+                {"pattern": {"kind": "variant", "tag": tag,
+                             "payload": {"kind": "bind", "name": bind_name}},
+                 "body": {"kind": "variant", "tag": "Just", "payload": b_var(bind_name)}},
+                {"pattern": {"kind": "wildcard"}, "body": NONE_V},
+            ]}
+
+
+def _schema_projection_body(lam_params, call, status, field, kind):
+    """A schema-derived projection body: the call bound ONCE, status-guarded to the response the
+    schema is declared on. field=None -> the whole document (`parse_json r.body`, Maybe Json);
+    otherwise map_get the field out of the JObj, narrowed per its declared type (`_narrow_case`),
+    or raw for object/array/untyped fields — the json_get shape, inlined so the record is
+    self-contained."""
+    parsed = curried_app(b_var("parse_json"), b_field(b_var("r"), "body"))
+    if field is None:
+        on_status = parsed
+    else:
+        if kind == "string":
+            get = {"kind": "case",
+                   "scrutinee": curried_app(b_var("map_get"), s_lit(field), b_var("m")),
+                   "arms": [
+                       {"pattern": {"kind": "variant", "tag": "Just",
+                                    "payload": {"kind": "bind", "name": "v"}},
+                        "body": _narrow_case("v", "JStr", "s")},
+                       {"pattern": {"kind": "wildcard"}, "body": NONE_V},
+                   ]}
+        elif kind == "bool":
+            get = {"kind": "case",
+                   "scrutinee": curried_app(b_var("map_get"), s_lit(field), b_var("m")),
+                   "arms": [
+                       {"pattern": {"kind": "variant", "tag": "Just",
+                                    "payload": {"kind": "bind", "name": "v"}},
+                        "body": _narrow_case("v", "JBool", "b")},
+                       {"pattern": {"kind": "wildcard"}, "body": NONE_V},
+                   ]}
+        else:  # json: map_get already yields Maybe Json
+            get = curried_app(b_var("map_get"), s_lit(field), b_var("m"))
+        on_status = {"kind": "case", "scrutinee": parsed,
+                     "arms": [
+                         {"pattern": {"kind": "variant", "tag": "Just",
+                                      "payload": {"kind": "bind", "name": "j"}},
+                          "body": {"kind": "case", "scrutinee": b_var("j"),
+                                   "arms": [
+                                       {"pattern": {"kind": "variant", "tag": "JObj",
+                                                    "payload": {"kind": "bind", "name": "m"}},
+                                        "body": get},
+                                       {"pattern": {"kind": "wildcard"}, "body": NONE_V},
+                                   ]}},
+                         {"pattern": {"kind": "wildcard"}, "body": NONE_V},
+                     ]}
+    return {"kind": "lambda",
+            "params": [{"name": p} for p in lam_params],
+            "body": b_let("r", call, _case_bool(
+                curried_app(b_var("eq"), b_field(b_var("r"), "status"),
+                            b_lit({"kind": "nat", "value": status})),
+                on_status, NONE_V))}
+
+
+def _value_conforms(doc, check):
+    """Hold an OBSERVED document (evaluator value AST) to the declared schema fragment the
+    projections were compiled from — and nothing more: object-ness, every required property
+    present, every declared-type property that IS present carries its declared type. Deeper
+    constraints (enum, minProperties, nested shapes) are deliberately unchecked: the gate
+    checks exactly the shape the records promise. Returns (ok, why)."""
+    if not (isinstance(doc, dict) and doc.get("tag") == "JObj"):
+        return False, "observed document is not a JSON object"
+    entries = {e["key"]: e["value"] for e in (doc.get("payload") or {}).get("entries", [])}
+    for req in check["required"]:
+        if req not in entries:
+            return False, f"required property `{req}` absent from the observed document"
+    tags = {"string": "JStr", "boolean": "JBool", "integer": "JNum", "number": "JNum",
+            "object": "JObj", "array": "JList"}
+    for prop, t in check["types"].items():
+        if prop in entries and t in tags:
+            v = entries[prop]
+            if not (isinstance(v, dict) and v.get("tag") == tags[t]):
+                return False, f"property `{prop}` is not the declared `{t}`"
+            if t == "integer" and (v.get("payload") or {}).get("kind") != "int":
+                return False, f"property `{prop}` is not an integer"
+    return True, ""
+
+
 def build_operation(spec, base_url, path, verb, op, shared_params, global_security, secret_name):
-    """Compile one operation. Returns ("ok", record, body_ast, notes) or ("skip", op_id, reason)."""
+    """Compile one operation. Returns ("ok", records, notes, pending) or ("skip", op_id, reason).
+    `pending` holds SCHEMA-DERIVED projections that cannot become records yet: a schema promises
+    shape, not a value, so their worked example must be OBSERVED against a live service
+    (--verify-against) before a v0.2 record (>=1 example) can exist at all."""
     verb = verb.upper()
     op_id = op.get("operationId") or _param_name(f"{verb}_{path}")
 
@@ -578,6 +732,7 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
     # deterministic SUCCESS example is constructible from the spec alone: a GET with no path
     # parameters and no request body (path parameters name server state the description cannot
     # promise). Field access composes in-language (json_get / json_path), principle 4.
+    pending = []
     proj = _response_json_example(spec, op)
     if proj is not None:
         proj_code, proj_doc = proj
@@ -605,6 +760,57 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
             records.append((proj_record, proj_body))
             notes.append(f"body projection: {op_id}Body -> Maybe Json "
                          f"(documented {proj_code} example)")
+    else:
+        # SCHEMA-DERIVED PROJECTION (the ingestion-sweep residual — the Frankfurter finding:
+        # real-world descriptions declare response SCHEMAS, not examples). A declared 2xx
+        # object schema licenses `<opId>Body : … -> Maybe Json` plus one typed field
+        # projection per soundly-narrowable declared property — but a schema promises SHAPE,
+        # not a value, so these stay PENDING: the live gate observes the value (one execution,
+        # trace-carried, offline-replayable) and holds the observed document to the declared
+        # shape — a lying description refuses rather than publishes. Same constructibility
+        # constraint as the example path, same one-bound-call shape as the header projections.
+        sch = _response_json_schema(spec, op)
+        if sch is not None:
+            s_code, s_schema = sch
+            if verb != "GET" or path_param_names or has_body:
+                notes.append("declared response schema not projected — only a bodyless GET "
+                             "without path parameters has a spec-constructible success call")
+            elif s_schema.get("type") != "object" and not s_schema.get("properties"):
+                notes.append("declared response schema not projected — this increment "
+                             "projects object documents only")
+            else:
+                fields, skipped_fields, check = _schema_object_fields(spec, s_schema)
+                for prop, why in skipped_fields:
+                    notes.append(f"schema property `{prop}` not projected — {why}")
+                if not fields:
+                    notes.append("schema declares no named properties (a map-shaped object) "
+                                 "— whole-document projection only")
+                pending.append({
+                    "name": op_id + "Body", "hint": _param_name(op_id + "Body"),
+                    "type_ast": {"kind": "fn", "params": param_types, "result": MAYBE_JSON},
+                    "body_ast": _schema_projection_body(lam_params, call, s_code, None, None),
+                    "args": example["args"], "effect": effect,
+                    "intent": intent + ["parse"], "field": None, "required_field": False,
+                    "check": check, "code": s_code,
+                })
+                kinds = {"string": MAYBE_STRING, "bool": MAYBE_BOOL, "json": MAYBE_JSON}
+                for prop, kind in fields:
+                    suffix = re.sub(r"[^a-zA-Z0-9]", " ", prop).title().replace(" ", "")
+                    pending.append({
+                        "name": op_id + suffix, "hint": _param_name(op_id + suffix),
+                        "type_ast": {"kind": "fn", "params": param_types,
+                                     "result": kinds[kind]},
+                        "body_ast": _schema_projection_body(lam_params, call, s_code,
+                                                            prop, kind),
+                        "args": example["args"], "effect": effect,
+                        "intent": intent + ["parse"], "field": prop,
+                        "required_field": prop in check["required"],
+                        "check": check, "code": s_code,
+                    })
+                declared = ", ".join(f"{p}:{k}" for p, k in fields) or "(none)"
+                notes.append(f"schema-derived projections pending a live observation gate: "
+                             f"{op_id}Body -> Maybe Json; fields {declared} "
+                             f"(declared {s_code} schema)")
 
     # HEADER PROJECTION (GW16 — the description-layer counterpart of the GW14 pull): a header the
     # documented response declares WITH an example is spec-time knowledge of where the answer
@@ -646,7 +852,7 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
         records.append((hdr_record, hdr_body))
         notes.append(f"header projection: {op_id}{suffix} -> Maybe string "
                      f"(documented {want} `{hname}` example)")
-    return ("ok", records, notes)
+    return ("ok", records, notes, pending)
 
 
 def _example_for(base_url, verb, path_param_names, has_body, op,
@@ -674,7 +880,14 @@ def _example_for(base_url, verb, path_param_names, has_body, op,
     for pname in mp_parts:
         args.append({"kind": "string", "value": f"{pname} bytes"})
     if verb in ("GET", "DELETE"):
-        want = 404 if 404 in codes else (codes[0] if codes else 200)
+        if path_param_names:
+            want = 404 if 404 in codes else (codes[0] if codes else 200)
+        else:
+            # No path parameter carries the guaranteed-absent name, so the minimal call IS the
+            # happy path — assert the documented success, not a 404 the call cannot reach.
+            # (Found by the Frankfurter live gate: GET /latest documents a 404 for date paths,
+            # but the parameterless call answers 200.)
+            want = next((c for c in codes if 200 <= c < 300), codes[0] if codes else 200)
     elif verb in ("PUT", "POST"):
         # A fresh name is a CREATE — 201 if the operation documents it, else the first 2xx.
         want = 201 if 201 in codes else next((c for c in codes if 200 <= c < 300), codes[0] if codes else 201)
@@ -684,10 +897,11 @@ def _example_for(base_url, verb, path_param_names, has_body, op,
 
 
 def walk(spec, secret_name):
-    """-> (built, skipped): built = [(record, body_ast, notes)], skipped = [(op_id, reason)]."""
+    """-> (built, skipped, pending): built = [(record, body_ast, notes)], skipped =
+    [(op_id, reason)], pending = schema-derived projections awaiting a live observation gate."""
     base_url = (spec.get("servers") or [{}])[0].get("url", "http://localhost")
     global_security = spec.get("security", [])
-    built, skipped = [], []
+    built, skipped, pending = [], [], []
     for path, item in spec.get("paths", {}).items():
         item = deref(spec, item)
         if not isinstance(item, dict):
@@ -704,9 +918,10 @@ def walk(spec, secret_name):
                 # the notes ride with the first so they print once.
                 for i, (record, body_ast) in enumerate(got[1]):
                     built.append((record, body_ast, got[2] if i == 0 else []))
+                pending.extend(got[3])
             else:
                 skipped.append((got[1], got[2]))
-    return built, skipped
+    return built, skipped, pending
 
 
 def certify(record_path, body_path, out_dir):
@@ -769,6 +984,66 @@ def attach_example_traces(record_path, body_path, record, out_dir, secret_names,
     return True, new_hash
 
 
+def materialize_schema_projection(p, out_dir, secret_names, token, oauth_ids=()):
+    """The live OBSERVATION gate for a schema-derived projection (the GW12 shape, one rung
+    deeper): run the body once (`eval --trace-out`, grants + secrets), hold the observed value
+    to the DECLARED schema — the whole document to `_value_conforms`, a required field to
+    presence-with-its-declared-type (`Just …`, never `None`) — and only then does a record
+    exist at all: the observation becomes its worked example, trace-attached, so `run` replays
+    it offline. A service that does not honor its description FAILS here; nothing publishes.
+    Returns (ok, record_or_message)."""
+    name = p["name"]
+    fbase = sanitize_hint(name)  # the on-disk convention: lowercase name_hints[0]
+    bp = os.path.join(out_dir, f"body-{fbase}.json")
+    json.dump(p["body_ast"], open(bp, "w"), indent=2)
+    argfiles = []
+    for j, a in enumerate(p["args"]):
+        ap = os.path.join(out_dir, f".arg-{fbase}-{j}.json")
+        json.dump(a, open(ap, "w"))
+        argfiles.append(ap)
+    trace_path = os.path.join(out_dir, f"trace-{fbase}-0.json")
+    cmd = [_VALIDATOR, "eval", bp]
+    for ap in argfiles:
+        cmd += ["--arg", ap]
+    cmd += ["--grant", p["effect"]]
+    for n in secret_names:
+        cmd += ["--secret", f"{n}={token}"]
+    for oname, cfg in oauth_ids:
+        cmd += ["--oauth", f"{oname}={cfg}"]
+    cmd += ["--trace-out", trace_path]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    for ap in argfiles:
+        os.unlink(ap)
+    if r.returncode != 0:
+        return False, f"live observation failed: {(r.stderr or '').strip()}"
+    got = json.loads(r.stdout)
+    is_none = isinstance(got, dict) and got.get("kind") == "variant" and got.get("tag") == "None"
+    if p["field"] is None:
+        if is_none:
+            return False, (f"live response did not yield the declared {p['code']} JSON "
+                           "document (status or parse mismatch)")
+        ok, why = _value_conforms(got.get("payload"), p["check"])
+        if not ok:
+            return False, f"observed document violates the declared schema: {why}"
+    elif p["required_field"] and is_none:
+        return False, (f"required property `{p['field']}` absent or mistyped in the live "
+                       "response — the description's promise does not hold")
+    trc = subprocess.run([_VALIDATOR, "hash", trace_path],
+                         capture_output=True, text=True).stdout.strip()
+    if not trc.startswith("trc_"):
+        return False, f"trace did not hash to a trc_… address: {trc!r}"
+    record = build_v2_record(
+        name=name, type_ast=p["type_ast"],
+        examples=[{"args": p["args"], "result": got, "trace": trc}],
+        body_text=p["body_ast"], module_name=None, extra_hints=[p["hint"]],
+        effects=[p["effect"]], terminates="always", intent_tags=p["intent"],
+        complexity="O(n)",
+    )
+    rp = os.path.join(out_dir, f"{fbase}.v0.2.json")
+    json.dump(record, open(rp, "w"), indent=2)
+    return True, record
+
+
 def verify_examples(record_path, out_dir, base_url, secret_names, token):
     secret_flags = [f for n in secret_names for f in ("--secret", f"{n}={token}")]
     r = subprocess.run(
@@ -814,7 +1089,7 @@ def main(argv=None):
                 oauth_ids.append((secret_name or key, f"{cc['tokenUrl']}|{cid}|{csec}"))
     os.makedirs(args.out, exist_ok=True)
 
-    ops, skipped = walk(spec, secret_name)
+    ops, skipped, pending = walk(spec, secret_name)
     for op_id, reason in skipped:
         print(f"{op_id:16} SKIPPED: {reason}")
     if not ops:
@@ -833,10 +1108,35 @@ def main(argv=None):
         written.append((name, rp, bp, record))
 
     ok = True
+    # Schema-derived projections: a schema promises shape, not a value — without a live gate
+    # there is nothing honest to put in the record's example, so they are not emitted at all.
+    observed = set()
+    if pending and not args.verify_against:
+        for p in pending:
+            print(f"{p['name']:16} note: schema-derived projection not materialized — a schema "
+                  "promises shape, not a value; --verify-against observes one")
+    elif pending:
+        for p in pending:
+            m_ok, got = materialize_schema_projection(p, args.out, secret_names, args.token,
+                                                      oauth_ids=oauth_ids)
+            if not m_ok:
+                ok = False
+                print(f"{p['name']:16} observation-gate=FAIL: {got}")
+                continue
+            name = got["name_hints"][0]
+            rp = os.path.join(args.out, f"{name}.v0.2.json")
+            bp = os.path.join(args.out, f"body-{name}.json")
+            written.append((name, rp, bp, got))
+            observed.add(name)
+
     for name, rp, bp, record in written:
         line = f"{name:16} body={record['body_hash'][:20]}…"
         effectful = bool((record.get("signature") or {}).get("effects"))
-        if args.verify_against and effectful:
+        if name in observed:
+            # Already ran live exactly once (the observation IS the example, trace attached);
+            # certify + the offline replay below are the remaining checks.
+            line += "  live=OBSERVED+schema-checked"
+        elif args.verify_against and effectful:
             # GW12: the live gate for an effectful record IS the trace capture — each example runs
             # exactly once (grants + secrets), must reproduce its documented result, and its
             # observed trace is attached by trc_… address (re-addressing the record).
