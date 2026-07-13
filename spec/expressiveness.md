@@ -479,7 +479,8 @@ second increment below, same day), the 57 v0.1
 surface-typed stdlib records (uncertifiable as-is; `--v2` re-ingestion needs annotated
 sources — the measured stdlib boundary says the pull is annotated *library* code, not
 CPython), and scale-out to a large description (e.g. GitHub's ~900-operation description —
-mechanical, deferred until a consumer wants it rather than publishing 900 thin records).
+not yet attempted at the time; the then-current hesitation, that it would publish hundreds of
+*thin* status-projections, expired when schema-derived depth landed).
 
 **Ingestion sweep, second increment (2026-07-12): schema-derived response depth — the
 examples gap closes.** The first increment's finding was that real-world descriptions
@@ -548,8 +549,42 @@ but typeshed honestly types them `ReadableBuffer` — a buffer-protocol alias th
 not carry — and `string.capwords`' stub is genuinely polymorphic, a TypeVar that determines no
 value), 10 **doctest-no-body** (statistics — real documented examples over bodies the subset
 cannot lift: generators, raising validation), 36 **no-body** (classes, IO, comprehension and
-multi-assignment shapes). Adapter tests 35 → 44. The sweep's remaining residual is
-large-description scale-out alone (deferred until a consumer wants it).
+multi-assignment shapes). Adapter tests 35 → 44. The sweep's remaining increment is
+large-description scale-out — taken up the same session, below.
+
+**Ingestion sweep, fourth increment (2026-07-12, same session): GitHub-scale — 1,196
+operations, zero refusals, and the finding that discovery precision is the scale
+bottleneck.** GitHub's production REST description (13 MB, 790 paths, **1,196 operations** —
+the largest real-world OpenAPI document in common circulation) compiles in one run:
+**1,377 records, 1,377/1,377 certify, zero skipped operations, 95 s wall** including the
+per-record certify subprocesses. The honest-refusal machinery never had to fire on the
+operations themselves; it spoke entirely through notes: 1,045 optional parameters omitted
+(minimal documented calls), 836 declared response schemas not projected (path-parameter
+GETs — no spec-constructible success call), 44 non-object response documents, 15 numeric
+properties (the JNum narrowing refusal), and Link/Location **header projections generated
+from documented examples** on the list endpoints — GitHub documents its pagination header,
+so the description layer meets GW15's in-language pagination walkers. 20 operations carry
+123 schema-derived pendings; the **live-gated slice** (the parameterless public GETs
+`/meta`, `/emojis`, `/rate_limit` — ~25 unauthenticated calls, within GitHub's 60/hr)
+materialized **25 records — 3 base + 22 schema-derived projections, including the first
+`Maybe bool` field projection in production** (`meta/getVerifiablePasswordAuthentication`),
+all observed, schema-checked, certified, offline-replayed, and published to Arca with
+bodies + traces + signed certs. Two trace-economy notes: every `/meta` observation
+deduplicated to ONE `trc_b2a04ce1…` across all nineteen `/meta`-family records, while `/rate_limit`'s
+observations are each their own artifact — its body counts the requests made to it, so
+distinct observations are the honest outcome, not a dedup failure. The loop closed
+(`orchestrate --intent parse --expect 'Just false' --grant net.read@api.github.com` →
+CONFIRMED, `msg_191d5743…` published, grantless `verify-claim` by address replays it) —
+and the close IS the finding: the rank held **10 same-sort effectful candidates it could
+not split** (never dry-run; every adapter-generated projection carries the same four
+intent tags; the coarse expect-sort keeps `Maybe Json` fits for a `Just bool` goal since a
+bool is a JSON value at sort level), so fetch order applied the *Frankfurter* currencies
+projection against GitHub's base URL — an honest `None` (404), truthfully asserted and
+replayable, but a wrong-goal first pick. Compilation scales; **the named residual is
+discovery precision**: adapter-generated records need distinguishing intent tags (the GW3
+blessed-tag precedent, applied at generation time) and/or orchestrate needs a name-affinity
+input, and the expect-sort could be tightened to distinguish variant payload encodings
+(`Just false` is never literally produced by a `Maybe Json` body).
 
 **Goal-aware discovery in production (2026-07-12): the GW16 skip becomes unnecessary.** GW16
 had to *skip discovery* — Arca holds a dozen `(string, string)` fits (status lookups, deleters,
