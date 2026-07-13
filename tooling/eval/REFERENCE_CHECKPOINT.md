@@ -210,6 +210,18 @@ made on **shared tasks**, never raw totals:
 > ftdata22 staged at `/var/tmp/claude/ftdata22` (6,364 pairs, train 6,046/valid 318, guard
 > excluded 466). **Retrain deliberately not run** (pod = user decision) — the next round measures
 > whether #52 flips `write/link_target` the way #42 flipped `take_rec`/`drop_rec`.
+>
+> **Round 22 (2026-07-12 night, corpus22/ftdata22, RTX PRO 6000 Blackwell, 5 cycles 1h47m ≈
+> $3.75): it does — `write/link_target` flips to PASS at EVERY tier and seed (5/5)**, with the
+> taught #52 shape verbatim (split-on-`<` / null guard / `str_contains` / split-on-`>`, total
+> through Maybe); `read/link_target` passes 4/5 (the 7B-s0 read miss is churn, not shape). **No
+> pin moves.** Line-comparable old-subset write vs the c14 pins: 3B −9/−9, 7B −4 (s1)/−10 (s0),
+> 14B −2 — the c14 lucky-seed gap persists (the round-20 reading holds); on the full 416-task
+> eval c22-7B-s1 posts **write 194/206, total semantic 94.0% — the best post-c14 7B yet** (+2
+> vs c21-7B-s0 on shared tasks), and c22-14B-s1 lands −2 vs the c21-s1 pin (which keeps the
+> total/read crown at 95.2%). Verdict: family #52 did its one job; the write ceiling stays
+> composition/churn-bound, consistent with the parked-loop reading. Adapters+evals in
+> `/home/claude/sandbox/round22/` (names `c22-*`).
 
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
