@@ -279,9 +279,30 @@ fn effect_op(effect: &str, detail: J, live: impl FnOnce() -> Result<Val>) -> Res
     effect_op_at(effect, None, detail, live)
 }
 
-/// `effect_op` with an optional SCOPE (today: the URL host of a net effect). A scoped effect is
-/// permitted by the bare grant (`net.write` — any host) or by a matching host-scoped grant
-/// (`net.write@api.example.com`); a host-scoped grant alone does NOT satisfy a different host.
+/// Whether one grant string permits `effect` at `scope`. A grant is `effect[@scope-prefix]`:
+/// the bare form permits the effect anywhere; a scoped form permits it only where the runtime
+/// scope extends the grant's scope SEGMENT-ALIGNED (`net.write@api.example.com` covers
+/// `api.example.com/v0/things` but `net.write@api.example.com/v0` does not cover
+/// `api.example.com/v0things`). The runtime scope is `host[/path]` for net effects and the file
+/// path for fs effects, so one rule carries host-scoped, path-scoped, and fs-path-scoped grants.
+fn grant_permits(grant: &str, effect: &str, scope: Option<&str>) -> bool {
+    match grant.split_once('@') {
+        None => grant == effect,
+        Some((base, pat)) => {
+            let pat = pat.strip_suffix('/').unwrap_or(pat);
+            base == effect
+                && scope.is_some_and(|s| {
+                    s == pat || (s.starts_with(pat) && s.as_bytes().get(pat.len()) == Some(&b'/'))
+                })
+        }
+    }
+}
+
+/// `effect_op` with an optional SCOPE (the URL `host/path` of a net effect, or the file path of an
+/// fs effect). A scoped effect is permitted by the bare grant (`net.write` — anywhere) or by a
+/// grant whose scope prefix matches segment-aligned (`net.write@api.example.com` — any path on
+/// that host; `net.write@api.example.com/v0/things` — only under that path; `fs.read@/data` —
+/// only under that directory). A scoped grant alone does NOT satisfy a different host or path.
 fn effect_op_at(effect: &str, scope: Option<&str>, detail: J, live: impl FnOnce() -> Result<Val>) -> Result<Val> {
     enum Mode {
         Replay(J),
@@ -293,11 +314,10 @@ fn effect_op_at(effect: &str, scope: Option<&str>, detail: J, live: impl FnOnce(
         if let Some(q) = e.replay.as_mut() {
             return Ok(q.pop_front().map_or(Mode::ReplayExhausted, Mode::Replay));
         }
-        let allowed = e.granted.contains(effect)
-            || scope.is_some_and(|s| e.granted.contains(&format!("{effect}@{s}")));
+        let allowed = e.granted.iter().any(|g| grant_permits(g, effect, scope));
         if !allowed {
             match scope {
-                Some(s) => bail!("ungranted effect `{effect}` on host `{s}`: the body performed it, but neither `{effect}` nor `{effect}@{s}` is in the granted capability set (pass --grant {effect} or --grant {effect}@{s})"),
+                Some(s) => bail!("ungranted effect `{effect}` at `{s}`: the body performed it, but no grant covers it — a grant is `{effect}` (anywhere), `{effect}@host` (net: any path on the host), or a scope prefix like `{effect}@{s}` (pass --grant …)"),
                 None => bail!("ungranted effect `{effect}`: the body performed it, but it is not in the granted capability set (declare it in signature.effects or pass --grant {effect})"),
             }
         }
@@ -550,6 +570,24 @@ pub(crate) fn url_host(url: &str) -> Result<String> {
     let authority = rest.split('/').next().unwrap_or(rest);
     let host = authority.rsplit_once(':').map_or(authority, |(h, _)| h);
     Ok(host.to_string())
+}
+
+/// The grant SCOPE of a net effect: `host` for a bare-path URL, `host/path` otherwise (query and
+/// fragment stripped, port dropped like [`url_host`]). This is what a scoped net grant
+/// (`net.write@host[/path/prefix]`) is checked against, segment-aligned (see `grant_permits`).
+pub(crate) fn url_scope(url: &str) -> Result<String> {
+    let host = url_host(url)?;
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).unwrap_or(url);
+    let path = match rest.split_once('/') {
+        Some((_, p)) => p.split(['?', '#']).next().unwrap_or(""),
+        None => "",
+    };
+    let path = path.trim_end_matches('/');
+    if path.is_empty() {
+        Ok(host)
+    } else {
+        Ok(format!("{host}/{path}"))
+    }
 }
 
 /// RFC 3986 strict percent-encoding: unreserved characters (ALPHA / DIGIT / - . _ ~) pass, every
@@ -1388,31 +1426,39 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
         }
         "read_file" => {
             // fs.read: read a real file's contents (live), or the recorded contents (replay).
+            // The file path is the grant scope, so `fs.read@/data` confines reads to a directory.
             let path = as_str(&a[0])?;
-            effect_op("fs.read", json!({ "path": path.as_str() }), move || {
+            let scope = path.clone();
+            effect_op_at("fs.read", Some(&scope), json!({ "path": path.as_str() }), move || {
                 std::fs::read_to_string(&path).map(Val::Str).map_err(|e| anyhow!("read_file {path}: {e}"))
             })?
         }
         "write_file" => {
             // fs.write: write a real file (live), or a no-op returning unit (replay).
+            // The file path is the grant scope, so `fs.write@/out` confines writes to a directory.
             let path = as_str(&a[0])?;
             let contents = as_str(&a[1])?;
-            effect_op("fs.write", json!({ "path": path.as_str() }), move || {
+            let scope = path.clone();
+            effect_op_at("fs.write", Some(&scope), json!({ "path": path.as_str() }), move || {
                 std::fs::write(&path, &contents).map(|_| Val::Unit).map_err(|e| anyhow!("write_file {path}: {e}"))
             })?
         }
         "http_get" => {
-            // net.read: a real http:// GET (live), or the recorded body (replay).
+            // net.read: a real http:// GET (live), or the recorded body (replay). The URL's
+            // host/path is the grant scope, same as the general `http` builtin.
             let url = as_str(&a[0])?;
-            effect_op("net.read", json!({ "url": url.as_str() }), move || {
+            let scope = url_scope(&url)?;
+            effect_op_at("net.read", Some(&scope), json!({ "url": url.as_str() }), move || {
                 http_request("GET", &url, None).map(Val::Str)
             })?
         }
         "http_post" => {
-            // net.write: a real http:// POST (live), or the recorded response (replay).
+            // net.write: a real http:// POST (live), or the recorded response (replay). Scoped
+            // like http_get.
             let url = as_str(&a[0])?;
             let body = as_str(&a[1])?;
-            effect_op("net.write", json!({ "url": url.as_str() }), move || {
+            let scope = url_scope(&url)?;
+            effect_op_at("net.write", Some(&scope), json!({ "url": url.as_str() }), move || {
                 http_request("POST", &url, Some(&body)).map(Val::Str)
             })?
         }
@@ -1433,7 +1479,7 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             let headers = as_map(&a[2])?;
             let body = as_str(&a[3])?;
             let effect = if method == "GET" || method == "HEAD" { "net.read" } else { "net.write" };
-            let host = url_host(&url)?;
+            let scope = url_scope(&url)?;
             let mut symbolic: Vec<(String, String)> = Vec::new();
             for (k, v) in &headers {
                 symbolic.push((k.clone(), as_str(v)?));
@@ -1444,7 +1490,7 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
                 "headers": symbolic.iter().map(|(k, v)| json!({ "name": k, "value": v })).collect::<Vec<_>>(),
                 "body": body.as_str(),
             });
-            effect_op_at(effect, Some(&host), detail, move || {
+            effect_op_at(effect, Some(&scope), detail, move || {
                 let mut real = Vec::with_capacity(symbolic.len());
                 for (k, v) in &symbolic {
                     // Secrets first, then oauth: both placeholder families resolve only inside
@@ -2455,6 +2501,63 @@ mod tests {
         set_effect_replay(vec![json!({ "effect": "net.write", "detail": {}, "result": resp })]);
         let out = eval_body(&http_body, &[s("PUT"), s("http://h.example/x"), no_headers, s("{}")]).unwrap();
         assert_eq!(out, resp);
+        clear_effects();
+    }
+
+    #[test]
+    fn grant_scopes_match_segment_aligned() {
+        use super::{grant_permits, url_scope};
+        // Bare grant: anywhere, but only its own effect.
+        assert!(grant_permits("net.read", "net.read", Some("h.example/v1/x")));
+        assert!(!grant_permits("net.read", "net.write", Some("h.example/v1/x")));
+        // Host-scoped: any path on the host, no other host.
+        assert!(grant_permits("net.write@h.example", "net.write", Some("h.example")));
+        assert!(grant_permits("net.write@h.example", "net.write", Some("h.example/v0/things")));
+        assert!(!grant_permits("net.write@h.example", "net.write", Some("other.example/v0")));
+        // Path-scoped: only under the path, segment-aligned — /v0 covers /v0/things, not /v0things.
+        assert!(grant_permits("net.write@h.example/v0", "net.write", Some("h.example/v0")));
+        assert!(grant_permits("net.write@h.example/v0", "net.write", Some("h.example/v0/things")));
+        assert!(!grant_permits("net.write@h.example/v0", "net.write", Some("h.example/v0things")));
+        assert!(!grant_permits("net.write@h.example/v0", "net.write", Some("h.example")));
+        // A trailing slash on the grant is tolerated; a scoped grant never matches scopeless effects.
+        assert!(grant_permits("net.write@h.example/v0/", "net.write", Some("h.example/v0/x")));
+        assert!(!grant_permits("net.write@h.example", "net.write", None));
+        // fs scoping: the file path is the scope.
+        assert!(grant_permits("fs.read@/data", "fs.read", Some("/data/in.txt")));
+        assert!(!grant_permits("fs.read@/data", "fs.read", Some("/database/in.txt")));
+
+        // url_scope: host for a bare URL, host/path otherwise; query/fragment/port stripped.
+        assert_eq!(url_scope("https://h.example").unwrap(), "h.example");
+        assert_eq!(url_scope("https://h.example/").unwrap(), "h.example");
+        assert_eq!(url_scope("http://h.example:8080/v0/things?page=2#f").unwrap(), "h.example/v0/things");
+    }
+
+    #[test]
+    fn path_scoped_grant_gates_the_http_builtin() {
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+        let http_body = json!({ "kind": "lambda",
+            "params": [{ "name": "m" }, { "name": "u" }, { "name": "h" }, { "name": "b" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "http" },
+                      "args": [{ "kind": "var", "name": "m" }, { "kind": "var", "name": "u" },
+                               { "kind": "var", "name": "h" }, { "kind": "var", "name": "b" }] } });
+        let no_headers = json!({ "kind": "map", "entries": [] });
+
+        // A path outside the granted prefix dies at the gate — before any I/O — and the error
+        // names the offending scope.
+        set_effect_grants(vec!["net.write@h.example/v0/things".to_string()]);
+        let err = eval_body(&http_body, &[s("PUT"), s("http://h.example/v0/other"), no_headers.clone(), s("")])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("ungranted effect"), "outside the path prefix must be gated: {err}");
+        assert!(err.contains("h.example/v0/other"), "gate names the offending scope: {err}");
+        clear_effects();
+
+        // Inside the prefix the gate passes (the failure is at connect time, not the gate).
+        set_effect_grants(vec!["net.write@h.example/v0/things".to_string()]);
+        let err = eval_body(&http_body, &[s("PUT"), s("http://h.example/v0/things/t1"), no_headers, s("")])
+            .unwrap_err()
+            .to_string();
+        assert!(!err.contains("ungranted effect"), "inside the prefix the gate is not the failure: {err}");
         clear_effects();
     }
 

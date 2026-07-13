@@ -295,10 +295,23 @@ the goal over a commons containing a prior `double_then_add` composite (whose bo
   a grant may name its host — `--grant net.write@api.example.com` — and the sandbox enforces the
   scope at the effect boundary, where the URL is actually known (the static gate reads a scoped
   grant as its base effect). A bare `net.write` still means any host; a scoped grant alone refuses
-  every other host by name. Still designed-but-not-built, waiting for a workflow to pull them:
-  per-function trust-gated grants (they discriminate on the wrong variable — the function, not the
-  arguments) and path-level constraints. Trace-conditioned `observed` claims are now **built**
-  (pulled by GW11 — see below).
+  every other host by name. **Path-scoped grants and per-function trust-gated grants are now built
+  too (pulled by GW17, the untrusted-commons operator-hardening workflow).** A grant scope may
+  extend past the host into the path — `--grant net.write@api.example.com/v0/things` — and fs
+  grants scope by directory the same way (`--grant fs.read@/data`); matching is SEGMENT-ALIGNED at
+  the effect boundary (`/v0` covers `/v0/things`, never `/v0things`), the one rule carrying host,
+  host+path, and fs-path scoping. And a grant may be **trust-gated per function**:
+  `--grant-certified net.read@host/path` (on `respond` and `orchestrate --verify`, backed by the
+  operator's policy + attestation graph) counts only for a target **certified by a certifier the
+  policy trusts** (`certification_verdict` — the third-party verdict, distinct from the loop's own
+  local certify step); an uncertified target sees only the unconditional grants and draws the same
+  policy-shaped `reject`. The decision is recorded per candidate as a `grants` transcript step
+  (unconditional set, gated set, gate open/closed, reason), so which effects were live for which
+  function is auditable, not oracular. The two scoping axes deliberately compose against the caveat
+  above: trust-gating discriminates on the *function* (is anyone I trust vouching for this code?),
+  path-scoping discriminates on the *arguments* (whatever the code is, it can only touch here) —
+  neither substitutes for the other, together they bound both variables. Trace-conditioned
+  `observed` claims are now **built** (pulled by GW11 — see below).
 - **Credentials are effect-boundary configuration, not data (pulled by GW6).** An authenticated
   workflow needs a secret the commons must never see: records, asserts, and traces are public,
   content-addressed artifacts. So a secret never exists as a language value at all — an `http`

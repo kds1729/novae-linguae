@@ -810,7 +810,41 @@ an `observed` assert of `Just(JObj({version: JStr "1.0.0"}))` whose trace keeps 
 and a verifier with **no grants and no secrets** replays it CONFIRMED. No new language surface,
 no new corpus family (the message layer isn't corpus material; parse/projection shapes are
 already families #40/#47). Residual: `observed` claims for `orchestrate`'s multi-stage pipelines
-carry one trace per stage (built); trust-gated grants and path constraints stay designed-not-built.
+carry one trace per stage (built); trust-gated grants and path constraints were the last
+designed-not-built residual — closed by GW17 (2026-07-13, below).
+
+**GW17 — operator hardening on an untrusted commons (2026-07-13): trust-gated grants and path
+constraints, the named residual, built.** The scenario the residual always implied: an operator
+runs the loop against an open commons holding functions of mixed provenance, and wants to state
+*both* "I perform `net.read` only on behalf of code someone I trust has certified" *and* "and
+only against this service path" — the two variables of the standing SSRF-shaped caveat, bounded
+independently. Two pieces, one enforcement rule. **Path-scoped grants**: the grant scope grammar
+extends past the host — `--grant net.write@api.example.com/v0/things` — and fs grants scope by
+directory the same way (`fs.read@/data`); the runtime scope is `host[/path]` for net and the
+file path for fs, matched SEGMENT-ALIGNED at the effect boundary (`/v0` covers `/v0/things`,
+never `/v0things`; query/fragment/port stripped), one rule for host, host+path, and fs scoping —
+and the legacy `http_get`/`http_post`/`read_file`/`write_file` builtins now carry scopes too (a
+host-scoped grant previously never satisfied them, a gap the unification closed). **Per-function
+trust-gated grants**: `--grant-certified <effect[@scope]>` (on `respond` and `orchestrate
+--verify`, requiring the policy that gives "certified" meaning) counts toward a target's
+effective grant set only when `certification_verdict` says a certifier the operator's policy
+trusts has certified that function — the *third-party* verdict, deliberately distinct from the
+loop's own local certify step (local certification proves the declared metadata honest; it
+cannot tell the operator whether anyone they trust vouches for the code). The per-candidate
+decision lands in the transcript as a `grants` step (unconditional set, gated set, gate
+open/closed, reason) — auditable like `rank`. Exit gate, live against the fake service: the same
+`orchestrate --verify` command over `spec/examples` with `--grant-certified
+net.read@127.0.0.1/items` and a vouched-but-uncertified `item_status` drew the policy-shaped
+reject with the gate recorded **closed** ("no certification found"); adding one signed
+certification from a policy-trusted certifier flipped the gate **OPEN** and the run applied live
+→ observed 404 assert + trace → **CONFIRMED**; re-scoping the same certified grant to
+`…@127.0.0.1/reports` kept the gate open but the effect boundary refused the call (a signed
+reject again — policy, not breakage), and the eval-level error names the offending scope
+verbatim. The spec's old skepticism ("they discriminate on the wrong variable") resolved into
+the design: trust-gating discriminates on the function, path-scoping on the arguments — they
+compose precisely because neither substitutes for the other (spec/agent-loop.md §Scope). No new
+language surface, no schema change, no corpus material (grants are operator configuration, not
+bodies).
 
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.

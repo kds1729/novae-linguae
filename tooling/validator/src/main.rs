@@ -511,10 +511,26 @@ enum Commands {
         /// refused with a signed `reject` (`effect not granted: …`). Grants are measured against the
         /// target's *verified* effect declaration and enforced by the runtime sandbox at perform time.
         /// Granting `net.read` means this machine fetches URLs chosen by remote input — front with
-        /// egress controls if that matters (spec/agent-loop.md §Scope). A net grant may be
-        /// HOST-scoped (`net.write@api.example.com`), enforced at the effect boundary.
+        /// egress controls if that matters (spec/agent-loop.md §Scope). A net grant may be scoped
+        /// (`net.write@api.example.com` — any path on the host; `net.write@api.example.com/v0` —
+        /// only under that path; `fs.read@/data` — only under that directory), enforced
+        /// segment-aligned at the effect boundary.
         #[arg(long)]
         grant: Vec<String>,
+        /// Grant an effect ONLY when the message's target function is certified by a certifier
+        /// trusted under `--certifier-policy` (a per-function trust-gated grant —
+        /// spec/agent-loop.md §Scope). Same grammar as --grant, including scoping. An uncertified
+        /// target sees only the unconditional --grant set. Repeatable.
+        #[arg(long = "grant-certified", requires = "certifier_policy")]
+        grant_certified: Vec<String>,
+        /// Local trust policy (JSON — the `certified` command's format) whose trusted certifiers
+        /// back --grant-certified.
+        #[arg(long = "certifier-policy")]
+        certifier_policy: Option<PathBuf>,
+        /// Signed attestation/certification messages backing the --grant-certified trust gate
+        /// (repeatable).
+        #[arg(long = "attestation")]
+        attestations: Vec<PathBuf>,
         /// Supply a named secret (`NAME=VALUE`) for `{{secret:NAME}}` placeholders in `http` header
         /// values — effect-boundary configuration, never a language value, never in the trace.
         #[arg(long = "secret")]
@@ -591,10 +607,19 @@ enum Commands {
         /// Grant an effect the responder half of this loop will perform (e.g. `net.read`). Repeatable.
         /// Default NONE (pure-only). The orchestrator's own verify step re-runs under the same grants.
         /// Granting `net.read` means this machine fetches URLs chosen by the discovered function's
-        /// arguments — see spec/agent-loop.md §Scope. A net grant may be HOST-scoped
-        /// (`net.write@api.example.com`), enforced at the effect boundary.
+        /// arguments — see spec/agent-loop.md §Scope. A net grant may be scoped
+        /// (`net.write@api.example.com` — any path on the host; `net.write@api.example.com/v0/things`
+        /// — only under that path; `fs.read@/data` — only under that directory), enforced
+        /// segment-aligned at the effect boundary.
         #[arg(long)]
         grant: Vec<String>,
+        /// Grant an effect ONLY to a target function certified by a certifier trusted under
+        /// `--policy` (a per-function trust-gated grant — spec/agent-loop.md §Scope). Same grammar
+        /// as --grant, including host/path scoping. Decided per candidate against the attestation
+        /// graph and recorded as a `grants` transcript step; an uncertified candidate sees only the
+        /// unconditional --grant set (and draws a signed `reject` if it needs more). Repeatable.
+        #[arg(long = "grant-certified", requires = "verify", requires = "policy")]
+        grant_certified: Vec<String>,
         /// Supply a named secret (`NAME=VALUE`) for `{{secret:NAME}}` placeholders in `http` header
         /// values — effect-boundary configuration, never a language value, never in the trace.
         #[arg(long = "secret")]
@@ -885,13 +910,12 @@ fn main() -> ExitCode {
         Commands::AttestWeights { record, eval, results, sign, timestamp } => {
             (cmd_attest_weights(&record, &eval, &results, &sign, timestamp.as_deref()), false)
         }
-        Commands::Respond { request, records, seed, timestamp, grant, secret, oauth, trace_out } => {
-            nl_validator::set_effect_grants(grant.iter().cloned());
+        Commands::Respond { request, records, seed, timestamp, grant, grant_certified, certifier_policy, attestations, secret, oauth, trace_out } => {
             match parse_secrets(&secret).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
                 Ok((s, o)) => {
                     nl_validator::set_effect_secrets(s);
                     nl_validator::set_effect_oauth(o);
-                    (cmd_respond(&request, &records, &seed, timestamp.as_deref(), trace_out.as_ref()), false)
+                    (cmd_respond(&request, &records, &seed, timestamp.as_deref(), trace_out.as_ref(), &grant, &grant_certified, certifier_policy.as_ref(), &attestations), false)
                 }
                 Err(e) => (Err(e), false),
             }
@@ -929,7 +953,7 @@ fn main() -> ExitCode {
         Commands::Authorize { policy, capability, grantee, delegations, at } => {
             (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
-        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, expect, grant, secret, oauth } => {
+        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, expect, grant, grant_certified, secret, oauth } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
             match parse_secrets(&secret).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
                 Err(e) => (Err(e), false),
@@ -937,7 +961,7 @@ fn main() -> ExitCode {
                     nl_validator::set_effect_secrets(s);
                     nl_validator::set_effect_oauth(o);
                     if verify {
-                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified, expect.as_ref()), false)
+                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified, expect.as_ref(), &grant_certified), false)
                     } else {
                         (cmd_orchestrate(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
                     }
@@ -1371,15 +1395,46 @@ fn cmd_attest_weights(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_respond(
     request: &PathBuf,
     records: &PathBuf,
     seed: &str,
     timestamp: Option<&str>,
     trace_out: Option<&PathBuf>,
+    grants: &[String],
+    grant_certified: &[String],
+    certifier_policy: Option<&PathBuf>,
+    attestations: &[PathBuf],
 ) -> Result<()> {
     use std::io::Write;
     let message = nl_validator::read_json(request)?;
+    // PER-FUNCTION TRUST-GATED GRANTS: a `--grant-certified` effect applies only when the
+    // message's target function is certified by a certifier the operator's policy trusts —
+    // decided here, before the responder's static effect gate measures the target against the
+    // (effective) granted set. The verdict goes to stderr so the operator sees which set applied.
+    let mut effective: Vec<String> = grants.to_vec();
+    if !grant_certified.is_empty() {
+        let pol_path = certifier_policy.ok_or_else(|| anyhow::anyhow!("--grant-certified requires --certifier-policy"))?;
+        let pol = nl_validator::Policy::from_json(&nl_validator::read_json(pol_path)?)?;
+        let msgs = load_json_messages(attestations, None)?;
+        let graph = nl_validator::AttestationGraph::from_messages(&msgs, timestamp);
+        let (open, reason) = match message.pointer("/body/target").and_then(|t| t.as_str()) {
+            Some(target) => {
+                let v = pol.certification_verdict(&graph, target, None, timestamp);
+                (v.certified, format!("`{target}`: {}", v.reason))
+            }
+            None => (false, "message carries no target function".to_string()),
+        };
+        if open {
+            effective.extend(grant_certified.iter().cloned());
+        }
+        eprintln!(
+            "trust gate {} — {reason}",
+            if open { "OPEN (certified-gated grants apply)" } else { "closed (unconditional grants only)" }
+        );
+    }
+    nl_validator::set_effect_grants(effective);
     let link_map = nl_validator::build_link_map(records)?;
     let record_map = nl_validator::build_record_map(records)?;
     let key = nl_validator::signing_key_from_seed(seed);
@@ -2052,6 +2107,7 @@ fn cmd_orchestrate_verified(
     solver: &str,
     require_certified: bool,
     expect: Option<&PathBuf>,
+    grant_certified: &[String],
 ) -> Result<()> {
     if intents.len() != 1 {
         anyhow::bail!("--verify supports exactly one --intent (got {})", intents.len());
@@ -2063,7 +2119,7 @@ fn cmd_orchestrate_verified(
     let atts = attestations.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
     let exp = expect.map(|p| nl_validator::read_json(p)).transpose()?;
     let (link, recs) = commons_view(records, node, intents)?;
-    let run = nl_validator::orchestrate_verified_with_maps(link, recs, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp)?;
+    let run = nl_validator::orchestrate_verified_with_maps(link, recs, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp, grant_certified)?;
 
     for step in &run.steps {
         let m = &step.message;
@@ -2077,6 +2133,12 @@ fn cmd_orchestrate_verified(
                 m.get("scores").map(|v| v.to_string()).unwrap_or_default()
             ),
             "certify" => format!("certified={} {}", m.get("certified").map(|v| v.to_string()).unwrap_or_default(), m.get("failed").map(|v| v.to_string()).unwrap_or_default()),
+            "grants" => format!(
+                "trust gate {} for {} — {}",
+                if m.get("trust_gate_open").and_then(|v| v.as_bool()).unwrap_or(false) { "OPEN (certified-gated grants apply)" } else { "closed (unconditional grants only)" },
+                m.get("function").and_then(|f| f.as_str()).unwrap_or(""),
+                m.get("reason").and_then(|r| r.as_str()).unwrap_or("")
+            ),
             "prove" => format!("property `{}` proved={}", m.get("property").and_then(|p| p.as_str()).unwrap_or(""), m.get("proved").map(|v| v.to_string()).unwrap_or_default()),
             "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
             "trace" => format!("{} recorded observation(s)", m.get("ops").and_then(|o| o.as_array()).map(|a| a.len()).unwrap_or(0)),

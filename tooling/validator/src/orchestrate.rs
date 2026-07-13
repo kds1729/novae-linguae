@@ -557,12 +557,13 @@ pub fn orchestrate_verified(
     timestamp: Option<&str>,
     require_certified: bool,
     expect: Option<J>,
+    certified_grants: &[String],
 ) -> Result<VerifiedRun> {
     let link = build_link_map(records_dir)?;
     let records = build_record_map(records_dir)?;
     orchestrate_verified_with_maps(
         link, records, intent, args, orchestrator, responder, solver, policy, attestations, timestamp, require_certified,
-        expect,
+        expect, certified_grants,
     )
 }
 
@@ -582,9 +583,14 @@ pub fn orchestrate_verified_with_maps(
     timestamp: Option<&str>,
     require_certified: bool,
     expect: Option<J>,
+    certified_grants: &[String],
 ) -> Result<VerifiedRun> {
     let responder_did = did_nova_from_pubkey(&responder.verifying_key());
     let mut steps = Vec::new();
+    // TRUST-GATED GRANTS (spec/agent-loop.md §Scope): `certified_grants` apply only to a target
+    // certified by a certifier the local policy trusts. The unconditional set is whatever the
+    // operator installed before this run; the per-candidate effective set is computed below.
+    let base_grants: Vec<String> = crate::interp::current_effect_grants().into_iter().collect();
 
     // DISCOVER: query the commons by intent.
     let mut query = json!({
@@ -720,6 +726,32 @@ pub fn orchestrate_verified_with_maps(
             // No resolvable body to certify — leave `certified` unknown rather than claim a verdict.
             _ => None,
         };
+
+        // PER-FUNCTION TRUST-GATED GRANTS: a `--grant-certified` effect counts for THIS candidate
+        // only if a certifier the policy trusts has certified it (`commons_cert`, the third-party
+        // verdict — the local certify above proves the metadata honest, not that the operator
+        // should perform effects on the function's behalf). The decision is recorded as a `grants`
+        // step so the effective set is auditable in the transcript, like `rank`.
+        if !certified_grants.is_empty() {
+            let gate_open = commons_cert.as_ref().is_some_and(|c| c.certified);
+            let mut effective = base_grants.clone();
+            if gate_open {
+                effective.extend(certified_grants.iter().cloned());
+            }
+            crate::interp::set_effect_grants(effective);
+            steps.push(Step {
+                label: "grants".into(),
+                message: json!({
+                    "function": target,
+                    "unconditional": base_grants,
+                    "certified_gated": certified_grants,
+                    "trust_gate_open": gate_open,
+                    "reason": commons_cert.as_ref().map(|c| c.reason.clone())
+                        .unwrap_or_else(|| "no policy supplied — the trust gate stays closed".to_string()),
+                }),
+            });
+        }
+
         if require_certified && certified != Some(true) {
             if last {
                 return Ok(VerifiedRun { steps, trusted, certified, property: None, confirmed: false });
@@ -871,6 +903,59 @@ mod tests {
         crate::read_json(&examples().join("add.json")).unwrap()["hash"].as_str().unwrap().to_string()
     }
 
+    /// A signed certification record (`certify --sign`): `certifier` certifies function `subject`.
+    fn certification(certifier_seed: &str, subject: &str) -> J {
+        use crate::{sign_artifact, ArtifactKind};
+        let mut c = json!({
+            "schema_version": "0.2.0", "kind": "certification", "subject": subject,
+            "body_hash": "expr_0000000000000000000000000000000000000000000000000000000000000000",
+            "checks": [{ "check": "typecheck", "verdict": "WELL-TYPED", "detail": "" }],
+            "certified": true,
+        });
+        sign_artifact(&mut c, &signing_key_from_seed(certifier_seed), ArtifactKind::Certification).unwrap();
+        c
+    }
+
+    #[test]
+    fn trust_gated_grants_open_only_for_certified_targets() {
+        // Per-function trust-gated grants (spec/agent-loop.md §Scope): io.console is granted ONLY
+        // for targets certified by a certifier the policy trusts. greet (io.console, vouched but
+        // NOT certified) draws the policy-shaped reject with the gate recorded closed; adding a
+        // trusted certifier's certification opens the gate and the same run CONFIRMS.
+        let greet: String = crate::read_json(&examples().join("greet.v0.2.json")).unwrap()["hash"]
+            .as_str().unwrap().to_string();
+        let pol = policy(&[&did("root")]);
+        let arg = json!({ "kind": "string", "value": "hi" });
+        let gated = ["io.console".to_string()];
+
+        // Vouched (trusted) but uncertified: the gate stays closed, the responder refuses.
+        crate::interp::set_effect_grants(Vec::<String>::new());
+        let atts = [vouch("root", &greet)];
+        let run = orchestrate_verified(
+            &examples(), "io", vec![arg.clone()],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+            "z3", Some(&pol), &atts, None, false, None, &gated,
+        ).unwrap();
+        let gate = run.steps.iter().find(|s| s.label == "grants").expect("a grants step is recorded");
+        assert_eq!(gate.message["trust_gate_open"], json!(false), "{}", gate.message);
+        assert!(!run.confirmed, "an uncertified target must not be fulfilled under a gated grant");
+        let reject = run.steps.iter().find(|s| s.label == "reject").expect("the refusal is in the transcript");
+        assert!(reject.message["body"]["reason"].as_str().unwrap().contains("effect not granted"), "{}", reject.message);
+
+        // root vouches for carol; carol (a trusted certifier) certifies greet → the gate OPENS.
+        crate::interp::set_effect_grants(Vec::<String>::new());
+        let atts = [vouch("root", &greet), vouch("root", &did("carol")), certification("carol", &greet)];
+        let run = orchestrate_verified(
+            &examples(), "io", vec![arg],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+            "z3", Some(&pol), &atts, None, false, None, &gated,
+        ).unwrap();
+        crate::interp::clear_effects();
+        let gate = run.steps.iter().find(|s| s.label == "grants").expect("a grants step is recorded");
+        assert_eq!(gate.message["trust_gate_open"], json!(true), "{}", gate.message);
+        assert!(run.confirmed, "the certified target runs under the gated grant and re-verifies");
+    }
+
     #[test]
     fn signature_fits_checks_arity_and_types() {
         let records = crate::build_record_map(&examples()).unwrap();
@@ -951,7 +1036,7 @@ mod tests {
         let run = orchestrate_verified(
             &examples(), "arithmetic",
             vec![json!({ "kind": "int", "value": 2 }), json!({ "kind": "int", "value": 3 })],
-            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"), s, Some(&pol), &atts, None, true, None,
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"), s, Some(&pol), &atts, None, true, None, &[],
         ).unwrap();
         assert_eq!(run.trusted, Some(true));
         assert_eq!(run.certified, Some(true), "the chosen function certified (require_certified passed)");
@@ -971,7 +1056,7 @@ mod tests {
         let pol = policy(&[&did(root)]);
         let run = orchestrate_verified(
             &examples(), "arithmetic", vec![json!({ "kind": "nat", "value": 21 })],
-            &orch, &resp, s, Some(&pol), &atts, None, true, None,
+            &orch, &resp, s, Some(&pol), &atts, None, true, None, &[],
         ).unwrap();
 
         assert_eq!(run.trusted, Some(true), "the vouched function is trusted");
@@ -1046,7 +1131,7 @@ mod tests {
         let run = orchestrate_verified_with_maps(
             link, records, "retrytest", vec![json!({ "kind": "string", "value": "hello" })],
             &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
-            "z3", None, &[], None, false, None,
+            "z3", None, &[], None, false, None, &[],
         ).unwrap();
 
         assert!(run.confirmed, "the pure second candidate must confirm after the effectful first is rejected");
@@ -1103,7 +1188,7 @@ mod tests {
         let run = orchestrate_verified_with_maps(
             link, records, "sorttest", vec![json!({ "kind": "string", "value": "hello" })],
             &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
-            "z3", None, &[], None, false, Some(json!({ "kind": "int", "value": 5 })),
+            "z3", None, &[], None, false, Some(json!({ "kind": "int", "value": 5 })), &[],
         ).unwrap();
 
         assert!(run.confirmed);
@@ -1189,7 +1274,7 @@ mod tests {
         let run = orchestrate_verified_with_maps(
             link, records, "dryruntest", vec![json!({ "kind": "int", "value": 3 })],
             &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
-            "z3", None, &[], None, false, Some(json!({ "kind": "int", "value": 9 })),
+            "z3", None, &[], None, false, Some(json!({ "kind": "int", "value": 9 })), &[],
         ).unwrap();
 
         assert!(run.confirmed);
@@ -1226,7 +1311,7 @@ mod tests {
         let run = orchestrate_verified_with_maps(
             link, records, "length-of-thing", vec![json!({ "kind": "string", "value": "hey" })],
             &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
-            "z3", None, &[], None, false, None,
+            "z3", None, &[], None, false, None, &[],
         ).unwrap();
 
         assert!(run.confirmed);
@@ -1256,7 +1341,7 @@ mod tests {
         let pol = policy(&[&did("lonely-root")]);
         let run = orchestrate_verified(
             &examples(), "arithmetic", vec![json!({ "kind": "nat", "value": 21 })],
-            &orch, &resp, "z3", Some(&pol), &[], None, false, None,
+            &orch, &resp, "z3", Some(&pol), &[], None, false, None, &[],
         ).unwrap();
 
         assert_eq!(run.trusted, Some(false));
