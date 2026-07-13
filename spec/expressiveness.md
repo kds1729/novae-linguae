@@ -586,6 +586,30 @@ blessed-tag precedent, applied at generation time) and/or orchestrate needs a na
 input, and the expect-sort could be tightened to distinguish variant payload encodings
 (`Just false` is never literally produced by a `Maybe Json` body).
 
+**Discovery precision closed (2026-07-12, same session).** Both remedies landed the same
+night, and diagnosing them surfaced a third force: the failing broad query had returned
+**25 matches for ~30 parse-tagged holdings — the node's discovery-cost cap** — and the
+right candidate hadn't even made the returned page, so no rank could have saved it.
+(1) **The expect-sort now carries variant payload depth** ([agent-loop.md](agent-loop.md)):
+a `Just false` goal requires a declared Just-arm whose payload type matches the payload's
+sort, so `Maybe Json` fits drop — they answer `Just (JBool false)`, a different value — while
+a caller who states the Json encoding keeps them, and only them. On the exact failing
+command this turns the wrong-goal apply into an **honest non-confirm** (all the capped
+page's fits correctly drop). (2) **Every adapter-generated record now carries one extending
+intent tag** — `<lead>/<its-hyphenated-name>`, e.g.
+`parse/meta-get-verifiable-password-authentication` — the GW3 blessed-tag move applied at
+generation time (the tag-grammar's 64-char bound is honored by *omission*, never
+truncation; the node's verify-then-store gate rejected the first, snake_case attempt with a
+422 — the schema doing its job). The retagged GitHub slice supersedes the morning's, and
+the demo is the whole point: the **precise query** (`--intent
+parse/meta-get-verifiable-password-authentication --expect 'Just false'`) returns **1
+match, fetches 4 artifacts (the broad query fetched 61), certifies, applies, and answers
+`Just false` — the stated goal — CONFIRMED** (`msg_25e507b9…`, grantless `verify-claim` by
+address replays it; the observation trace is `trc_b2a04ce1…` for the third time — one
+`/meta` observation, shared by address across three publishing events). Precise tags also
+compose with the discovery-cost cap instead of fighting it: specificity moves from the
+truncated result page into the query itself.
+
 **Goal-aware discovery in production (2026-07-12): the GW16 skip becomes unnecessary.** GW16
 had to *skip discovery* — Arca holds a dozen `(string, string)` fits (status lookups, deleters,
 builders, a predicate, the α-equivalent twins) that no argument-signature filter can split — and
