@@ -231,7 +231,12 @@ fn eval(node: &Value, env: &BTreeMap<String, Term>) -> Option<Term> {
 
 fn bindings(example: &Value) -> BTreeMap<String, Term> {
     let mut env = BTreeMap::new();
-    if let Some(t) = example.get("result").and_then(value_to_term) {
+    // A by-address expected value (`result_blob`) resolves through the interpreter's installed
+    // resolver when one is present; otherwise `result` stays unbound and the property is
+    // UNVERIFIABLE against this example — honest, not wrong.
+    if let Some(t) =
+        crate::interp::example_expected(example).ok().as_ref().and_then(value_to_term)
+    {
         env.insert("result".to_string(), t);
     }
     if let Some(args) = example.get("args").and_then(|v| v.as_array()) {

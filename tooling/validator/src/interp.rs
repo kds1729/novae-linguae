@@ -55,6 +55,27 @@ pub fn resolver_lookup(addr: &str) -> Option<J> {
     RESOLVER.with(|r| r.borrow().get(addr).cloned())
 }
 
+/// An example's expected value-expression: the inline `result`, or — for a by-address example
+/// (`result_blob`, spec/function-record.v0.2.schema.json) — the blob resolved through the installed
+/// resolver under its `blob_<sha256>` key. The blob's bytes were sha256-verified when the resolver
+/// was populated (`build_link_map` for a local dir, the node crawl for a remote store), so what
+/// comes back here is exactly the value the record's pointer pins.
+pub fn example_expected(ex: &J) -> Result<J> {
+    if let Some(r) = ex.get("result") {
+        return Ok(r.clone());
+    }
+    let blob = ex
+        .get("result_blob")
+        .ok_or_else(|| anyhow!("example has neither `result` nor `result_blob`"))?;
+    let sha = blob
+        .get("sha256")
+        .and_then(|s| s.as_str())
+        .ok_or_else(|| anyhow!("`result_blob` has no sha256"))?;
+    resolver_lookup(&format!("blob_{sha}")).ok_or_else(|| {
+        anyhow!("the example's expected value is by address (result_blob sha256 {sha}) and the blob is not available — supply a `blob-{sha}.json` sidecar in the records dir, or resolve against a node that serves /v0/blobs/{sha}")
+    })
+}
+
 // Effect enforcement: a scoped capability sandbox. Effectful builtins (`print` → io.console, `rand`
 // → random) gate on a *granted* effect set and append to a structured trace — so a body may only
 // perform effects its grant permits (e.g. a function record's declared `signature.effects`), and the
@@ -1587,12 +1608,18 @@ pub fn run_examples(record: &J, body: &J) -> Result<Vec<ExampleRun>> {
     let mut out = vec![];
     for (index, ex) in examples.iter().enumerate() {
         let args = ex.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
-        let expected_j = ex.get("result").cloned().unwrap_or(J::Null);
+        // For a by-address example the pointer object is what's reported as `expected` on an
+        // unresolvable-blob error; on the happy path the resolved value replaces it below.
+        let mut expected_j =
+            ex.get("result").or_else(|| ex.get("result_blob")).cloned().unwrap_or(J::Null);
         let run = (|| -> Result<(bool, J)> {
             // Decode everything BEFORE installing replay, so no error path can leave the thread
             // replaying into the next example.
             let argv = args.iter().map(decode_value).collect::<Result<Vec<_>>>()?;
-            let expected = decode_value(&expected_j)?;
+            let resolved = example_expected(ex)
+                .map_err(|e| anyhow!("example {index}: {e}"))?;
+            let expected = decode_value(&resolved)?;
+            expected_j = resolved;
             let replaying = match ex.get("trace").and_then(|t| t.as_str()) {
                 Some(trace_addr) => {
                     let trace = resolver_lookup(trace_addr).ok_or_else(|| {
@@ -1730,7 +1757,9 @@ pub fn runtime_verdict(expr: &J, examples: &[J], self_fn: &Option<Val>) -> Verdi
     let mut any_false = false;
     for ex in examples {
         let mut env = Env::new();
-        if let Some(r) = ex.get("result").and_then(|r| decode_value(r).ok()) {
+        // By-address expected values resolve through the installed resolver; an unresolvable blob
+        // just leaves `result` unbound (the property comes out UNVERIFIABLE — honest, not wrong).
+        if let Some(r) = example_expected(ex).ok().and_then(|r| decode_value(&r).ok()) {
             env.insert("result".to_string(), r);
         }
         if let Some(args) = ex.get("args").and_then(|a| a.as_array()) {
@@ -1807,6 +1836,42 @@ mod tests {
         assert!(runs.iter().all(|r| r.passed), "double should match all its worked examples");
         // double(5) == 10
         assert_eq!(eval_body(&body, &[nat(5)]).unwrap(), encode_value(&Val::Int(10)));
+    }
+
+    #[test]
+    fn by_address_example_result_resolves_through_the_resolver() {
+        // An example whose expected value is by address (`result_blob`) checks exactly like an
+        // inline one once the blob is in the installed resolver (build_link_map / the node crawl
+        // put it there, sha256-verified, under `blob_<sha256>`).
+        let body = load("body-double.json");
+        let sha = "ab".repeat(32);
+        let record = json!({ "examples": [{
+            "args": [nat(5)],
+            "result_blob": { "sha256": sha, "bytes": 23 }
+        }] });
+        let mut map = HashMap::new();
+        map.insert(format!("blob_{sha}"), json!({ "kind": "int", "value": 10 }));
+        set_resolver(map);
+        let runs = run_examples(&record, &body).unwrap();
+        clear_resolver();
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0].passed, "double(5) == the blob-carried 10: {:?}", runs[0].error);
+        assert_eq!(runs[0].expected, json!({ "kind": "int", "value": 10 }), "expected reports the resolved value");
+    }
+
+    #[test]
+    fn by_address_example_without_the_blob_fails_honestly() {
+        let body = load("body-double.json");
+        let sha = "cd".repeat(32);
+        let record = json!({ "examples": [{
+            "args": [nat(5)],
+            "result_blob": { "sha256": sha, "bytes": 23 }
+        }] });
+        clear_resolver();
+        let runs = run_examples(&record, &body).unwrap();
+        assert!(!runs[0].passed);
+        let err = runs[0].error.as_deref().unwrap_or("");
+        assert!(err.contains("by address") && err.contains(&sha), "got: {err}");
     }
 
     #[test]

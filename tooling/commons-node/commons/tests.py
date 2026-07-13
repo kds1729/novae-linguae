@@ -93,6 +93,36 @@ class CommonsProtocolTests(TestCase):
         # The observed assert itself goes through the ordinary signed-message gate.
         self.assertEqual(self._publish(assert_msg).status_code, 201)
 
+    def test_publish_by_address_example_record(self):
+        # A record whose example carries its expected value BY ADDRESS (`result_blob`, the v0.2
+        # by-address form for values too large to inline) passes the verify-then-store gate on
+        # schema + hash alone: the node does not fetch or judge blobs — like a weights record's
+        # manifest, the sha256 in the record is the consumer's security boundary, not the store's.
+        rec = _load("double-second-field.v0.2.json")
+        ex = rec["examples"][0]
+        del ex["result"]
+        ex["result_blob"] = {"sha256": "ab" * 32, "bytes": 123}
+        rec.pop("hash")
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(rec, f)
+        rec["hash"] = subprocess.run([str(VALIDATOR), "hash", f.name],
+                                     capture_output=True, text=True).stdout.strip()
+        self.assertTrue(rec["hash"].startswith("fn_"))
+        resp = self._publish(rec)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        got = self.client.get(f"/v0/records/{rec['hash']}")
+        self.assertEqual(got.json()["examples"][0]["result_blob"]["sha256"], "ab" * 32)
+
+    @override_settings(COMMONS_MAX_RECORD_BYTES=512)
+    def test_oversized_record_draws_413(self):
+        # The record-store size cap — the boundary that makes by-address example values necessary
+        # at all (a multi-MB inline observed document must not enter the metadata index).
+        rec = _load("map.json")
+        rec["_padding"] = "x" * 1024  # guaranteed past the overridden cap before any verification
+        resp = self._publish(rec)
+        self.assertEqual(resp.status_code, 413)
+        self.assertEqual(resp.json(), {"error": "too_large"})
+
     def test_publish_bare_variant_body(self):
         # `variant`/`tuple` are legal bare-body top-level kinds (a 0-argument body like `\-> None`
         # tops out at them); the gate's body-kind list was missing both — same latent hole as the

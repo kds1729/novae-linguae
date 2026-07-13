@@ -185,14 +185,28 @@
     },
     "example": {
       "type": "object",
-      "required": ["args", "result"],
+      "required": ["args"],
       "additionalProperties": false,
+      "oneOf": [
+        { "required": ["result"], "not": { "required": ["result_blob"] } },
+        { "required": ["result_blob"], "not": { "required": ["result"] } }
+      ],
       "properties": {
         "args": {
           "type": "array",
           "items": { "$ref": "#/$defs/ve_value" }
         },
         "result": { "$ref": "#/$defs/ve_value" },
+        "result_blob": {
+          "type": "object",
+          "required": ["sha256", "bytes"],
+          "additionalProperties": false,
+          "properties": {
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "bytes": { "type": "integer", "minimum": 1 }
+          },
+          "description": "By-address alternative to `result`, for example values too large to inline (e.g. a multi-MB observed document): the sha256 of the value's JCS-canonical value-expression bytes, plus their length. The bytes live in the gate-free blob store (`GET /v0/blobs/{sha256}`, spec/commons.md) — the same host-untrusted, hash-is-the-truth boundary as weights blobs (spec/weights.md): any mirror may serve them, the consumer verifies the digest, then parses the bytes as a ve_value and proceeds exactly as if it were inline. Exactly one of `result` / `result_blob` per example. The pointer (not the value) is what the record's fn_ address covers, so the blob is pinned by content like everything else."
+        },
         "trace": {
           "type": "string",
           "pattern": "^trc_[0-9a-f]{64}$",

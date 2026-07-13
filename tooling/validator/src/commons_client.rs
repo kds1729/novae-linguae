@@ -52,6 +52,22 @@ pub fn fetch_artifact(node: &str, addr: &str) -> Result<J> {
     Ok(v)
 }
 
+/// Fetch a blob from the gate-free blob store (`GET /v0/blobs/{sha256}`, spec/commons.md) and
+/// **verify it locally**: the bytes must hash (sha256 — the blob namespace, distinct from the
+/// BLAKE3 record namespace) to the requested address, else any host — the store is untrusted by
+/// construction — could substitute a value. Parses the verified bytes as JSON: the blobs the
+/// validator consumes are JCS-canonical value-expression bytes (`examples[].result_blob`).
+pub fn fetch_blob(node: &str, sha256: &str) -> Result<J> {
+    let url = format!("{}/v0/blobs/{}", node.trim_end_matches('/'), sha256);
+    let text = crate::interp::http_request("GET", &url, None)?;
+    let recomputed = crate::sha256_hex(text.as_bytes());
+    if recomputed != sha256 {
+        bail!("blob hash mismatch from node for {sha256}: content hashes to {recomputed} — refusing the blob (the store is untrusted)");
+    }
+    serde_json::from_str(&text)
+        .map_err(|e| anyhow!("blob {sha256} is not JSON (a result_blob carries value-expression bytes): {e}"))
+}
+
 /// Typed discovery: `POST /v0/query` with a filter object; returns matched `fn_…` addresses.
 pub fn query(node: &str, filter: &J) -> Result<Vec<String>> {
     let url = format!("{}/v0/query", node.trim_end_matches('/'));
@@ -100,6 +116,8 @@ pub fn publish_artifact(node: &str, artifact: &J) -> Result<J> {
 
 /// Every `fn_…`/`expr_…` content-address mentioned anywhere in an artifact (body hashes, `fn_ref`
 /// targets in examples and bodies) — the edges of the reference graph the closure walk follows.
+/// A by-address example value (`result_blob`, function-record v0.2) is scanned as the
+/// pseudo-address `blob_<sha256>` so the walk pulls the blob the example needs to check.
 fn referenced_addresses(v: &J, out: &mut Vec<String>) {
     match v {
         J::String(s) => {
@@ -111,7 +129,14 @@ fn referenced_addresses(v: &J, out: &mut Vec<String>) {
             }
         }
         J::Array(items) => items.iter().for_each(|x| referenced_addresses(x, out)),
-        J::Object(m) => m.values().for_each(|x| referenced_addresses(x, out)),
+        J::Object(m) => {
+            if let Some(sha) = m.get("result_blob").and_then(|b| b.get("sha256")).and_then(|s| s.as_str()) {
+                if sha.len() == 64 && sha.chars().all(|c| c.is_ascii_hexdigit()) {
+                    out.push(format!("blob_{sha}"));
+                }
+            }
+            m.values().for_each(|x| referenced_addresses(x, out));
+        }
         _ => {}
     }
 }
@@ -135,6 +160,22 @@ mod tests {
         assert!(refs.contains(&("fn_".to_owned() + &"c".repeat(64))));
         assert!(!refs.iter().any(|r| r.starts_with("msg_")), "messages aren't in the runnable closure scan");
         assert!(!refs.contains(&"fn_not_a_hash".to_string()), "non-hex suffixes are not addresses");
+    }
+
+    #[test]
+    fn reference_scan_finds_by_address_example_values() {
+        // A by-address expected value (`result_blob`) joins the closure walk as `blob_<sha256>`,
+        // so the crawl pulls the blob the example needs; a bare weights-style sha256 elsewhere
+        // (e.g. `files[].sha256`) does not.
+        let sha = "ef".repeat(32);
+        let rec = json!({
+            "examples": [{ "args": [], "result_blob": { "sha256": sha, "bytes": 12 } }],
+            "files": [{ "name": "adapter.safetensors", "sha256": "aa".repeat(32), "bytes": 5 }]
+        });
+        let mut refs = Vec::new();
+        referenced_addresses(&rec, &mut refs);
+        assert!(refs.contains(&format!("blob_{sha}")));
+        assert_eq!(refs.iter().filter(|r| r.starts_with("blob_")).count(), 1, "only result_blob is a closure edge");
     }
 
     #[test]
@@ -183,14 +224,26 @@ fn crawl(node: &str, seeds: &[String], lenient: bool, max_fetches: usize) -> Res
         if !seen.insert(addr.clone()) {
             continue;
         }
-        if !(addr.starts_with("fn_") || addr.starts_with("expr_") || addr.starts_with("trc_")) {
-            continue; // messages/certs aren't part of the runnable closure (traces ARE — replay needs them)
+        if !(addr.starts_with("fn_")
+            || addr.starts_with("expr_")
+            || addr.starts_with("trc_")
+            || addr.starts_with("blob_"))
+        {
+            continue; // messages/certs aren't part of the runnable closure (traces and example blobs ARE — checking needs them)
         }
         if fetched >= max_fetches {
             bail!("remote closure exceeded {max_fetches} artifacts — refusing an unbounded crawl");
         }
         fetched += 1;
-        let art = match fetch_artifact(node, &addr) {
+        // A `blob_<sha256>` pseudo-address is a by-address example value: served by the gate-free
+        // blob store, sha256-verified by fetch_blob, and indexed straight into the link map under
+        // the same key `run_examples` resolves it by.
+        let fetch = if let Some(sha) = addr.strip_prefix("blob_") {
+            fetch_blob(node, sha)
+        } else {
+            fetch_artifact(node, &addr)
+        };
+        let art = match fetch {
             Ok(a) => a,
             Err(e) if lenient => {
                 eprintln!("skip {addr}: {e}");

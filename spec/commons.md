@@ -166,9 +166,12 @@ judge — the client verifies each attestation and decides under its own policy
 
 ### `GET /v0/blobs/{sha256}` — binary blobs, by content hash
 
-Serves opaque binary bytes (adapter weights, [`weights.md`](weights.md)) keyed by their sha256.
-**Deliberately gate-free and outside the record store**: blobs are not records — a weights record's
-`files[].sha256` is the security boundary, so any host (including a hostile mirror) is safe to fetch
+Serves opaque binary bytes keyed by their sha256 — adapter weights ([`weights.md`](weights.md)) and
+large example values (a function record's `examples[].result_blob`: the JCS-canonical value-expression
+bytes of an expected result too big to inline, e.g. a multi-MB observed document).
+**Deliberately gate-free and outside the record store**: blobs are not records — the referencing
+record's sha256 (a weights record's `files[].sha256`, an example's `result_blob.sha256`) is the
+security boundary, so any host (including a hostile mirror) is safe to fetch
 from; the client hashes the download and rejects a mismatch. The URL shape is the contract, not the
 implementation — a static file server or CDN may front or replace the node's view; `urls[]` entries in
 a weights record are advisory hints, primary-first by convention. Content-addressed and immutable

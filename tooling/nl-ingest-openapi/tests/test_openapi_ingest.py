@@ -532,13 +532,13 @@ class SchemaObservationGateTest(unittest.TestCase):
         cls.svc.terminate()
         cls.svc.wait()
 
-    def _ingest(self, schema, tag):
+    def _ingest(self, schema, tag, extra=()):
         tmp = tempfile.mkdtemp(prefix=f"nl-openapi-schema-{tag}-")
         sp = Path(tmp) / "spec.json"
         json.dump(SchemaDerivedTest._health_spec(self.base, schema), open(sp, "w"))
         code = 0
         try:
-            oi.main([str(sp), "--out", tmp, "--verify-against", self.base])
+            oi.main([str(sp), "--out", tmp, "--verify-against", self.base, *extra])
         except SystemExit as e:
             code = e.code
         return tmp, code
@@ -561,6 +561,41 @@ class SchemaObservationGateTest(unittest.TestCase):
         r = subprocess.run([str(VALIDATOR), "run", str(Path(tmp) / "gethealthstatus.v0.2.json"),
                             "--records", tmp], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_oversized_example_value_goes_by_address(self):
+        # Above --blob-threshold the observed expected value leaves the record: a result_blob
+        # pointer (sha256 + bytes) plus a blob-<sha256>.json sidecar of the JCS-canonical
+        # value-expression bytes (the NWS 413 rung — a multi-MB observed document must not blow
+        # the node's record-store cap). The record still certifies and `run` still replays the
+        # example offline, resolving the blob from the records dir; a corrupted blob is refused.
+        import hashlib
+        tmp, code = self._ingest({"type": "object",
+                                  "properties": {"status": {"type": "string"}},
+                                  "required": ["status"]}, "blob",
+                                 extra=["--blob-threshold", "16"])
+        self.assertEqual(code, 0)
+        rec = json.load(open(Path(tmp) / "gethealthbody.v0.2.json"))
+        ex = rec["examples"][0]
+        self.assertNotIn("result", ex, "oversized value must not stay inline")
+        sha = ex["result_blob"]["sha256"]
+        sidecar = Path(tmp) / f"blob-{sha}.json"
+        raw = sidecar.read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), sha)
+        self.assertEqual(ex["result_blob"]["bytes"], len(raw))
+        # The blob IS the expected value-expression: the observed Just(JObj …) document.
+        val = json.loads(raw)
+        self.assertEqual(val["tag"], "Just")
+        # Offline replay resolves the blob from the records dir (already checked by main's own
+        # replay pass, but assert it directly for the record that went by address).
+        r = subprocess.run([str(VALIDATOR), "run", str(Path(tmp) / "gethealthbody.v0.2.json"),
+                            "--records", tmp], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # Hash-is-the-truth: content that no longer matches the sidecar's name is refused.
+        sidecar.write_bytes(raw + b" ")
+        r = subprocess.run([str(VALIDATOR), "run", str(Path(tmp) / "gethealthbody.v0.2.json"),
+                            "--records", tmp], capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("corrupted blob", (r.stderr or "") + (r.stdout or ""))
 
     def test_lying_required_property_refuses(self):
         # The description promises a required property the service never answers: the observed

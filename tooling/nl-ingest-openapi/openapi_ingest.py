@@ -81,6 +81,7 @@ provider. Reuses ingest-common (BLAKE3+JCS core, body-AST builders).
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -91,7 +92,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "ingest-common")))
 
 from nl_body import b_app, b_field, b_let, b_lit, b_var  # noqa: E402
-from nl_core import build_v2_record, expr_address, sanitize_hint  # noqa: E402
+from nl_core import build_v2_record, canonicalize, expr_address, sanitize_hint  # noqa: E402
 
 STRING = {"kind": "builtin", "name": "string"}
 INT = {"kind": "builtin", "name": "int"}
@@ -960,6 +961,31 @@ def walk(spec, secret_name):
     return built, skipped, pending
 
 
+# Above this many JCS-canonical bytes an example's expected value is carried BY ADDRESS
+# (`result_blob`, function-record v0.2): the value's canonical bytes become a `blob-<sha256>.json`
+# sidecar (destined for the gate-free /v0/blobs store — the weights boundary: host untrusted, the
+# sha256 in the record is the truth) and the record carries only the pointer. Chosen well under the
+# reference node's 1 MiB record-store cap: a multi-MB observed document (the NWS glossary) must not
+# blow the record gate, while ordinary worked examples stay inline and human-greppable.
+BLOB_THRESHOLD_DEFAULT = 65536
+
+
+def blobify_example(ex, out_dir, threshold):
+    """Move an oversized inline `result` out to a verified blob sidecar. Returns the sha256 when
+    the example was converted, else None (small values stay inline)."""
+    if threshold is None or "result" not in ex:
+        return None
+    data = canonicalize(ex["result"])
+    if len(data) <= threshold:
+        return None
+    sha = hashlib.sha256(data).hexdigest()
+    with open(os.path.join(out_dir, f"blob-{sha}.json"), "wb") as f:
+        f.write(data)
+    ex["result_blob"] = {"sha256": sha, "bytes": len(data)}
+    del ex["result"]
+    return sha
+
+
 def certify(record_path, body_path, out_dir):
     r = subprocess.run(
         [_VALIDATOR, "certify", record_path, "--body", body_path, "--records", out_dir],
@@ -969,7 +995,7 @@ def certify(record_path, body_path, out_dir):
 
 
 def attach_example_traces(record_path, body_path, record, out_dir, secret_names, token,
-                          oauth_ids=()):
+                          oauth_ids=(), blob_threshold=BLOB_THRESHOLD_DEFAULT):
     """The live gate for an EFFECTFUL record, one execution per example (GW12): run each worked
     example once via `eval --trace-out` (grants = the record's declared effects, secrets supplied),
     require the live result to equal the documented one, and attach the observed trace to the
@@ -993,8 +1019,8 @@ def attach_example_traces(record_path, body_path, record, out_dir, secret_names,
             cmd += ["--grant", e]
         for n in secret_names:
             cmd += ["--secret", f"{n}={token}"]
-        for name, cfg in oauth_ids:
-            cmd += ["--oauth", f"{name}={cfg}"]
+        for oname, cfg in oauth_ids:
+            cmd += ["--oauth", f"{oname}={cfg}"]
         cmd += ["--trace-out", trace_path]
         r = subprocess.run(cmd, capture_output=True, text=True)
         for p in argfiles:
@@ -1010,6 +1036,7 @@ def attach_example_traces(record_path, body_path, record, out_dir, secret_names,
         if not trc.startswith("trc_"):
             return False, f"example {i} trace did not hash to a trc_… address: {trc!r}"
         ex["trace"] = trc
+        blobify_example(ex, out_dir, blob_threshold)
     # The examples changed -> the record's content-address moves; recompute and rewrite.
     record.pop("hash", None)
     json.dump(record, open(record_path, "w"), indent=2)
@@ -1020,7 +1047,8 @@ def attach_example_traces(record_path, body_path, record, out_dir, secret_names,
     return True, new_hash
 
 
-def materialize_schema_projection(p, out_dir, secret_names, token, oauth_ids=()):
+def materialize_schema_projection(p, out_dir, secret_names, token, oauth_ids=(),
+                                  blob_threshold=BLOB_THRESHOLD_DEFAULT):
     """The live OBSERVATION gate for a schema-derived projection (the GW12 shape, one rung
     deeper): run the body once (`eval --trace-out`, grants + secrets), hold the observed value
     to the DECLARED schema — the whole document to `_value_conforms`, a required field to
@@ -1068,9 +1096,11 @@ def materialize_schema_projection(p, out_dir, secret_names, token, oauth_ids=())
                          capture_output=True, text=True).stdout.strip()
     if not trc.startswith("trc_"):
         return False, f"trace did not hash to a trc_… address: {trc!r}"
+    example = {"args": p["args"], "result": got, "trace": trc}
+    blobify_example(example, out_dir, blob_threshold)
     record = build_v2_record(
         name=name, type_ast=p["type_ast"],
-        examples=[{"args": p["args"], "result": got, "trace": trc}],
+        examples=[example],
         body_text=p["body_ast"], module_name=None, extra_hints=[p["hint"]],
         effects=[p["effect"]], terminates="always", intent_tags=p["intent"],
         complexity="O(n)",
@@ -1104,6 +1134,10 @@ def main(argv=None):
     ap.add_argument("--oauth-client", default="gw13-client:gw13-secret",
                     help="client-credentials pair (id:secret) for oauth2 schemes during --verify-against; "
                          "the tokenUrl comes from the description itself")
+    ap.add_argument("--blob-threshold", type=int, default=BLOB_THRESHOLD_DEFAULT,
+                    help="JCS-canonical bytes above which an example's expected value is carried by "
+                         "address (a result_blob pointer + a blob-<sha256>.json sidecar for the "
+                         f"gate-free /v0/blobs store; default {BLOB_THRESHOLD_DEFAULT})")
     args = ap.parse_args(argv)
 
     spec = load_spec(args.spec)
@@ -1154,7 +1188,8 @@ def main(argv=None):
     elif pending:
         for p in pending:
             m_ok, got = materialize_schema_projection(p, args.out, secret_names, args.token,
-                                                      oauth_ids=oauth_ids)
+                                                      oauth_ids=oauth_ids,
+                                                      blob_threshold=args.blob_threshold)
             if not m_ok:
                 ok = False
                 print(f"{p['name']:16} observation-gate=FAIL: {got}")
@@ -1177,12 +1212,18 @@ def main(argv=None):
             # exactly once (grants + secrets), must reproduce its documented result, and its
             # observed trace is attached by trc_… address (re-addressing the record).
             att_ok, att_msg = attach_example_traces(rp, bp, record, args.out, secret_names, args.token,
-                                                    oauth_ids=oauth_ids)
+                                                    oauth_ids=oauth_ids,
+                                                    blob_threshold=args.blob_threshold)
             if not att_ok:
                 ok = False
                 print(f"{line}  live-gate=FAIL: {att_msg}")
                 continue
             line += "  live=PASS+traces"
+        # After the gates (either one may have moved an oversized expected value out to a blob
+        # sidecar), report examples that are now carried by address.
+        blobbed = [ex["result_blob"] for ex in record.get("examples", []) if "result_blob" in ex]
+        if blobbed:
+            line += f"  example=BY-ADDRESS({'+'.join(str(b['bytes']) for b in blobbed)} bytes)"
         cert_ok, cert_msg = certify(rp, bp, args.out)
         line += f"  certify={'OK' if cert_ok else 'FAIL'}"
         ok = ok and cert_ok

@@ -11,7 +11,7 @@
 //! (`check_predicate_well_formed`), value (`check_value_well_formed`), and body
 //! (`check_body_well_formed`).
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use jsonschema::{Retrieve, Uri};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -394,6 +394,21 @@ pub fn format_hash(prefix: &str, hash: &[u8; 32]) -> String {
     out
 }
 
+/// sha256 of arbitrary bytes as 64 lowercase hex chars — the blob-store addressing scheme
+/// (`GET /v0/blobs/{sha256}`, spec/commons.md): weights blobs and by-address example values
+/// (`examples[].result_blob`). Distinct from the BLAKE3 record namespace by design — blobs are
+/// opaque bytes outside the JCS pipeline (spec/weights.md).
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(64);
+    use std::fmt::Write;
+    for byte in digest {
+        write!(out, "{:02x}", byte).expect("writing to String is infallible");
+    }
+    out
+}
+
 /// Compute the content-hash of an artifact end-to-end, with the given kind:
 /// strip the kind-appropriate fields, JCS-canonicalize, BLAKE3-256, and format
 /// with the kind's prefix. Returns e.g. `fn_<hex>`, `msg_<hex>`, `expr_<hex>`.
@@ -432,6 +447,24 @@ pub fn build_link_map(dir: &Path) -> Result<std::collections::HashMap<String, Va
         let path = entry?.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
+        }
+        // A `blob-<sha256>.json` sidecar: the JCS-canonical value-expression bytes of a by-address
+        // example value (`examples[].result_blob`). Verified against the sha256 its name claims on
+        // load — same hash-is-the-truth boundary as fetching it from a node's blob store — and
+        // indexed under `blob_<sha256>` so `run_examples` resolves it like a trace reference.
+        let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if let Some(hex) = fname.strip_prefix("blob-").and_then(|s| s.strip_suffix(".json")) {
+            if hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
+                let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+                let digest = sha256_hex(&bytes);
+                if digest != hex {
+                    bail!("blob sidecar {} hashes to sha256 {digest}, not the {hex} its name claims — refusing the corrupted blob", path.display());
+                }
+                let v: Value = serde_json::from_slice(&bytes)
+                    .with_context(|| format!("blob sidecar {} is not JSON (a result_blob carries value-expression bytes)", path.display()))?;
+                bodies_by_expr.insert(format!("blob_{hex}"), v);
+                continue;
+            }
         }
         let v = read_json(&path)?;
         let is_record = v.get("hash").and_then(|h| h.as_str()).is_some_and(|h| h.starts_with("fn_"));
@@ -1287,6 +1320,36 @@ mod link_map_tests {
         let map = build_link_map(&dir).unwrap();
         assert!(map.contains_key(&bh), "bare-variant body indexed by its expr address");
         assert!(map.contains_key(&h), "…and aliased under the fn address, so a fn_ref resolves");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn build_link_map_indexes_a_verified_blob_sidecar() {
+        // A `blob-<sha256>.json` sidecar (a by-address example value, `examples[].result_blob`) is
+        // indexed under `blob_<sha256>` after its bytes verify against the name's digest.
+        let value = json!({ "kind": "int", "value": 10 });
+        let bytes = canonicalize(&value).unwrap();
+        let sha = sha256_hex(&bytes);
+        let dir = std::env::temp_dir().join(format!("nl_blobmap_{}", &sha[..16]));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("blob-{sha}.json")), &bytes).unwrap();
+        let map = build_link_map(&dir).unwrap();
+        assert_eq!(map.get(&format!("blob_{sha}")), Some(&value), "blob indexed under blob_<sha256>");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn build_link_map_refuses_a_corrupted_blob_sidecar() {
+        // The sha256 in the sidecar's name is the security boundary: content that hashes elsewhere
+        // is refused outright, not indexed under a lying name.
+        let sha = "ab".repeat(32);
+        let dir = std::env::temp_dir().join(format!("nl_blobbad_{}", &sha[..16]));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("blob-{sha}.json")), b"{\"kind\":\"int\",\"value\":10}").unwrap();
+        let err = build_link_map(&dir).unwrap_err().to_string();
+        assert!(err.contains("refusing the corrupted blob"), "got: {err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
