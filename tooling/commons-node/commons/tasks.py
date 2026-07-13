@@ -160,9 +160,77 @@ def replicate_blobs(peer):
 
 
 @shared_task
+def reconcile_peer(peer):
+    """Merkle anti-entropy against one peer (commons.md open question 1): compare set digests at
+    `GET /v0/sync/merkle`, descend only differing subtrees, and admit any located-missing records
+    through the SAME verification gate as a direct publish.
+
+    This is the complement of `replicate_peer`'s cursor tail: the cursor answers "what's new", the
+    tree answers "are we whole" — one cheap request when in sync (equal root digests), O(log n)
+    when not, instead of re-walking the feed. Divergence this run cannot finish (fetch failures,
+    the per-run batch cap) is simply still-visible divergence next run — no cursor to mis-step, the
+    same self-healing shape as blob replication. Pull-only: records we hold that the peer lacks are
+    the peer's problem."""
+    from .merkle import merkle_node
+
+    base = peer.rstrip("/")
+    budget = settings.COMMONS_REPLICATE_BATCH
+    requests = missing = mirrored = fetch_failures = 0
+    frontier = [""]
+    in_sync = True
+    while frontier and budget > 0:
+        prefix = frontier.pop()
+        try:
+            remote = _get_json(f"{base}/v0/sync/merkle?prefix={prefix}")
+        except Exception:
+            break  # peer unreachable this run — divergence stays visible next run
+        requests += 1
+        local = merkle_node(prefix)
+        if remote.get("digest") == local["digest"]:
+            continue
+        in_sync = False
+        if "hashes" in remote:
+            for h in remote["hashes"]:
+                if budget <= 0:
+                    break
+                if not isinstance(h, str) or Record.objects.filter(hash=h).exists():
+                    continue
+                missing += 1
+                budget -= 1
+                try:
+                    raw = _get_json(f"{base}/v0/records/{h}")
+                except Exception:
+                    fetch_failures += 1
+                    continue
+                try:
+                    kind, version, address = V.verify_record(raw)  # untrusted-peer admission gate
+                    if address != h:
+                        continue  # different content under this address — refuse it
+                    create_record(raw, kind, version, address)
+                    mirrored += 1
+                except Exception:
+                    continue  # unverifiable — skip; a lying tree only wasted a request
+            continue
+        local_children = local.get("children", {})
+        # A leaf-sized LOCAL subset still yields child digests remotely — recompute locally per
+        # child prefix instead of assuming the shapes align.
+        for nib, child in (remote.get("children") or {}).items():
+            if not isinstance(nib, str) or len(nib) != 1 or nib not in "0123456789abcdef":
+                continue
+            lc = local_children.get(nib)
+            local_digest = lc["digest"] if lc else merkle_node(prefix + nib)["digest"]
+            if child.get("digest") != local_digest:
+                frontier.append(prefix + nib)
+    return {"peer": base, "requests": requests, "in_sync": in_sync, "missing_seen": missing,
+            "mirrored": mirrored, "fetch_failures": fetch_failures}
+
+
+@shared_task
 def replicate_all():
-    """Run record + blob replication for every configured peer (the beat-scheduled entry point)."""
-    return [{"records": replicate_peer(p), "blobs": replicate_blobs(p)}
+    """Run record + blob replication + Merkle anti-entropy for every configured peer (the
+    beat-scheduled entry point). Reconciliation runs AFTER the cursor tail: in the common case the
+    tail already converged and reconcile is a single equal-digest request."""
+    return [{"records": replicate_peer(p), "blobs": replicate_blobs(p), "reconcile": reconcile_peer(p)}
             for p in settings.COMMONS_PEERS]
 
 

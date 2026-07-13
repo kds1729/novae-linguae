@@ -20,6 +20,7 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 | `GET /v0/records/{hash}/attestations` — the signed eval attestations about a weights record | ✅ |
 | `GET /v0/records/{hash}/equivalences` — the signed `equivalent` claims naming a function (each re-provable by `verify-claim`) | ✅ |
 | `GET /v0/blobs/{sha256}` — content-addressed binary blobs (gate-free; the referencing record's sha256 — a weights manifest, a by-address example value — is the boundary) | ✅ |
+| `GET /v0/sync/merkle?prefix=…` — Merkle set reconciliation: one request answers "same record set?", divergence localizes in O(log n) (commons.md open question 1) | ✅ |
 | `POST /v0/query` — typed (exact) discovery | ✅ |
 | `GET /v0/sync` — replication feed (cursor) | ✅ |
 | `GET /v0/info` — node metadata | ✅ |

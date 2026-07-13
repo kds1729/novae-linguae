@@ -354,6 +354,28 @@ def sync(request):
                          "complete": len(rows) < limit})
 
 
+def sync_merkle(request):
+    """GET /v0/sync/merkle?prefix={hex} — Merkle set reconciliation (commons.md open question 1).
+
+    One request answers "same record set?" (compare root digests); a differing set localizes in
+    O(log n) requests by descending only differing children, reading address lists only at small
+    leaves. The tree is an efficiency hint, never a trust surface: located-missing records are
+    admitted through the same verify-then-store gate as any publish (see commons/merkle.py).
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    from .merkle import MerkleError, merkle_node
+
+    try:
+        node = merkle_node(request.GET.get("prefix", ""))
+    except MerkleError as exc:
+        return JsonResponse({"error": "bad_prefix", "detail": str(exc)}, status=400)
+    resp = JsonResponse(node)
+    # The set changes as records land — cache only briefly (like the certification sets).
+    resp["Cache-Control"] = "public, max-age=10"
+    return resp
+
+
 def info(request):
     """GET /v0/info — node metadata (peers are hints, not authority)."""
     if request.method != "GET":

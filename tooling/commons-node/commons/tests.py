@@ -1956,3 +1956,95 @@ class BodyTieringTests(TestCase):
             call_command("exportbundle", str(out), stdout=io.StringIO(), stderr=io.StringIO())
             _, records = read_bundle(str(out))
             self.assertIn(body, records, "the bundle carries the real body, not the pointer stub")
+
+
+# --- Merkle set reconciliation (commons.md open question 1) ----------------------------------------
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class MerkleSyncTests(TestCase):
+    """`GET /v0/sync/merkle` + the reconcile_peer anti-entropy walk."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def _publish(self, record):
+        return self.client.post("/v0/records", data=json.dumps(record),
+                                content_type="application/json")
+
+    def test_merkle_unit_semantics(self):
+        from commons.merkle import LEAF_LIMIT, merkle_node, set_digest
+
+        # Order-independent digest, the bundle construction.
+        self.assertEqual(set_digest(["fn_ab", "fn_cd"]), set_digest(["fn_cd", "fn_ab"]))
+        self.assertNotEqual(set_digest(["fn_ab"]), set_digest(["fn_cd"]))
+
+        # 100 synthetic addresses spread over nibbles: the root partitions into children whose
+        # counts sum to the total; a leaf-sized prefix returns the address list itself.
+        addrs = [f"fn_{i % 16:x}{i:063x}" for i in range(100)]
+        root = merkle_node("", addresses=addrs)
+        self.assertEqual(root["count"], 100)
+        self.assertGreater(root["count"], LEAF_LIMIT)
+        self.assertNotIn("hashes", root)
+        self.assertEqual(sum(c["count"] for c in root["children"].values()), 100)
+        leaf = merkle_node("0", addresses=addrs)
+        self.assertEqual(leaf["count"], root["children"]["0"]["count"])
+        self.assertEqual(leaf["digest"], root["children"]["0"]["digest"])
+        self.assertEqual(len(leaf["hashes"]), leaf["count"])
+
+    def test_merkle_endpoint(self):
+        from commons.merkle import set_digest
+
+        rec = _load("map.json")
+        self.assertIn(self._publish(rec).status_code, (200, 201))
+        resp = self.client.get("/v0/sync/merkle")
+        self.assertEqual(resp.status_code, 200)
+        node = resp.json()
+        hashes = list(Record.objects.values_list("hash", flat=True))
+        self.assertEqual(node["digest"], set_digest(hashes))
+        self.assertEqual(node["count"], len(hashes))
+        self.assertEqual(self.client.get("/v0/sync/merkle?prefix=zz").status_code, 400)
+
+    def test_reconcile_heals_a_divergent_replica(self):
+        from commons import tasks
+        from commons.merkle import merkle_node
+
+        peer_records = {r["hash"]: r for r in (_load("map.json"), _load("double.v0.2.json"))}
+
+        def fake_get(url, timeout=30):
+            if "/v0/sync/merkle" in url:
+                prefix = url.rsplit("prefix=", 1)[1] if "prefix=" in url else ""
+                return merkle_node(prefix, addresses=list(peer_records))
+            for h, r in peer_records.items():
+                if h in url:
+                    return r
+            raise AssertionError(f"unexpected fetch {url}")
+
+        with mock.patch.object(tasks, "_get_json", fake_get):
+            out = tasks.reconcile_peer("https://peer.example")
+            self.assertFalse(out["in_sync"])
+            self.assertEqual(out["mirrored"], 2, out)
+            for h in peer_records:
+                self.assertTrue(Record.objects.filter(hash=h).exists())
+            # Converged: the next round is one equal-digest request and no fetches.
+            again = tasks.reconcile_peer("https://peer.example")
+            self.assertTrue(again["in_sync"])
+            self.assertEqual(again["requests"], 1)
+            self.assertEqual(again["mirrored"], 0)
+
+    def test_reconcile_refuses_lying_content(self):
+        from commons import tasks
+        from commons.merkle import merkle_node
+
+        good = _load("map.json")
+        lying_addr = "fn_" + "e" * 64
+
+        def fake_get(url, timeout=30):
+            if "/v0/sync/merkle" in url:
+                prefix = url.rsplit("prefix=", 1)[1] if "prefix=" in url else ""
+                return merkle_node(prefix, addresses=[lying_addr])
+            return good  # the peer serves DIFFERENT content under the claimed address
+
+        with mock.patch.object(tasks, "_get_json", fake_get):
+            out = tasks.reconcile_peer("https://peer.example")
+            self.assertEqual(out["mirrored"], 0, "content under a lying address is refused")
+            self.assertFalse(Record.objects.filter(hash=lying_addr).exists())

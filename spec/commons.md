@@ -341,6 +341,30 @@ the commons federates without any node being authoritative.
 { "hashes": ["fn_3a9b…", "msg_e7a2…"], "cursor": "…", "complete": false }
 ```
 
+### `GET /v0/sync/merkle?prefix={hex}` — set reconciliation (anti-entropy)
+
+The cursor feed answers "what came after position N"; this answers **"do we hold the same set?"**
+in one request, and localizes any divergence in O(log n) more. The record set forms a 16-ary
+Merkle trie over the hex part of the content-addresses (uniformly distributed — they are
+cryptographic hashes). A node response carries the subset's order-independent digest (the
+bundle-digest construction, so implementations agree) and either the 16 children's digests/counts
+or — at small leaves — the sorted address list itself:
+
+```json
+{ "prefix": "a", "digest": "blake2b:…", "count": 812,
+  "children": { "0": { "digest": "blake2b:…", "count": 47 }, "1": { … }, … } }
+
+{ "prefix": "a3f", "digest": "blake2b:…", "count": 12, "hashes": ["expr_a3f0…", "fn_a3f9…"] }
+```
+
+A reconciler compares root digests (equal ⇒ in sync, done), descends only differing children, and
+diffs address lists only at leaves; located-missing records are fetched and admitted through the
+ordinary verify-then-store gate. The tree is an **efficiency hint, never a trust surface**: a lying
+digest can waste a request or withhold a record — exactly what a lying cursor feed could already do
+— because authenticity lives in each record's self-verification, not in the tree. The reference
+worker runs this walk after every cursor tail (`reconcile_peer`), so a cursor mis-step or missed
+page is *found and healed* instead of silently permanent.
+
 ### Seed bundles (`.nlb`) — out-of-band federation
 
 Where `sync` federates node-to-node over HTTP, a **seed bundle** federates over *anything* — an HTTP
@@ -353,9 +377,13 @@ records.jsonl    one content-addressed record per line, sorted by hash
 ```
 
 The manifest is specified by [`bundle.schema.json`](bundle.schema.json). A bundle is **deterministic**
-(records sorted by hash, manifest keys sorted, fixed tar/gzip mtime) so the same record set always
-produces identical bytes and bundles dedupe and diff cleanly. `bundle_digest` (BLAKE2b-256 over the
-sorted record-hash set) is a cheap whole-payload integrity pre-check on read.
+(records ordered by address — hashless self-addressing artifacts like bare bodies and traces after
+them, by canonical serialization — manifest keys sorted, fixed tar/gzip mtime) so the same record
+set always produces identical bytes and bundles dedupe and diff cleanly. `bundle_digest`
+(BLAKE2b-256 over the sorted **hash-carrying** record set — the reader recomputes it without a
+validator, so it cannot self-address the hashless artifacts; those are verified by the ingest
+gate's self-addressing, the same boundary as a network publish) is a cheap whole-payload integrity
+pre-check on read.
 
 A bundle is ingested through **exactly the same verify-then-store gate as `POST /v0/records`** — every
 record is re-checked by hash (and messages by signature) — so the **producer is untrusted**: a bundle can
@@ -483,8 +511,20 @@ conformant if it speaks the protocol above. The engine choice MUST NOT leak into
 
 ## Open questions (v0.3+, not blockers)
 
-1. **Authenticated `sync`/anti-entropy** — efficient set reconciliation (e.g. Merkle/IBLT) instead
-   of cursor polling, for large mirrors.
+1. ~~**Authenticated `sync`/anti-entropy** — efficient set reconciliation (e.g. Merkle/IBLT) instead
+   of cursor polling, for large mirrors.~~ **RESOLVED** — `GET /v0/sync/merkle?prefix=<hex>` (below):
+   a 16-ary Merkle trie over the uniformly-distributed hex part of the content-addresses (they ARE
+   cryptographic hashes, so no derived keying is needed), digests order-independent and
+   implementation-portable (the bundle-digest construction). One request answers "same set?"
+   (equal root digests); divergence localizes in O(log n) requests, descending only differing
+   children and reading address lists only at small leaves. The reference worker runs the
+   reconcile walk after each cursor tail (`reconcile_peer`, self-healing like blob replication:
+   no cursor to mis-step, unresolved divergence is simply still visible next run). Honest scope:
+   the tree is an *efficiency hint*, not a trust surface — every located-missing record still
+   passes the same verify-then-store gate as a direct publish, so a lying digest can only waste a
+   request or withhold (which a lying cursor feed could already do). "Authenticated" therefore
+   comes from record self-verification, not from the tree; per-node signed tree roots (provenance
+   anchoring, question 2) remain the separate, still-open add-on.
 2. **Provenance anchoring** — *optionally* publishing periodic Merkle roots of a node's corpus to an
    external append-only log (including, if desired, a public blockchain) as a tamper-evident
    timestamp. This is an add-on for auditability, never the store itself.
