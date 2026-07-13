@@ -2181,6 +2181,13 @@ fn cmd_orchestrate_verified(
             "propose" => format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).unwrap_or_default()),
             "trace" => format!("{} recorded observation(s)", m.get("ops").and_then(|o| o.as_array()).map(|a| a.len()).unwrap_or(0)),
             "assert" => assert_result_detail(m),
+            // A signed reject carries its policy-shaped reason — print it (a bare "reject" line
+            // made a granted-but-refused run undiagnosable from the transcript).
+            "reject" | "retry" => format!(
+                "{} {}",
+                m.pointer("/body/code").and_then(|c| c.as_str()).unwrap_or(""),
+                m.pointer("/body/reason").and_then(|r| r.as_str()).unwrap_or("")
+            ),
             other => other.to_string(),
         };
         println!("{:>8}  {detail}", step.label);
