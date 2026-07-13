@@ -661,6 +661,41 @@ enum Commands {
         #[arg(long = "oauth")]
         oauth: Vec<String>,
     },
+    /// Prove two commons functions extensionally equivalent and sign the claim: equal canonical
+    /// normal forms (solver-free), else the SMT/structural-induction equivalence prover. Refuses to
+    /// sign anything the prover didn't close — the signed `assert` (claim kind `equivalent`,
+    /// spec/claim-expression.schema.json) is OBJECTIVE: any receiver re-proves it with
+    /// `verify-claim`, and the attestation graph ingests it as a symmetric `equivalent-to` edge
+    /// pair that discovery uses to collapse equivalence classes.
+    AssertEquivalent {
+        /// Content-address (`fn_…`) of one function.
+        #[arg(long)]
+        f: String,
+        /// Content-address (`fn_…`) of the other function.
+        #[arg(long)]
+        g: String,
+        /// Directory of records/bodies to resolve the two functions against.
+        #[arg(long, conflicts_with = "node", required_unless_present = "node")]
+        records: Option<PathBuf>,
+        /// A live commons node URL: both records/bodies fetched by content-address, hash-verified.
+        #[arg(long)]
+        node: Option<String>,
+        /// Signing seed for the asserting identity.
+        #[arg(long, default_value = "equivalence-asserter")]
+        seed: String,
+        /// SMT solver for the non-normal-form path.
+        #[arg(long, default_value = "z3")]
+        solver: String,
+        /// Timestamp (RFC 3339 UTC) stamped into the assert.
+        #[arg(long)]
+        timestamp: Option<String>,
+        /// Write the signed assert to this file (else stdout).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// With `--node`: publish the signed assert back through the verify-then-store gate.
+        #[arg(long, requires = "node")]
+        publish: bool,
+    },
     /// Verify a delegation chain (spec/trust-model.md): can `--grantee` wield `--capability` by a chain
     /// of signed `delegate` tokens back to a recognized `--root`? Checks every token's signature,
     /// attenuation (no link widens the grant), expiry (against `--at`), and that the chain reaches a
@@ -941,6 +976,9 @@ fn main() -> ExitCode {
                 }
                 Err(e) => (Err(e), false),
             }
+        }
+        Commands::AssertEquivalent { f, g, records, node, seed, solver, timestamp, out, publish } => {
+            (cmd_assert_equivalent(&f, &g, records.as_ref(), node.as_deref(), &seed, &solver, timestamp.as_deref(), out.as_deref(), publish), false)
         }
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
             (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
@@ -1875,6 +1913,72 @@ fn cmd_verify_claim(assert: &str, records: Option<&PathBuf>, node: Option<&str>)
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn cmd_assert_equivalent(
+    f: &str,
+    g: &str,
+    records: Option<&PathBuf>,
+    node: Option<&str>,
+    seed: &str,
+    solver: &str,
+    timestamp: Option<&str>,
+    out: Option<&Path>,
+    publish: bool,
+) -> Result<()> {
+    if !f.starts_with("fn_") || !g.starts_with("fn_") {
+        anyhow::bail!("--f/--g must be fn_… content-addresses");
+    }
+    if f == g {
+        anyhow::bail!("--f and --g are the same address — hash equality already says they are the same function");
+    }
+    let link_map = match (records, node) {
+        (Some(dir), None) => nl_validator::build_link_map(dir)?,
+        (None, Some(url)) => {
+            let (_, link_map) = nl_validator::commons_client::maps_from_node(url, &[f.to_string(), g.to_string()])?;
+            link_map
+        }
+        _ => anyhow::bail!("supply exactly one of --records / --node"),
+    };
+    let bf = link_map.get(f).ok_or_else(|| anyhow::anyhow!("cannot resolve `{f}`'s body"))?;
+    let bg = link_map.get(g).ok_or_else(|| anyhow::anyhow!("cannot resolve `{g}`'s body"))?;
+    // Prove FIRST; only a closed proof gets signed. The claim is objective either way — any
+    // receiver re-proves it via `verify-claim` — but an agent must not sign what it hasn't checked.
+    let method = match nl_validator::prove_equivalent(bf, bg, solver) {
+        nl_validator::EquivVerdict::EquivalentByNormalization => "normal-form",
+        nl_validator::EquivVerdict::Equivalent(lemmas) => {
+            if !lemmas.is_empty() {
+                eprintln!("proved with auxiliary lemma(s): {}", lemmas.join(", "));
+            }
+            "induction"
+        }
+        nl_validator::EquivVerdict::Distinct(model) => {
+            anyhow::bail!("DISTINCT   counterexample: {model} — refusing to sign a false claim")
+        }
+        nl_validator::EquivVerdict::Unknown => anyhow::bail!("UNKNOWN    the prover could not close the equivalence — nothing signed"),
+        nl_validator::EquivVerdict::Unsupported(why) => anyhow::bail!("UNSUPPORTED  {why} — nothing signed"),
+        nl_validator::EquivVerdict::NoSolver => anyhow::bail!("NO-SOLVER  `{solver}` not found (and the normal forms differ)"),
+    };
+    let key = nl_validator::signing_key_from_seed(seed);
+    let to = nl_validator::did_nova_from_pubkey(&key.verifying_key());
+    let assert = nl_validator::build_equivalence_assert(f, g, method, &to, timestamp, &key)?;
+    let addr = assert.get("hash").and_then(|h| h.as_str()).unwrap_or("").to_string();
+    println!("EQUIVALENT proved by {method}; signed assert {addr}");
+    let pretty = serde_json::to_string_pretty(&assert)?;
+    match out {
+        Some(p) => {
+            std::fs::write(p, format!("{pretty}\n")).map_err(|e| anyhow::anyhow!("writing {}: {e}", p.display()))?;
+            eprintln!("written to {}", p.display());
+        }
+        None => println!("{pretty}"),
+    }
+    if publish {
+        let resp = nl_validator::commons_client::publish_artifact(node.expect("--publish requires --node"), &assert)?;
+        println!("published  {addr} -> node accepted ({})",
+                 resp.get("status").and_then(|s| s.as_str()).unwrap_or("stored"));
+    }
+    Ok(())
+}
+
 /// Load JSON messages from a list of paths (each a `.json` file or a directory of them). When
 /// `kind_filter` is `Some(k)`, only messages whose `kind` is `k` are kept; `None` keeps all. Directory
 /// entries are read in sorted order for determinism.
@@ -2169,6 +2273,12 @@ fn cmd_orchestrate_verified(
                 "goal-ordered {} candidate(s): {}",
                 m.get("ordered").and_then(|o| o.as_array()).map(|a| a.len()).unwrap_or(0),
                 m.get("scores").map(|v| v.to_string()).unwrap_or_default()
+            ),
+            "collapse" => format!(
+                "{} proven-equivalent candidate(s) merged; {} class representative(s) remain — {}",
+                m.get("collapsed").and_then(|c| c.as_array()).map(|a| a.len()).unwrap_or(0),
+                m.get("kept").and_then(|k| k.as_array()).map(|a| a.len()).unwrap_or(0),
+                m.get("collapsed").map(|v| v.to_string()).unwrap_or_default()
             ),
             "certify" => format!("certified={} {}", m.get("certified").map(|v| v.to_string()).unwrap_or_default(), m.get("failed").map(|v| v.to_string()).unwrap_or_default()),
             "grants" => format!(

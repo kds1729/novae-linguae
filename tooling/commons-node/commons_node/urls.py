@@ -12,6 +12,7 @@ urlpatterns = [
     re_path(rf"^v0/records/{_ADDR}$", views.record),    # GET resolve / HEAD exists
     re_path(rf"^v0/records/{_ADDR}/certifications$", views.certifications),  # GET certs about a function
     re_path(rf"^v0/records/{_ADDR}/attestations$", views.attestations),  # GET eval attestations about weights
+    re_path(rf"^v0/records/{_ADDR}/equivalences$", views.equivalences),  # GET equivalence claims about a function
     re_path(r"^v0/blobs/(?P<sha256>[0-9a-f]{64})$", views.blob),  # GET binary blob by content hash
     path("v0/query", views.query),                      # POST typed discovery
     path("v0/search", views.search),                    # POST semantic discovery

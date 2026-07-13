@@ -31,6 +31,9 @@ pub struct Attestation {
     pub expires_at: Option<String>,
     /// The `assert` message's content-address — what a `retract` targets.
     pub hash: String,
+    /// For a symmetric artifact relation (`equivalent-to`): the other endpoint. `None` for the
+    /// agent-trust verbs, whose relation is attester → subject.
+    pub peer: Option<String>,
 }
 
 impl Attestation {
@@ -87,9 +90,16 @@ impl AttestationGraph {
         let mut edges = Vec::new();
         for m in messages {
             match m.get("kind").and_then(|k| k.as_str()) {
-                // A signed attestation `assert`: `<attester> <verb> <subject>`.
+                // A signed attestation `assert`: `<attester> <verb> <subject>`. A signed
+                // **equivalence** `assert` (claim kind `equivalent`, spec/claim-expression) also
+                // lands here: it contributes a SYMMETRIC `equivalent-to` edge pair between the two
+                // functions. Like `certifies` it is objective and re-checkable (verify-claim
+                // re-proves it from the two bodies) and on a separate axis from agent trust — the
+                // graph records who signed it, and a consumer prices that testimony (or re-proves
+                // locally) before acting on it.
                 Some("assert") => {
-                    if m.pointer("/body/claim/kind").and_then(|k| k.as_str()) != Some("attestation") {
+                    let claim_kind = m.pointer("/body/claim/kind").and_then(|k| k.as_str());
+                    if claim_kind != Some("attestation") && claim_kind != Some("equivalent") {
                         continue;
                     }
                     let hash = match m.get("hash").and_then(|h| h.as_str()) {
@@ -103,6 +113,29 @@ impl AttestationGraph {
                         Some(c) => c,
                         None => continue,
                     };
+                    if claim_kind == Some("equivalent") {
+                        let (Some(attester), Some(a), Some(b)) = (
+                            m.get("from").and_then(|f| f.as_str()),
+                            claim.get("a").and_then(|s| s.as_str()),
+                            claim.get("b").and_then(|s| s.as_str()),
+                        ) else {
+                            continue;
+                        };
+                        for (subject, peer) in [(a, b), (b, a)] {
+                            edges.push(Attestation {
+                                attester: attester.to_string(),
+                                subject: subject.to_string(),
+                                verb: "equivalent-to".to_string(),
+                                domain: None,
+                                confidence: None,
+                                issued_at: m.get("timestamp").and_then(|t| t.as_str()).map(String::from),
+                                expires_at: None,
+                                hash: hash.clone(),
+                                peer: Some(peer.to_string()),
+                            });
+                        }
+                        continue;
+                    }
                     let expires_at = claim.get("expires_at").and_then(|e| e.as_str()).map(String::from);
                     if is_expired(expires_at.as_deref(), at) {
                         continue;
@@ -123,6 +156,7 @@ impl AttestationGraph {
                         issued_at: claim.get("issued_at").and_then(|t| t.as_str()).map(String::from),
                         expires_at,
                         hash,
+                        peer: None,
                     });
                 }
                 // A signed **certification** record (`certify --sign`): `<certifier> certifies <function>`.
@@ -157,6 +191,7 @@ impl AttestationGraph {
                         issued_at: m.get("timestamp").and_then(|t| t.as_str()).map(String::from),
                         expires_at: None,
                         hash,
+                        peer: None,
                     });
                 }
                 // A signed **eval attestation** (`attest-weights --sign`): `<certifier> attests-eval
@@ -187,6 +222,7 @@ impl AttestationGraph {
                         issued_at: m.get("timestamp").and_then(|t| t.as_str()).map(String::from),
                         expires_at: None,
                         hash,
+                        peer: None,
                     });
                 }
                 _ => continue,
@@ -241,6 +277,34 @@ impl AttestationGraph {
             .filter(|e| e.subject == subject && e.verb == "attests-eval")
             .map(|e| e.attester.clone())
             .collect()
+    }
+
+    /// The functions attested extensionally equivalent to `subject` — the TRANSITIVE closure over
+    /// `equivalent-to` edges (equivalence classes compose: a≡b and b≡c puts c in a's class). Every
+    /// edge here came from a signed, signature-verified `equivalent` claim; whether to *act* on one
+    /// is still the consumer's call (re-prove locally, or price the signer's testimony — see
+    /// [`Self::equivalence_edge`] for per-edge attribution).
+    pub fn equivalents(&self, subject: &str) -> BTreeSet<String> {
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        let mut frontier = vec![subject.to_string()];
+        while let Some(cur) = frontier.pop() {
+            for e in self.edges.iter().filter(|e| e.verb == "equivalent-to" && e.subject == cur) {
+                if let Some(p) = &e.peer {
+                    if p != subject && seen.insert(p.clone()) {
+                        frontier.push(p.clone());
+                    }
+                }
+            }
+        }
+        seen
+    }
+
+    /// The `equivalent-to` edge connecting `x` and `y` DIRECTLY (either orientation), if any —
+    /// exposes who signed it, so a policy can decide whether that asserter's testimony counts.
+    pub fn equivalence_edge(&self, x: &str, y: &str) -> Option<&Attestation> {
+        self.edges.iter().find(|e| {
+            e.verb == "equivalent-to" && e.subject == x && e.peer.as_deref() == Some(y)
+        })
     }
 
     /// Attesters who `distrusts` `subject`.
@@ -348,6 +412,65 @@ mod tests {
         );
         assert!(g.positive_attesters(&bob, Some("rust_ingestion")).contains(&did("alice")));
         assert!(g.positive_attesters(&bob, Some("crypto")).is_empty(), "domain-scoped trust does not apply to another domain");
+    }
+
+    // ---- equivalence claims as symmetric `equivalent-to` edges ----
+
+    fn fn_addr(fill: char) -> String {
+        format!("fn_{}", fill.to_string().repeat(64))
+    }
+
+    /// A signed equivalence `assert` (claim kind `equivalent`) between two functions.
+    fn equiv_assert(asserter_seed: &str, a: &str, b: &str) -> J {
+        crate::respond::build_equivalence_assert(
+            a, b, "normal-form", &did(asserter_seed), Some("2026-07-13T00:00:00Z"),
+            &signing_key_from_seed(asserter_seed),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn equivalence_claim_yields_symmetric_edges() {
+        let (a, b) = (fn_addr('1'), fn_addr('2'));
+        let g = AttestationGraph::from_messages(&[equiv_assert("alice", &a, &b)], None);
+        assert_eq!(g.len(), 2, "one claim, two directed edges");
+        assert!(g.equivalents(&a).contains(&b));
+        assert!(g.equivalents(&b).contains(&a));
+        let e = g.equivalence_edge(&a, &b).expect("direct edge either orientation");
+        assert_eq!(e.attester, did("alice"));
+        assert_eq!(e.verb, "equivalent-to");
+    }
+
+    #[test]
+    fn equivalents_closure_is_transitive() {
+        let (a, b, c) = (fn_addr('1'), fn_addr('2'), fn_addr('3'));
+        let g = AttestationGraph::from_messages(
+            &[equiv_assert("alice", &a, &b), equiv_assert("carol", &b, &c)],
+            None,
+        );
+        let class = g.equivalents(&a);
+        assert!(class.contains(&b) && class.contains(&c), "a≡b, b≡c puts c in a's class");
+        assert!(!class.contains(&a), "the closure reports the OTHERS in the class");
+        // But the direct edge between a and c does not exist — attribution stays per-claim.
+        assert!(g.equivalence_edge(&a, &c).is_none());
+    }
+
+    #[test]
+    fn retracted_equivalence_claim_drops_both_edges() {
+        let (a, b) = (fn_addr('1'), fn_addr('2'));
+        let m = equiv_assert("alice", &a, &b);
+        let h = m["hash"].as_str().unwrap().to_string();
+        let g = AttestationGraph::from_messages(&[m, retract("alice", &h)], None);
+        assert!(g.is_empty());
+    }
+
+    #[test]
+    fn tampered_equivalence_claim_is_skipped() {
+        let (a, b) = (fn_addr('1'), fn_addr('2'));
+        let mut m = equiv_assert("alice", &a, &b);
+        m["body"]["claim"]["b"] = json!(fn_addr('9')); // tamper after signing
+        let g = AttestationGraph::from_messages(&[m], None);
+        assert!(g.is_empty());
     }
 
     // ---- certifications as `certifies` edges ----

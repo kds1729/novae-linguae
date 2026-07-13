@@ -116,6 +116,32 @@ def attestations(request, address):
     return resp
 
 
+@csrf_exempt
+def equivalences(request, address):
+    """GET /v0/records/{fn-hash}/equivalences — the signed `equivalent` claims mentioning a function.
+
+    The discovery face of semantic equivalence (spec/claim-expression.schema.json): a client that
+    resolved a function asks which OTHER addresses are claimed extensionally equivalent to it. Each
+    returned assert is objective and re-checkable — `verify-claim` re-proves it from the two bodies
+    (equal normal forms, else the equivalence prover) — so the node does not judge (principle 7); it
+    serves the signed claims and the consumer re-proves or prices the signer's testimony. Bounded
+    scan over stored messages (equivalence claims are rare artifacts, and the JSON-path filter
+    narrows in the database); full assert messages are returned so the client can hash- and
+    signature-verify without a second round-trip.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    rows = (Record.objects.filter(kind="message", raw__kind="assert",
+                                  raw__body__claim__kind="equivalent").order_by("id"))[:2000]
+    claims = [r.raw for r in rows
+              if address in ((r.raw.get("body") or {}).get("claim", {}).get("a"),
+                             (r.raw.get("body") or {}).get("claim", {}).get("b"))]
+    resp = JsonResponse({"subject": address, "equivalences": claims, "count": len(claims)})
+    # Immutable individually, but the set about a subject grows — cache briefly, like certifications.
+    resp["Cache-Control"] = "public, max-age=10"
+    return resp
+
+
 def blob(request, sha256):
     """GET /v0/blobs/{sha256} — serve a binary blob by content hash (spec/weights.md).
 

@@ -210,11 +210,36 @@ fn assert_application(
 /// bytes to the claimed address. The blob itself is never fetched and need not exist anywhere:
 /// re-execution reconstructs the value, the hash pins the claim.
 pub fn verify_claim(assert: &J, link_map: HashMap<String, J>) -> Result<bool> {
+    let kind = assert.pointer("/body/claim/kind").and_then(|k| k.as_str()).unwrap_or("predicate");
+    // An `equivalent` claim is OBJECTIVE: re-prove it from the two bodies (equal normal forms,
+    // else the SMT/induction equivalence prover) instead of taking the signer's word. `Ok(false)`
+    // is a refutation (a solver counterexample); an undecided proof is an error, not a verdict.
+    if kind == "equivalent" {
+        let claim = assert.pointer("/body/claim").ok_or_else(|| anyhow!("assert has no claim"))?;
+        let (Some(a), Some(b)) = (
+            claim.get("a").and_then(|s| s.as_str()),
+            claim.get("b").and_then(|s| s.as_str()),
+        ) else {
+            bail!("`equivalent` claim must carry function addresses `a` and `b`");
+        };
+        let fa = link_map.get(a).ok_or_else(|| anyhow!("cannot resolve `{a}`'s body from the provided records/node"))?;
+        let fb = link_map.get(b).ok_or_else(|| anyhow!("cannot resolve `{b}`'s body from the provided records/node"))?;
+        // z3 is the reference solver default; the normalization fast path inside needs no solver.
+        return match crate::equiv::prove_equivalent(fa, fb, "z3") {
+            crate::equiv::EquivVerdict::Equivalent(_) | crate::equiv::EquivVerdict::EquivalentByNormalization => Ok(true),
+            crate::equiv::EquivVerdict::Distinct(model) => {
+                eprintln!("equivalence claim REFUTED by counterexample: {model}");
+                Ok(false)
+            }
+            crate::equiv::EquivVerdict::Unknown => bail!("equivalence claim did not re-prove (the prover could not close it)"),
+            crate::equiv::EquivVerdict::Unsupported(why) => bail!("equivalence claim outside the provable fragment: {why}"),
+            crate::equiv::EquivVerdict::NoSolver => bail!("no SMT solver available to re-prove the equivalence claim (and the normal forms differ)"),
+        };
+    }
     let expr = assert
         .pointer("/body/claim/expr")
         .ok_or_else(|| anyhow!("assert has no `body.claim.expr` to re-run (not a `predicate`/`observed` claim?)"))?
         .clone();
-    let kind = assert.pointer("/body/claim/kind").and_then(|k| k.as_str()).unwrap_or("predicate");
     let replaying = kind == "observed";
     if replaying {
         let trace_addr = assert
@@ -280,6 +305,37 @@ fn blob_eq_parts(expr: &J) -> Option<(J, String)> {
         }
     }
     None
+}
+
+/// The signed `equivalent` assert for two proven-equivalent functions (spec/claim-expression).
+/// Canonicalizes the pair order (`a` < `b`) so duplicate claims dedupe by content-address. The
+/// CALLER is responsible for having proved the equivalence first — `assert-equivalent` refuses to
+/// sign anything the prover didn't close, and any receiver re-proves via [`verify_claim`] anyway.
+pub fn build_equivalence_assert(
+    a: &str,
+    b: &str,
+    method: &str,
+    to: &str,
+    timestamp: Option<&str>,
+    signing_key: &SigningKey,
+) -> Result<J> {
+    let (x, y) = if a <= b { (a, b) } else { (b, a) };
+    sign_envelope(
+        json!({
+            "schema_version": "0.2.0",
+            "kind": "assert",
+            "to": to,
+            "in_reply_to": null,
+            "timestamp": timestamp,
+            "constraints": null,
+            "body": {
+                "subject": x,
+                "claim": { "kind": "equivalent", "a": x, "b": y, "method": method },
+                "evidence": null
+            }
+        }),
+        signing_key,
+    )
 }
 
 /// The common reply envelope; `sign_message` fills `from`/`hash`/`signature`.
@@ -774,6 +830,65 @@ mod tests {
 
     fn map_addr() -> String {
         load("map.v0.2.json")["hash"].as_str().unwrap().to_string()
+    }
+
+    // ---- equivalence claims: objective, re-proved by the receiver ----
+
+    fn lam(param: &str, body: J) -> J {
+        json!({ "kind": "lambda", "params": [{ "name": param }], "body": body })
+    }
+
+    fn addv(x: J, y: J) -> J {
+        json!({ "kind": "app", "fn": { "kind": "var", "name": "add" }, "args": [x, y] })
+    }
+
+    fn var(n: &str) -> J {
+        json!({ "kind": "var", "name": n })
+    }
+
+    fn has_solver() -> bool {
+        std::process::Command::new("z3").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+    }
+
+    #[test]
+    fn equivalence_claim_reproves_from_the_bodies() {
+        // α-renamed twins: `\n -> n+n` vs `\m -> m+m` — equal normal forms, no solver needed.
+        let (a, b) = (format!("fn_{}", "1".repeat(64)), format!("fn_{}", "2".repeat(64)));
+        let key = signing_key_from_seed("equiv-tester");
+        let to = crate::did_nova_from_pubkey(&key.verifying_key());
+        let assert = build_equivalence_assert(&a, &b, "normal-form", &to, None, &key).unwrap();
+        assert!(verify_signature(&assert).is_ok());
+        // Canonical pair order: a < b regardless of argument order.
+        let flipped = build_equivalence_assert(&b, &a, "normal-form", &to, None, &key).unwrap();
+        assert_eq!(assert["hash"], flipped["hash"], "pair order canonicalizes, duplicates dedupe by address");
+
+        let mut link = HashMap::new();
+        link.insert(a.clone(), lam("n", addv(var("n"), var("n"))));
+        link.insert(b.clone(), lam("m", addv(var("m"), var("m"))));
+        assert!(verify_claim(&assert, link).unwrap(), "the receiver re-proves, not trusts");
+
+        // Unresolvable body: undecidable, an error rather than a verdict.
+        assert!(verify_claim(&assert, HashMap::new()).is_err());
+    }
+
+    #[test]
+    fn false_equivalence_claim_is_refuted() {
+        if !has_solver() {
+            return; // refutation is a solver counterexample
+        }
+        // A signed claim that `\n -> n+n` ≡ `\n -> n+1` — verify_claim must answer REFUTED, not
+        // undecidable: the solver produces a counterexample model.
+        let (a, b) = (format!("fn_{}", "1".repeat(64)), format!("fn_{}", "2".repeat(64)));
+        let key = signing_key_from_seed("equiv-liar");
+        let to = crate::did_nova_from_pubkey(&key.verifying_key());
+        let assert = build_equivalence_assert(&a, &b, "normal-form", &to, None, &key).unwrap();
+        let mut link = HashMap::new();
+        link.insert(a.clone(), lam("n", addv(var("n"), var("n"))));
+        link.insert(
+            b.clone(),
+            lam("n", addv(var("n"), json!({ "kind": "lit", "value": { "kind": "int", "value": 1 } }))),
+        );
+        assert!(!verify_claim(&assert, link).unwrap(), "a false equivalence claim refutes");
     }
 
     /// A minimal signed-ish request (the responder only reads `from`/`hash`/`body`, not the sig).

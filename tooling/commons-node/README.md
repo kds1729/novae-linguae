@@ -18,6 +18,7 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 | `GET /v0/records/{hash}` — resolve · `HEAD` — exists | ✅ |
 | `GET /v0/records/{hash}/certifications` — the signed certifications about a function | ✅ |
 | `GET /v0/records/{hash}/attestations` — the signed eval attestations about a weights record | ✅ |
+| `GET /v0/records/{hash}/equivalences` — the signed `equivalent` claims naming a function (each re-provable by `verify-claim`) | ✅ |
 | `GET /v0/blobs/{sha256}` — content-addressed binary blobs (gate-free; the referencing record's sha256 — a weights manifest, a by-address example value — is the boundary) | ✅ |
 | `POST /v0/query` — typed (exact) discovery | ✅ |
 | `GET /v0/sync` — replication feed (cursor) | ✅ |

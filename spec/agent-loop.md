@@ -139,10 +139,15 @@ to use is the consumer's trust decision, not the order they came back in.) It th
 function's own
 declared property over the unbounded domain (don't trust the record's claim — re-prove it with the SMT
 + induction + lemma-discovery engine), then **apply** it and **re-verify** the result by re-running
-(principle 3). The transcript gains `trust`, `rank`, `certify`, and `prove` steps between `ack` and
+(principle 3). The transcript gains `trust`, `rank`, `collapse`, `certify`, and `prove` steps between `ack` and
 `propose` (`certify` runs on every candidate — the `--require-certified` flag only decides whether a
 failed certification aborts), plus a `grants` step when `--grant-certified` is in play and `retry`
-steps between candidates.
+steps between candidates. The **`collapse`** step merges candidates that are *proven* extensionally
+equivalent — one function wearing several addresses (α-equivalent twins are unsplittable by any
+signature filter) — so the class is tried once, represented by its best-ranked member: equal
+canonical normal forms recomputed locally always merge; a signed `equivalent-to` attestation edge
+merges only when the local policy trusts its signer (testimony may save work, never without a
+policy pricing it). Every merge is recorded with its proof method.
 The candidates are an **ordered list, not a single pick**: the argument-signature filter is coarse (two
 functions over the same argument types are indistinguishable to it), so a wrong first fit is expected —
 when a candidate fails the certify gate or the responder answers a signed `reject` (e.g. "effect not

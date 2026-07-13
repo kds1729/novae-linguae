@@ -164,6 +164,23 @@ judge — the client verifies each attestation and decides under its own policy
 200 OK   { "subject": "wgt_…", "attestations": [ <signed attestation>, … ], "count": 1 }
 ```
 
+### `GET /v0/records/{hash}/equivalences` — equivalence claims about a function
+
+Returns the signed `assert` messages whose claim (kind `equivalent`,
+[`claim-expression.schema.json`](claim-expression.schema.json)) names this `fn_…` address as either
+endpoint — the discovery face of "semantic equivalence vs hash equivalence": which *other*
+addresses are claimed to compute the same function. Each claim is **objective and re-checkable**
+(`nl-validator verify-claim <msg> --node <url>` resolves both bodies and re-proves — equal normal
+forms, else the equivalence prover), so the node stores and serves but does not judge; a consumer
+re-proves locally or prices the signer's testimony under its own policy. `assert-equivalent`
+creates and publishes the claims; the verified agent loop uses the resulting `equivalent-to`
+attestation edges (and its own local normal-form recomputation) to collapse equivalent discovery
+candidates into one class ([`agent-loop.md`](agent-loop.md), the `collapse` step).
+
+```
+200 OK   { "subject": "fn_…", "equivalences": [ <signed assert>, … ], "count": 1 }
+```
+
 ### `GET /v0/blobs/{sha256}` — binary blobs, by content hash
 
 Serves opaque binary bytes keyed by their sha256 — adapter weights ([`weights.md`](weights.md)) and

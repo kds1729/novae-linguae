@@ -743,6 +743,42 @@ pub fn orchestrate_verified_with_maps(
         });
     }
 
+    // COLLAPSE: proven-equivalent candidates are one candidate wearing several addresses — trying
+    // the second after the first failed (or splitting rank between them) is pure waste, and the
+    // signature filter can never split them (GW16's α-equivalent twins). Two proofs are accepted:
+    // (i) equal canonical normal forms, recomputed LOCALLY from the two bodies (solver-free, no
+    // trust needed); (ii) a signed `equivalent-to` edge in the attestation graph whose asserter the
+    // local policy trusts — testimony is allowed to save work only when the policy already prices
+    // its signer, and never used at all without a policy. The best-ranked member represents the
+    // class; the transcript's `collapse` step records every merge with its proof.
+    if ordered.len() > 1 {
+        let mut kept: Vec<String> = Vec::new();
+        let mut collapsed: Vec<J> = Vec::new();
+        for c in &ordered {
+            let dup = kept.iter().find_map(|k| {
+                if let (Some(bk), Some(bc)) = (link.get(k), link.get(c)) {
+                    if crate::normalize::normal_equivalent(bk, bc) {
+                        return Some((k.clone(), "normal-form", J::Null));
+                    }
+                }
+                if let (Some(p), Some(e)) = (policy, graph.equivalence_edge(k, c)) {
+                    if p.evaluate_trust(&graph, &e.attester, None, timestamp).trusted {
+                        return Some((k.clone(), "attested", json!(e.hash)));
+                    }
+                }
+                None
+            });
+            match dup {
+                Some((k, via, assert)) => collapsed.push(json!({ "dropped": c, "kept": k, "via": via, "assert": assert })),
+                None => kept.push(c.clone()),
+            }
+        }
+        if !collapsed.is_empty() {
+            steps.push(Step { label: "collapse".into(), message: json!({ "kept": kept, "collapsed": collapsed }) });
+            ordered = kept;
+        }
+    }
+
     let mut link = link;
     let total = ordered.len();
     for (attempt, target) in ordered.iter().enumerate() {
@@ -1032,6 +1068,48 @@ mod tests {
         let gate = run.steps.iter().find(|s| s.label == "grants").expect("a grants step is recorded");
         assert_eq!(gate.message["trust_gate_open"], json!(true), "{}", gate.message);
         assert!(run.confirmed, "the certified target runs under the gated grant and re-verifies");
+    }
+
+    #[test]
+    fn collapse_merges_alpha_equivalent_twins() {
+        // GW16's unsplittable-fits shape: the same function published under two addresses (bodies
+        // differ only by a parameter name). The collapse step must merge them by equal normal
+        // forms — locally recomputed, no policy, no attestations — so the class is tried ONCE.
+        let dir = examples();
+        let records = crate::build_record_map(&dir).unwrap();
+        let link = crate::build_link_map(&dir).unwrap();
+        let double = double_hash();
+        let twin_addr = format!("fn_{}", "9".repeat(64));
+
+        let mut records = records;
+        let mut twin = records[&double].clone();
+        twin["hash"] = json!(twin_addr);
+        records.insert(twin_addr.clone(), twin);
+
+        let mut link = link;
+        let mut twin_body = link[&double].clone();
+        // α-rename the lambda parameter n → k (double's body is `\n -> add n n`).
+        twin_body["params"] = json!([{ "name": "k", "type": { "kind": "builtin", "name": "nat" } }]);
+        twin_body["body"]["args"] = json!([{ "kind": "var", "name": "k" }, { "kind": "var", "name": "k" }]);
+        assert!(crate::normalize::normal_equivalent(&link[&double], &twin_body), "the twin is a true α-twin");
+        link.insert(twin_addr.clone(), twin_body);
+
+        let run = orchestrate_verified_with_maps(
+            link, records, "arithmetic", vec![json!({ "kind": "nat", "value": 21 })],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+            "z3", None, &[], None, false,
+            Some(json!({ "kind": "int", "value": 42 })), &[],
+        )
+        .unwrap();
+
+        let collapse = run.steps.iter().find(|s| s.label == "collapse").expect("a collapse step is recorded");
+        let merged = collapse.message["collapsed"].as_array().unwrap();
+        assert_eq!(merged.len(), 1, "{}", collapse.message);
+        assert_eq!(merged[0]["via"], json!("normal-form"));
+        let pair = [merged[0]["kept"].as_str().unwrap(), merged[0]["dropped"].as_str().unwrap()];
+        assert!(pair.contains(&double.as_str()) && pair.contains(&twin_addr.as_str()), "{}", collapse.message);
+        assert!(run.confirmed, "the surviving representative applies and re-verifies");
+        assert_eq!(run.steps.iter().filter(|s| s.label == "propose").count(), 1, "the class is proposed once");
     }
 
     #[test]

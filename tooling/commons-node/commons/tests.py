@@ -1816,3 +1816,63 @@ class TypePatternQueryTests(TestCase):
         resp = self._q({"type_pattern": {"kind": "nope"}})
         self.assertEqual(resp.status_code, 400)
         self.assertIn("kind", resp.json().get("detail", "") + resp.json().get("error", ""))
+
+
+# --- equivalence claims (`equivalent`, spec/claim-expression) --------------------------------------
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class EquivalenceClaimTests(TestCase):
+    """The `equivalent` claim kind through the gate + GET /v0/records/{fn}/equivalences."""
+
+    FN_A = "fn_" + "1" * 64
+    FN_B = "fn_" + "2" * 64
+    FN_C = "fn_" + "3" * 64
+
+    def setUp(self):
+        self.client = Client()
+
+    def _signed_equiv_assert(self, a, b, seed="equivalence-asserter"):
+        envelope = {
+            "schema_version": "0.2.0", "kind": "assert", "to": None, "in_reply_to": None,
+            "timestamp": "2026-07-13T00:00:00Z", "constraints": None,
+            "body": {"subject": a, "claim": {"kind": "equivalent", "a": a, "b": b,
+                                             "method": "normal-form"}, "evidence": None},
+        }
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(envelope, f)
+        out = subprocess.run([str(VALIDATOR), "sign", f.name, "--seed", seed],
+                             capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_signed_equivalence_assert_passes_the_gate(self):
+        # The message gate needed no code change: the claim schema gained the kind, and a signed
+        # assert carrying it verifies like any other message.
+        msg = self._signed_equiv_assert(self.FN_A, self.FN_B)
+        resp = self.client.post("/v0/records", data=json.dumps(msg),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        got = self.client.get(f"/v0/records/{msg['hash']}")
+        self.assertEqual(got.json()["body"]["claim"]["kind"], "equivalent")
+
+    def test_equivalences_endpoint_filters_by_either_endpoint(self):
+        one = self._signed_equiv_assert(self.FN_A, self.FN_B)
+        other = self._signed_equiv_assert(self.FN_B, self.FN_C, seed="second-asserter")
+        for m in (one, other):
+            self.assertEqual(self.client.post("/v0/records", data=json.dumps(m),
+                                              content_type="application/json").status_code, 201)
+        # Something non-equivalent that must not leak in.
+        rec = _load("map.json")
+        self.client.post("/v0/records", data=json.dumps(rec), content_type="application/json")
+
+        about_a = self.client.get(f"/v0/records/{self.FN_A}/equivalences").json()
+        self.assertEqual(about_a["count"], 1)
+        self.assertEqual(about_a["equivalences"][0]["hash"], one["hash"])
+        about_b = self.client.get(f"/v0/records/{self.FN_B}/equivalences").json()
+        self.assertEqual(about_b["count"], 2, "b appears in both claims (either endpoint matches)")
+        none = self.client.get(f"/v0/records/{rec['hash']}/equivalences").json()
+        self.assertEqual(none["count"], 0)
+
+    def test_equivalences_get_only(self):
+        resp = self.client.post(f"/v0/records/{self.FN_A}/equivalences")
+        self.assertEqual(resp.status_code, 405)

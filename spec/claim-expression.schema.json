@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://novae-linguae.org/spec/v0.1/claim-expression.schema.json",
   "title": "Nova Locutio Claim Expression",
-  "description": "Structured AST for claims made by the `assert` speech act. The v0.1 message schema's `assert.claim` is a string in surface syntax; this schema defines the structured form that v0.2+ of the message schema will require. Kinds: `predicate` (wraps an arbitrary predicate-expression), `observed` (a predicate conditioned on a recorded effect trace — the effectful counterpart of `predicate`: any receiver replays the computation against the trace, no effect grants or secrets needed, and confirms the result follows deterministically from the recorded observations; the observations themselves remain the signer's testimony, priced by the trust model), `satisfies` (subject satisfies a named property — the common case, sugar for a `predicate` with the equivalent `app('satisfies', subject, property)` shape), `verified` (subject artifact has been verified by some agent, optionally with a proof certificate), and `attestation` (a trust statement *about an agent or artifact* — the building block of the trust graph; see trust-model.md). The predicate sub-tree is opaque at this layer; it must validate independently against predicate-expression.schema.json. Higher-level reasoning over claims (e.g. consequence-of, contradicts-with, supports) is the verifier's job and not part of this schema.",
+  "description": "Structured AST for claims made by the `assert` speech act. The v0.1 message schema's `assert.claim` is a string in surface syntax; this schema defines the structured form that v0.2+ of the message schema will require. Kinds: `predicate` (wraps an arbitrary predicate-expression), `observed` (a predicate conditioned on a recorded effect trace — the effectful counterpart of `predicate`: any receiver replays the computation against the trace, no effect grants or secrets needed, and confirms the result follows deterministically from the recorded observations; the observations themselves remain the signer's testimony, priced by the trust model), `satisfies` (subject satisfies a named property — the common case, sugar for a `predicate` with the equivalent `app('satisfies', subject, property)` shape), `verified` (subject artifact has been verified by some agent, optionally with a proof certificate), `attestation` (a trust statement *about an agent or artifact* — the building block of the trust graph; see trust-model.md), and `equivalent` (an extensional-equivalence claim between two functions — objective and re-checkable: a verifier re-proves it from the two bodies rather than trusting the signer). The predicate sub-tree is opaque at this layer; it must validate independently against predicate-expression.schema.json. Higher-level reasoning over claims (e.g. consequence-of, contradicts-with, supports) is the verifier's job and not part of this schema.",
   "$ref": "#/$defs/claim",
   "$defs": {
     "claim": {
@@ -11,7 +11,8 @@
         { "$ref": "#/$defs/observed" },
         { "$ref": "#/$defs/satisfies" },
         { "$ref": "#/$defs/verified" },
-        { "$ref": "#/$defs/attestation" }
+        { "$ref": "#/$defs/attestation" },
+        { "$ref": "#/$defs/equivalent" }
       ]
     },
     "predicate": {
@@ -133,6 +134,29 @@
         }
       },
       "description": "A trust statement about an agent (or artifact): `<attester> <verb> <subject>`. The attester is the enclosing `assert` message's signer (`from`). Edges of the trust graph the reference policy engine reasons over (nl-validator evaluate-trust). Retractable via the `retract` speech act referencing the attestation's hash."
+    },
+    "equivalent": {
+      "type": "object",
+      "required": ["kind", "a", "b"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "equivalent" },
+        "a": {
+          "type": "string",
+          "pattern": "^fn_[0-9a-f]{64}$",
+          "description": "Content-address of one function. Canonical form orders `a` < `b` lexicographically (the relation is symmetric; the ordering makes duplicate claims dedupe by hash)."
+        },
+        "b": {
+          "type": "string",
+          "pattern": "^fn_[0-9a-f]{64}$",
+          "description": "Content-address of the other function."
+        },
+        "method": {
+          "enum": ["normal-form", "induction"],
+          "description": "How the signer established the equivalence: `normal-form` = equal canonical normal forms (α-renaming + AC ordering + constant folding, solver-free); `induction` = the SMT/structural-induction equivalence prover. Advisory — a verifier recomputes regardless."
+        }
+      },
+      "description": "An extensional-equivalence claim: `∀x. a(x) = b(x)` over the unbounded domain. OBJECTIVE and re-checkable, like a certification: `verify-claim` resolves both bodies and re-proves (equal normal forms, else the equivalence prover), so a receiver never has to take the signer's word. The attestation graph ingests a signed, verified `equivalent` claim as a symmetric `equivalent-to` edge pair — the operable form of the 'semantic equivalence vs hash equivalence' open problem: two content-addresses, one behavior, and discovery can collapse the class (spec/agent-loop.md `collapse` step). Retractable like any attestation."
     }
   }
 }
