@@ -1,0 +1,129 @@
+{
+ "body_hash": "expr_a84290d48ca25685a218228a0045f63409128e93e768873fe554b60a2a7c52c5",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 3
+    },
+    {
+     "kind": "nat",
+     "value": 4
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 3
+     },
+     {
+      "kind": "int",
+      "value": 4
+     },
+     {
+      "kind": "int",
+      "value": 5
+     },
+     {
+      "kind": "int",
+      "value": 6
+     }
+    ],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -2
+    },
+    {
+     "kind": "nat",
+     "value": 3
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": -2
+     },
+     {
+      "kind": "int",
+      "value": -1
+     },
+     {
+      "kind": "int",
+      "value": 0
+     }
+    ],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 5
+    },
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "elems": [],
+    "kind": "list"
+   }
+  }
+ ],
+ "hash": "fn_fdd603455dd8e7512fb54075c0e764eb95e56885e717978148744658d2b244c1",
+ "intent_tags": [
+  "generate",
+  "list"
+ ],
+ "name_hints": [
+  "range_from",
+  "count_up"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "int"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "List"
+    },
+    "kind": "apply"
+   }
+  }
+ },
+ "supersedes": null
+}

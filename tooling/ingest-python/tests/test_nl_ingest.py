@@ -332,11 +332,15 @@ class TestExecutableCorpus(unittest.TestCase):
         # (raise-totalization: guard-raise -> the None arm, Traceback doctest -> None example),
         # add_sub / swap_diff / running_gap (tuples: construction, unpacking, and a DEPENDENT
         # multi-accumulator loop via a tuple-accumulator fold), sum_values / keys_over
-        # (tuple-unpacking `for (k, v) in …` — accumulator and guarded-append shapes), and
+        # (tuple-unpacking `for (k, v) in …` — accumulator and guarded-append shapes),
         # label_of / batch_size / scaled / ready (annotation-rooted TRUTHINESS: str/list/int
-        # truthy tests + a mixed truthy-and-comparison chain).
-        self.assertEqual(len(records), 31)
-        self.assertEqual(len(bodies), 31)               # every body is in the executable subset
+        # truthy tests + a mixed truthy-and-comparison chain), and the SUBSCRIPT/WHILE frontier:
+        # item_at / port_of / last_of (read subscripts -> Maybe-totalized, the canonical `nth`
+        # by fn_ref, KeyError/IndexError doctests as runnable None examples), set_flag (the
+        # total map_put store), sum_below / fall (counting whiles, ascending + descending) and
+        # squares_upto (`for i in range(n)`) over the canonical `range` record.
+        self.assertEqual(len(records), 38)
+        self.assertEqual(len(bodies), 38)               # every body is in the executable subset
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
@@ -344,6 +348,10 @@ class TestExecutableCorpus(unittest.TestCase):
                 (d / f"{h}.json").write_text(json.dumps(body))
             for rec in records:
                 (d / f"{rec['hash']}.json").write_text(json.dumps(rec))
+            # The canonical iteration records: emitted bodies apply nth/range by fn_ref, so the
+            # runnable directory carries them exactly as `--emit-dir` does.
+            for fname, artifact in n.canonical_dependency_artifacts():
+                (d / fname).write_text(json.dumps(artifact))
             for rec in records:
                 name = rec["name_hints"][0]
                 # The record's body_hash is a real emitted body, not a synthetic source-hash fallback.
@@ -440,11 +448,15 @@ class TestStringIdiomBodies(unittest.TestCase):
         b4 = self._body('def f(d: dict[str, int]):\n    return sorted(d.keys())\n')
         self.assertIn('"map_keys"', b4)
         # The bare 1-arg get IS the Maybe (the None<->Maybe boundary, decided 2026-07-09);
-        # subscript (raises) stays out of subset.
+        # the bare subscript `d["k"]` is the SAME Maybe now the subscript frontier is taken
+        # (2026-07-13) — the function Maybe-totalizes and the read passes through.
         func = pyast.parse('def f(d: dict):\n    return d.get("k")\n').body[0]
         self.assertIn('"map_get"', json.dumps(nl_body.body_ast_from_py(func)))
         func2 = pyast.parse('def f(d: dict):\n    return d["k"]\n').body[0]
-        self.assertIsNone(nl_body.body_ast_from_py(func2))
+        self.assertIn('"map_get"', json.dumps(nl_body.body_ast_from_py(func2)))
+        # …but a subscript over an UNPROVEN root still refuses.
+        func2b = pyast.parse('def f(d):\n    return d["k"]\n').body[0]
+        self.assertIsNone(nl_body.body_ast_from_py(func2b))
         # Unannotated receivers keep the untyped reading (no map_get).
         func3 = pyast.parse('def f(d):\n    return d.get("k", 0)\n').body[0]
         b5 = nl_body.body_ast_from_py(func3)

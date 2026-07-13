@@ -1068,7 +1068,47 @@ bodies).
   truthy tests sit in *unannotated* functions (and co-occur with `while`/`try`/kwargs), so
   truthiness serves clean annotated code, the kind agents and modern libraries write. The
   remaining design frontier from the survey is now subscripting (`d[k]`/`xs[i]` — partiality
-  again) and `while`.
+  again) and `while` — *both taken 2026-07-13, below*.
+  *Subscripting and the counting `while` (2026-07-13):* the survey's last two design frontiers,
+  taken together because they share one move — **counted iteration and list indexing are
+  IN-LANGUAGE, not builtins** (the `json_get` precedent): `nth : forall a. (int, List a) →
+  Maybe a`, `range_from : (int, nat) → List int`, and `range : (int, int) → List int` are
+  ordinary certified commons records in `spec/examples`, self-recursive, pure, composing by
+  content-address (`range` applies `range_from` by `fn_ref`; `nth` even certifies
+  termination-SOUND, see below). No new primitive, and no second value-driven allocator to
+  undermine `replicate`'s deliberate `alloc` gate — a body wanting `range`-shaped data applies a
+  record like any other assembly, and ingested bodies do exactly that (adapters bundle the
+  canonical records into their emit dir so `run --records` links; the pinned hashes live in
+  `ingest-common/nl_canon.py` and a drifted spec/examples fails loudly).
+  **Subscript READS are partiality, so they ride the raise-totalization boundary**: a function
+  reading `d[k]`/`xs[i]` (annotation-proven roots only) Maybe-totalizes — `d[k]` → `map_get`,
+  `xs[i]` → the canonical `nth` by fn_ref, the idiomatic literal `xs[-1]` → a null-guarded
+  `last` — with a `let`-bound read binding the Just payload and short-circuiting the miss to
+  the function's None outcome, a returned read passing through unwrapped (the bare-`d.get(k)`
+  rule), and a `KeyError`/`IndexError` Traceback doctest as the runnable None example.
+  Negative non-literal indices deliberately diverge (None, not Python's tail-indexing — the
+  `//`→`div` honesty contract); `-> Optional[T]` plus a subscript stays refused (two None
+  sources would merge); an unproven root refuses. **Subscript STORES are total**: `d[k] = v`
+  is the `map_put` rebind — no totalization, and the dict-building loop follows for free.
+  **The counting `while` desugars to the `for` machinery over an applied `range`**:
+  `while i < n: …; i += 1` (and `<=`, and the descending `>`/`>=` with `i -= 1`, iterating
+  exactly Python's values via a reversed range) — unit step last, counter assigned nowhere
+  else, bound loop-invariant, anything else refused (termination has no witness, never
+  approximated) — after which every existing loop shape (accumulators, guards, appends,
+  search) applies unchanged; `for i in range(a, b)` falls out of the same translation.
+  `item_at`/`port_of`/`last_of`/`set_flag`/`sum_below`/`fall`/`squares_upto`
+  (thirty-eight-function executable corpus) ingest, run their doctests through the linked
+  canonical records, and **all certify**. En route the termination checker got both **wider
+  and sounder**: it now proves `tail`-descent at ANY fixed argument position (`nth` descends
+  position 2 — previously only the first argument counted), and it no longer accepts a
+  descent that feeds a *different* position (`self(tail(xs), xs)` — an infinite loop the old
+  first-arg check wrongly certified as terminating; caught while proving `nth`, regression
+  tests both ways). The measured stdlib boundary is UNMOVED (22 of 87) — the stdlib's
+  subscripts and whiles co-occur with `try`/kwargs/non-counting guards (bisect's `while lo <
+  hi` halves, honestly out) — so the frontier serves clean annotated code, the kind agents
+  write. The survey's design-frontier list is, for the first time, **empty**: what remains
+  out of subset is out by honest refusal (non-counting whiles, `try`, kwargs, classes), not
+  by a pending design decision.
 - **Commons**: publish the golden-workflow records and their certifications to Arca; they are
   the first *practical* inhabitants of the commons.
 

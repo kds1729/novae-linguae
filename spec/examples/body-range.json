@@ -1,0 +1,60 @@
+{
+ "body": {
+  "args": [
+   {
+    "kind": "var",
+    "name": "a"
+   },
+   {
+    "args": [
+     {
+      "args": [
+       {
+        "kind": "var",
+        "name": "b"
+       },
+       {
+        "kind": "var",
+        "name": "a"
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "sub"
+      },
+      "kind": "app"
+     },
+     {
+      "kind": "lit",
+      "value": {
+       "kind": "int",
+       "value": 0
+      }
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "max"
+    },
+    "kind": "app"
+   }
+  ],
+  "fn": {
+   "kind": "lit",
+   "value": {
+    "kind": "fn_ref",
+    "target": "fn_fdd603455dd8e7512fb54075c0e764eb95e56885e717978148744658d2b244c1"
+   }
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "b"
+  }
+ ]
+}

@@ -1,0 +1,145 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "kind": "var",
+     "name": "nil"
+    },
+    "pattern": {
+     "kind": "lit",
+     "value": {
+      "kind": "bool",
+      "value": true
+     }
+    }
+   },
+   {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": {
+            "kind": "nat",
+            "value": 1
+           }
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "kind": "var",
+            "name": "n"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "sub"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "args": [
+           {
+            "kind": "lit",
+            "value": {
+             "kind": "nat",
+             "value": 1
+            }
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "add"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "self"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "a"
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "cons"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    },
+    "pattern": {
+     "kind": "lit",
+     "value": {
+      "kind": "bool",
+      "value": false
+     }
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "lit",
+     "value": {
+      "kind": "nat",
+      "value": 0
+     }
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "n"
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "eq"
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "n"
+  }
+ ]
+}

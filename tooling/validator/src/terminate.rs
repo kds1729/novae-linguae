@@ -128,17 +128,28 @@ fn first_order_head(node: &J) -> Option<String> {
     FIRST_ORDER_OPS.contains(&op.as_str()).then_some(op)
 }
 
-/// Walk the body collecting each `self`-call's recursion descent (`tail_descent` of its first argument)
-/// and detecting any opaque/higher-order application. Returns the first opaque reason via `opaque`.
-fn walk(node: &J, descents: &mut Vec<Option<(String, usize)>>, opaque: &mut Option<String>) {
+/// Walk the body collecting, for each `self`-call, the set of argument POSITIONS that structurally
+/// descend — position `j` counts only when the argument is `tail^k` of the parameter bound at that
+/// same position (`params[j]`): the well-founded measure is the value a recursion slot feeds back
+/// into itself, so `self(tail(xs), xs)` descends nowhere (the first slot receives a shrinking
+/// value, but it is `xs` — the second slot — that the next activation keeps unchanged). Also
+/// detects any opaque/higher-order application, returning the first reason via `opaque`.
+fn walk(node: &J, params: &[String], descents: &mut Vec<std::collections::BTreeSet<usize>>, opaque: &mut Option<String>) {
     if opaque.is_some() {
         return;
     }
     if let Some(sargs) = self_call_args(node) {
-        // A self-call: its first argument is the recursion position.
-        descents.push(sargs.first().and_then(tail_descent));
+        let call_descents: std::collections::BTreeSet<usize> = sargs
+            .iter()
+            .enumerate()
+            .filter(|(j, a)| {
+                tail_descent(a).is_some_and(|(p, _)| params.get(*j).is_some_and(|pj| *pj == p))
+            })
+            .map(|(j, _)| j)
+            .collect();
+        descents.push(call_descents);
         for a in &sargs {
-            walk(a, descents, opaque);
+            walk(a, params, descents, opaque);
         }
         return;
     }
@@ -162,10 +173,10 @@ fn walk(node: &J, descents: &mut Vec<Option<(String, usize)>>, opaque: &mut Opti
                 if k == "pattern" {
                     continue; // patterns bind, they don't compute
                 }
-                walk(v, descents, opaque);
+                walk(v, params, descents, opaque);
             }
         }
-        J::Array(items) => items.iter().for_each(|v| walk(v, descents, opaque)),
+        J::Array(items) => items.iter().for_each(|v| walk(v, params, descents, opaque)),
         _ => {}
     }
 }
@@ -179,9 +190,9 @@ pub fn analyze_termination(body: &J) -> TerminationOutcome {
         return TerminationOutcome::Unknown("lambda has no body".into());
     };
 
-    let mut descents: Vec<Option<(String, usize)>> = Vec::new();
+    let mut descents: Vec<std::collections::BTreeSet<usize>> = Vec::new();
     let mut opaque: Option<String> = None;
-    walk(inner, &mut descents, &mut opaque);
+    walk(inner, &params, &mut descents, &mut opaque);
 
     if let Some(why) = opaque {
         return TerminationOutcome::Unknown(why);
@@ -190,25 +201,17 @@ pub fn analyze_termination(body: &J) -> TerminationOutcome {
         // Non-recursive over the first-order fragment: every builtin halts on finite input.
         return TerminationOutcome::Always;
     }
-    // Structurally recursive: every self-call must descend `tail^k` (k ≥ 1) on ONE fixed parameter.
-    let mut on: Option<String> = None;
-    for d in descents {
-        match d {
-            Some((p, _)) if params.contains(&p) => match &on {
-                None => on = Some(p),
-                Some(prev) if *prev == p => {}
-                Some(_) => {
-                    return TerminationOutcome::Unknown(
-                        "self-calls descend on different parameters (no single well-founded measure)".into(),
-                    )
-                }
-            },
-            _ => {
-                return TerminationOutcome::Unknown(
-                    "a self-call's recursion argument is not a structural `tail` descent of a parameter".into(),
-                )
-            }
-        }
+    // Structurally recursive: some ONE argument position must descend `tail^k` (k ≥ 1) of its own
+    // parameter in EVERY self-call — a single well-founded measure. (Any fixed position works, not
+    // just the first: `nth(i, xs)` descends position 2.)
+    let common = descents
+        .iter()
+        .skip(1)
+        .fold(descents[0].clone(), |acc, s| acc.intersection(s).cloned().collect());
+    if common.is_empty() {
+        return TerminationOutcome::Unknown(
+            "no single argument position is a structural `tail` descent of its own parameter in every self-call".into(),
+        );
     }
     TerminationOutcome::Always
 }
@@ -295,6 +298,28 @@ mod tests {
         let step = app("cons", vec![app("head", vec![v("xs")]), rec]);
         let body = lambda(&["xs", "ys"], rec_case("xs", v("ys"), step));
         assert_eq!(analyze_termination(&body), TerminationOutcome::Always);
+    }
+
+    #[test]
+    fn descent_in_a_later_position_terminates() {
+        // nth: \i xs -> case null xs of true -> 0 | false -> self(sub(i, 1), tail(xs)).
+        // The descent is at position 2 (its own parameter) — any FIXED position carries the measure.
+        let rec = json!({ "kind": "app", "op": "self",
+                          "args": [app("sub", vec![v("i"), lit_i(1)]), app("tail", vec![v("xs")])] });
+        let body = lambda(&["i", "xs"], rec_case("xs", lit_i(0), rec));
+        assert_eq!(analyze_termination(&body), TerminationOutcome::Always);
+    }
+
+    #[test]
+    fn descent_of_another_positions_parameter_is_unknown() {
+        // \i xs -> case null xs of true -> 0 | false -> self(tail(xs), xs): the FIRST slot receives
+        // a shrinking value, but it is xs — the SECOND slot — that the next activation keeps
+        // unchanged, so the guard never progresses (an infinite loop the old first-arg check
+        // wrongly accepted as Always).
+        let rec = json!({ "kind": "app", "op": "self", "args": [app("tail", vec![v("xs")]), v("xs")] });
+        let body = lambda(&["i", "xs"], rec_case("xs", lit_i(0), rec));
+        assert!(matches!(analyze_termination(&body), TerminationOutcome::Unknown(_)),
+                "a descent must feed its own position");
     }
 
     #[test]

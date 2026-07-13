@@ -448,3 +448,104 @@ def ready(name: str, count: int) -> bool:
     if name and count > 0:
         return True
     return False
+
+def item_at(xs: list[int], i: int) -> int:
+    """The i-th element (subscript READ: partiality — the record's result is `Maybe int`, the
+    canonical `nth` commons record does the walk by fn_ref, and the IndexError doctest IS the
+    runnable None-case example).
+
+    >>> item_at([7, 8, 9], 1)
+    8
+    >>> item_at([7, 8, 9], 5)
+    Traceback (most recent call last):
+        ...
+    IndexError: list index out of range
+    """
+    return xs[i]
+
+
+def port_of(cfg: dict[str, int]) -> int:
+    """Twice the configured port (a LET-bound dict subscript: the Just payload binds the name,
+    the missing key short-circuits to the function's None outcome).
+
+    >>> port_of({"port": 8080})
+    16160
+    >>> port_of({})
+    Traceback (most recent call last):
+        ...
+    KeyError: 'port'
+    """
+    p = cfg["port"]
+    return p * 2
+
+
+def last_of(xs: list[int]) -> int:
+    """The final element — the idiomatic `xs[-1]`, translated exactly (a null-guarded `last`).
+
+    >>> last_of([3, 1, 4])
+    4
+    >>> last_of([])
+    Traceback (most recent call last):
+        ...
+    IndexError: list index out of range
+    """
+    return xs[-1]
+
+
+def set_flag(d: dict[str, int]) -> dict[str, int]:
+    """The dict with `flag` set (subscript STORE: the total `map_put` rebind — no partiality,
+    the result stays a plain dict).
+
+    >>> set_flag({"a": 1})
+    {'a': 1, 'flag': 1}
+    """
+    d["flag"] = 1
+    return d
+
+
+def sum_below(n: int) -> int:
+    """The sum 0 + 1 + … + (n-1) (a counting `while` — the unit-step counter desugars to the
+    `for` machinery over the canonical `range` record).
+
+    >>> sum_below(5)
+    10
+    >>> sum_below(0)
+    0
+    """
+    total = 0
+    i = 0
+    while i < n:
+        total += i
+        i += 1
+    return total
+
+
+def fall(n: int) -> int:
+    """The falling product n * (n-1) * … * 1 (a DESCENDING counting `while`: `n > 0` with
+    `n -= 1` iterates n, n-1, …, 1 — a reversed range).
+
+    >>> fall(4)
+    24
+    >>> fall(0)
+    1
+    """
+    acc = 1
+    while n > 0:
+        acc *= n
+        n -= 1
+    return acc
+
+
+def squares_upto(n: int) -> list[int]:
+    """The squares of 0 … n-1 (`for i in range(n)` — counted iteration over the canonical
+    `range` record, riding the ordinary append-loop shape).
+
+    >>> squares_upto(4)
+    [0, 1, 4, 9]
+    >>> squares_upto(0)
+    []
+    """
+    out = []
+    for i in range(n):
+        out.append(i * i)
+    return out

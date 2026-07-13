@@ -44,7 +44,8 @@ from pathlib import Path
 # Higher-fidelity (v0.2) helpers live in the shared ingest-common dir: structured type ASTs and real
 # examples extracted from doctests. Imported only for --v2; the v0.1 path stays self-contained.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest-common"))
-from nl_body import body_ast_from_py, function_raises  # noqa: E402
+from nl_body import body_ast_from_py, function_raises, function_subscript_reads  # noqa: E402
+from nl_canon import canonical_dependency_artifacts  # noqa: E402
 from nl_examples import examples_from_docstring  # noqa: E402
 from nl_effects import effects_from_py, terminates_from_py  # noqa: E402
 from nl_synth import SynthError, synth_args  # noqa: E402
@@ -745,7 +746,8 @@ def build_v2_record(func, module_name: str | None, imports=None, with_properties
     # `Maybe T` — the type IS the transform — and the body no longer panics, so the inferred
     # `panic` effect is dropped. Only when the body actually lifts: a fallback source-hash body
     # keeps the plain type it had.
-    totalized = body_ast_from_py(func) is not None and function_raises(func)
+    totalized = body_ast_from_py(func) is not None \
+        and (function_raises(func) or function_subscript_reads(func))
     if totalized:
         t = type_ast["body"] if type_ast.get("kind") == "forall" else type_ast
         t["result"] = {"kind": "apply", "ctor": {"kind": "builtin", "name": "Maybe"},
@@ -985,6 +987,12 @@ def main(argv=None) -> int:
                 for record in records:
                     (args.emit_dir / f"{record['hash']}.json").write_text(
                         json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                # The canonical iteration records (nth / range_from / range): an emitted body may
+                # apply them by fn_ref (subscripts, range loops, counting whiles), so the runnable
+                # directory must carry them for `run --records` to link.
+                for fname, artifact in canonical_dependency_artifacts():
+                    (args.emit_dir / fname).write_text(
+                        json.dumps(artifact, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             except OSError as e:
                 print(f"nl-ingest-py: writing emit dir {args.emit_dir}: {e}", file=sys.stderr)
                 exit_code = 1

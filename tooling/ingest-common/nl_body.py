@@ -42,6 +42,7 @@ The Rust adapter has its own parallel `body_ast` over `syn` in nl_ingest.rs.
 import ast
 import re
 
+from nl_canon import NTH_HASH, RANGE_HASH
 from nl_core import split_top
 from nl_values import ValueEncodeError, to_value_ast
 
@@ -173,6 +174,54 @@ def _is_dictish(node, dicts):
     `sorted(d.keys())`); anything unproven keeps its untyped reading, and a wrong guess fails the
     example gate rather than shipping wrong."""
     return isinstance(node, ast.Name) and node.id in dicts
+
+
+def _is_listish(node, lists):
+    """Whether `node` is syntactically known to be a LIST: a list-annotated parameter (or a `let`
+    name threaded through `lists`), or a list literal. Roots the subscript translation — like the
+    dict inference, only a PROVEN type may translate."""
+    if isinstance(node, ast.Name):
+        return node.id in lists
+    return isinstance(node, ast.List)
+
+
+def _fn_ref_app(target, args):
+    """Apply a canonical commons record BY CONTENT-ADDRESS — an applied `fn_ref` literal. The
+    adapter must ship the referenced record + body alongside the emitted one
+    (`nl_canon.canonical_dependency_artifacts`) so `run --records` links it."""
+    return b_app({"kind": "lit", "value": {"kind": "fn_ref", "target": target}}, args)
+
+
+def _subscript_read(node, strs, dicts, lists):
+    """The MAYBE-valued translation of a read subscript, or None when the root's type is unproven
+    or the shape is out of subset:
+        d[k]    (known dict)          -> map_get(k, d)
+        xs[i]   (known list)          -> nth(i, xs)      (the canonical commons record, by fn_ref)
+        xs[-1]  (known list, literal) -> case null(xs) of { true => None; false => Just(last(xs)) }
+    Partiality is the point: Python's raising access becomes a Maybe, and the caller (a
+    `let`/`return` in a Maybe-totalized function) supplies the None short-circuit — the same
+    boundary raise-totalization draws. A NEGATIVE non-literal index deliberately diverges from
+    Python's tail-indexing (`nth` answers None) — annotations cannot prove sign, the idiomatic
+    literal `xs[-1]` translates exactly, and a wrong guess fails the example gate rather than
+    shipping wrong (the `//` -> `div` honesty contract). Other negative literals stay out."""
+    if not isinstance(node, ast.Subscript):
+        return None
+    root, idx = node.value, node.slice
+    if isinstance(idx, ast.Slice):
+        return None
+    if _is_dictish(root, dicts):
+        return b_app(b_var("map_get"),
+                     [_expr_from_py(idx, strs, dicts), _expr_from_py(root, strs, dicts)])
+    if _is_listish(root, lists):
+        xs = _expr_from_py(root, strs, dicts)
+        if isinstance(idx, ast.UnaryOp) and isinstance(idx.op, ast.USub) \
+                and isinstance(idx.operand, ast.Constant):
+            if idx.operand.value == 1:
+                return b_if(b_app(b_var("null"), [xs]), b_variant("None"),
+                            b_variant("Just", b_app(b_var("last"), [xs])))
+            return None  # xs[-2]…: not the idiom, out of subset
+        return _fn_ref_app(NTH_HASH, [_expr_from_py(idx, strs, dicts), xs])
+    return None
 
 
 def _is_maybeish(node, maybes, dicts):
@@ -411,6 +460,17 @@ def _expr_from_py(node, strs=frozenset(), dicts=frozenset()):
                 return b_app(b_var("str_length"), [_expr_from_py(node.args[0], strs, dicts)])
             if fn.id == "len" and len(node.args) == 1 and _is_dictish(node.args[0], dicts):
                 return b_app(b_var("map_size"), [_expr_from_py(node.args[0], strs, dicts)])
+            # `range(n)` / `range(a, b)` -> the canonical `range` commons record by fn_ref —
+            # counted iteration as DATA built by structural recursion (no new builtin), so
+            # `for i in range(…)` rides the existing loop shapes and a counting `while`
+            # desugars to it. A stepped `range(a, b, s)` is out of subset (honest refusal).
+            if fn.id == "range" and node.args:
+                if len(node.args) > 2:
+                    raise BodyError("`range` with a step is out of subset")
+                lo = _expr_from_py(node.args[0], strs, dicts) if len(node.args) == 2 \
+                    else b_lit(_value(0))
+                hi = _expr_from_py(node.args[-1], strs, dicts)
+                return _fn_ref_app(RANGE_HASH, [lo, hi])
             # `sorted(d)` / `sorted(d.keys())` over a known dict -> map_keys (which is sorted —
             # deterministic iteration is exactly what makes this translation sound).
             if fn.id == "sorted" and len(node.args) == 1:
@@ -474,6 +534,11 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
         if ret_maybe:
             if isinstance(head.value, ast.Constant) and head.value.value is None:
                 return b_variant("None")
+            # `return d[k]` / `return xs[i]`: the subscript IS the Maybe — pass it through
+            # unwrapped, exactly like the bare 1-arg `d.get(k)`.
+            sub = _subscript_read(head.value, strs, dicts, lists)
+            if sub is not None:
+                return sub
             expr = _expr_from_py(head.value, strs, dicts)
             return expr if _is_maybeish(head.value, maybes, dicts) else b_variant("Just", expr)
         return _expr_from_py(head.value, strs, dicts)
@@ -497,10 +562,40 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
         return {"kind": "case", "scrutinee": _expr_from_py(head.value, strs, dicts),
                 "arms": [{"pattern": pat, "body": _block_from_py(tail, inner, inner_d, inner_m, ret_maybe,
                                                                  ints - set(names), lists - set(names))}]}
+    if isinstance(head, ast.Assign) and len(head.targets) == 1 \
+            and isinstance(head.targets[0], ast.Subscript):
+        # Subscript STORE `d[k] = v` over a known dict: the total map_put rebind — no partiality,
+        # no totalization (a store cannot miss). `d` stays a known dict.
+        target = head.targets[0]
+        if not (isinstance(target.value, ast.Name) and _is_dictish(target.value, dicts)):
+            raise BodyError("subscript assignment is only in subset over a known dict")
+        d = target.value.id
+        update = b_app(b_var("map_put"),
+                       [_expr_from_py(target.slice, strs, dicts),
+                        _expr_from_py(head.value, strs, dicts), b_var(d)])
+        return b_let(d, update, _block_from_py(tail, strs - {d}, dicts, maybes - {d}, ret_maybe,
+                                               ints - {d}, lists - {d}))
     if isinstance(head, ast.Assign):
         if len(head.targets) != 1 or not isinstance(head.targets[0], ast.Name):
             raise BodyError("only single-name assignment targets are in subset")
         name = head.targets[0].id
+        # `v = d[k]` / `v = xs[i]`: a read subscript is a MAYBE — bind the Just payload to `v` and
+        # short-circuit the miss to the function's None outcome (only a Maybe-totalized function
+        # may read a subscript; the adapter's trigger mirrors raise-totalization).
+        sub = _subscript_read(head.value, strs, dicts, lists)
+        if sub is not None:
+            if not ret_maybe:
+                raise BodyError("a read subscript is partial — only a Maybe-totalized function "
+                                "(or one returning it directly) may bind it")
+            rest = _block_from_py(tail, strs - {name}, dicts - {name}, maybes - {name}, ret_maybe,
+                                  ints - {name}, lists - {name})
+            return {"kind": "case", "scrutinee": sub,
+                    "arms": [
+                        {"pattern": {"kind": "variant", "tag": "Just",
+                                     "payload": {"kind": "bind", "name": name}},
+                         "body": rest},
+                        {"pattern": {"kind": "variant", "tag": "None"}, "body": b_variant("None")},
+                    ]}
         inner = (strs | {name}) if _is_stringish(head.value, strs) else (strs - {name})
         inner_d = (dicts | {name}) if _is_dictish(head.value, dicts) else (dicts - {name})
         inner_m = (maybes | {name}) if _is_maybeish(head.value, maybes, dicts) else (maybes - {name})
@@ -603,6 +698,81 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                 x += "_"
         else:
             raise BodyError("only `for <name>` / `for (a, b)` loops are in subset")
+        src = _expr_from_py(head.iter, strs, dicts)
+        return _loop_from_py(x, elt_names, src, head.body, tail, stmts, strs, dicts, maybes,
+                             ret_maybe, ints, lists)
+    if isinstance(head, ast.While):
+        # The COUNTING while (spec/expressiveness.md, statement-subset frontier): a unit-step
+        # counter against a loop-invariant bound IS iteration over an integer interval, so it
+        # desugars to the `for` machinery over the canonical `range` record — every existing loop
+        # shape (accumulators, guards, appends, search) then applies unchanged. Anything without a
+        # recognized progress shape is refused (termination has no witness), never approximated.
+        if head.orelse:
+            raise BodyError("`while … else` is out of subset")
+        i, src, inner_body = _counting_while(head, strs, dicts)
+        return _loop_from_py(i, None, src, inner_body, tail, stmts, strs, dicts, maybes,
+                             ret_maybe, ints, lists)
+    raise BodyError(f"unsupported statement {type(head).__name__}")
+
+
+def _counting_while(head, strs, dicts):
+    """Recognize the counting `while` and return `(counter, src_expr, body_without_step)`.
+    The shape: `while i <OP> bound: …; i += 1` (or `i -= 1` under a descending `>`/`>=` guard),
+    where the step is the LAST statement, the counter is assigned nowhere else in the body, and
+    the bound is loop-invariant (reads neither the counter nor any name the body assigns). The
+    iterated values are exactly Python's:
+        i <  b  ->  range(i, b)             i >  b  ->  reverse(range(b + 1, i + 1))
+        i <= b  ->  range(i, b + 1)         i >= b  ->  reverse(range(b, i + 1))
+    Everything else — compound guards, non-unit steps, counter mutation mid-body — refuses."""
+    test = head.test
+    if not (isinstance(test, ast.Compare) and len(test.ops) == 1
+            and isinstance(test.left, ast.Name) and type(test.ops[0]) in (ast.Lt, ast.LtE, ast.Gt, ast.GtE)):
+        raise BodyError("only counting `while i < n` loops are in subset")
+    i, op, bound = test.left.id, test.ops[0], test.comparators[0]
+    up = isinstance(op, (ast.Lt, ast.LtE))
+    body = head.body
+    step = body[-1] if body else None
+    if not (isinstance(step, ast.AugAssign) and isinstance(step.target, ast.Name)
+            and step.target.id == i and isinstance(step.op, ast.Add if up else ast.Sub)
+            and isinstance(step.value, ast.Constant) and step.value.value == 1):
+        raise BodyError("a counting `while` must end with a unit step of its counter "
+                        "(`i += 1`, or `i -= 1` under a descending guard)")
+    inner = body[:-1]
+    assigned = set()
+    for s in body:
+        for n in ast.walk(s):
+            if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+                assigned |= {t.id for t in targets if isinstance(t, ast.Name)}
+    for s in inner:
+        for n in ast.walk(s):
+            if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+                if any(isinstance(t, ast.Name) and t.id == i for t in targets):
+                    raise BodyError("the `while` counter is reassigned inside the loop body")
+    if any(isinstance(n, ast.Name) and (n.id == i or n.id in assigned) for n in ast.walk(bound)):
+        raise BodyError("the `while` bound must be loop-invariant")
+    b = _expr_from_py(bound, strs, dicts)
+    one = b_lit(_value(1))
+    if isinstance(op, ast.Lt):
+        src = _fn_ref_app(RANGE_HASH, [b_var(i), b])
+    elif isinstance(op, ast.LtE):
+        src = _fn_ref_app(RANGE_HASH, [b_var(i), _op_app("add", [b, one])])
+    elif isinstance(op, ast.Gt):
+        src = b_app(b_var("reverse"),
+                    [_fn_ref_app(RANGE_HASH, [_op_app("add", [b, one]), _op_app("add", [b_var(i), one])])])
+    else:
+        src = b_app(b_var("reverse"),
+                    [_fn_ref_app(RANGE_HASH, [b, _op_app("add", [b_var(i), one])])])
+    return i, src, inner
+
+
+def _loop_from_py(x, elt_names, src, body, tail, stmts, strs=frozenset(), dicts=frozenset(),
+                  maybes=frozenset(), ret_maybe=False, ints=frozenset(), lists=frozenset()):
+    """The shared loop translation: element `x` (or tuple names `elt_names`) drawn from the list
+    expression `src` (a `for`'s iterable, or a counting `while`'s range — see `_counting_while`),
+    over the four supported shapes (search / append / nested append / accumulator folds)."""
+    if True:  # (kept at the original indentation for a reviewable diff)
         bound_elt = {x} if elt_names is None else set(elt_names)
         # After the loop Python leaves the element name(s) bound to the last item; none of the
         # translations do, so a tail that reads any of them is out of subset (not silently wrong).
@@ -612,7 +782,6 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                 raise BodyError("loop variable read after a loop")
         loop_strs, loop_dicts, loop_maybes = strs - bound_elt, dicts - bound_elt, maybes - bound_elt
         loop_ints, loop_lists = ints - bound_elt, lists - bound_elt
-        src = _expr_from_py(head.iter, strs, dicts)
 
         def _welt(expr):
             """Wrap a lambda body that reads the element: for a tuple target, destructure the fresh
@@ -627,7 +796,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
         # Peel one optional guard `if cond: <body>` (no else) off the loop body. The guard is
         # translated ONCE here (boolean as before; annotation-proven truthiness desugared) and the
         # resulting expression reused by every loop shape below.
-        body = head.body
+        orig_body = body
         guard = guard_expr = None
         if len(body) == 1 and isinstance(body[0], ast.If) and not body[0].orelse:
             guard = body[0].test
@@ -720,7 +889,7 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                 raise BodyError("nested loop body must be a single (optionally guarded) `.append(…)`")
             receiver = ibody[0].value.func.value
             acc = receiver.id
-            for n in ast.walk(head):
+            for n in (nn for s in orig_body for nn in ast.walk(s)):
                 if isinstance(n, ast.Name) and n.id == acc and isinstance(n.ctx, ast.Load) \
                         and n is not receiver:
                     raise BodyError("nested loop reads its accumulator mid-loop")
@@ -829,7 +998,6 @@ def _block_from_py(stmts, strs=frozenset(), dicts=frozenset(), maybes=frozenset(
                 result = b_let(acc, fold, result)
             return result
         raise BodyError("loop body must be an accumulator assignment or an `.append(…)`")
-    raise BodyError(f"unsupported statement {type(head).__name__}")
 
 
 def _fixed_param_names(func):
@@ -920,6 +1088,26 @@ def function_raises(func):
     return any(isinstance(n, ast.Raise) for n in ast.walk(func))
 
 
+def function_subscript_reads(func):
+    """Whether the function's body READS a subscript (`d[k]` / `xs[i]` in Load context) — with
+    `function_raises`, a trigger for Maybe-totalization: a raising access IS the None outcome.
+    Annotation positions (`dict[str, int]`, `list[int]`) do not count, and a subscript STORE
+    (`d[k] = v`, the total map_put rebind) needs no totalization."""
+    ann = []
+    a = func.args
+    for p in (list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs)):
+        if p.annotation is not None:
+            ann.append(p.annotation)
+    if func.returns is not None:
+        ann.append(func.returns)
+    for node in ast.walk(func):
+        if isinstance(node, ast.AnnAssign) and node.annotation is not None:
+            ann.append(node.annotation)
+    in_annotations = {id(x) for t in ann for x in ast.walk(t)}
+    return any(isinstance(n, ast.Subscript) and isinstance(n.ctx, ast.Load)
+               and id(n) not in in_annotations for n in ast.walk(func))
+
+
 def body_ast_from_py(func):
     """An *executable* body AST for a Python function whose body is in the supported subset (a
     `lambda` over its parameters; a bare expression for a 0-parameter function), or None otherwise.
@@ -934,13 +1122,16 @@ def body_ast_from_py(func):
     stmts = body[start:]
     if not stmts:
         return None
-    raises = function_raises(func)
+    # Subscript READS are partiality like `raise` — either triggers the Maybe totalization, and
+    # either combined with an explicit `-> Optional[T]` stays out of subset (collapsing a missing
+    # key/index or a raise with a returned None would silently merge two distinct outcomes).
+    partial = function_raises(func) or function_subscript_reads(func)
     ret_opt = _is_optional_ann(func.returns)
-    if raises and ret_opt:
+    if partial and ret_opt:
         return None
     try:
         expr = _block_from_py(stmts, _str_annotated_params(func), _dict_annotated_params(func),
-                              _optional_annotated_params(func), ret_opt or raises,
+                              _optional_annotated_params(func), ret_opt or partial,
                               _int_annotated_params(func), _list_annotated_params(func))
         params = _fixed_param_names(func)
         # A 0-arg function is its bare result (applying it to [] still evaluates); else wrap in a
