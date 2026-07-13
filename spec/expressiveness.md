@@ -586,6 +586,40 @@ blessed-tag precedent, applied at generation time) and/or orchestrate needs a na
 input, and the expect-sort could be tightened to distinguish variant payload encodings
 (`Just false` is never literally produced by a `Maybe Json` body).
 
+**Ingestion sweep, fifth increment (2026-07-13): the National Weather Service — and the `+json`
+finding.** The next real-world description is the NWS API (`api.weather.gov` — US government
+weather data, public, unauthenticated beyond a required `User-Agent`, genuinely useful to
+agents): OpenAPI **3.1**, 66 paths / **66 operations, 66/66 compile and certify** on first
+contact, zero refused operations (notes: 169 undocumented response headers honestly not
+projected, 99 optional-param omissions, 49 path-param GETs whose declared schemas can't gate).
+Its `User-Agent` requirement is *documented as an apiKey security scheme*, so the doctrine
+carries it with no new machinery — generated records hold a `{{secret:userAgent}}` placeholder
+and the operator supplies the value at run time; traces keep the placeholder. **The finding**:
+NWS serves every response as `application/ld+json` — the schema-derived path knew only
+`application/json`, so at first contact the projections stayed silent. Production APIs
+overwhelmingly serve JSON under RFC 6839 structured-syntax suffixes (`ld+json`, `geo+json`,
+`hal+json`), and the `+json` suffix IS the parses-as-JSON promise `parse_json` needs — the
+adapter now accepts any `+json` subtype (parameters tolerated; non-JSON types still license
+nothing; test both ways, adapter tests 36 → 37). Re-gated live against the real service, the
+3-op parameterless slice (`/glossary`, `/alerts/types`, `/alerts/active/count` — a polite
+handful of real calls) materialized **12 records — 3 base + 9 schema-derived projections**, all
+observed, schema-checked, certified, offline-replayable; trace economy held (ONE observation
+trace per operation, shared by address across its projections). Published to Arca: 10 records +
+12 certifications + bodies + 3 traces — and the two that did NOT store are the increment's
+residual finding: `glossaryBody`/`glossaryGlossary` embed the observed multi-MB glossary
+document in their worked examples and drew the store gate's **413** (the node caps request
+size) — **observed-value size is a real boundary**; the principled rung is value-by-address
+(the gate-free blob store already exists for weights), a named future pull, not a workaround.
+Loop closed in production with the precise generated tag AND a GW17 path-scoped grant
+composing: `orchestrate --node … --intent query/lookup/glossary --expect 200 --verify
+--require-certified --grant net.read@api.weather.gov/glossary --secret userAgent=…` → **1
+match, 2 artifacts fetched, applied live, CONFIRMED**, assert published (`msg_a3ed8839…`;
+`trc_2e755474…` deduplicating across its second publishing event), and a grantless, secretless
+`verify-claim` by bare address replays it CONFIRMED. The canonical iteration records
+(`nth`/`range_from`/`range`, the statement-subset pull) went to Arca the same session with
+signed certifications — commons inhabitants like any other. No corpus change (the shapes are
+#40/#47/#50's).
+
 **Discovery precision closed (2026-07-12, same session).** Both remedies landed the same
 night, and diagnosing them surfaced a third force: the failing broad query had returned
 **25 matches for ~30 parse-tagged holdings — the node's discovery-cost cap** — and the

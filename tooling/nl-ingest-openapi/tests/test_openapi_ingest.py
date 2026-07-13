@@ -474,6 +474,22 @@ class SchemaDerivedTest(unittest.TestCase):
         self.assertTrue(by_name["getHealthStatus"]["required_field"])
         self.assertFalse(by_name["getHealthReady"]["required_field"])
 
+    def test_suffixed_json_content_type_licenses_schema(self):
+        # RFC 6839 structured-syntax suffixes (the NWS finding): `application/ld+json` (and
+        # geo+json/hal+json, with parameters) IS the parses-as-JSON promise — the schema-derived
+        # path treats it exactly like application/json. A non-JSON type still yields nothing.
+        spec = self._health_spec("http://127.0.0.1:1", {
+            "type": "object", "properties": {"status": {"type": "string"}},
+            "required": ["status"]})
+        resp = spec["paths"]["/health"]["get"]["responses"]["200"]
+        resp["content"] = {"application/ld+json; charset=utf-8":
+                           resp["content"].pop("application/json")}
+        built, skipped, pending = oi.walk(spec, None)
+        self.assertEqual({p["name"] for p in pending}, {"getHealthBody", "getHealthStatus"})
+        resp["content"] = {"text/html": {"schema": {"type": "string"}}}
+        built, skipped, pending = oi.walk(spec, None)
+        self.assertEqual(pending, [], "a non-JSON content type licenses nothing")
+
     def test_documented_example_wins_over_schema(self):
         # A response documenting BOTH an example and a schema takes the example path (spec-time
         # value, no live gate needed) — the schema path exists for the example-less reality.

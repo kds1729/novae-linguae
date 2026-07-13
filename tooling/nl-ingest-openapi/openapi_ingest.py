@@ -424,16 +424,32 @@ def _response_header_examples(spec, op, want):
     return projectable, unprojectable
 
 
+def _json_media(content):
+    """The JSON media entry of a response `content` map: `application/json`, or any subtype with
+    the RFC 6839 `+json` structured-syntax suffix (`application/ld+json`, `geo+json`, `hal+json`
+    — the NWS finding: production APIs overwhelmingly serve JSON under suffixed types, and the
+    suffix IS the parses-as-JSON promise `parse_json` needs). Parameters (`;charset=…`) are
+    tolerated; non-JSON types answer None."""
+    if not isinstance(content, dict):
+        return None
+    for ctype, media in content.items():
+        bare = ctype.split(";")[0].strip().lower()
+        if bare == "application/json" or bare.split("/")[-1].endswith("+json"):
+            return media if isinstance(media, dict) else {}
+    return None
+
+
 def _response_json_example(spec, op):
-    """The documented application/json EXAMPLE of the operation's first 2xx response, as
-    (status_code, parsed_example), or None. This is spec-time data — the one thing that makes a
-    runnable worked example for a body projection possible without guessing."""
+    """The documented JSON EXAMPLE of the operation's first 2xx response (see `_json_media` for
+    which content types count), as (status_code, parsed_example), or None. This is spec-time
+    data — the one thing that makes a runnable worked example for a body projection possible
+    without guessing."""
     responses = op.get("responses", {})
     for code in sorted(c for c in responses if c.isdigit() and 200 <= int(c) < 300):
         resp = deref(spec, responses[code])
         if not isinstance(resp, dict):
             continue
-        media = (resp.get("content") or {}).get("application/json") or {}
+        media = _json_media(resp.get("content")) or {}
         example = media.get("example")
         if example is None and isinstance(media.get("schema"), dict):
             example = media["schema"].get("example")
@@ -443,17 +459,18 @@ def _response_json_example(spec, op):
 
 
 def _response_json_schema(spec, op):
-    """The declared application/json SCHEMA of the operation's first 2xx response, as
-    (status_code, resolved_schema), or None. Consulted only when no documented example exists —
-    real-world descriptions overwhelmingly declare schemas, not examples (the Frankfurter
-    finding, spec/expressiveness.md). A schema promises SHAPE, not a value: it licenses a
-    projection record, but the record's worked example must come from a live observation."""
+    """The declared JSON SCHEMA of the operation's first 2xx response (any `+json` content type
+    — see `_json_media`), as (status_code, resolved_schema), or None. Consulted only when no
+    documented example exists — real-world descriptions overwhelmingly declare schemas, not
+    examples (the Frankfurter finding, spec/expressiveness.md). A schema promises SHAPE, not a
+    value: it licenses a projection record, but the record's worked example must come from a
+    live observation."""
     responses = op.get("responses", {})
     for code in sorted(c for c in responses if c.isdigit() and 200 <= int(c) < 300):
         resp = deref(spec, responses[code])
         if not isinstance(resp, dict):
             continue
-        media = (resp.get("content") or {}).get("application/json") or {}
+        media = _json_media(resp.get("content")) or {}
         schema = deref(spec, media.get("schema")) if isinstance(media.get("schema"), dict) else None
         if isinstance(schema, dict):
             return int(code), schema
