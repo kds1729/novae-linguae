@@ -60,6 +60,19 @@ coarse complexity). **0 pairs achieve *precise* complexity composition** — no 
 the node carries the v0.3 `cost` metadata yet (the corpus rows do; the production records
 predate it). That is the named, honest gap this metric leaves open.
 
+*(Closed 2026-07-12 by `cost_sweep.py` — the cert-sweep move applied to `cost`: for every
+pure, body-hosted, un-costed v0.2 record it infers the time class from `check-complexity`'s
+own structural analysis, finds the tightest `output_size` the checker verifies, and
+publishes a superseding costed record + signed cert. One run costed **133 records** (99
+honest refusals: higher-order/opaque time or unestablished output class — the fold/map
+family; effectful records are out of scope on purpose, their time is the effect's). The
+metric now reports a dedicated costed-pair subsample — the first-400-pairs cap walks
+enumeration order and had left the newly-costed tail entirely unsampled, reading 0 while
+costed pairs composed precisely: of **100 costed pairs, 100 compose and 98 on the precise
+basis** (`cost-basis precise (output-size substitution)`); the 2 coarse fallbacks are
+stages whose established output class cannot re-express the downstream measure — the
+substitution rule refusing, not failing.)*
+
 ## 5. Certification coverage — measured, then moved
 
 | | before sweep | after `cert_sweep.py` |
@@ -93,6 +106,7 @@ coverage is 98.9% of certifiable holdings. One claim came back *against* the hea
 current scale — first-contact assembly costs ~1.3× a perfect author's context on a small
 chain — with the honest qualifiers that reuse inverts it (3.4×) and perfect authorship is
 a floor no measured model achieves. The two named gaps: `cost` metadata absent from
-production records (precise composition unrealized), and the v0.1 tier awaiting `--v2`
-re-ingestion (since dispatched — see the coverage section's addendum: 1 upgraded, 56
-measured as boundary).
+production records (precise composition unrealized — since closed by `cost_sweep.py`, see
+§4's addendum: 133 records costed, 98/100 costed pairs compose on the precise basis), and
+the v0.1 tier awaiting `--v2` re-ingestion (since dispatched — see the coverage section's
+addendum: 1 upgraded, 56 measured as boundary).

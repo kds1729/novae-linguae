@@ -42,7 +42,9 @@ _LAST_REQ = [0.0]
 
 
 def _open(req_or_url, timeout=60):
-    """Paced urlopen with 429 backoff — the node rate-limits bursts."""
+    """Paced urlopen with 429 backoff — the node rate-limits bursts. Transient transport
+    errors (a TLS handshake timeout killed one multi-hundred-request walk at the very end)
+    retry with the same backoff; a real outage still raises after the attempts run out."""
     for attempt in range(6):
         wait = _MIN_GAP - (time.monotonic() - _LAST_REQ[0])
         if wait > 0:
@@ -52,6 +54,11 @@ def _open(req_or_url, timeout=60):
             return urllib.request.urlopen(req_or_url, timeout=timeout)
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < 5:
+                time.sleep(2 ** attempt)
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError):
+            if attempt < 5:
                 time.sleep(2 ** attempt)
                 continue
             raise
@@ -353,30 +360,47 @@ def metric_composition(node, validator, fn_summaries, certified_addrs, cap_pairs
         cands.append({"addr": s["hash"], "params": params, "result": result, "record": rec})
 
     unary = [c for c in cands if len(c["params"]) == 1]
-    attempted = composed = precise = 0
-    for c1 in cands:
-        for c2 in unary:
-            if attempted >= cap_pairs:
-                break
-            if c1["addr"] == c2["addr"]:
-                continue
-            # cheap plausibility: same top-level kind, or either side polymorphic
-            r, p = c1["result"], c2["params"][0]
-            plausible = (r.get("kind") == "var" or p.get("kind") == "var" or r == p or
-                         (r.get("kind") == p.get("kind") == "builtin" and r.get("name") == p.get("name")) or
-                         (r.get("kind") == p.get("kind") == "apply"))
-            if not plausible:
-                continue
-            attempted += 1
-            rc, out, _ = validator_run(validator, ["compose"], [c1["record"], c2["record"]])
-            if rc == 0:
-                composed += 1
-                if "cost-basis" in out and "precise" in out:
-                    precise += 1
+
+    def _plausible(c1, c2):
+        if c1["addr"] == c2["addr"]:
+            return False
+        # cheap plausibility: same top-level kind, or either side polymorphic
+        r, p = c1["result"], c2["params"][0]
+        return (r.get("kind") == "var" or p.get("kind") == "var" or r == p or
+                (r.get("kind") == p.get("kind") == "builtin" and r.get("name") == p.get("name")) or
+                (r.get("kind") == p.get("kind") == "apply"))
+
+    def _sweep(stage1s, stage2s, cap):
+        attempted = composed = precise = 0
+        for c1 in stage1s:
+            for c2 in stage2s:
+                if attempted >= cap:
+                    break
+                if not _plausible(c1, c2):
+                    continue
+                attempted += 1
+                rc, out, _ = validator_run(validator, ["compose"], [c1["record"], c2["record"]])
+                if rc == 0:
+                    composed += 1
+                    if "cost-basis" in out and "precise" in out:
+                        precise += 1
+        return attempted, composed, precise
+
+    attempted, composed, precise = _sweep(cands, unary, cap_pairs)
+    # The capped sample above walks enumeration order, so a newly-costed tail can be entirely
+    # unsampled (the cost-sweep's records were — the headline read 0 while costed pairs composed
+    # precisely). The dedicated subsample answers the question the `cost` field exists for:
+    # of pairs where BOTH stages carry verified cost, how many compose on the precise basis?
+    costed = [c for c in cands if (c["record"].get("signature") or {}).get("cost")]
+    costed_unary = [c for c in costed if len(c["params"]) == 1]
+    c_attempted, c_composed, c_precise = _sweep(costed, costed_unary, min(cap_pairs, 100))
     return {"certified_typed_candidates": len(cands), "unary_stage2": len(unary),
             "plausible_pairs_attempted": attempted, "composed_ok": composed,
             "success_rate": round(composed / attempted, 3) if attempted else None,
-            "precise_complexity": precise}
+            "precise_complexity": precise,
+            "costed_candidates": len(costed),
+            "costed_pairs_attempted": c_attempted, "costed_composed_ok": c_composed,
+            "costed_precise": c_precise}
 
 
 def metric_cert_coverage(node, fn_summaries):
@@ -483,6 +507,9 @@ def main():
     print(f"compose     candidates {m['certified_typed_candidates']} "
           f"attempted {m['plausible_pairs_attempted']} ok {m['composed_ok']} "
           f"rate={m['success_rate']}  precise-complexity {m['precise_complexity']}")
+    print(f"compose     costed candidates {m['costed_candidates']}  costed pairs "
+          f"{m['costed_pairs_attempted']} ok {m['costed_composed_ok']} "
+          f"precise {m['costed_precise']}")
 
     if args.out:
         json.dump(report, open(args.out, "w"), indent=1)

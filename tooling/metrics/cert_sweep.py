@@ -41,6 +41,12 @@ def _open(req_or_url, timeout=60):
                 time.sleep(2 ** attempt)
                 continue
             raise
+        except (urllib.error.URLError, TimeoutError, OSError):
+            # Transient transport hiccups (TLS handshake timeout, reset) retry like a 429.
+            if attempt < 5:
+                time.sleep(2 ** attempt)
+                continue
+            raise
 
 
 def get_json(node, path):
