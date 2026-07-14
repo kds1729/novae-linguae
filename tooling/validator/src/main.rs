@@ -2150,7 +2150,16 @@ fn commons_view(
                 }
                 seeds.extend(matched);
             }
-            let (record_map, link_map) = nl_validator::commons_client::maps_from_node(url, &seeds)?;
+            // LENIENT closure walk: discovery is a search over a partial, untrusted store — one
+            // candidate whose body (or trace, or blob) the node doesn't serve must weaken THAT
+            // candidate, not abort the whole run for the other 24 on the page. Real case: v0.1
+            // description-tier records carry a SYNTHETIC body_hash (a source fingerprint no stored
+            // artifact answers — see nl-ingest-py `_body_hash`), and any record's body may simply
+            // not have replicated here yet. The per-candidate gates (signature fit, certify, the
+            // apply itself) verify what actually got fetched; strict fetching remains where the
+            // specific artifacts ARE the point (verify-claim, assert-equivalent).
+            let (record_map, link_map) =
+                nl_validator::commons_client::maps_from_node_lenient(url, &seeds, seeds.len() * 8 + 64)?;
             eprintln!("node fetch  {} record(s) + {} linked artifact(s), all hash-verified", record_map.len(),
                       link_map.len().saturating_sub(record_map.len()));
             Ok((link_map, record_map))
