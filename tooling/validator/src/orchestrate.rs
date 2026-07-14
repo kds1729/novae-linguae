@@ -308,7 +308,10 @@ fn arg_fits(ptype: &J, arg: &J, records: &std::collections::HashMap<String, J>, 
     }
     let Some(target) = arg.get("target").and_then(|t| t.as_str()) else { return false };
     let Some(rec) = records.get(target) else { return false };
-    let Some(mut tt) = rec.pointer("/signature/type") else { return false };
+    let Some(raw_tt) = rec.pointer("/signature/type") else { return false };
+    // Same canonical-ref fold as `signature_fits`, for the higher-order target's declared type.
+    let folded_tt = crate::fold_canonical_type_refs(raw_tt);
+    let mut tt = &folded_tt;
     if tt.get("kind").and_then(|k| k.as_str()) == Some("forall") {
         match tt.get("body") {
             Some(b) => tt = b,
@@ -330,7 +333,11 @@ fn arg_fits(ptype: &J, arg: &J, records: &std::collections::HashMap<String, J>, 
 /// Does the function record's signature accept these arguments — matching arity *and* parameter types,
 /// including the signatures of higher-order (`fn_ref`) arguments? `records` resolves those targets.
 fn signature_fits(record: &J, args: &[J], records: &std::collections::HashMap<String, J>) -> bool {
-    let Some(mut t) = record.pointer("/signature/type") else { return false };
+    let Some(raw) = record.pointer("/signature/type") else { return false };
+    // Fold refs-to-canonical-builtin-artifacts (the v0.2 builtin↔ref interchange) so the coarse
+    // sort filter sees the builtin, not an unknown node it would keep only by permissiveness.
+    let folded = crate::fold_canonical_type_refs(raw);
+    let mut t = &folded;
     if t.get("kind").and_then(|k| k.as_str()) == Some("forall") {
         match t.get("body") {
             Some(b) => t = b,
@@ -354,7 +361,10 @@ fn signature_fits(record: &J, args: &[J], records: &std::collections::HashMap<St
 /// `(string, string) -> Maybe string` builder both survive a two-string application (the GW16
 /// unsplittable-fits residual). A caller-stated expectation pins the result sort too.
 fn result_fits(record: &J, expect: &J) -> bool {
-    let Some(mut t) = record.pointer("/signature/type") else { return false };
+    let Some(raw) = record.pointer("/signature/type") else { return false };
+    // Same canonical-ref fold as `signature_fits` — the result position must not widen either.
+    let folded = crate::fold_canonical_type_refs(raw);
+    let mut t = &folded;
     if t.get("kind").and_then(|k| k.as_str()) == Some("forall") {
         match t.get("body") {
             Some(b) => t = b,
@@ -935,6 +945,37 @@ mod tests {
                 { "kind": "apply", "ctor": { "kind": "builtin", "name": "List" },
                   "args": [ { "kind": "builtin", "name": "string" } ] } ] } ],
             "result": { "kind": "any" } }));
+    }
+
+    #[test]
+    fn canonical_type_refs_fold_in_the_signature_filter() {
+        // A signature spelled with refs to the canonical builtin type artifacts (the v0.2
+        // builtin→ref fold) must filter exactly like the builtin spelling. The distinguishing
+        // assertion is the REJECTION: an unfolded ref would fall to the permissive unknown arm
+        // and keep the wrong-sorted argument.
+        let string_ref =
+            json!({ "kind": "ref", "target": crate::canonical_builtin_type_address("string").unwrap() });
+        let bool_ref =
+            json!({ "kind": "ref", "target": crate::canonical_builtin_type_address("bool").unwrap() });
+        let record = json!({ "signature": { "type": {
+            "kind": "fn", "params": [string_ref.clone(), string_ref], "result": bool_ref } } });
+        let records = std::collections::HashMap::new();
+
+        let two_strings =
+            vec![json!({ "kind": "string", "value": "a" }), json!({ "kind": "string", "value": "b" })];
+        assert!(signature_fits(&record, &two_strings, &records));
+        let string_and_int =
+            vec![json!({ "kind": "string", "value": "a" }), json!({ "kind": "int", "value": 1 })];
+        assert!(!signature_fits(&record, &string_and_int, &records));
+
+        assert!(result_fits(&record, &json!({ "kind": "bool", "value": true })));
+        assert!(!result_fits(&record, &json!({ "kind": "int", "value": 1 })));
+
+        // A NON-canonical ref stays opaque-permissive, exactly as before the fold.
+        let opaque = json!({ "signature": { "type": { "kind": "fn",
+            "params": [ { "kind": "ref", "target": format!("type_{}", "ab".repeat(32)) } ],
+            "result": { "kind": "builtin", "name": "bool" } } } });
+        assert!(signature_fits(&opaque, &[json!({ "kind": "int", "value": 1 })], &records));
     }
 
     #[test]

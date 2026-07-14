@@ -641,7 +641,10 @@ fn pattern_ty(pat: &J, scrut: &Ty, env: &mut Env, inf: &mut Infer) -> Result<()>
 /// Verdict text and ok/err for a body checked against a declared type.
 pub fn typecheck(declared: &J, body: &J) -> Result<String> {
     let mut inf = Infer::new();
-    let dt = ast_to_ty(declared)?;
+    // A `ref` to a canonical builtin type artifact IS the builtin (the v0.2 fold) — normalize
+    // before conversion so it doesn't land as an opaque nominal `ref:<hash>`.
+    let declared = crate::fold_canonical_type_refs(declared);
+    let dt = ast_to_ty(&declared)?;
     // Bind `self` to the declared (skolemized) function type so a self-recursive body type-checks:
     // a recursive call shares the function's own rigid type. Monomorphic recursion only — `self` is a
     // single monotype, not re-generalized — which is exactly what these records need.
@@ -710,6 +713,25 @@ mod tests {
         let record = load("double.v0.2.json");
         let body = load("body-double.json");
         assert!(typecheck_record(&record, &body).is_ok());
+    }
+
+    #[test]
+    fn canonical_type_refs_typecheck_as_their_builtins() {
+        // `int` spelled as a ref to its canonical type artifact (the v0.2 builtin→ref fold) must
+        // check exactly like the builtin spelling — before the fold it became the opaque nominal
+        // `ref:<hash>`, which can't unify with the arithmetic body.
+        let int_ref =
+            json!({ "kind": "ref", "target": crate::canonical_builtin_type_address("int").unwrap() });
+        let declared = json!({ "kind": "fn", "params": [int_ref.clone()], "result": int_ref });
+        let body = json!({ "kind": "lambda", "params": [ { "name": "n" } ], "body": {
+            "kind": "app", "fn": { "kind": "var", "name": "add" },
+            "args": [ { "kind": "var", "name": "n" }, { "kind": "var", "name": "n" } ] } });
+        typecheck(&declared, &body).unwrap();
+
+        // A NON-canonical ref stays an opaque nominal type: the same body must NOT check.
+        let opaque = json!({ "kind": "ref", "target": format!("type_{}", "cd".repeat(32)) });
+        let declared = json!({ "kind": "fn", "params": [opaque.clone()], "result": opaque });
+        assert!(typecheck(&declared, &body).is_err());
     }
 
     #[test]

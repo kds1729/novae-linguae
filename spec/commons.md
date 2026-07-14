@@ -257,6 +257,13 @@ budget. Identical targets match without resolving (content addresses: same addre
 definition); an unresolvable ref (absent on this node, cyclic alias, budget spent) matches only
 `any`, a pattern variable, or the identical ref — never structurally.
 
+The exception that needs no resolution at all: a `ref` to a **canonical builtin type artifact**
+(the v0.2 builtin→ref fold — each builtin's canonical artifact is the builtin node itself, so
+its address is recomputable locally; see canonical-serialization.md) is **folded to the builtin**
+on either side before matching, with no store lookup and no budget spend. The two spellings of
+e.g. `int` are fully interchangeable in typed query, whether or not the canonical artifacts have
+replicated to the answering node.
+
 **Equivalence-class collapse (`?collapse=equivalent`).** Opt-in: the matched set is grouped by the
 node's stored signed `equivalent` claims (transitively), each class returns only its FIRST member
 in the response order (id, or relevance under `?rank`), and the response reports the merges:

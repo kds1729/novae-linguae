@@ -139,6 +139,13 @@ kinds, so hashing takes an explicit `--kind type` and the node's gate keys on th
 prefix instead. These are the artifacts a type AST's `ref` nodes target; the node's typed query
 resolves `type_pattern` matching through them.
 
+The **canonical builtin type artifacts** (the v0.2 builtin→ref fold) are the degenerate case:
+each builtin's canonical artifact is **the builtin node itself** — `{"kind":"builtin","name":"int"}`
+hashes to `type_52f7ad90…`. The definition is deterministic, so every consumer can recompute the
+fourteen addresses locally (`nl-validator canonical-types`) and treat a `ref` to one as exactly
+the builtin, with no store lookup — which is what makes the two spellings interchangeable rather
+than merely resolvable.
+
 ### Eval attestations
 
 An **eval attestation** (top-level `kind: "eval-attestation"`, produced by `nl-validator attest-weights

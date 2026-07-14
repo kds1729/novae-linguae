@@ -518,6 +518,89 @@ pub fn build_record_map(dir: &Path) -> Result<std::collections::HashMap<String, 
     Ok(map)
 }
 
+// ---- canonical builtin type artifacts (the v0.2 builtin→ref fold) ----
+
+/// The closed v0.1 builtin type vocabulary (spec/type-expression.schema.json).
+pub const BUILTIN_TYPE_NAMES: [&str; 14] = [
+    "bool", "int", "nat", "float", "string", "bytes", "unit", "never", "List", "Maybe", "Result",
+    "Map", "Set", "Json",
+];
+
+/// The canonical commons type artifact for a builtin is **the builtin node itself** — hashing
+/// `{"kind":"builtin","name":"int"}` with `--kind type` gives the primitive its stable commons
+/// address ("v0.2+ will likely fold these into 'ref' once the primitives have stable hashes in
+/// the commons", spec/type-expression.schema.json). Because the definition is deterministic, the
+/// address is recomputable locally: `ref`-to-canonical-artifact and the builtin spelling are
+/// decidably interchangeable without a store lookup.
+///
+/// Returns the canonical `type_…` address → builtin-name map, computed once.
+pub fn canonical_builtin_type_targets() -> &'static std::collections::HashMap<String, &'static str>
+{
+    static MAP: std::sync::OnceLock<std::collections::HashMap<String, &'static str>> =
+        std::sync::OnceLock::new();
+    MAP.get_or_init(|| {
+        BUILTIN_TYPE_NAMES
+            .iter()
+            .map(|name| {
+                let node = serde_json::json!({ "kind": "builtin", "name": name });
+                let addr = hash_artifact_with_kind(&node, ArtifactKind::Type)
+                    .expect("a builtin node always canonicalizes");
+                (addr, *name)
+            })
+            .collect()
+    })
+}
+
+/// The canonical `type_…` address of one builtin's type artifact.
+pub fn canonical_builtin_type_address(name: &str) -> Option<String> {
+    if !BUILTIN_TYPE_NAMES.contains(&name) {
+        return None;
+    }
+    let node = serde_json::json!({ "kind": "builtin", "name": name });
+    hash_artifact_with_kind(&node, ArtifactKind::Type).ok()
+}
+
+/// The builtin name a single type node denotes: a `builtin` node's own name, or the builtin a
+/// `ref`-to-canonical-artifact folds to. Non-canonical refs and every other node kind are `None`.
+pub fn builtin_type_name(ty: &Value) -> Option<&'static str> {
+    match ty.get("kind").and_then(|k| k.as_str()) {
+        Some("builtin") => {
+            let n = ty.get("name")?.as_str()?;
+            BUILTIN_TYPE_NAMES.iter().find(|b| **b == n).copied()
+        }
+        Some("ref") => {
+            let target = ty.get("target")?.as_str()?;
+            canonical_builtin_type_targets().get(target).copied()
+        }
+        _ => None,
+    }
+}
+
+/// Fold every `ref` to a canonical builtin type artifact back into the builtin node, recursively —
+/// the local normal form for v0.2 type ASTs. Consumers apply this at the boundary where a
+/// `signature.type` enters, so their structural walkers (which key on `{"kind":"builtin",…}`)
+/// treat the two spellings identically: the HM typechecker, the coarse sort filter, the
+/// float-domain prover guard, the `nat` recognizers, shape bucketing, and output-size analysis.
+/// Non-canonical refs (user-defined types) are left opaque, exactly as before.
+pub fn fold_canonical_type_refs(ty: &Value) -> Value {
+    match ty {
+        Value::Object(map) => {
+            if map.get("kind").and_then(|k| k.as_str()) == Some("ref") {
+                if let Some(name) = map
+                    .get("target")
+                    .and_then(|t| t.as_str())
+                    .and_then(|t| canonical_builtin_type_targets().get(t))
+                {
+                    return serde_json::json!({ "kind": "builtin", "name": name });
+                }
+            }
+            Value::Object(map.iter().map(|(k, v)| (k.clone(), fold_canonical_type_refs(v))).collect())
+        }
+        Value::Array(items) => Value::Array(items.iter().map(fold_canonical_type_refs).collect()),
+        _ => ty.clone(),
+    }
+}
+
 // ---- hash verification ----
 
 /// Result of comparing an artifact's stored `hash` field to its recomputed

@@ -69,10 +69,11 @@ fn unwrap_forall(ty: &J) -> &J {
     }
 }
 
-/// Whether a type AST is the `nat` builtin.
+/// Whether a type AST is the `nat` builtin — spelled directly or as a `ref` to the canonical
+/// `nat` type artifact (the v0.2 builtin↔ref interchange): either spelling implies the same
+/// non-negativity refinement.
 fn is_nat(ty: &J) -> bool {
-    ty.get("kind").and_then(|k| k.as_str()) == Some("builtin")
-        && ty.get("name").and_then(|n| n.as_str()) == Some("nat")
+    crate::builtin_type_name(ty) == Some("nat")
 }
 
 fn app(op: &str, args: Vec<J>) -> J {

@@ -116,6 +116,18 @@ enum Commands {
         /// Path to the type-expression document
         record: PathBuf,
     },
+    /// Print the canonical commons type artifact address for every builtin type (the v0.2
+    /// builtin→ref fold, spec/type-expression.schema.json): `<name> <type_…>` per line. The
+    /// canonical artifact's content is the builtin node itself, so the address is recomputable
+    /// anywhere and a `ref` to it is decidably interchangeable with the builtin spelling.
+    CanonicalTypes {
+        /// Also write each artifact (`type-builtin-<name>.json`, `hash` field included) into
+        /// this directory, ready to publish through a commons node's verify-then-store gate.
+        /// (The `builtin` infix keeps `Map`'s file clear of spec/examples' `type-map.json` —
+        /// the `map` FUNCTION's type — on case-insensitive filesystems.)
+        #[arg(long)]
+        emit_dir: Option<PathBuf>,
+    },
     /// Run well-formedness checks on a Nova Lingua predicate expression.
     /// Catches what JSON Schema cannot express: arity of known built-in
     /// operators (not/1, and/2, eq/2, foldl/3, …). Unknown ops (content-
@@ -917,6 +929,7 @@ fn main() -> ExitCode {
             in_place,
         } => (cmd_sign(&record, &seed, in_place), false),
         Commands::CheckType { record } => (cmd_check_type(&record), true),
+        Commands::CanonicalTypes { emit_dir } => (cmd_canonical_types(emit_dir.as_ref()), false),
         Commands::CheckPredicate { record } => (cmd_check_predicate(&record), true),
         Commands::CheckValue { record } => (cmd_check_value(&record), true),
         Commands::CheckBody { record } => (cmd_check_body(&record), true),
@@ -1160,6 +1173,24 @@ fn cmd_verify(record: &PathBuf, kind_override: Option<nl_validator::ArtifactKind
 fn cmd_check_type(record: &PathBuf) -> Result<()> {
     let value = nl_validator::read_json(record)?;
     nl_validator::check_type_well_formed(&value)
+}
+
+fn cmd_canonical_types(emit_dir: Option<&PathBuf>) -> Result<()> {
+    if let Some(dir) = emit_dir {
+        std::fs::create_dir_all(dir)?;
+    }
+    for name in nl_validator::BUILTIN_TYPE_NAMES {
+        let addr = nl_validator::canonical_builtin_type_address(name)
+            .ok_or_else(|| anyhow!("no canonical address for builtin `{name}`"))?;
+        println!("{name} {addr}");
+        if let Some(dir) = emit_dir {
+            let artifact = serde_json::json!({ "kind": "builtin", "name": name, "hash": addr });
+            let path = dir.join(format!("type-builtin-{name}.json"));
+            std::fs::write(&path, serde_json::to_string_pretty(&artifact)? + "\n")
+                .map_err(|e| anyhow!("writing {}: {e}", path.display()))?;
+        }
+    }
+    Ok(())
 }
 
 fn cmd_check_predicate(record: &PathBuf) -> Result<()> {

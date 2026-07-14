@@ -55,7 +55,12 @@ fn type_shape(t: &J) -> String {
 }
 
 fn record_shape(record: &J) -> String {
-    record.pointer("/signature/type").map(type_shape).unwrap_or_else(|| "?".into())
+    // Fold refs-to-canonical-builtin-artifacts first (the v0.2 builtin↔ref interchange), so the
+    // two spellings of the same type land in the same shape bucket and get pairwise-compared.
+    record
+        .pointer("/signature/type")
+        .map(|t| type_shape(&crate::fold_canonical_type_refs(t)))
+        .unwrap_or_else(|| "?".into())
 }
 
 fn find(parent: &mut [usize], mut i: usize) -> usize {

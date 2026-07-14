@@ -1776,6 +1776,27 @@ class TypePatternMatchTests(TestCase):
             with self.assertRaises(PatternError):
                 validate_pattern(bad)
 
+    def test_canonical_builtin_ref_interchange(self):
+        # The v0.2 builtin→ref fold: a `ref` to a builtin's canonical type artifact matches the
+        # builtin spelling in BOTH directions, with NO resolver — the fold is local (the artifact
+        # needn't be stored on this node).
+        from .typematch import CANONICAL_BUILTIN_TYPES
+        by_name = {v: k for k, v in CANONICAL_BUILTIN_TYPES.items()}
+        int_ref = {"kind": "ref", "target": by_name["int"]}
+        self.assertTrue(self._m(_FN([_B("int")], _B("int")), _FN([int_ref], int_ref)))
+        self.assertTrue(self._m(_FN([int_ref], int_ref), _FN([_B("int")], _B("int"))))
+        # Exactness survives the fold: the canonical int ref still does not match `nat`.
+        self.assertFalse(self._m(_FN([int_ref], int_ref), _NAT_SUCC))
+        # `head` sees through a canonical-ref ctor.
+        list_ref = {"kind": "ref", "target": by_name["List"]}
+        self.assertTrue(self._m({"kind": "head", "names": ["List"]},
+                                {"kind": "apply", "ctor": list_ref, "args": [_B("int")]}))
+        # Record-variable consistency folds too: `forall a. a -> a` accepts (canonical-int-ref → int).
+        self.assertTrue(self._m(_FN([int_ref], _B("int")), _POLY_ID))
+        # A NON-canonical ref is unchanged: unresolvable, so it matches only any/var/identical-ref.
+        other = {"kind": "ref", "target": "type_" + "7" * 64}
+        self.assertFalse(self._m(_FN([_B("int")], _B("int")), _FN([other], other)))
+
 
 class TypePatternQueryTests(TestCase):
     """`type_pattern` on POST /v0/query — server-side narrowing by structured type."""
@@ -1899,6 +1920,43 @@ class TypeArtifactTests(TestCase):
         cyc = json.dumps(_FN([_B("string")], {"kind": "ref", "target": a}))
         self.assertFalse(matches_type(_FN([_B("string")], _B("bool")), cyc,
                                       load_type=aliases.get))
+
+    def test_canonical_builtin_artifacts_gate_parity(self):
+        # The pinned canonical map (typematch.CANONICAL_BUILTIN_TYPES) agrees with the validator
+        # binary for every builtin, and the canonical artifact — the bare builtin node itself —
+        # passes the verify-then-store gate.
+        from .typematch import CANONICAL_BUILTIN_TYPES
+        by_name = {v: k for k, v in CANONICAL_BUILTIN_TYPES.items()}
+        self.assertEqual(len(by_name), 14)
+        for name, pinned in by_name.items():
+            rec = self._addressed(_B(name))
+            self.assertEqual(rec["hash"], pinned, name)
+        int_rec = self._addressed(_B("int"))
+        self.assertEqual(self._publish(int_rec).status_code, 201)
+        self.assertEqual(self.client.get(f"/v0/records/{int_rec['hash']}").json(), int_rec)
+
+    def test_canonical_ref_signature_matches_builtin_pattern_unstored(self):
+        # A record whose signature spells its builtins as canonical refs is found by the plain
+        # builtin-spelled pattern WITHOUT the canonical artifacts being stored on this node —
+        # the fold is local recompute, not resolution (and the resolver-side path stays intact:
+        # an alias chain published on the node may bottom out at a canonical ref).
+        from .typematch import CANONICAL_BUILTIN_TYPES
+        by_name = {v: k for k, v in CANONICAL_BUILTIN_TYPES.items()}
+        ref_spelled = _FN([{"kind": "ref", "target": by_name["string"]}],
+                          {"kind": "ref", "target": by_name["bool"]})
+        Record.objects.create(hash="fn_" + "e" * 64, kind="function-record",
+                              schema_version="0.2.0", raw={}, terminates="always",
+                              type_str=json.dumps(ref_spelled))
+        resp = self.client.post("/v0/query", content_type="application/json",
+                                data=json.dumps({"type_pattern": _FN([_B("string")], _B("bool"))}))
+        self.assertIn("fn_" + "e" * 64, resp.json()["results"])
+        # An alias artifact published on the node that POINTS at a canonical ref resolves + folds.
+        alias = self._addressed({"kind": "ref", "target": by_name["bool"]})
+        self.assertEqual(self._publish(alias).status_code, 201)
+        resp = self.client.post("/v0/query", content_type="application/json",
+                                data=json.dumps({"type_pattern":
+                                                 _FN([_B("string")], {"kind": "ref", "target": alias["hash"]})}))
+        self.assertIn("fn_" + "e" * 64, resp.json()["results"])
 
 
 # --- equivalence claims (`equivalent`, spec/claim-expression) --------------------------------------

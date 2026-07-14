@@ -73,10 +73,10 @@
             "Set",
             "Json"
           ],
-          "description": "v0.1 built-in vocabulary. Atomic types (lowercase: bool, int, nat, float, string, bytes, unit, never), common type constructors (PascalCase: List, Maybe, Result, Map, Set), and the nominal sum type Json (added in v0.4 — spec/expressiveness.md phase 3; the subject of the parse_json/render_json builtins, nullary: it takes no type arguments). Closed enum. v0.2+ will likely fold these into 'ref' once the primitives have stable hashes in the commons."
+          "description": "v0.1 built-in vocabulary. Atomic types (lowercase: bool, int, nat, float, string, bytes, unit, never), common type constructors (PascalCase: List, Maybe, Result, Map, Set), and the nominal sum type Json (added in v0.4 — spec/expressiveness.md phase 3; the subject of the parse_json/render_json builtins, nullary: it takes no type arguments). Closed enum. The v0.2 fold into 'ref' is DEFINED: every builtin has a canonical commons type artifact whose content is the builtin node itself (hash the node with kind 'type' — e.g. {\"kind\":\"builtin\",\"name\":\"int\"} is type_52f7ad90…; `nl-validator canonical-types` lists all fourteen, spec/examples/type-builtin-<name>.json carries them), so the primitives have stable hashes in the commons and a 'ref' to a canonical artifact is INTERCHANGEABLE with the builtin spelling — consumers fold it locally by recomputing the address, no store lookup. The builtin spelling remains the compact canonical emission form (published records' content-addresses do not churn); the fold gives nominal 'ref' spellings the same semantics everywhere (typechecking, discovery filtering, typed query, the prover's float guard, the nat recognizers)."
         }
       },
-      "description": "A built-in primitive type (atomic) or built-in type constructor. Distinguished from 'ref' because v0.1 does not yet have commons entries for the standard types; v0.2+ may unify."
+      "description": "A built-in primitive type (atomic) or built-in type constructor. Kept distinct from 'ref' as the compact canonical spelling; since the v0.2 fold each builtin also has a canonical commons artifact (content = the builtin node itself), and a 'ref' targeting it means exactly the builtin."
     },
     "forall": {
       "type": "object",

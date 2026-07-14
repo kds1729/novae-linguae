@@ -636,6 +636,9 @@ fn list_output_size(params: &[String], inner: &J) -> OutputSize {
 /// polymorphic (type-variable) or otherwise-unrecognized result is `Unknown` (its size could be as large
 /// as the input — never claimed smaller).
 pub fn analyze_output_size(result_ty: &J, body: &J) -> OutputSize {
+    // A `ref` to a canonical builtin type artifact IS the builtin (the v0.2 fold) — normalize so
+    // e.g. a ref-spelled scalar result is recognized as `Const` rather than falling to `Unknown`.
+    let result_ty = &crate::fold_canonical_type_refs(result_ty);
     let Some(params) = lambda_params(body) else { return OutputSize::Unknown };
     let Some(inner) = body.get("body") else { return OutputSize::Unknown };
     if is_scalar_type(result_ty) {

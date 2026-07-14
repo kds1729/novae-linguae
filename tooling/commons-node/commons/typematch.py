@@ -22,6 +22,9 @@ Semantics:
   • Builtin names match EXACTLY: a pattern `int` does not match a declared `nat` — a caller who
     accepts either says so with `any_of` (or `head`). Structural forms (`fn`, `apply`, `tuple`,
     `record`, `sum`, `ref`) match structurally: same shape, same arity/fields/tags, subtrees match.
+  • A `ref` to a CANONICAL builtin type artifact (the builtin node's own `type_…` hash — the v0.2
+    builtin→ref fold) is folded to the builtin locally, on either side, with no resolution and no
+    budget spend: the two spellings of e.g. `int` are fully interchangeable.
   • Only records with a STRUCTURED type participate: a v0.1 string-typed record never matches a
     `type_pattern` (use `type_contains` for those).
 
@@ -39,6 +42,40 @@ class PatternError(ValueError):
 
 _PATTERN_KINDS = {"any", "any_of", "head", "var", "ref", "builtin", "forall", "fn", "apply",
                   "tuple", "record", "sum"}
+
+
+# The canonical type artifact for a v0.1 builtin is the builtin node ITSELF (the v0.2
+# builtin→ref fold, spec/type-expression.schema.json): `{"kind":"builtin","name":"int"}` hashed
+# with `--kind type`. The definition is deterministic, so the fold is decidable LOCALLY — no
+# store lookup, no resolver budget, and it works before the artifact has replicated to this
+# node. Pinned from `nl-validator canonical-types`; a gate-parity test recomputes each address
+# through the validator binary and asserts agreement.
+CANONICAL_BUILTIN_TYPES = {
+    "type_c2b26ad539c1f12d0f17bc4aef7b1acd78cd92d5153156396e56a79f5ebc227e": "bool",
+    "type_52f7ad9092dd7d22b8da25c5e95b90b69ddf4512cd636706ee9ca665b4ff54cb": "int",
+    "type_15c7d4c5a485264af846575e3ee49640ecfd869c8f8f9fa7fe1d29d929e514a9": "nat",
+    "type_bbc5e0eb00a35af4cee3c75adb9914b54409f1da0d81a82164cdb7b85c0e029f": "float",
+    "type_7a6904dd65bf7afe944e3f0dca3fca97c342d1dd7fd60b0ba05942108b5a0788": "string",
+    "type_d51a205596f7568b0049a51aa47cab992687747ee32edcb20e8e1f5ec1a1c7b7": "bytes",
+    "type_f7e0f0599d01875388207ae16373202a57a479574222ef5d81e370b956776615": "unit",
+    "type_7b425dc8490da14089a4a793f9c9cefb68132427910d1e1fb0be08fa7ba06638": "never",
+    "type_eaf34cd92a804d5d4896fb9472994105d6d94a67a2a515f58426d2491206f674": "List",
+    "type_2c5d96a37e8da5b6780292d19dbe3e0c0e980f52865cf845b15c606d53d29488": "Maybe",
+    "type_6f708109b86adb9d8d85382065e536d3ba344452423bb5cbcab3cb1229c36d8d": "Result",
+    "type_3b3b8b1f53949db41093ee9b1c0f4dcbc1f3a1f42709c74696003b12852bdb31": "Map",
+    "type_f3eb4818dadd6007076c8e67ce802da51d9fce4b7c13f61b3ab4b3b8d85a2d41": "Set",
+    "type_abc8af97d1ba996b2513e016b2142c8068dae7e026f671eb8f7661cb2c920ec2": "Json",
+}
+
+
+def _fold_canonical(node):
+    """A `ref` to a canonical builtin type artifact IS the builtin — fold it (one node, not
+    recursive: subtrees fold when matching reaches them). Everything else passes through."""
+    if isinstance(node, dict) and node.get("kind") == "ref":
+        name = CANONICAL_BUILTIN_TYPES.get(node.get("target", ""))
+        if name:
+            return {"kind": "builtin", "name": name}
+    return node
 
 
 def validate_pattern(p, path="type_pattern"):
@@ -121,11 +158,13 @@ def _strip_forall(t):
 
 
 def _head_name(t):
-    """The head builtin name of a record-side type, if it has one."""
+    """The head builtin name of a record-side type, if it has one. A canonical-ref ctor folds to
+    its builtin first (the fold happens at `_match` entry for the node itself, but an `apply`'s
+    ctor is inspected here directly)."""
     if t.get("kind") == "builtin":
         return t.get("name")
     if t.get("kind") == "apply":
-        ctor = t.get("ctor", {})
+        ctor = _fold_canonical(t.get("ctor", {}))
         if isinstance(ctor, dict) and ctor.get("kind") == "builtin":
             return ctor.get("name")
     return None
@@ -135,6 +174,7 @@ def _compat(p, q):
     """Could patterns `p` and `q` admit a common type? Used when the same record variable is bound
     from two occurrences. Approximate, and deliberately errs PERMISSIVE on shapes it cannot decide
     (a filter must not over-reject)."""
+    p, q = _fold_canonical(p), _fold_canonical(q)
     for a, b in ((p, q), (q, p)):
         if a.get("kind") == "any" or a.get("kind") == "var":
             return True
@@ -198,7 +238,7 @@ def _deref(node, res):
     """Follow a CHAIN of `ref` nodes (and strip foralls) until a structural node, a variable, or
     an unresolvable ref remains. The chain's own targets form the cycle guard (a ref chain that
     revisits a target can never bottom out)."""
-    node = _strip_forall(node)
+    node = _fold_canonical(_strip_forall(node))
     chain = set()
     while isinstance(node, dict) and node.get("kind") == "ref" and res is not None:
         target = node.get("target", "")
@@ -208,7 +248,9 @@ def _deref(node, res):
         if resolved is None:
             return node  # absent on this node, or the global budget is spent
         chain.add(target)
-        node = _strip_forall(resolved)
+        # A published alias chain may bottom out at a canonical builtin ref — fold it locally
+        # (the canonical artifact needn't be stored here for the chain to resolve).
+        node = _fold_canonical(_strip_forall(resolved))
     return node
 
 
@@ -218,8 +260,10 @@ def _match(p, t, psub, rsub, res=None):
     Mutates the substitutions on success; `any_of` branches on copies. `res` (a [`_Resolver`] or
     None) lets `ref` nodes on EITHER side match through their published definitions; an
     unresolvable ref matches only `any`, a pattern variable, or an identical ref."""
-    p = _strip_forall(p)
-    t = _strip_forall(t)
+    # Canonical builtin refs fold to their builtins BEFORE any other rule (the v0.2 builtin↔ref
+    # interchange): the two spellings match identically, resolver or no resolver.
+    p = _fold_canonical(_strip_forall(p))
+    t = _fold_canonical(_strip_forall(t))
     if not isinstance(p, dict) or not isinstance(t, dict):
         return False
     pk = p.get("kind")

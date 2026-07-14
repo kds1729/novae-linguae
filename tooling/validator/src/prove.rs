@@ -775,18 +775,24 @@ pub fn prove_property(prop_expr: &J, body: Option<&J>, solver: &str) -> (ProofOu
 /// hold the record (`prove`, `check-refinement`, `cluster`) check this and report
 /// UNSUPPORTED / UNVERIFIABLE / a singleton class instead — honest, never mis-proved.
 pub fn type_mentions_float(ty: &J) -> bool {
-    match ty {
-        J::Object(map) => {
-            if map.get("kind").and_then(|k| k.as_str()) == Some("builtin")
-                && map.get("name").and_then(|n| n.as_str()) == Some("float")
-            {
-                return true;
+    // Fold refs-to-canonical-builtin-artifacts first (the v0.2 builtin↔ref interchange): a float
+    // spelled as `{"kind":"ref","target":type_<canonical float>}` must trip the guard exactly like
+    // the builtin spelling — otherwise a ref-typed record would be mis-proved over Int theory.
+    fn walk(ty: &J) -> bool {
+        match ty {
+            J::Object(map) => {
+                if map.get("kind").and_then(|k| k.as_str()) == Some("builtin")
+                    && map.get("name").and_then(|n| n.as_str()) == Some("float")
+                {
+                    return true;
+                }
+                map.values().any(walk)
             }
-            map.values().any(type_mentions_float)
+            J::Array(items) => items.iter().any(walk),
+            _ => false,
         }
-        J::Array(items) => items.iter().any(type_mentions_float),
-        _ => false,
     }
+    walk(&crate::fold_canonical_type_refs(ty))
 }
 
 #[cfg(test)]

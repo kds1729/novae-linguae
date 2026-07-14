@@ -392,10 +392,9 @@ pub fn nat_param_positions(record: &J) -> std::collections::BTreeSet<usize> {
         .map(|ps| {
             ps.iter()
                 .enumerate()
-                .filter(|(_, p)| {
-                    p.get("kind").and_then(|k| k.as_str()) == Some("builtin")
-                        && p.get("name").and_then(|n| n.as_str()) == Some("nat")
-                })
+                // `nat` spelled directly or as a `ref` to the canonical `nat` type artifact
+                // (the v0.2 builtin↔ref interchange): both are bounded below by type.
+                .filter(|(_, p)| crate::builtin_type_name(p) == Some("nat"))
                 .map(|(i, _)| i)
                 .collect()
         })
