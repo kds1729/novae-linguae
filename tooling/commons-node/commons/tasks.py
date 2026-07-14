@@ -255,13 +255,17 @@ def witness_anchors(base):
 
 @shared_task
 def replicate_all():
-    """Run record + blob replication + Merkle anti-entropy + anchor witnessing for every
+    """Run anchor witnessing + record + blob replication + Merkle anti-entropy for every
     configured peer (the beat-scheduled entry point). Reconciliation runs AFTER the cursor tail:
     in the common case the tail already converged and reconcile is a single equal-digest request.
-    Witnessing runs LAST, after reconcile has converged the sets, so a moved root is compared
-    against the freshest local corpus and upgrades to "root-matched" as early as possible."""
-    return [{"records": replicate_peer(p), "blobs": replicate_blobs(p), "reconcile": reconcile_peer(p),
-             "witness": witness_anchors(p)}
+    Witnessing runs FIRST — it is a single request, and running it after replication starves it
+    behind the peer's per-IP rate limit for as long as a bulk sync is in flight (measured on the
+    first production witness: every pass burned the budget on record fetches and the anchors
+    fetch drew 429 after 429). Witnessing early at worst countersigns "unverified" against a
+    corpus one pass staler — and the append-upgrade semantics exist precisely so a later pass
+    adds the "root-matched" statement once the sets converge."""
+    return [{"witness": witness_anchors(p), "records": replicate_peer(p), "blobs": replicate_blobs(p),
+             "reconcile": reconcile_peer(p)}
             for p in settings.COMMONS_PEERS]
 
 

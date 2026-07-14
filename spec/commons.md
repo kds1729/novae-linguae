@@ -409,8 +409,9 @@ bundle, compares, and checks the Ed25519 signature (the bundle-manifest construc
 ### `GET /v0/witnesses?limit={n}[&origin={url}]` — countersigned peer anchors
 
 The federated half of anchoring: **other nodes are the external append-only log.** A node with
-peers configured fetches each peer's `/v0/anchors` (the `witness_anchors` task, after
-replication + reconciliation; `manage.py witnessanchors <peer>` is the manual form), verifies
+peers configured fetches each peer's `/v0/anchors` (the `witness_anchors` task, FIRST in each
+replication pass — one request, ordered before the bulk sync so the peer's rate limit can't
+starve it; `manage.py witnessanchors <peer>` is the manual form), verifies
 every anchor's signature — an invalid or unsigned anchor is never countersigned — and signs a
 witness statement (`nl-witness/1`) embedding the origin's full signed anchor *verbatim*, so a
 third party checks BOTH signatures and needs neither node's honesty. `agreement` states what the
