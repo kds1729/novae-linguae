@@ -114,6 +114,14 @@ impl AttestationGraph {
                         None => continue,
                     };
                     if claim_kind == Some("equivalent") {
+                        // A DOMAIN-QUALIFIED equivalence (`∀x. D(x) ⇒ a(x) = b(x)`) is not an
+                        // unconditional edge: substitution is licensed only on the domain, and
+                        // an `equivalent-to` edge would let every collapse view merge the pair
+                        // for arbitrary applications. The claim stays queryable (the node serves
+                        // it under /equivalences); it just never enters the graph.
+                        if claim.get("domain").is_some() {
+                            continue;
+                        }
                         let (Some(attester), Some(a), Some(b)) = (
                             m.get("from").and_then(|f| f.as_str()),
                             claim.get("a").and_then(|s| s.as_str()),
@@ -423,7 +431,7 @@ mod tests {
     /// A signed equivalence `assert` (claim kind `equivalent`) between two functions.
     fn equiv_assert(asserter_seed: &str, a: &str, b: &str) -> J {
         crate::respond::build_equivalence_assert(
-            a, b, "normal-form", &did(asserter_seed), Some("2026-07-13T00:00:00Z"),
+            a, b, "normal-form", None, &did(asserter_seed), Some("2026-07-13T00:00:00Z"),
             &signing_key_from_seed(asserter_seed),
         )
         .unwrap()
@@ -439,6 +447,25 @@ mod tests {
         let e = g.equivalence_edge(&a, &b).expect("direct edge either orientation");
         assert_eq!(e.attester, did("alice"));
         assert_eq!(e.verb, "equivalent-to");
+    }
+
+    #[test]
+    fn domain_qualified_claim_never_becomes_an_edge() {
+        // `∀x. D(x) ⇒ a(x) = b(x)` licenses substitution only ON the domain — an unconditional
+        // `equivalent-to` edge would let every collapse view merge the pair for arbitrary
+        // applications. The graph must skip it entirely.
+        let (a, b) = (fn_addr('1'), fn_addr('2'));
+        let domain = serde_json::json!({ "vars": ["n"], "expr": { "kind": "app", "op": "ge", "args": [
+            { "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] } });
+        let m = crate::respond::build_equivalence_assert(
+            &a, &b, "induction", Some(&domain), &did("alice"), Some("2026-07-14T00:00:00Z"),
+            &signing_key_from_seed("alice"),
+        )
+        .unwrap();
+        let g = AttestationGraph::from_messages(&[m], None);
+        assert_eq!(g.len(), 0, "a domain-qualified claim contributes no edges");
+        assert!(g.equivalents(&a).is_empty());
+        assert!(g.equivalence_edge(&a, &b).is_none());
     }
 
     #[test]

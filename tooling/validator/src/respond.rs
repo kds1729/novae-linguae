@@ -224,8 +224,18 @@ pub fn verify_claim(assert: &J, link_map: HashMap<String, J>) -> Result<bool> {
         };
         let fa = link_map.get(a).ok_or_else(|| anyhow!("cannot resolve `{a}`'s body from the provided records/node"))?;
         let fb = link_map.get(b).ok_or_else(|| anyhow!("cannot resolve `{b}`'s body from the provided records/node"))?;
-        // z3 is the reference solver default; the normalization fast path inside needs no solver.
-        return match crate::equiv::prove_equivalent(fa, fb, "z3") {
+        // A domain-qualified claim re-proves EXACTLY what it states: equality on the stated
+        // domain (∀x. domain(x) ⇒ a(x) = b(x)), by the Int-domain induction. Full equivalence
+        // is neither assumed nor established by it.
+        let verdict = match claim.get("domain") {
+            Some(d) => match crate::equiv::parse_equiv_domain(d) {
+                Ok(dom) => crate::equiv::prove_equivalent_on(fa, fb, &dom, "z3"),
+                Err(why) => bail!("equivalence claim carries an unsupported domain: {why}"),
+            },
+            // z3 is the reference solver default; the normalization fast path needs no solver.
+            None => crate::equiv::prove_equivalent(fa, fb, "z3"),
+        };
+        return match verdict {
             crate::equiv::EquivVerdict::Equivalent(_) | crate::equiv::EquivVerdict::EquivalentByNormalization => Ok(true),
             crate::equiv::EquivVerdict::Distinct(model) => {
                 eprintln!("equivalence claim REFUTED by counterexample: {model}");
@@ -315,11 +325,20 @@ pub fn build_equivalence_assert(
     a: &str,
     b: &str,
     method: &str,
+    domain: Option<&J>,
     to: &str,
     timestamp: Option<&str>,
     signing_key: &SigningKey,
 ) -> Result<J> {
     let (x, y) = if a <= b { (a, b) } else { (b, a) };
+    // A domain-qualified claim (`∀x. domain(x) ⇒ a(x) = b(x)`) carries its domain INSIDE the
+    // signed, content-addressed claim: the hash covers it, strict schemas make old software
+    // refuse rather than misread it as full equivalence, and the attestation graph deliberately
+    // skips it (substitution is licensed only on the domain — no collapse view may merge on it).
+    let mut claim = json!({ "kind": "equivalent", "a": x, "b": y, "method": method });
+    if let Some(d) = domain {
+        claim["domain"] = d.clone();
+    }
     sign_envelope(
         json!({
             "schema_version": "0.2.0",
@@ -330,7 +349,7 @@ pub fn build_equivalence_assert(
             "constraints": null,
             "body": {
                 "subject": x,
-                "claim": { "kind": "equivalent", "a": x, "b": y, "method": method },
+                "claim": claim,
                 "evidence": null
             }
         }),
@@ -856,10 +875,10 @@ mod tests {
         let (a, b) = (format!("fn_{}", "1".repeat(64)), format!("fn_{}", "2".repeat(64)));
         let key = signing_key_from_seed("equiv-tester");
         let to = crate::did_nova_from_pubkey(&key.verifying_key());
-        let assert = build_equivalence_assert(&a, &b, "normal-form", &to, None, &key).unwrap();
+        let assert = build_equivalence_assert(&a, &b, "normal-form", None, &to, None, &key).unwrap();
         assert!(verify_signature(&assert).is_ok());
         // Canonical pair order: a < b regardless of argument order.
-        let flipped = build_equivalence_assert(&b, &a, "normal-form", &to, None, &key).unwrap();
+        let flipped = build_equivalence_assert(&b, &a, "normal-form", None, &to, None, &key).unwrap();
         assert_eq!(assert["hash"], flipped["hash"], "pair order canonicalizes, duplicates dedupe by address");
 
         let mut link = HashMap::new();
@@ -881,7 +900,7 @@ mod tests {
         let (a, b) = (format!("fn_{}", "1".repeat(64)), format!("fn_{}", "2".repeat(64)));
         let key = signing_key_from_seed("equiv-liar");
         let to = crate::did_nova_from_pubkey(&key.verifying_key());
-        let assert = build_equivalence_assert(&a, &b, "normal-form", &to, None, &key).unwrap();
+        let assert = build_equivalence_assert(&a, &b, "normal-form", None, &to, None, &key).unwrap();
         let mut link = HashMap::new();
         link.insert(a.clone(), lam("n", addv(var("n"), var("n"))));
         link.insert(
@@ -889,6 +908,56 @@ mod tests {
             lam("n", addv(var("n"), json!({ "kind": "lit", "value": { "kind": "int", "value": 1 } }))),
         );
         assert!(!verify_claim(&assert, link).unwrap(), "a false equivalence claim refutes");
+    }
+
+    #[test]
+    fn domain_qualified_claim_verifies_exactly_the_qualified_statement() {
+        if !has_solver() {
+            return;
+        }
+        // factorial guarded `eq(n,0)` vs guarded `le(n,0)`: NOT equal over int (n = -1 splits
+        // them), EQUAL on n ≥ 0. The domain-qualified claim round-trips: built with the domain,
+        // verify_claim re-proves the qualified statement — while the same pair's UNQUALIFIED
+        // claim must never come back true.
+        let int_rec = |guard_op: &str| {
+            json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": {
+                "kind": "case",
+                "scrutinee": { "kind": "app", "op": guard_op, "args": [
+                    { "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+                "arms": [
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                      "body": { "kind": "lit", "value": { "kind": "int", "value": 1 } } },
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                      "body": { "kind": "app", "op": "mul", "args": [
+                          { "kind": "var", "name": "n" },
+                          { "kind": "app", "op": "apply", "args": [
+                              { "kind": "var", "name": "self" },
+                              { "kind": "app", "op": "sub", "args": [
+                                  { "kind": "var", "name": "n" },
+                                  { "kind": "lit", "value": { "kind": "int", "value": 1 } }] }] }] } }] } })
+        };
+        let domain = json!({ "vars": ["n"], "expr": { "kind": "app", "op": "ge", "args": [
+            { "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] } });
+        let (a, b) = (format!("fn_{}", "3".repeat(64)), format!("fn_{}", "4".repeat(64)));
+        let key = signing_key_from_seed("domain-equiv-tester");
+        let to = crate::did_nova_from_pubkey(&key.verifying_key());
+        let mut link = HashMap::new();
+        link.insert(a.clone(), int_rec("eq"));
+        link.insert(b.clone(), int_rec("le"));
+
+        let qualified = build_equivalence_assert(&a, &b, "induction", Some(&domain), &to, None, &key).unwrap();
+        assert_eq!(
+            qualified.pointer("/body/claim/domain/vars/0").and_then(|v| v.as_str()),
+            Some("n"),
+            "the domain rides inside the signed claim"
+        );
+        assert!(verify_claim(&qualified, link.clone()).unwrap(), "the qualified statement re-proves");
+
+        // The unqualified claim over the same pair: must NOT verify true (undecided is
+        // acceptable — the pair is genuinely distinct at n = -1 — but never a confirmation).
+        let unqualified = build_equivalence_assert(&a, &b, "induction", None, &to, None, &key).unwrap();
+        assert!(!matches!(verify_claim(&unqualified, link), Ok(true)),
+            "the full-domain claim must never confirm");
     }
 
     /// A minimal signed-ish request (the responder only reads `from`/`hash`/`body`, not the sig).

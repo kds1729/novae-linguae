@@ -693,6 +693,12 @@ enum Commands {
         /// Timestamp (RFC 3339 UTC) stamped into the assert.
         #[arg(long)]
         timestamp: Option<String>,
+        /// Path to a domain qualifier ({"vars": ["n"], "expr": <ge/gt predicate AST>}): the claim
+        /// becomes `∀x. domain(x) ⇒ f(x) = g(x)` — equality ON the stated domain only, proved by
+        /// the Int-domain induction. The sound form for guarded numeric recursions whose
+        /// full-domain claim would be false (behavior below the guard differs/diverges).
+        #[arg(long)]
+        domain: Option<PathBuf>,
         /// Write the signed assert to this file (else stdout).
         #[arg(long)]
         out: Option<PathBuf>,
@@ -981,8 +987,8 @@ fn main() -> ExitCode {
                 Err(e) => (Err(e), false),
             }
         }
-        Commands::AssertEquivalent { f, g, records, node, seed, solver, timestamp, out, publish } => {
-            (cmd_assert_equivalent(&f, &g, records.as_ref(), node.as_deref(), &seed, &solver, timestamp.as_deref(), out.as_deref(), publish), false)
+        Commands::AssertEquivalent { f, g, records, node, seed, solver, timestamp, domain, out, publish } => {
+            (cmd_assert_equivalent(&f, &g, records.as_ref(), node.as_deref(), &seed, &solver, timestamp.as_deref(), domain.as_ref(), out.as_deref(), publish), false)
         }
         Commands::VerifyDelegation { capability, grantee, roots, delegations, at } => {
             (cmd_verify_delegation(&capability, &grantee, &roots, &delegations, at.as_deref()), false)
@@ -1922,6 +1928,7 @@ fn cmd_verify_claim(assert: &str, records: Option<&PathBuf>, node: Option<&str>)
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn cmd_assert_equivalent(
     f: &str,
     g: &str,
@@ -1930,6 +1937,7 @@ fn cmd_assert_equivalent(
     seed: &str,
     solver: &str,
     timestamp: Option<&str>,
+    domain: Option<&PathBuf>,
     out: Option<&Path>,
     publish: bool,
 ) -> Result<()> {
@@ -1951,7 +1959,17 @@ fn cmd_assert_equivalent(
     let bg = link_map.get(g).ok_or_else(|| anyhow::anyhow!("cannot resolve `{g}`'s body"))?;
     // Prove FIRST; only a closed proof gets signed. The claim is objective either way — any
     // receiver re-proves it via `verify-claim` — but an agent must not sign what it hasn't checked.
-    let method = match nl_validator::prove_equivalent(bf, bg, solver) {
+    // With `--domain`, prove — and sign — exactly the domain-qualified statement.
+    let domain_json = domain.map(|p| nl_validator::read_json(p)).transpose()?;
+    let verdict = match &domain_json {
+        Some(d) => {
+            let dom = nl_validator::parse_equiv_domain(d)
+                .map_err(|why| anyhow::anyhow!("unsupported --domain: {why}"))?;
+            nl_validator::prove_equivalent_on(bf, bg, &dom, solver)
+        }
+        None => nl_validator::prove_equivalent(bf, bg, solver),
+    };
+    let method = match verdict {
         nl_validator::EquivVerdict::EquivalentByNormalization => "normal-form",
         nl_validator::EquivVerdict::Equivalent(lemmas) => {
             if !lemmas.is_empty() {
@@ -1968,9 +1986,12 @@ fn cmd_assert_equivalent(
     };
     let key = nl_validator::signing_key_from_seed(seed);
     let to = nl_validator::did_nova_from_pubkey(&key.verifying_key());
-    let assert = nl_validator::build_equivalence_assert(f, g, method, &to, timestamp, &key)?;
+    let assert = nl_validator::build_equivalence_assert(f, g, method, domain_json.as_ref(), &to, timestamp, &key)?;
     let addr = assert.get("hash").and_then(|h| h.as_str()).unwrap_or("").to_string();
-    println!("EQUIVALENT proved by {method}; signed assert {addr}");
+    match &domain_json {
+        Some(_) => println!("EQUIVALENT ON THE STATED DOMAIN proved by {method}; signed assert {addr}"),
+        None => println!("EQUIVALENT proved by {method}; signed assert {addr}"),
+    }
     let pretty = serde_json::to_string_pretty(&assert)?;
     match out {
         Some(p) => {

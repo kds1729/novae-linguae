@@ -1914,12 +1914,14 @@ class EquivalenceClaimTests(TestCase):
     def setUp(self):
         self.client = Client()
 
-    def _signed_equiv_assert(self, a, b, seed="equivalence-asserter"):
+    def _signed_equiv_assert(self, a, b, seed="equivalence-asserter", domain=None):
+        claim = {"kind": "equivalent", "a": a, "b": b, "method": "normal-form"}
+        if domain is not None:
+            claim["domain"] = domain
         envelope = {
             "schema_version": "0.2.0", "kind": "assert", "to": None, "in_reply_to": None,
             "timestamp": "2026-07-13T00:00:00Z", "constraints": None,
-            "body": {"subject": a, "claim": {"kind": "equivalent", "a": a, "b": b,
-                                             "method": "normal-form"}, "evidence": None},
+            "body": {"subject": a, "claim": claim, "evidence": None},
         }
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump(envelope, f)
@@ -1979,6 +1981,33 @@ class EquivalenceClaimTests(TestCase):
                                   content_type="application/json").json()
         self.assertEqual(merged["results"], [self.FN_A, self.FN_C])
         self.assertEqual(merged["collapsed"], {self.FN_A: [self.FN_B]})
+
+    def test_domain_qualified_claim_passes_the_gate_but_never_collapses(self):
+        # A DOMAIN-QUALIFIED equivalence (`∀x. domain(x) ⇒ a(x) = b(x)`, spec/claim-expression)
+        # licenses substitution only ON the domain: the gate admits it, /equivalences serves it,
+        # and the collapse view must NEVER merge on it — substituting one address for another in
+        # arbitrary applications is exactly what the qualifier withholds.
+        domain = {"vars": ["n"], "expr": {"kind": "app", "op": "ge", "args": [
+            {"kind": "var", "name": "n"}, {"kind": "lit", "value": {"kind": "int", "value": 0}}]}}
+        for fill in ("1", "2"):
+            Record.objects.create(hash="fn_" + fill * 64, kind="function-record",
+                                  schema_version="0.2.0", raw={}, terminates="always",
+                                  intent_tags=["domain-demo"])
+        msg = self._signed_equiv_assert(self.FN_A, self.FN_B, domain=domain)
+        resp = self.client.post("/v0/records", data=json.dumps(msg),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+
+        served = self.client.get(f"/v0/records/{self.FN_A}/equivalences").json()
+        self.assertEqual(served["count"], 1, "the claim stays queryable")
+        self.assertEqual(served["equivalences"][0]["body"]["claim"]["domain"], domain)
+
+        flt = json.dumps({"intent_tags": {"any": ["domain-demo"]}})
+        merged = self.client.post("/v0/query?collapse=equivalent", data=flt,
+                                  content_type="application/json").json()
+        self.assertEqual(sorted(merged["results"]), [self.FN_A, self.FN_B],
+                         "both candidates survive — no merge on a domain-qualified claim")
+        self.assertNotIn("collapsed", merged)
 
 
 # --- body storage tiering (commons.md open question 4) ---------------------------------------------

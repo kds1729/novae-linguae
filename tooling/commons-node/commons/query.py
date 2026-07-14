@@ -239,6 +239,12 @@ def equivalence_find():
                                   raw__body__claim__kind="equivalent").order_by("id"))[:_DB_SCAN_CAP]
     for r in rows:
         claim = (r.raw.get("body") or {}).get("claim", {})
+        # A DOMAIN-QUALIFIED claim (`∀x. domain(x) ⇒ a(x) = b(x)`) is not an unconditional
+        # equivalence: substitution is licensed only on its domain, so the collapse view — which
+        # substitutes one address for another in ARBITRARY applications — must never merge on it.
+        # It stays served under /equivalences; it just never enters this union-find.
+        if claim.get("domain") is not None:
+            continue
         a, b = claim.get("a"), claim.get("b")
         if isinstance(a, str) and isinstance(b, str):
             ra, rb = find(a), find(b)

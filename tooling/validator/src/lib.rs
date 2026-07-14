@@ -44,7 +44,7 @@ pub mod normalize;
 pub use normalize::{normal_equivalent, normalize};
 
 pub mod equiv;
-pub use equiv::{prove_equivalent, EquivVerdict};
+pub use equiv::{parse_equiv_domain, prove_equivalent, prove_equivalent_on, EquivDomain, EquivVerdict};
 
 pub mod compose;
 pub use compose::{compose, CompositionMetadata};

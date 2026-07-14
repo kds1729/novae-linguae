@@ -136,7 +136,7 @@ enum FnModel {
 
 // --- AST helpers (shared shapes with prove.rs, kept local to avoid cross-module coupling) ----------
 
-fn head_op(node: &J) -> Option<String> {
+pub(crate) fn head_op(node: &J) -> Option<String> {
     if let Some(op) = node.get("op").and_then(|o| o.as_str()) {
         return Some(op.to_string());
     }
@@ -146,7 +146,7 @@ fn head_op(node: &J) -> Option<String> {
     None
 }
 
-fn args_of(node: &J) -> Vec<&J> {
+pub(crate) fn args_of(node: &J) -> Vec<&J> {
     node.get("args").and_then(|a| a.as_array()).map(|a| a.iter().collect()).unwrap_or_default()
 }
 
@@ -1807,6 +1807,243 @@ fn self_homomorphism_conjectures() -> Vec<(&'static str, J)> {
             (if op == "add" { "self_append_add" } else { "self_append_append" }, stmt)
         })
         .collect()
+}
+
+// --- Int-domain equivalence (domain-qualified claims, spec/claim-expression) -----------------------
+
+/// Whether `arg` is `sub(<param>, <int literal ≥ 1>)` — the guarded constant numeric descent.
+fn is_numeric_descent(arg: &J, param: &str) -> bool {
+    let J::Object(m) = arg else { return false };
+    let head = m
+        .get("op")
+        .and_then(|o| o.as_str())
+        .or_else(|| m.get("fn").and_then(|f| f.get("name")).and_then(|n| n.as_str()));
+    if head != Some("sub") {
+        return false;
+    }
+    let Some(args) = m.get("args").and_then(|a| a.as_array()) else { return false };
+    let var_ok = args.first().and_then(var_name) == Some(param);
+    let k_ok = args
+        .get(1)
+        .filter(|k| k.get("kind").and_then(|x| x.as_str()) == Some("lit"))
+        .and_then(|k| k.pointer("/value/value"))
+        .and_then(|v| v.as_i64())
+        .is_some_and(|k| k >= 1);
+    var_ok && k_ok
+}
+
+/// Every `self`-call in `node` must descend numerically on `param` (`self(sub(param, k≥1))`).
+/// The Int-domain step proof is sound regardless (an unpinned model just fails to close), but
+/// constant descent is what guarantees the recursion's SMT equations pin real values across the
+/// checked points, so a caller may treat evaluated disagreement as a genuine counterexample and
+/// the base obligation as meaningful.
+fn all_self_calls_descend(node: &J, param: &str, self_name: &str, ok: &mut bool) {
+    match node {
+        J::Object(m) => {
+            if let Some(arg) = self_call_arg(m, self_name) {
+                if !is_numeric_descent(arg, param) {
+                    *ok = false;
+                }
+            }
+            m.values().for_each(|v| all_self_calls_descend(v, param, self_name, ok));
+        }
+        J::Array(items) => items.iter().for_each(|v| all_self_calls_descend(v, param, self_name, ok)),
+        _ => {}
+    }
+}
+
+/// A unary Int function lowered for the Int-domain step proof. Recursive bodies deliberately do
+/// NOT use `define-fun-rec`: z3's recfun engine unfolds at constructor patterns but not at
+/// arithmetic terms like `(+ n 1)` (measured — the factorial step is `unknown` under recfun and
+/// `unsat` under this encoding). Instead the function is an UNINTERPRETED symbol plus an
+/// explicitly instantiated one-step unfolding axiom at exactly the point the step needs.
+struct IntDef {
+    /// `(define-fun …)` for a non-recursive body; `(declare-fun name (Int) <ret>)` for a recursive one.
+    decl: String,
+    /// For a recursive body: the one-step unfolding axiom instantiated at `(+ n 1)`.
+    unfold_at_np1: Option<String>,
+    ret: Sort3,
+}
+
+/// Lower a UNARY lambda over an Int parameter (see [`IntDef`]). Refuses a parameter the body
+/// pins to a non-Int sort and any list-sorted result (outside the Int-domain fragment).
+fn lower_int_def(body: &J, smt_name: &str, recursive: bool) -> Result<IntDef> {
+    if body.get("kind").and_then(|k| k.as_str()) != Some("lambda") {
+        bail!("body is not a lambda");
+    }
+    let params = body.get("params").and_then(|p| p.as_array()).ok_or_else(|| anyhow!("lambda has no params"))?;
+    if params.len() != 1 {
+        bail!("the Int-domain induction covers unary functions (got {} parameters)", params.len());
+    }
+    let p = params[0].get("name").and_then(|n| n.as_str()).ok_or_else(|| anyhow!("param has no name"))?;
+    let inner = body.get("body").ok_or_else(|| anyhow!("lambda has no body"))?;
+    let pnames = vec![p.to_string()];
+    let mut psorts: BTreeMap<String, Option<Sort3>> = pnames.iter().map(|n| (n.clone(), None)).collect();
+    walk_sorts(inner, &pnames, &mut psorts)?;
+    if let Some(s) = psorts.get(p).copied().flatten() {
+        if s != Sort3::Int {
+            bail!("parameter `{p}` is used at sort {s:?}, not Int — outside the Int-domain fragment");
+        }
+    }
+    let ret = infer_result_sort(inner);
+    if ret == Sort3::Lst {
+        bail!("list-returning function — outside the Int-domain fragment");
+    }
+    let kw = sort_kw(ret)?;
+    if !recursive {
+        let lowered = lower(inner, &BTreeMap::new())?;
+        return Ok(IntDef { decl: format!("(define-fun {smt_name} (({p} Int)) {kw} {lowered})\n"), unfold_at_np1: None, ret });
+    }
+    let mut env = BTreeMap::new();
+    env.insert(p.to_string(), "(+ n 1)".to_string());
+    let unfolded = lower(inner, &env)?;
+    Ok(IntDef {
+        decl: format!("(declare-fun {smt_name} (Int) {kw})\n"),
+        unfold_at_np1: Some(format!("(assert (= ({smt_name} (+ n 1)) {unfolded}))\n")),
+        ret,
+    })
+}
+
+/// An SMT Int literal (negatives as `(- n)`).
+fn smt_int(n: i64) -> String {
+    if n < 0 { format!("(- {})", -n) } else { n.to_string() }
+}
+
+/// Rewrite op-form applications (`{kind: "app", op: X, args}` — the property/equiv dialect) to
+/// the fn-form the interpreter evaluates (`{kind: "app", fn: {var X}, args}`). Purely mechanical;
+/// fn-form input passes through untouched, so both dialects evaluate.
+fn op_to_fn_form(node: &J) -> J {
+    match node {
+        J::Object(m) => {
+            let mut out: serde_json::Map<String, J> =
+                m.iter().map(|(k, v)| (k.clone(), op_to_fn_form(v))).collect();
+            if out.get("kind").and_then(|k| k.as_str()) == Some("app") {
+                if let Some(op) = out.get("op").and_then(|o| o.as_str()).map(String::from) {
+                    out.remove("op");
+                    out.insert("fn".into(), json!({ "kind": "var", "name": op }));
+                }
+            }
+            J::Object(out)
+        }
+        J::Array(items) => J::Array(items.iter().map(op_to_fn_form).collect()),
+        other => other.clone(),
+    }
+}
+
+/// Evaluate a unary body at a concrete Int with the REAL interpreter, under a watchdog: the
+/// evaluation runs on its own thread and is abandoned past the deadline (a body may genuinely
+/// diverge at a point its guard misses — the same overrun stance the solver runner takes).
+/// `Some(value)` is ground truth; `None` means error or timeout — undecidable at this point.
+fn eval_int_point(body: &J, n: i64) -> Option<J> {
+    let body = op_to_fn_form(body);
+    let arg = json!({ "kind": "int", "value": n });
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(crate::interp::eval_body(&body, &[arg]).ok());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(3)).ok().flatten()
+}
+
+/// Prove `∀n ≥ c. f(n) = g(n)` — the domain-qualified equivalence over Int (ascending induction).
+///
+/// Verdict discipline, in order:
+/// - **Refutation is by EVALUATION**: the first few domain points run through the real
+///   interpreter; a disagreement of two produced VALUES is a genuine counterexample (no SMT
+///   model games — an unpinned `define-fun-rec` model can never masquerade as a refutation).
+/// - **The base obligation** `f(c) = g(c)` is likewise established by evaluation.
+/// - **The step** (`n ≥ c ∧ f(n) = g(n) ⇒ f(n+1) = g(n+1)`) is discharged by the solver over the
+///   two definitions. A non-closing step is UNKNOWN, never a refutation.
+///
+/// Below the domain nothing is claimed or checked — deliberately: the full-domain claim for such
+/// a pair may be FALSE (factorial guarded `eq(n,0)` diverges at −1 where a `le(n,0)` twin
+/// answers) while the domain-qualified one is provable. Recursive bodies must descend by a
+/// positive constant (checked structurally); the sweep's evaluation timeouts make even a
+/// mis-guarded diverging point undecidable rather than wrong.
+pub fn prove_equiv_on_int_ge(body_f: &J, body_g: &J, c: i64, solver: &str) -> InductionOutcome {
+    use crate::prove::{run_smt, SatAnswer};
+
+    let mut recursive = [false, false];
+    for (i, (body, side)) in [(body_f, "left"), (body_g, "right")].into_iter().enumerate() {
+        let Some(inner) = body.get("body") else {
+            return InductionOutcome::Unsupported(format!("{side} body is not a lambda"));
+        };
+        recursive[i] = crate::equiv::references_self(inner);
+        if recursive[i] {
+            let p = body.pointer("/params/0/name").and_then(|n| n.as_str()).unwrap_or("");
+            let mut ok = true;
+            all_self_calls_descend(inner, p, "self", &mut ok);
+            if !ok {
+                return InductionOutcome::Unsupported(format!(
+                    "{side} body's recursion does not descend by a positive constant on its parameter (out of the Int-domain fragment)"
+                ));
+            }
+        }
+        // The Int fragment: list machinery stays out (its prelude/datatype is deliberately absent).
+        let mut used = BTreeSet::new();
+        collect_ops(inner, &mut used);
+        if !used.is_empty() {
+            return InductionOutcome::Unsupported(format!(
+                "{side} body uses list operations ({}) — outside the Int-domain fragment",
+                used.into_iter().collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
+
+    // Refutation sweep + the base obligation, by evaluation (ground truth).
+    let mut base_established = false;
+    for j in c..c + 6 {
+        match (eval_int_point(body_f, j), eval_int_point(body_g, j)) {
+            (Some(va), Some(vb)) if va != vb => {
+                return InductionOutcome::Failed(format!(
+                    "the functions differ inside the domain, at n = {j}: {va} vs {vb}"
+                ));
+            }
+            (Some(_), Some(_)) => {
+                if j == c {
+                    base_established = true;
+                }
+            }
+            // Undecidable point (error/divergence): not a counterexample, but the base must decide.
+            _ if j == c => {
+                return InductionOutcome::Unsupported(format!(
+                    "the base point n = {c} could not be evaluated on both sides — the induction has no established base"
+                ));
+            }
+            _ => {}
+        }
+    }
+    if !base_established {
+        return InductionOutcome::Unsupported("no established base".into());
+    }
+
+    let def_f = match lower_int_def(body_f, "self", recursive[0]) {
+        Ok(x) => x,
+        Err(e) => return InductionOutcome::Unsupported(format!("{e:#}")),
+    };
+    let g2 = rename_self(body_g, "self__g");
+    let def_g = match lower_int_def(&g2, "self__g", recursive[1]) {
+        Ok(x) => x,
+        Err(e) => return InductionOutcome::Unsupported(format!("{e:#}")),
+    };
+    if def_f.ret != def_g.ret {
+        return InductionOutcome::Unsupported("the two bodies' result sorts differ".into());
+    }
+
+    let script = format!(
+        "{}{}(declare-const n Int)\n(assert (>= n {}))\n{}{}; IH at n, goal at n + 1\n(assert (= (self n) (self__g n)))\n(assert (not (= (self (+ n 1)) (self__g (+ n 1)))))\n(check-sat)\n",
+        def_f.decl,
+        def_g.decl,
+        smt_int(c),
+        def_f.unfold_at_np1.as_deref().unwrap_or(""),
+        def_g.unfold_at_np1.as_deref().unwrap_or("")
+    );
+    match run_smt(&script, solver) {
+        Ok(SatAnswer::Unsat) => InductionOutcome::Proved,
+        // A satisfiable step is NOT a refutation: the model may live at unpinned points.
+        Ok(SatAnswer::Sat(_)) | Ok(SatAnswer::Unknown) => InductionOutcome::Unknown,
+        Ok(SatAnswer::NoSolver) => InductionOutcome::NoSolver,
+        Err(e) => InductionOutcome::Unsupported(format!("solver error (step): {e:#}")),
+    }
 }
 
 #[cfg(test)]

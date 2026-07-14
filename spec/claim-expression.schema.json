@@ -153,10 +153,28 @@
         },
         "method": {
           "enum": ["normal-form", "induction"],
-          "description": "How the signer established the equivalence: `normal-form` = equal canonical normal forms (α-renaming + AC ordering + constant folding, solver-free); `induction` = the SMT/structural-induction equivalence prover. Advisory — a verifier recomputes regardless."
+          "description": "How the signer established the equivalence: `normal-form` = equal canonical normal forms (α-renaming + AC ordering + constant folding, solver-free); `induction` = the SMT/structural-induction equivalence prover (for a domain-qualified claim: the Int-domain induction). Advisory — a verifier recomputes regardless."
+        },
+        "domain": {
+          "type": "object",
+          "required": ["vars", "expr"],
+          "additionalProperties": false,
+          "properties": {
+            "vars": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "Positional parameter names the domain predicate ranges over — vars[i] binds both functions' i-th parameter."
+            },
+            "expr": {
+              "type": "object",
+              "description": "Boolean predicate-expression AST over `vars` (predicate-expression.schema.json; checked structurally only here). The v1 PROVABLE grammar is `ge(vars[0], <int literal>)` / `gt(vars[0], <int literal>)` — a richer domain validates but is UNSUPPORTED at proof time, never misread."
+            }
+          },
+          "description": "OPTIONAL domain qualifier: the claim becomes `∀x. domain(x) ⇒ a(x) = b(x)` — equality ON the stated domain only. The sound form for guarded numeric recursions, whose full-domain claim may be FALSE (behavior below the guard differs or diverges: factorial guarded `eq(n,0)` diverges at −1 where a `le(n,0)` twin answers — distinct over int, equal on n ≥ 0). A domain-qualified claim licenses substitution ONLY for arguments satisfying the domain: the attestation graph does NOT ingest it as an `equivalent-to` edge and no collapse view merges on it — it stays a queryable, independently re-provable statement. The domain lives inside the signed, content-addressed claim, and strict schemas make older software refuse such a claim rather than misread it as full equivalence."
         }
       },
-      "description": "An extensional-equivalence claim: `∀x. a(x) = b(x)` over the unbounded domain. OBJECTIVE and re-checkable, like a certification: `verify-claim` resolves both bodies and re-proves (equal normal forms, else the equivalence prover), so a receiver never has to take the signer's word. The attestation graph ingests a signed, verified `equivalent` claim as a symmetric `equivalent-to` edge pair — the operable form of the 'semantic equivalence vs hash equivalence' open problem: two content-addresses, one behavior, and discovery can collapse the class (spec/agent-loop.md `collapse` step). Retractable like any attestation."
+      "description": "An extensional-equivalence claim: `∀x. a(x) = b(x)` over the unbounded domain — or, when the optional `domain` qualifier is present, over exactly the stated domain. OBJECTIVE and re-checkable, like a certification: `verify-claim` resolves both bodies and re-proves (equal normal forms, else the equivalence prover; the Int-domain induction for qualified claims), so a receiver never has to take the signer's word. The attestation graph ingests a signed, verified UNQUALIFIED `equivalent` claim as a symmetric `equivalent-to` edge pair — the operable form of the 'semantic equivalence vs hash equivalence' open problem: two content-addresses, one behavior, and discovery can collapse the class (spec/agent-loop.md `collapse` step); a domain-qualified claim never becomes an edge. Retractable like any attestation."
     }
   }
 }

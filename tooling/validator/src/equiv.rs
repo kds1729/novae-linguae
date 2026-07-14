@@ -375,6 +375,80 @@ pub fn prove_equivalent(body_f: &J, body_g: &J, solver: &str) -> EquivVerdict {
     }
 }
 
+/// A parsed v1 equivalence domain: `var ≥ ge` on the single parameter — the guarded-descent
+/// shape the termination checker knows and the Int-domain induction proves over. The claim's
+/// serialized form (`{vars, expr}`, spec/claim-expression) is richer by design; anything this
+/// parser doesn't recognize is UNSUPPORTED at proof time, never misread.
+pub struct EquivDomain {
+    pub var: String,
+    pub ge: i64,
+}
+
+/// Parse a claim's `domain` object. v1 grammar: exactly one var; `expr` is `ge(var, <int lit>)`
+/// or `gt(var, <int lit>)` (normalized to `≥ lit+1`), the variable on the left.
+pub fn parse_equiv_domain(d: &J) -> Result<EquivDomain, String> {
+    let vars: Vec<&str> = d
+        .get("vars")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+        .unwrap_or_default();
+    let [var] = vars[..] else {
+        return Err(format!("domain v1 covers exactly one variable (got {})", vars.len()));
+    };
+    let expr = d.get("expr").ok_or("domain has no expr")?;
+    let op = crate::induct::head_op(expr).ok_or("domain expr is not an application")?;
+    let args = crate::induct::args_of(expr);
+    let (Some(lhs), Some(rhs)) = (args.first(), args.get(1)) else {
+        return Err("domain expr needs two arguments".into());
+    };
+    if lhs.get("kind").and_then(|k| k.as_str()) != Some("var")
+        || lhs.get("name").and_then(|n| n.as_str()) != Some(var)
+    {
+        return Err("domain expr's left side must be the domain variable".into());
+    }
+    let c = rhs
+        .pointer("/value/value")
+        .and_then(|v| v.as_i64())
+        .filter(|_| rhs.get("kind").and_then(|k| k.as_str()) == Some("lit"))
+        .ok_or("domain expr's right side must be an int literal")?;
+    match op.as_str() {
+        "ge" => Ok(EquivDomain { var: var.to_string(), ge: c }),
+        "gt" => Ok(EquivDomain { var: var.to_string(), ge: c + 1 }),
+        other => Err(format!("domain v1 covers `ge`/`gt` bounds (got `{other}`)")),
+    }
+}
+
+/// Prove `∀x. domain(x) ⇒ f(x) = g(x)` — DOMAIN-QUALIFIED equivalence (spec/claim-expression's
+/// optional `domain` on the `equivalent` claim). Semantics: equality ON the stated domain only;
+/// substitution is licensed only for arguments satisfying it, the attestation graph does not
+/// ingest such a claim as an `equivalent-to` edge, and no collapse view merges on it. This is
+/// the sound form for guarded numeric recursions, whose full-domain claim may be FALSE while
+/// the domain-qualified one proves (factorial guarded `eq(n,0)` vs guarded `le(n,0)`: distinct
+/// at −1, equal on n ≥ 0). Equal normal forms still short-circuit — equal everywhere is equal
+/// on any domain.
+pub fn prove_equivalent_on(body_f: &J, body_g: &J, domain: &EquivDomain, solver: &str) -> EquivVerdict {
+    let (Some(pf), Some(pg)) = (params(body_f), params(body_g)) else {
+        return EquivVerdict::Unsupported("both inputs must be `lambda` bodies".into());
+    };
+    if pf.len() != 1 || pg.len() != 1 {
+        return EquivVerdict::Unsupported(format!(
+            "domain-qualified equivalence v1 covers unary functions (got arity {} vs {})",
+            pf.len(),
+            pg.len()
+        ));
+    }
+    if crate::normalize::normal_equivalent(body_f, body_g) {
+        return EquivVerdict::EquivalentByNormalization;
+    }
+    match crate::induct::prove_equiv_on_int_ge(body_f, body_g, domain.ge, solver) {
+        InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_) => EquivVerdict::Equivalent(vec![]),
+        InductionOutcome::Failed(model) => EquivVerdict::Distinct(model),
+        InductionOutcome::Unknown => EquivVerdict::Unknown,
+        InductionOutcome::NoSolver => EquivVerdict::NoSolver,
+        InductionOutcome::Unsupported(why) => EquivVerdict::Unsupported(why),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -641,6 +715,97 @@ mod tests {
                           { "kind": "app", "op": "sub", "args": [
                               { "kind": "var", "name": "n" },
                               { "kind": "lit", "value": { "kind": "int", "value": 1 } }] }] }] } }] } })
+    }
+
+    // \n -> case <guard> of true -> <base_val> | false -> <op>(n, self(sub(n, 1))) — the guarded
+    // numeric recursion shape (factorial, triangular, …).
+    fn int_rec(guard_op: &str, base_val: i64, step_op: &str) -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "op": guard_op, "args": [
+                { "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "lit", "value": { "kind": "int", "value": base_val } } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": { "kind": "app", "op": step_op, "args": [
+                      { "kind": "var", "name": "n" },
+                      { "kind": "app", "op": "apply", "args": [
+                          { "kind": "var", "name": "self" },
+                          { "kind": "app", "op": "sub", "args": [
+                              { "kind": "var", "name": "n" },
+                              { "kind": "lit", "value": { "kind": "int", "value": 1 } }] }] }] } }] } })
+    }
+
+    fn ge_zero_domain() -> EquivDomain {
+        parse_equiv_domain(&json!({ "vars": ["n"], "expr": { "kind": "app", "op": "ge", "args": [
+            { "kind": "var", "name": "n" },
+            { "kind": "lit", "value": { "kind": "int", "value": 0 } }] } }))
+        .unwrap()
+    }
+
+    #[test]
+    fn domain_qualified_factorials_prove_on_the_domain() {
+        let Some(s) = solver() else { return };
+        // THE trap pair: factorial guarded `eq(n,0)` diverges at n = -1 where the `le(n,0)` twin
+        // answers 1 — NOT extensionally equal over int, so the full-domain claim must never sign.
+        // On n ≥ 0 they agree everywhere, and the domain-qualified prover closes exactly that.
+        let fact_eq = int_rec("eq", 1, "mul");
+        let fact_le = int_rec("le", 1, "mul");
+        match prove_equivalent_on(&fact_eq, &fact_le, &ge_zero_domain(), s) {
+            EquivVerdict::Equivalent(_) => {}
+            other => panic!("expected EQUIVALENT on n ≥ 0, got {other:?}"),
+        }
+        // The full-domain claim for the same pair must NOT prove (n = -1 splits them). UNKNOWN or
+        // UNSUPPORTED are the acceptable honest verdicts — never Equivalent.
+        match prove_equivalent(&fact_eq, &fact_le, s) {
+            EquivVerdict::Equivalent(_) | EquivVerdict::EquivalentByNormalization => {
+                panic!("the full-domain claim is FALSE and must not prove")
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn domain_qualified_distinct_pair_refutes_with_an_in_domain_witness() {
+        let Some(s) = solver() else { return };
+        // factorial vs triangular: both n ≥ 0-guarded recursions, genuinely different (24 vs 10 at
+        // n = 4). The refutation must come from EVALUATED disagreement at a domain point.
+        let fact = int_rec("eq", 1, "mul");
+        let tri = int_rec("eq", 0, "add");
+        match prove_equivalent_on(&fact, &tri, &ge_zero_domain(), s) {
+            EquivVerdict::Distinct(why) => {
+                assert!(why.contains("inside the domain"), "witness must be in-domain: {why}")
+            }
+            other => panic!("expected DISTINCT with an in-domain witness, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn domain_qualified_nonconstant_descent_refuses_cleanly() {
+        let Some(s) = solver() else { return };
+        // A recursion that descends on `div(n, 2)` — not constant descent, so the fragment's
+        // pinning argument doesn't apply; the refusal must say so, before any solver work.
+        let halving = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "op": "eq", "args": [
+                { "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": { "kind": "app", "op": "apply", "args": [
+                      { "kind": "var", "name": "self" },
+                      { "kind": "app", "op": "div", "args": [
+                          { "kind": "var", "name": "n" },
+                          { "kind": "lit", "value": { "kind": "int", "value": 2 } }] }] } }] } });
+        let fact = int_rec("eq", 1, "mul");
+        match prove_equivalent_on(&halving, &fact, &ge_zero_domain(), s) {
+            EquivVerdict::Unsupported(why) => {
+                assert!(why.contains("descend"), "want the descent refusal, got: {why}")
+            }
+            other => panic!("expected UNSUPPORTED, got {other:?}"),
+        }
     }
 
     #[test]
