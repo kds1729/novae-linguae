@@ -623,6 +623,70 @@ mod tests {
         }
     }
 
+    // \n -> case <scrut_op>(n, 0) of true -> 1 | false -> mul(n, self(sub(n, 1))) — a factorial-style
+    // NUMERIC recursion; `scrut_op` varies the base test so two instances don't share a normal form.
+    fn rec_over_int(scrut_op: &str) -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "op": scrut_op, "args": [
+                { "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "lit", "value": { "kind": "int", "value": 1 } } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": { "kind": "app", "op": "mul", "args": [
+                      { "kind": "var", "name": "n" },
+                      { "kind": "app", "op": "apply", "args": [
+                          { "kind": "var", "name": "self" },
+                          { "kind": "app", "op": "sub", "args": [
+                              { "kind": "var", "name": "n" },
+                              { "kind": "lit", "value": { "kind": "int", "value": 1 } }] }] }] } }] } })
+    }
+
+    #[test]
+    fn numeric_recursion_refuses_cleanly_before_the_solver() {
+        // Two factorial-style bodies (different base predicates, so normalization can't reconcile
+        // them) reach the two-recursive path, whose induction is LIST-structural. The refusal must
+        // be the clean out-of-fragment reason — the leading parameter is used at Int — decided
+        // pre-emission, never z3's raw sort-check text (the production `factorial` pair's failure
+        // mode: `Sorts Lst and Int are incompatible`). No solver run is needed to decide this.
+        let f = rec_over_int("eq");
+        let g = rec_over_int("le");
+        match prove_equivalent(&f, &g, "z3") {
+            EquivVerdict::Unsupported(why) => assert!(
+                why.contains("leading list parameter") && !why.contains("solver error"),
+                "want the clean out-of-fragment reason, got: {why}"
+            ),
+            other => panic!("expected UNSUPPORTED, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bool_accumulator_fold_refuses_cleanly_before_the_solver() {
+        // contains_zero-style bodies: foldr with a Bool literal accumulator. The global fold model
+        // is Int-valued, so this is out of fragment — the refusal must say so, decided pre-emission
+        // (the production failure mode was z3's `unknown constant foldr_f (Bool Lst)`).
+        let fold_any = |z: bool| {
+            json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+                "kind": "app", "op": "foldr", "args": [
+                    { "kind": "lambda", "params": [{ "name": "x" }, { "name": "acc" }], "body": {
+                        "kind": "app", "op": "or", "args": [
+                            { "kind": "app", "op": "eq", "args": [
+                                { "kind": "var", "name": "x" },
+                                { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+                            { "kind": "var", "name": "acc" }] } },
+                    { "kind": "lit", "value": { "kind": "bool", "value": z } },
+                    { "kind": "var", "name": "xs" }] } })
+        };
+        match prove_equivalent(&fold_any(false), &fold_any(true), "z3") {
+            EquivVerdict::Unsupported(why) => assert!(
+                why.contains("accumulator is Bool") && !why.contains("solver error"),
+                "want the clean out-of-fragment reason, got: {why}"
+            ),
+            other => panic!("expected UNSUPPORTED, got {other:?}"),
+        }
+    }
+
     #[test]
     fn misaligned_strides_proved_by_kstep() {
         let Some(s) = solver() else { return };

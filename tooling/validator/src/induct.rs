@@ -315,6 +315,17 @@ fn walk_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Option<Sor
             walk_sorts(c, vars, sorts)?;
         }
     }
+    // Descend into case arms: a recursive body's constraints usually live THERE (factorial's
+    // `mul(n, self(sub(n,1)))` is an arm body), and missing them left the leading parameter
+    // unconstrained — silently defaulted to Lst, deferring a numeric recursion's refusal to z3's
+    // raw sort-check error instead of the clean out-of-fragment reason.
+    if let Some(arms) = node.get("arms").and_then(|a| a.as_array()) {
+        for arm in arms {
+            if let Some(b) = arm.get("body") {
+                walk_sorts(b, vars, sorts)?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -464,9 +475,31 @@ fn lower_value(value: &J) -> Result<String> {
     }
 }
 
+/// Coarse "definitely Bool" check on a predicate/body node — a bool literal, or an application whose
+/// head is a boolean-valued operator. Used to refuse a Bool-accumulator fold BEFORE emission: the
+/// global fold model is Int-valued, so `(foldr_f false xs)` would only fail z3's sort check with raw
+/// solver-error text instead of a clean out-of-fragment reason.
+fn expr_is_bool(node: &J) -> bool {
+    match node.get("kind").and_then(|k| k.as_str()) {
+        Some("lit") => node.pointer("/value/kind").and_then(|k| k.as_str()) == Some("bool"),
+        Some("app") => matches!(
+            head_op(node).as_deref(),
+            Some("and" | "or" | "xor" | "not" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "null")
+        ),
+        _ => false,
+    }
+}
+
 fn lower_app(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
     let op = head_op(node).ok_or_else(|| anyhow!("application with no resolvable head"))?;
     let args = args_of(node);
+    // A fold result consumed by a boolean connective is the same Int-model mismatch as a Bool
+    // accumulator (below) from the consumption side — refuse it with the same clean reason.
+    if matches!(op.as_str(), "and" | "or" | "xor" | "not")
+        && args.iter().any(|a| matches!(head_op(a).as_deref(), Some("foldr" | "foldl")))
+    {
+        bail!("a fold result is consumed as Bool — the modelled fold is Int-valued (out of fragment)");
+    }
     let l = |i: usize| -> Result<String> { lower(args[i], env) };
     Ok(match op.as_str() {
         // List operations → the recursively-defined SMT functions / datatype constructors.
@@ -476,8 +509,13 @@ fn lower_app(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
         "map" => format!("(mapf {})", l(1)?), // arg0 (the function) is modelled globally as `mapfn`
         "filter" => format!("(filterp {})", l(1)?),
         // fold(f, z, xs): arg0 (f) is the global binary `foldfn`; arg1 is the accumulator, arg2 the list.
-        "foldr" => format!("(foldr_f {} {})", l(1)?, l(2)?),
-        "foldl" => format!("(foldl_f {} {})", l(1)?, l(2)?),
+        "foldr" | "foldl" => {
+            if args.get(1).is_some_and(|z| expr_is_bool(z)) {
+                bail!("`{op}` accumulator is Bool — the modelled fold is Int-valued (out of fragment)");
+            }
+            let f = if op == "foldr" { "foldr_f" } else { "foldl_f" };
+            format!("({f} {} {})", l(1)?, l(2)?)
+        }
         "cons" => format!("(cons {} {})", l(0)?, l(1)?),
         "head" => format!("(hd {})", l(0)?),
         "tail" => format!("(tl {})", l(0)?),
@@ -623,13 +661,25 @@ fn lower_rec_def_with_sorts(body: &J, smt_name: &str) -> Result<(String, Vec<Sor
     let ret = sort_kw(ret_sort)?;
     // Parameter sorts: the recursion parameter (first) is a list; any other is inferred from the body,
     // defaulting to the return sort when unconstrained (the list-combining shape, e.g. append's `ys`). A
-    // wrong guess can't yield a false proof — the SMT def would fail to sort-check and report UNSUPPORTED.
+    // wrong spectator guess can't yield a false proof — the SMT def would fail to sort-check and report
+    // UNSUPPORTED. The LEADING parameter is checked here instead of leaning on that backstop: a body that
+    // pins it to a non-list sort (numeric descent like factorial's `self(sub(n,1))`, a Bool switch) is a
+    // non-structural recursion, and the refusal should say so rather than surface z3's sort-check text.
     let mut psorts: BTreeMap<String, Option<Sort3>> = pnames.iter().map(|p| (p.clone(), None)).collect();
     walk_sorts(inner, &pnames, &mut psorts)?;
     let mut sorts = Vec::with_capacity(pnames.len());
     let mut decls = String::new();
     for (i, p) in pnames.iter().enumerate() {
-        let s = if i == 0 { Sort3::Lst } else { psorts.get(p).copied().flatten().unwrap_or(ret_sort) };
+        let s = if i == 0 {
+            match psorts.get(p).copied().flatten() {
+                None | Some(Sort3::Lst) => Sort3::Lst,
+                Some(other) => bail!(
+                    "recursion parameter `{p}` is used at sort {other:?}, not as a list — structural induction is over a leading list parameter (numeric/boolean recursion is out of fragment)"
+                ),
+            }
+        } else {
+            psorts.get(p).copied().flatten().unwrap_or(ret_sort)
+        };
         sorts.push(s);
         decls.push_str(&format!("({p} {})", sort_kw(s)?));
     }
