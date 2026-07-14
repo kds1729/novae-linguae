@@ -269,6 +269,12 @@ pub enum ArtifactKind {
     /// and self-addressing like a body expression — the whole artifact IS the hashed content — so an
     /// `observed` claim can reference it by `trc_…` address and any verifier can replay against it.
     Trace,
+    /// A **type expression** published as a commons artifact (`type_…` — what a type AST's `ref`
+    /// nodes target). Hash-carrying like a function record (strips `hash`). NOT auto-detectable:
+    /// several type-node kinds (`var`, `tuple`, `record`) collide with body-expression kinds, so a
+    /// type artifact is always hashed/verified with an EXPLICIT `--kind type` (the node's gate keys
+    /// on the `type_` address prefix instead).
+    Type,
 }
 
 impl ArtifactKind {
@@ -277,7 +283,7 @@ impl ArtifactKind {
     /// `hash` field — the whole expression IS what gets hashed.
     fn strip_fields(self) -> &'static [&'static str] {
         match self {
-            ArtifactKind::FunctionRecord | ArtifactKind::Weights => &["hash"],
+            ArtifactKind::FunctionRecord | ArtifactKind::Weights | ArtifactKind::Type => &["hash"],
             ArtifactKind::Message | ArtifactKind::Certification | ArtifactKind::EvalAttestation => {
                 &["hash", "signature"]
             }
@@ -295,6 +301,7 @@ impl ArtifactKind {
             ArtifactKind::Weights => "wgt",
             ArtifactKind::EvalAttestation => "evl",
             ArtifactKind::Trace => "trc",
+            ArtifactKind::Type => "type",
         }
     }
 
@@ -347,7 +354,7 @@ impl ArtifactKind {
                 return Ok(ArtifactKind::BodyExpression);
             }
             return Err(anyhow!(
-                "cannot auto-detect artifact kind from top-level `kind` = `{kind_str}`. Not a Nova Locutio speech act and not a body-expression kind. Type expressions and predicate expressions are not independently hashable at this layer in v0.1."
+                "cannot auto-detect artifact kind from top-level `kind` = `{kind_str}`. Not a Nova Locutio speech act and not a body-expression kind. A TYPE expression is hashable with an explicit `--kind type` (its node kinds collide with body-expression kinds, so it is never auto-detected); predicate expressions are not independently hashable at this layer in v0.1."
             ));
         }
 

@@ -212,16 +212,20 @@ def query(request):
     include = request.GET.get("include")
     try:
         # A token budget only shapes the compact-summary tier (uniform-size hashes / heavy full records
-        # aren't what a context window is spent on); ignored for other include modes.
-        hashes, cursor, complete, budget = run_query(
-            flt, rank=request.GET.get("rank") == "relevance", budget=include == "summary")
+        # aren't what a context window is spent on); ignored for other include modes. The collapse
+        # view (`?collapse=equivalent`) is opt-in: results become one REPRESENTATIVE per stored
+        # equivalence class, with the merged members reported alongside — the node derives the
+        # classes from signed, gate-verified `equivalent` claims, each re-provable by the consumer.
+        hashes, cursor, complete, budget, collapsed = run_query(
+            flt, rank=request.GET.get("rank") == "relevance", budget=include == "summary",
+            collapse=request.GET.get("collapse") == "equivalent")
     except QueryError as exc:
         return JsonResponse({"error": "malformed_filter", "detail": str(exc)}, status=400)
     if include == "record":
         by_hash = {r.hash: r.raw for r in Record.objects.filter(hash__in=hashes)}
-        return JsonResponse({"records": [by_hash[h] for h in hashes if h in by_hash],
-                             "cursor": cursor, "complete": complete})
-    if include == "summary":
+        payload = {"records": [by_hash[h] for h in hashes if h in by_hash],
+                   "cursor": cursor, "complete": complete}
+    elif include == "summary":
         # Compact projection: the decision fields (type/effects/intent/…), not the full record — the
         # discovery-cost middle tier between hashes-only and `include=record`. `budget` (when a
         # `token_budget` was applied) reports the estimated token spend and whether more matched.
@@ -230,8 +234,11 @@ def query(request):
                    "cursor": cursor, "complete": complete}
         if budget is not None:
             payload["budget"] = budget
-        return JsonResponse(payload)
-    return JsonResponse({"results": hashes, "cursor": cursor, "complete": complete})
+    else:
+        payload = {"results": hashes, "cursor": cursor, "complete": complete}
+    if collapsed:
+        payload["collapsed"] = collapsed
+    return JsonResponse(payload)
 
 
 @csrf_exempt
@@ -372,6 +379,29 @@ def sync_merkle(request):
         return JsonResponse({"error": "bad_prefix", "detail": str(exc)}, status=400)
     resp = JsonResponse(node)
     # The set changes as records land — cache only briefly (like the certification sets).
+    resp["Cache-Control"] = "public, max-age=10"
+    return resp
+
+
+def anchors(request):
+    """GET /v0/anchors?limit={n} — the node's signed Merkle-root anchors, newest first
+    (commons.md open question 2). Each payload is a signed statement of what the node held (root
+    digest + count + timestamp; Ed25519, the bundle-manifest construction — verify with
+    nl_crypto.verify_manifest). This is the node's OWN history: the copy that makes tampering
+    evident is whatever the operator piped into an external append-only log; a verifier compares
+    an anchor's root against a recomputation from /v0/sync/merkle, a mirror, or a bundle.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    from .models import Anchor
+
+    try:
+        limit = max(1, min(int(request.GET.get("limit", "25") or 25), 500))
+    except ValueError:
+        return JsonResponse({"error": "bad_limit"}, status=400)
+    rows = list(Anchor.objects.order_by("-id")[:limit])
+    resp = JsonResponse({"anchors": [r.payload for r in rows], "count": len(rows),
+                         "enabled": bool(settings.COMMONS_ANCHOR_SEED)})
     resp["Cache-Control"] = "public, max-age=10"
     return resp
 

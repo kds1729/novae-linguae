@@ -129,6 +129,16 @@ the two hash layers: the record's *address* is BLAKE3 over its canonical JSON as
 while the `files[].sha256` entries inside it identify the **binary blobs** the record points at (sha256 by
 ML-ecosystem convention — blobs are not JSON and never enter the JCS pipeline).
 
+### Type artifacts
+
+A **type expression** published as a commons artifact ([`type-expression.schema.json`](type-expression.schema.json))
+is hashed like a function record — remove `hash`, JCS-canonicalize, BLAKE3-256 — with the address
+prefix `type_`. It is **unsigned pure content** (like a body expression), and it is **never
+auto-detected**: several type-node kinds (`var`, `tuple`, `record`) collide with body-expression
+kinds, so hashing takes an explicit `--kind type` and the node's gate keys on the `type_` address
+prefix instead. These are the artifacts a type AST's `ref` nodes target; the node's typed query
+resolves `type_pattern` matching through them.
+
 ### Eval attestations
 
 An **eval attestation** (top-level `kind: "eval-attestation"`, produced by `nl-validator attest-weights

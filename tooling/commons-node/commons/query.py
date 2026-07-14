@@ -73,7 +73,21 @@ def check_token_budget(tb):
         raise QueryError("`token_budget` must be a positive integer")
 
 
-def _array_ok(record, flt):
+def type_loader():
+    """A per-scan, memoizing loader for `ref` resolution during type matching: `type_…` →
+    the published type expression (hash stripped), or None when this node does not hold it."""
+    cache = {}
+
+    def load(target):
+        if target not in cache:
+            row = Record.objects.filter(kind="type", hash=target).first()
+            cache[target] = ({k: v for k, v in row.raw.items() if k != "hash"} if row else None)
+        return cache[target]
+
+    return load
+
+
+def _array_ok(record, flt, type_load=None):
     # Defensive: only honor an array predicate when it is the documented object shape, so even an
     # unvalidated caller (e.g. best-effort search) can never crash here — a malformed predicate is
     # simply not applied. `validate_filter` rejects malformed filters up front for `/v0/query`.
@@ -115,7 +129,8 @@ def _array_ok(record, flt):
     # v0.2 type AST. Runs in the Python confirm pass — it has no DB pushdown (the AST lives in a
     # text column), so like the array predicates it narrows the bounded scan, exactly and portably.
     pattern = flt.get("type_pattern")
-    if isinstance(pattern, dict) and not typematch.matches_type(pattern, record.type_str):
+    if isinstance(pattern, dict) and not typematch.matches_type(pattern, record.type_str,
+                                                                load_type=type_load):
         return False
     return True
 
@@ -170,7 +185,8 @@ def candidate_records(flt, cap=_DB_SCAN_CAP):
     typed `filter` means exactly the same thing in both endpoints.
     """
     scanned = list(_scalar_qs(flt)[:cap])
-    matched = [r for r in scanned if _array_ok(r, flt)]
+    load = type_loader() if flt.get("type_pattern") else None
+    matched = [r for r in scanned if _array_ok(r, flt, load)]
     return matched, len(scanned) >= cap
 
 
@@ -204,6 +220,47 @@ def record_summary(record):
     if record.body_hash:
         out["body_hash"] = record.body_hash
     return out
+
+
+def equivalence_find():
+    """Union-find over the stored `equivalent` claims (signed asserts admitted through the gate;
+    bounded scan, like the /equivalences endpoint): returns find(hash) -> class representative.
+    The node does not JUDGE the claims — each is objective and re-provable by any consumer
+    (`verify-claim`); this only derives the classes they state, for the opt-in collapse view."""
+    parent = {}
+
+    def find(x):
+        while parent.get(x, x) != x:
+            parent[x] = parent.get(parent[x], parent[x])  # path halving
+            x = parent[x]
+        return x
+
+    rows = (Record.objects.filter(kind="message", raw__kind="assert",
+                                  raw__body__claim__kind="equivalent").order_by("id"))[:_DB_SCAN_CAP]
+    for r in rows:
+        claim = (r.raw.get("body") or {}).get("claim", {})
+        a, b = claim.get("a"), claim.get("b")
+        if isinstance(a, str) and isinstance(b, str):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+    return find
+
+
+def collapse_equivalent(records):
+    """The collapse view (`?collapse=equivalent`): keep each equivalence class's FIRST member in
+    the given order (id or relevance — so the best-ranked member represents the class) and report
+    the merged ones. Returns (kept_records, {representative: [dropped, …]})."""
+    find = equivalence_find()
+    kept, dropped, seen = [], {}, {}
+    for r in records:
+        root = find(r.hash)
+        if root in seen:
+            dropped.setdefault(seen[root], []).append(r.hash)
+        else:
+            seen[root] = r.hash
+            kept.append(r)
+    return kept, dropped
 
 
 def _relevance(record, flt):
@@ -267,9 +324,11 @@ def _pack_budget(page, matched_total, token_budget):
     return greedy_budget(page, lambda r: summary_tokens(record_summary(r)), token_budget, matched_total)
 
 
-def run_query(flt, rank=False, budget=False):
-    """Return (hashes, cursor, complete, budget_report) for a query filter. Raises QueryError on a
-    malformed filter. `budget_report` is None unless a `token_budget` cap was applied.
+def run_query(flt, rank=False, budget=False, collapse=False):
+    """Return (hashes, cursor, complete, budget_report, collapsed) for a query filter. Raises
+    QueryError on a malformed filter. `budget_report` is None unless a `token_budget` cap was
+    applied; `collapsed` is None unless ``collapse=True`` merged something (then a mapping
+    {representative: [merged member, …]} — the opt-in equivalence-class view).
 
     With ``rank=True`` the matched candidate set (bounded scan) is ordered by [`_relevance`] instead of by
     `id`, and the single best-`limit` page is returned (`cursor` is `None`): relevance re-orders the set,
@@ -287,23 +346,30 @@ def run_query(flt, rank=False, budget=False):
     except (TypeError, ValueError):
         limit = 100
     token_budget = flt.get("token_budget") if budget else None
+    load = type_loader() if flt.get("type_pattern") else None
 
     if rank:
         scanned = list(qs[:_DB_SCAN_CAP])
-        matched = [r for r in scanned if _array_ok(r, flt)]
+        matched = [r for r in scanned if _array_ok(r, flt, load)]
         matched.sort(key=lambda r: (-_relevance(r, flt), r.id))
+        collapsed = None
+        if collapse:
+            matched, collapsed = collapse_equivalent(matched)
         page = matched[:limit]
         report = None
         if token_budget is not None:
             page, report = _pack_budget(page, len(matched), token_budget)
-        return [r.hash for r in page], None, len(scanned) < _DB_SCAN_CAP, report
+        return [r.hash for r in page], None, len(scanned) < _DB_SCAN_CAP, report, collapsed or None
 
     cursor = flt.get("cursor")
     if cursor is not None:
         qs = qs.filter(id__gt=int(cursor))
 
     scanned = list(qs[:_DB_SCAN_CAP])
-    matched = [r for r in scanned if _array_ok(r, flt)]
+    matched = [r for r in scanned if _array_ok(r, flt, load)]
+    collapsed = None
+    if collapse:
+        matched, collapsed = collapse_equivalent(matched)
     page = matched[:limit]
     report = None
     if token_budget is not None:
@@ -314,4 +380,4 @@ def run_query(flt, rank=False, budget=False):
     # "complete" iff this scan reached the end of the corpus (not truncated by the scan cap) and
     # we returned every matched row (so there is nothing obvious left — a budget-trimmed page is not).
     complete = len(scanned) < _DB_SCAN_CAP and len(page) == len(matched)
-    return hashes, next_cursor, complete, report
+    return hashes, next_cursor, complete, report, collapsed or None

@@ -21,6 +21,8 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 | `GET /v0/records/{hash}/equivalences` — the signed `equivalent` claims naming a function (each re-provable by `verify-claim`) | ✅ |
 | `GET /v0/blobs/{sha256}` — content-addressed binary blobs (gate-free; the referencing record's sha256 — a weights manifest, a by-address example value — is the boundary) | ✅ |
 | `GET /v0/sync/merkle?prefix=…` — Merkle set reconciliation: one request answers "same record set?", divergence localizes in O(log n) (commons.md open question 1) | ✅ |
+| `GET /v0/anchors` — signed Merkle-root anchors of the corpus (commons.md open question 2; `manage.py anchorcorpus` emits one for the operator's external append-only log) | ✅ |
+| `POST /v0/query?collapse=equivalent` — opt-in equivalence-class view: one representative per class of stored (re-provable) `equivalent` claims, merges reported | ✅ |
 | `POST /v0/query` — typed (exact) discovery | ✅ |
 | `GET /v0/sync` — replication feed (cursor) | ✅ |
 | `GET /v0/info` — node metadata | ✅ |
@@ -310,6 +312,8 @@ signature and bundle hash are the real checks.
 | `COMMONS_DB_PATH` | `./db.sqlite3` | SQLite file |
 | `COMMONS_MAX_RECORD_BYTES` | 1 MiB | local size cap (a permitted endpoint policy) |
 | `COMMONS_MAX_BODY_BYTES` | 8 MiB | ceiling for BARE BODIES past the record cap — verified as always, then tiered: pointer row in the index, canonical bytes in the blob store, resolve streams them back (commons.md open question 4) |
+| `COMMONS_ANCHOR_SEED` | empty (disabled) | Ed25519 seed for provenance anchors: the worker signs a Merkle root of the corpus whenever it moves (commons.md open question 2) |
+| `COMMONS_ANCHOR_INTERVAL` | `3600` | seconds between the beat task's anchor checks (a no-op when the root is unchanged) |
 | `COMMONS_PEERS` | empty | comma-separated peer hints for future replication |
 | `COMMONS_EMBEDDER` | `lexical-hashing-v0` | embedding model id; a non-lexical id selects the neural backend |
 | `COMMONS_EMBEDDING_DIM` | `256` | vector dimensionality (256 lexical / 384 bge-small) — part of model identity |

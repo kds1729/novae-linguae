@@ -30,5 +30,11 @@ app.conf.beat_schedule = {
         "task": "commons.tasks.embed_pending",
         "schedule": settings.COMMONS_EMBED_INTERVAL,
     },
+    # Provenance anchoring (commons.md open question 2): a no-op unless COMMONS_ANCHOR_SEED is set
+    # AND the corpus root has moved since the last anchor.
+    "anchor-corpus": {
+        "task": "commons.tasks.anchor_corpus",
+        "schedule": settings.COMMONS_ANCHOR_INTERVAL,
+    },
 }
 app.autodiscover_tasks()

@@ -59,3 +59,21 @@ class Record(models.Model):
 
     def __str__(self):
         return self.hash
+
+
+class Anchor(models.Model):
+    """A signed Merkle-root anchor of the corpus (commons.md open question 2; commons/anchor.py).
+    The node's OWN history of what it attested holding — served at GET /v0/anchors. The copy that
+    makes tampering evident is the one the operator pipes into an external append-only log; this
+    table is the staging record and serving surface, not the trust root."""
+
+    at = models.DateTimeField(auto_now_add=True)
+    root = models.CharField(max_length=80)
+    count = models.IntegerField()
+    payload = models.JSONField()  # the full signed anchor statement
+
+    class Meta:
+        ordering = ["-id"]
+
+    def __str__(self):
+        return f"{self.root} @ {self.at}"

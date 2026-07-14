@@ -94,6 +94,11 @@ COMMONS_MAX_RECORD_BYTES = int(os.environ.get("COMMONS_MAX_RECORD_BYTES", str(1 
 # signature, no queryable metadata), which is what makes the bigger ceiling safe.
 COMMONS_MAX_BODY_BYTES = int(os.environ.get("COMMONS_MAX_BODY_BYTES", str(8 << 20)))  # 8 MiB
 COMMONS_PEERS = [p for p in os.environ.get("COMMONS_PEERS", "").split(",") if p.strip()]
+# Provenance anchoring (commons.md open question 2): with a seed set, the worker signs a Merkle
+# root of the corpus whenever it has moved (commons/anchor.py; GET /v0/anchors; `manage.py
+# anchorcorpus` prints one for the operator's external append-only log). Empty = disabled.
+COMMONS_ANCHOR_SEED = os.environ.get("COMMONS_ANCHOR_SEED", "")
+COMMONS_ANCHOR_INTERVAL = float(os.environ.get("COMMONS_ANCHOR_INTERVAL", "3600"))  # seconds
 
 # Semantic search (spec/commons.md `POST /v0/search`). The reference node ships a stdlib-only,
 # deterministic lexical embedder; this is the seam where a neural backend would be selected. The

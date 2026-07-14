@@ -172,10 +172,52 @@ def _compat(p, q):
     return True  # record/sum intersection: permissive
 
 
-def _match(p, t, psub, rsub):
+class _Resolver:
+    """Bounded resolution of `ref` nodes through published `type_…` artifacts. `load(target)`
+    returns the referenced type expression or None. A GLOBAL load budget bounds the whole match
+    (a pathological web of mutually-referencing structural types cannot recurse unboundedly:
+    every level costs one load, and an exhausted budget leaves a bare, unmatchable ref); the
+    per-chain cycle set lives in [`_deref`], so the same legitimate ref may appear — and
+    resolve — any number of times across the type."""
+
+    BUDGET = 64
+
+    def __init__(self, load):
+        self.load = load
+        self.remaining = self.BUDGET
+
+    def resolve(self, target):
+        if self.load is None or self.remaining <= 0:
+            return None
+        self.remaining -= 1
+        got = self.load(target)
+        return got if isinstance(got, dict) else None
+
+
+def _deref(node, res):
+    """Follow a CHAIN of `ref` nodes (and strip foralls) until a structural node, a variable, or
+    an unresolvable ref remains. The chain's own targets form the cycle guard (a ref chain that
+    revisits a target can never bottom out)."""
+    node = _strip_forall(node)
+    chain = set()
+    while isinstance(node, dict) and node.get("kind") == "ref" and res is not None:
+        target = node.get("target", "")
+        if target in chain:
+            return node  # a cyclic alias chain has no structural definition
+        resolved = res.resolve(target)
+        if resolved is None:
+            return node  # absent on this node, or the global budget is spent
+        chain.add(target)
+        node = _strip_forall(resolved)
+    return node
+
+
+def _match(p, t, psub, rsub, res=None):
     """Match pattern `p` against record-side type `t`, threading pattern-variable bindings (`psub`,
     var name → record subtree) and record-variable bindings (`rsub`, var name → pattern subtree).
-    Mutates the substitutions on success; `any_of` branches on copies."""
+    Mutates the substitutions on success; `any_of` branches on copies. `res` (a [`_Resolver`] or
+    None) lets `ref` nodes on EITHER side match through their published definitions; an
+    unresolvable ref matches only `any`, a pattern variable, or an identical ref."""
     p = _strip_forall(p)
     t = _strip_forall(t)
     if not isinstance(p, dict) or not isinstance(t, dict):
@@ -186,7 +228,7 @@ def _match(p, t, psub, rsub):
     if pk == "any_of":
         for branch in p["types"]:
             ps, rs = dict(psub), dict(rsub)
-            if _match(branch, t, ps, rs):
+            if _match(branch, t, ps, rs, res):
                 psub.clear(); psub.update(ps)
                 rsub.clear(); rsub.update(rs)
                 return True
@@ -204,6 +246,16 @@ def _match(p, t, psub, rsub):
             return psub[name] == t  # canonical ASTs: structural equality is alpha-consistent here
         psub[name] = t
         return True
+    # Identical refs match without resolving (content-addresses: same target = same definition).
+    if pk == "ref" and t.get("kind") == "ref" and p.get("target") == t.get("target"):
+        return True
+    # Otherwise a ref on either side matches through its published definition, when resolvable.
+    if pk == "ref" or t.get("kind") == "ref":
+        p2, t2 = _deref(p, res), _deref(t, res)
+        if (isinstance(p2, dict) and p2.get("kind") == "ref") or \
+           (isinstance(t2, dict) and t2.get("kind") == "ref"):
+            return False  # an unresolvable ref cannot be structurally matched
+        return _match(p2, t2, psub, rsub, res)
     if pk == "head":
         return _head_name(t) in p["names"]
     tk = t.get("kind")
@@ -211,31 +263,29 @@ def _match(p, t, psub, rsub):
         return False
     if pk == "builtin":
         return p.get("name") == t.get("name")
-    if pk == "ref":
-        return p.get("target") == t.get("target")
     if pk == "fn":
         tparams = t.get("params", [])
         if len(p["params"]) != len(tparams):
             return False
-        return (all(_match(a, b, psub, rsub) for a, b in zip(p["params"], tparams))
-                and _match(p["result"], t.get("result", {}), psub, rsub))
+        return (all(_match(a, b, psub, rsub, res) for a, b in zip(p["params"], tparams))
+                and _match(p["result"], t.get("result", {}), psub, rsub, res))
     if pk == "apply":
         targs = t.get("args", [])
         if len(p["args"]) != len(targs):
             return False
-        return (_match(p["ctor"], t.get("ctor", {}), psub, rsub)
-                and all(_match(a, b, psub, rsub) for a, b in zip(p["args"], targs)))
+        return (_match(p["ctor"], t.get("ctor", {}), psub, rsub, res)
+                and all(_match(a, b, psub, rsub, res) for a, b in zip(p["args"], targs)))
     if pk == "tuple":
         telems = t.get("elems", [])
         if len(p["elems"]) != len(telems):
             return False
-        return all(_match(a, b, psub, rsub) for a, b in zip(p["elems"], telems))
+        return all(_match(a, b, psub, rsub, res) for a, b in zip(p["elems"], telems))
     if pk == "record":
         tfields = {f.get("name"): f.get("type") for f in t.get("fields", [])}
         pfields = {f["name"]: f["type"] for f in p["fields"]}
         if set(pfields) != set(tfields):
             return False
-        return all(_match(pfields[n], tfields[n], psub, rsub) for n in pfields)
+        return all(_match(pfields[n], tfields[n], psub, rsub, res) for n in pfields)
     if pk == "sum":
         tvariants = {v.get("tag"): v.get("type") for v in t.get("variants", [])}
         pvariants = {v["tag"]: v.get("type") for v in p["variants"]}
@@ -245,16 +295,18 @@ def _match(p, t, psub, rsub):
             tt = tvariants[tag]
             if (pt is None) != (tt is None):
                 return False
-            if pt is not None and not _match(pt, tt, psub, rsub):
+            if pt is not None and not _match(pt, tt, psub, rsub, res):
                 return False
         return True
     return False
 
 
-def matches_type(pattern, type_str):
+def matches_type(pattern, type_str, load_type=None):
     """Does `pattern` match the stored `type_str`? `type_str` is the extracted column — the JSON
     rendering of a structured v0.2 type, or a v0.1 surface string (which never matches — structured
-    matching needs a structured type)."""
+    matching needs a structured type). `load_type(target)` — when given — resolves `ref` nodes
+    through published `type_…` artifacts (bounded depth, cycle-guarded), so a nominally-typed
+    record matches a structural pattern and vice versa."""
     if not type_str:
         return False
     try:
@@ -263,4 +315,4 @@ def matches_type(pattern, type_str):
         return False
     if not isinstance(t, dict):
         return False
-    return _match(pattern, t, {}, {})
+    return _match(pattern, t, {}, {}, _Resolver(load_type) if load_type else None)

@@ -226,6 +226,16 @@ def reconcile_peer(peer):
 
 
 @shared_task
+def anchor_corpus():
+    """Sign a Merkle-root anchor when the corpus has moved (commons.md open question 2). No-op
+    without COMMONS_ANCHOR_SEED, and when the root is unchanged since the last anchor."""
+    from .anchor import record_anchor
+
+    payload = record_anchor()
+    return {"anchored": payload is not None, "root": (payload or {}).get("root")}
+
+
+@shared_task
 def replicate_all():
     """Run record + blob replication + Merkle anti-entropy for every configured peer (the
     beat-scheduled entry point). Reconciliation runs AFTER the cursor tail: in the common case the

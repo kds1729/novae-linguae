@@ -21,6 +21,9 @@ enum CliKind {
     /// Signed eval attestation (top-level `evl_<hex>` hash, strips `hash` and `signature`;
     /// Ed25519 signature covers the hash).
     EvalAttestation,
+    /// Type expression published as a commons artifact (top-level `type_<hex>` hash, strips
+    /// `hash`). Never auto-detected — type-node kinds collide with body-expression kinds.
+    Type,
 }
 
 impl From<CliKind> for nl_validator::ArtifactKind {
@@ -31,6 +34,7 @@ impl From<CliKind> for nl_validator::ArtifactKind {
             CliKind::Body => Self::BodyExpression,
             CliKind::Weights => Self::Weights,
             CliKind::EvalAttestation => Self::EvalAttestation,
+            CliKind::Type => Self::Type,
         }
     }
 }
@@ -1117,6 +1121,10 @@ fn cmd_verify(record: &PathBuf, kind_override: Option<nl_validator::ArtifactKind
         }
         nl_validator::ArtifactKind::Weights => {
             println!("signature N/A   weights records have no signature (provenance is attested, not signed)");
+            true
+        }
+        nl_validator::ArtifactKind::Type => {
+            println!("signature N/A   type artifacts have no signature (pure content)");
             true
         }
         nl_validator::ArtifactKind::Message
@@ -2583,6 +2591,11 @@ fn cmd_sign(record: &PathBuf, seed: &str, in_place: bool) -> Result<()> {
         nl_validator::ArtifactKind::Trace => {
             return Err(anyhow::anyhow!(
                 "a trace is unsigned — it is content-addressed evidence referenced by a *signed* `observed` assert"
+            ));
+        }
+        nl_validator::ArtifactKind::Type => {
+            return Err(anyhow::anyhow!(
+                "a type artifact is unsigned pure content (and is never auto-detected — this arm is unreachable)"
             ));
         }
     }

@@ -92,6 +92,13 @@ def verify_record(raw):
     kind, version = detect(raw)
     if kind is None:
         raise VerifyError("unsupported_kind", f"unknown address prefix in {raw.get('hash')!r}")
+    if kind == "type":
+        # A type artifact is the bare type-expression AST plus its `hash` (no schema_version —
+        # the expression grammar admits no extra fields). Validate the STRIPPED expression, then
+        # recompute the address with the explicit kind (type-node kinds collide with body kinds,
+        # so the validator never auto-detects types), plus the well-formedness pass the schema
+        # itself delegates (var scoping, rank-1, unique fields/tags).
+        return _verify_type(raw)
     schema = _schema_path(kind, version)
     if schema is None:
         raise VerifyError("unsupported_kind", f"no schema for {kind} {version!r}")
@@ -111,6 +118,37 @@ def verify_record(raw):
     finally:
         os.unlink(path)
     return kind, version, raw["hash"]
+
+
+def _verify_type(raw):
+    """Verify a `type_…` artifact: the bare type expression (hash stripped) must validate against
+    the type-expression schema AND pass the well-formedness check, and the declared address must
+    recompute under the explicit type kind."""
+    expr = {k: v for k, v in raw.items() if k != "hash"}
+    schema = _schema_path("type", "0.1.0")
+    if schema is None:
+        raise VerifyError("unsupported_kind", "no schema for type 0.1.0")
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(expr, f)
+        path = f.name
+    try:
+        validated = _run("validate", schema, path)
+        if validated.returncode != 0:
+            raise VerifyError("schema_invalid", (validated.stderr or "").strip())
+        wellformed = _run("check-type", path)
+        if wellformed.returncode != 0:
+            raise VerifyError("schema_invalid",
+                              (wellformed.stdout or wellformed.stderr or "").strip())
+        hashed = _run("hash", path, "--kind", "type")
+        if hashed.returncode != 0:
+            raise VerifyError("schema_invalid", (hashed.stderr or "").strip())
+        address = (hashed.stdout or "").strip()
+        if address != raw["hash"]:
+            raise VerifyError("hash_mismatch",
+                              f"declared {raw['hash']!r} but the expression hashes to {address!r}")
+    finally:
+        os.unlink(path)
+    return "type", "0.1.0", address
 
 
 def _verify_bare_body(raw):

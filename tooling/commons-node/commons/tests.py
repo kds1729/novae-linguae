@@ -1818,6 +1818,89 @@ class TypePatternQueryTests(TestCase):
         self.assertIn("kind", resp.json().get("detail", "") + resp.json().get("error", ""))
 
 
+# --- type artifacts + matching through refs ---------------------------------------------------------
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class TypeArtifactTests(TestCase):
+    """`type_…` artifacts through the gate, and `type_pattern` matching THROUGH a `ref`."""
+
+    def setUp(self):
+        self.client = Client()
+
+    @staticmethod
+    def _addressed(expr):
+        """The expr plus its real, validator-computed `type_…` address."""
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(expr, f)
+        addr = subprocess.run([str(VALIDATOR), "hash", f.name, "--kind", "type"],
+                              capture_output=True, text=True).stdout.strip()
+        rec = dict(expr)
+        rec["hash"] = addr
+        return rec
+
+    def _publish(self, record):
+        return self.client.post("/v0/records", data=json.dumps(record),
+                                content_type="application/json")
+
+    def test_type_record_through_the_gate(self):
+        rec = self._addressed(_STR_TO_MAYBE_BOOL)
+        self.assertTrue(rec["hash"].startswith("type_"), rec["hash"])
+        resp = self._publish(rec)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        got = self.client.get(f"/v0/records/{rec['hash']}")
+        self.assertEqual(got.json(), rec)
+        # Idempotent; tampered content under the same address refuses.
+        self.assertEqual(self._publish(rec).status_code, 200)
+        bad = dict(rec)
+        bad["result"] = _B("int")
+        self.assertEqual(self._publish(bad).status_code, 422)
+
+    def test_illformed_type_refused(self):
+        # Schema-valid but ill-formed: a free type variable (no enclosing forall) fails check-type.
+        rec = self._addressed(_FN([_V("a")], _V("b")))
+        resp = self._publish(rec)
+        self.assertEqual(resp.status_code, 422, resp.content)
+
+    def test_pattern_matches_through_a_ref(self):
+        # A published type definition; a function whose declared type REFERENCES it nominally.
+        defn = self._addressed(_AP("Maybe", [_B("bool")]))
+        self.assertEqual(self._publish(defn).status_code, 201)
+        nominal = _FN([_B("string")], {"kind": "ref", "target": defn["hash"]})
+        Record.objects.create(hash="fn_" + "d" * 64, kind="function-record",
+                              schema_version="0.2.0", raw={}, terminates="always",
+                              type_str=json.dumps(nominal))
+        # A STRUCTURAL pattern finds the nominally-typed record (resolution at match time)...
+        resp = self.client.post("/v0/query", content_type="application/json",
+                                data=json.dumps({"type_pattern":
+                                                 _FN([_B("string")], _AP("Maybe", [_B("bool")]))}))
+        self.assertIn("fn_" + "d" * 64, resp.json()["results"])
+        # ...and so does a pattern that names the ref itself, and a head pattern through the ref.
+        for result_pattern in ({"kind": "ref", "target": defn["hash"]},
+                               {"kind": "head", "names": ["Maybe"]}):
+            resp = self.client.post("/v0/query", content_type="application/json",
+                                    data=json.dumps({"type_pattern": _FN([_B("string")], result_pattern)}))
+            self.assertIn("fn_" + "d" * 64, resp.json()["results"], result_pattern)
+        # A structurally-different pattern still refuses.
+        resp = self.client.post("/v0/query", content_type="application/json",
+                                data=json.dumps({"type_pattern": _FN([_B("string")], _B("bool"))}))
+        self.assertNotIn("fn_" + "d" * 64, resp.json()["results"])
+
+    def test_unresolvable_and_cyclic_refs_do_not_match_structurally(self):
+        from .typematch import matches_type
+
+        absent = {"kind": "ref", "target": "type_" + "9" * 64}
+        ty = json.dumps(_FN([_B("string")], absent))
+        # Unresolvable: matches `any`, not a structural pattern.
+        self.assertTrue(matches_type(_FN([_B("string")], {"kind": "any"}), ty, load_type=lambda t: None))
+        self.assertFalse(matches_type(_FN([_B("string")], _B("bool")), ty, load_type=lambda t: None))
+        # A cyclic alias chain terminates and does not match structurally.
+        a, b = "type_" + "a" * 64, "type_" + "b" * 64
+        aliases = {a: {"kind": "ref", "target": b}, b: {"kind": "ref", "target": a}}
+        cyc = json.dumps(_FN([_B("string")], {"kind": "ref", "target": a}))
+        self.assertFalse(matches_type(_FN([_B("string")], _B("bool")), cyc,
+                                      load_type=aliases.get))
+
+
 # --- equivalence claims (`equivalent`, spec/claim-expression) --------------------------------------
 
 @unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
@@ -1876,6 +1959,26 @@ class EquivalenceClaimTests(TestCase):
     def test_equivalences_get_only(self):
         resp = self.client.post(f"/v0/records/{self.FN_A}/equivalences")
         self.assertEqual(resp.status_code, 405)
+
+    def test_query_collapse_equivalent(self):
+        # Three same-intent functions, two of them claimed equivalent (a signed, gate-verified
+        # assert): the collapse view returns one representative per class and reports the merge;
+        # without the flag all three come back — the view is strictly opt-in.
+        for fill in ("1", "2", "3"):
+            Record.objects.create(hash="fn_" + fill * 64, kind="function-record",
+                                  schema_version="0.2.0", raw={}, terminates="always",
+                                  intent_tags=["collapse-demo"])
+        msg = self._signed_equiv_assert(self.FN_A, self.FN_B)
+        self.assertEqual(self.client.post("/v0/records", data=json.dumps(msg),
+                                          content_type="application/json").status_code, 201)
+        flt = json.dumps({"intent_tags": {"any": ["collapse-demo"]}})
+        plain = self.client.post("/v0/query", data=flt, content_type="application/json").json()
+        self.assertEqual(len(plain["results"]), 3)
+        self.assertNotIn("collapsed", plain)
+        merged = self.client.post("/v0/query?collapse=equivalent", data=flt,
+                                  content_type="application/json").json()
+        self.assertEqual(merged["results"], [self.FN_A, self.FN_C])
+        self.assertEqual(merged["collapsed"], {self.FN_A: [self.FN_B]})
 
 
 # --- body storage tiering (commons.md open question 4) ---------------------------------------------
@@ -1956,6 +2059,57 @@ class BodyTieringTests(TestCase):
             call_command("exportbundle", str(out), stdout=io.StringIO(), stderr=io.StringIO())
             _, records = read_bundle(str(out))
             self.assertIn(body, records, "the bundle carries the real body, not the pointer stub")
+
+
+# --- provenance anchoring (commons.md open question 2) ---------------------------------------------
+
+class AnchorTests(TestCase):
+    """Signed Merkle-root anchors: emitted on root movement, verifiable, served newest-first."""
+
+    def test_disabled_without_seed(self):
+        from commons.anchor import record_anchor
+
+        self.assertIsNone(record_anchor())
+        resp = Client().get("/v0/anchors")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["enabled"])
+        self.assertEqual(resp.json()["anchors"], [])
+
+    @override_settings(COMMONS_ANCHOR_SEED="anchor-test-seed")
+    def test_anchor_signs_the_current_root_and_dedupes(self):
+        from commons.anchor import record_anchor
+        from commons.bundle import _crypto
+        from commons.merkle import set_digest
+        from commons.models import Anchor
+
+        Record.objects.create(hash="fn_" + "1" * 64, kind="function-record",
+                              schema_version="0.2.0", raw={})
+        payload = record_anchor()
+        self.assertEqual(payload["root"], set_digest(["fn_" + "1" * 64]))
+        self.assertEqual(payload["count"], 1)
+        status, producer = _crypto().verify_manifest(payload)
+        self.assertEqual(status, "valid")
+        self.assertTrue(producer.startswith("did:nova:"))
+        self.assertEqual(Anchor.objects.count(), 1)
+
+        # Unchanged root: nothing new. Root moves: a new anchor.
+        self.assertIsNone(record_anchor())
+        self.assertEqual(Anchor.objects.count(), 1)
+        Record.objects.create(hash="fn_" + "2" * 64, kind="function-record",
+                              schema_version="0.2.0", raw={})
+        second = record_anchor()
+        self.assertEqual(second["count"], 2)
+        self.assertEqual(Anchor.objects.count(), 2)
+
+        # Tampering with a served anchor is detectable by anyone.
+        forged = dict(second)
+        forged["count"] = 3
+        self.assertEqual(_crypto().verify_manifest(forged)[0], "invalid")
+
+        resp = Client().get("/v0/anchors")
+        body = resp.json()
+        self.assertTrue(body["enabled"])
+        self.assertEqual([a["count"] for a in body["anchors"]], [2, 1], "newest first")
 
 
 # --- Merkle set reconciliation (commons.md open question 1) ----------------------------------------

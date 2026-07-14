@@ -20,5 +20,6 @@ urlpatterns = [
     path("v0/equiv", views.equiv),                      # POST prove two functions equivalent (best-effort)
     path("v0/sync", views.sync),                        # GET replication feed
     path("v0/sync/merkle", views.sync_merkle),          # GET Merkle set reconciliation
+    path("v0/anchors", views.anchors),                  # GET signed Merkle-root anchors
     path("v0/info", views.info),                        # GET node metadata
 ]

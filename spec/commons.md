@@ -249,6 +249,27 @@ stripped on both sides (rank-1). Builtin names match exactly (`int` does not mat
 structural forms (`fn`/`apply`/`tuple`/`record`/`sum`/`ref`) match structurally. Only records with
 a structured type participate: a v0.1 string-typed record never matches a `type_pattern`.
 
+A `ref` on either side matches **through its published definition**: the node resolves the
+`type_…` artifact (see [`canonical-serialization.md`](canonical-serialization.md) — type
+expressions are hash-carrying commons artifacts admitted through the ordinary gate, including the
+well-formedness pass) and matches structurally, chain- and cycle-guarded under a global resolution
+budget. Identical targets match without resolving (content addresses: same address, same
+definition); an unresolvable ref (absent on this node, cyclic alias, budget spent) matches only
+`any`, a pattern variable, or the identical ref — never structurally.
+
+**Equivalence-class collapse (`?collapse=equivalent`).** Opt-in: the matched set is grouped by the
+node's stored signed `equivalent` claims (transitively), each class returns only its FIRST member
+in the response order (id, or relevance under `?rank`), and the response reports the merges:
+
+```json
+{ "results": ["fn_3a9b…"], "collapsed": { "fn_3a9b…": ["fn_048a…"] }, "cursor": "…", "complete": true }
+```
+
+The node does not JUDGE the claims (each is objective — any consumer re-proves it with
+`verify-claim`, see `GET /v0/records/{hash}/equivalences`); the view only derives the classes the
+gate-verified claims state, for consumers who accept that basis — one candidate per behavior
+instead of one per address. Without the flag nothing changes.
+
 This is the **discovery-precision** lever found at ingestion scale: an agent loop's application
 carries its argument and result sorts *in the query* (`orchestrate --verify --node` sends them
 automatically), so the node's page is already argument-shaped BEFORE the page cap or token budget
@@ -364,6 +385,23 @@ digest can waste a request or withhold a record — exactly what a lying cursor 
 — because authenticity lives in each record's self-verification, not in the tree. The reference
 worker runs this walk after every cursor tail (`reconcile_peer`), so a cursor mis-step or missed
 page is *found and healed* instead of silently permanent.
+
+### `GET /v0/anchors?limit={n}` — signed Merkle-root anchors
+
+The node's provenance-anchoring history (open question 2, below): each entry is a signed statement
+of what the node held — the corpus Merkle root (the same digest `/v0/sync/merkle` serves at the
+empty prefix), the record count, and a timestamp — newest first. Anchors make retroactive
+tampering *evident*, not impossible: the node can rewrite its own table, so the copy that counts
+is whatever the operator piped into an external append-only log (`manage.py anchorcorpus` emits
+them for exactly that). A verifier recomputes the root from `/v0/sync/merkle`, a mirror, or a
+bundle, compares, and checks the Ed25519 signature (the bundle-manifest construction).
+
+```json
+{ "anchors": [ { "format_version": "nl-anchor/1", "root": "blake2b:…", "count": 1385,
+                 "at": "2026-07-14T05:00:00+00:00", "producer": "did:nova:…",
+                 "signature": "ed25519:…" } ],
+  "count": 1, "enabled": true }
+```
 
 ### Seed bundles (`.nlb`) — out-of-band federation
 
@@ -525,9 +563,18 @@ conformant if it speaks the protocol above. The engine choice MUST NOT leak into
    request or withhold (which a lying cursor feed could already do). "Authenticated" therefore
    comes from record self-verification, not from the tree; per-node signed tree roots (provenance
    anchoring, question 2) remain the separate, still-open add-on.
-2. **Provenance anchoring** — *optionally* publishing periodic Merkle roots of a node's corpus to an
+2. ~~**Provenance anchoring** — *optionally* publishing periodic Merkle roots of a node's corpus to an
    external append-only log (including, if desired, a public blockchain) as a tamper-evident
-   timestamp. This is an add-on for auditability, never the store itself.
+   timestamp. This is an add-on for auditability, never the store itself.~~ **RESOLVED** (at the
+   reference node's honest scope) — with `COMMONS_ANCHOR_SEED` set, the worker signs an **anchor**
+   whenever the corpus's Merkle root has moved (`{format_version, root, count, at}` + Ed25519, the
+   bundle-manifest construction), keeps the node's own history at `GET /v0/anchors`, and
+   `manage.py anchorcorpus` prints one for piping into whatever external append-only log the
+   operator trusts (a public git repo, a transparency log, a blockchain — that half is the
+   operator's by design: a node can rewrite its own table, which is exactly why the external copy
+   matters). Verification is recomputation: derive the root from `/v0/sync/merkle`, a mirror, or a
+   bundle, compare, and check the signature (`nl_crypto.verify_manifest`). Still an add-on for
+   auditability, never the store itself.
 3. **Embedding portability** — a recommended embedding model (or a way to publish embeddings as
    `proof`-like derived artifacts) so semantic search is more comparable across nodes.
 4. ~~**Body storage tiering** — the blob/CDN layer itself now exists (`GET /v0/blobs/{sha256}`, above:
@@ -549,6 +596,6 @@ conformant if it speaks the protocol above. The engine choice MUST NOT leak into
    matches the structured type AST by unification, with pattern wildcards, disjunction, and
    head-constructor sets; `orchestrate --verify --node` sends the application's argument/result
    sorts as a pattern automatically. Subtyping is not part of the type system, so unification is
-   the whole of the question; what remains open is only matching *through* a `ref` into the
-   commons (the node matches the reference by address, it does not resolve and match its
-   definition).
+   the whole of the question — including through a `ref`: type expressions are now first-class
+   commons artifacts (`type_…`, canonical-serialization.md) and the matcher resolves references to
+   their published definitions (bounded, cycle-guarded).
