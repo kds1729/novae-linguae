@@ -21,5 +21,6 @@ urlpatterns = [
     path("v0/sync", views.sync),                        # GET replication feed
     path("v0/sync/merkle", views.sync_merkle),          # GET Merkle set reconciliation
     path("v0/anchors", views.anchors),                  # GET signed Merkle-root anchors
+    path("v0/witnesses", views.witnesses),              # GET countersigned peer anchors
     path("v0/info", views.info),                        # GET node metadata
 ]

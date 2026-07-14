@@ -22,6 +22,7 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 | `GET /v0/blobs/{sha256}` — content-addressed binary blobs (gate-free; the referencing record's sha256 — a weights manifest, a by-address example value — is the boundary) | ✅ |
 | `GET /v0/sync/merkle?prefix=…` — Merkle set reconciliation: one request answers "same record set?", divergence localizes in O(log n) (commons.md open question 1) | ✅ |
 | `GET /v0/anchors` — signed Merkle-root anchors of the corpus (commons.md open question 2; `manage.py anchorcorpus` emits one for the operator's external append-only log) | ✅ |
+| `GET /v0/witnesses` — countersigned PEER anchors (the federated half of anchoring: signature-verified, root-compared against this node's own replicated corpus, signed with its anchor identity; the `witness_anchors` task runs per peer after replication, `manage.py witnessanchors <peer>` is the manual form) | ✅ |
 | `POST /v0/query?collapse=equivalent` — opt-in equivalence-class view: one representative per class of stored (re-provable) `equivalent` claims, merges reported | ✅ |
 | `POST /v0/query` — typed (exact) discovery | ✅ |
 | `GET /v0/sync` — replication feed (cursor) | ✅ |

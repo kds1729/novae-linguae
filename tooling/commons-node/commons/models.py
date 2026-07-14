@@ -77,3 +77,24 @@ class Anchor(models.Model):
 
     def __str__(self):
         return f"{self.root} @ {self.at}"
+
+
+class Witness(models.Model):
+    """A countersigned PEER anchor (commons.md open question 2, the federated half;
+    commons/witness.py). This node verified the origin's anchor signature — and, when its own
+    replicated corpus computed the same Merkle root, that agreement — and signed a statement
+    embedding the origin anchor verbatim. Served at GET /v0/witnesses: the copy of the ORIGIN'S
+    history the origin cannot rewrite. Append-only in spirit: an agreement upgrade adds a row."""
+
+    at = models.DateTimeField(auto_now_add=True)
+    origin = models.CharField(max_length=200)    # peer base URL the anchor was fetched from
+    producer = models.CharField(max_length=120)  # the origin anchor's signer (did:nova)
+    root = models.CharField(max_length=80)
+    agreement = models.CharField(max_length=16)  # "root-matched" | "unverified"
+    payload = models.JSONField()                 # the full signed witness statement
+
+    class Meta:
+        ordering = ["-id"]
+
+    def __str__(self):
+        return f"{self.origin} {self.root} ({self.agreement})"

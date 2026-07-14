@@ -406,6 +406,29 @@ bundle, compares, and checks the Ed25519 signature (the bundle-manifest construc
   "count": 1, "enabled": true }
 ```
 
+### `GET /v0/witnesses?limit={n}[&origin={url}]` — countersigned peer anchors
+
+The federated half of anchoring: **other nodes are the external append-only log.** A node with
+peers configured fetches each peer's `/v0/anchors` (the `witness_anchors` task, after
+replication + reconciliation; `manage.py witnessanchors <peer>` is the manual form), verifies
+every anchor's signature — an invalid or unsigned anchor is never countersigned — and signs a
+witness statement (`nl-witness/1`) embedding the origin's full signed anchor *verbatim*, so a
+third party checks BOTH signatures and needs neither node's honesty. `agreement` states what the
+witness could verify beyond the signature: `"root-matched"` means its own replicated corpus
+computed the same Merkle root at witnessing time (replication converges the sets, so this is the
+steady state); `"unverified"` means signature-only, and when the replica later catches up the
+same anchor gains an appended `root-matched` statement — the log upgrades by appending, never by
+rewriting. An origin that retroactively rewrites its own `/v0/anchors` history is contradicted
+by every witness that countersigned the original.
+
+```json
+{ "witnesses": [ { "format_version": "nl-witness/1", "origin": "https://nl.example.com",
+                   "anchor": { "format_version": "nl-anchor/1", "root": "blake2b:…", "…": "…" },
+                   "agreement": "root-matched", "at": "2026-07-14T09:00:00+00:00",
+                   "producer": "did:nova:…", "signature": "ed25519:…" } ],
+  "count": 1, "enabled": true }
+```
+
 ### Seed bundles (`.nlb`) — out-of-band federation
 
 Where `sync` federates node-to-node over HTTP, a **seed bundle** federates over *anything* — an HTTP
@@ -577,7 +600,12 @@ conformant if it speaks the protocol above. The engine choice MUST NOT leak into
    operator's by design: a node can rewrite its own table, which is exactly why the external copy
    matters). Verification is recomputation: derive the root from `/v0/sync/merkle`, a mirror, or a
    bundle, compare, and check the signature (`nl_crypto.verify_manifest`). Still an add-on for
-   auditability, never the store itself.
+   auditability, never the store itself. **The federated extension is now also in the reference
+   node** (`GET /v0/witnesses`, above): peers verify + countersign each other's anchors — with
+   root agreement checked against their own replicated corpora, not taken on faith — so "an
+   external log the origin cannot rewrite" is supplied by the federation itself, no operator
+   ceremony required. The two halves compose: operator-chosen logs for anchoring against the
+   whole federation colluding, witnesses for anchoring against any single node lying.
 3. **Embedding portability** — a recommended embedding model (or a way to publish embeddings as
    `proof`-like derived artifacts) so semantic search is more comparable across nodes.
 4. ~~**Body storage tiering** — the blob/CDN layer itself now exists (`GET /v0/blobs/{sha256}`, above:

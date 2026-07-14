@@ -2112,6 +2112,112 @@ class AnchorTests(TestCase):
         self.assertEqual([a["count"] for a in body["anchors"]], [2, 1], "newest first")
 
 
+class WitnessTests(TestCase):
+    """Anchor cross-node witnessing (open question 2, the federated half): a peer's anchors are
+    signature-verified, root-compared against THIS node's corpus, and countersigned."""
+
+    def _origin_anchor(self, hashes, seed="origin-anchor-seed"):
+        """A peer's signed anchor over the given record set (signed with the ORIGIN's identity,
+        distinct from the witness's own seed)."""
+        from commons.bundle import _crypto
+        from commons.merkle import set_digest
+
+        return _crypto().sign_manifest(
+            {"format_version": "nl-anchor/1", "root": set_digest(hashes), "count": len(hashes),
+             "at": "2026-07-14T00:00:00+00:00"}, seed)
+
+    def test_disabled_without_seed(self):
+        from commons.witness import witness_peer_anchors
+
+        self.assertEqual(witness_peer_anchors("https://origin.example", []), {"enabled": False})
+        resp = Client().get("/v0/witnesses")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["enabled"])
+        self.assertEqual(resp.json()["witnesses"], [])
+
+    @override_settings(COMMONS_ANCHOR_SEED="witness-test-seed")
+    def test_countersigns_valid_anchors_and_never_invalid_ones(self):
+        from commons.bundle import _crypto
+        from commons.models import Witness
+        from commons.witness import witness_peer_anchors
+
+        valid = self._origin_anchor(["fn_" + "1" * 64])
+        forged = dict(valid)
+        forged["count"] = 99  # tampered after signing — must never be countersigned
+        summary = witness_peer_anchors("https://origin.example",
+                                       [valid, forged, "junk", {"root": "x"}])
+        # forged = bad signature, the unsigned dict = also refused (invalid); "junk" = malformed.
+        self.assertEqual((summary["witnessed"], summary["invalid"], summary["malformed"]),
+                         (1, 2, 1), summary)
+
+        row = Witness.objects.get()
+        # Local corpus is empty, the anchored set is not — signature seen, agreement unverified.
+        self.assertEqual(row.agreement, "unverified")
+        self.assertEqual(row.producer, valid["producer"], "the row indexes the ORIGIN's signer")
+        # The witness statement is itself verifiable, embeds the origin anchor VERBATIM, and is
+        # signed by a DIFFERENT identity than the origin's — two signatures, no shared honesty.
+        status, witness_did = _crypto().verify_manifest(row.payload)
+        self.assertEqual(status, "valid")
+        self.assertNotEqual(witness_did, valid["producer"])
+        self.assertEqual(row.payload["anchor"], valid)
+        self.assertEqual(_crypto().verify_manifest(row.payload["anchor"])[0], "valid")
+
+    @override_settings(COMMONS_ANCHOR_SEED="witness-test-seed")
+    def test_root_agreement_and_appendonly_upgrade(self):
+        from commons.models import Witness
+        from commons.witness import witness_peer_anchors
+
+        Record.objects.create(hash="fn_" + "1" * 64, kind="function-record",
+                              schema_version="0.2.0", raw={})
+        # The origin anchors {fn_1, fn_2}; this node holds only fn_1 → unverified.
+        anchor = self._origin_anchor(["fn_" + "1" * 64, "fn_" + "2" * 64])
+        s1 = witness_peer_anchors("https://origin.example", [anchor])
+        self.assertEqual(s1["witnessed"], 1)
+        self.assertEqual(Witness.objects.get().agreement, "unverified")
+
+        # Replication catches up (fn_2 arrives) → the SAME anchor gains a root-matched witness:
+        # an APPENDED second statement, the first is never rewritten.
+        Record.objects.create(hash="fn_" + "2" * 64, kind="function-record",
+                              schema_version="0.2.0", raw={})
+        s2 = witness_peer_anchors("https://origin.example", [anchor])
+        self.assertEqual(s2["witnessed"], 1, s2)
+        rows = list(Witness.objects.order_by("id"))
+        self.assertEqual([r.agreement for r in rows], ["unverified", "root-matched"])
+
+        # Idempotent thereafter: root-matched is the terminal state for this (origin, root).
+        s3 = witness_peer_anchors("https://origin.example", [anchor])
+        self.assertEqual((s3["witnessed"], s3["already"]), (0, 1), s3)
+        self.assertEqual(Witness.objects.count(), 2)
+
+    @override_settings(COMMONS_ANCHOR_SEED="witness-test-seed")
+    def test_endpoint_serves_newest_first_and_filters_by_origin(self):
+        from commons.witness import witness_peer_anchors
+
+        witness_peer_anchors("https://a.example", [self._origin_anchor(["fn_" + "3" * 64])])
+        witness_peer_anchors("https://b.example", [self._origin_anchor(["fn_" + "4" * 64])])
+        body = Client().get("/v0/witnesses").json()
+        self.assertTrue(body["enabled"])
+        self.assertEqual([w["origin"] for w in body["witnesses"]],
+                         ["https://b.example", "https://a.example"], "newest first")
+        filtered = Client().get("/v0/witnesses?origin=https://a.example/").json()
+        self.assertEqual([w["origin"] for w in filtered["witnesses"]], ["https://a.example"])
+
+    @override_settings(COMMONS_ANCHOR_SEED="witness-test-seed")
+    def test_task_fetches_the_peer_and_witnesses(self):
+        from unittest import mock
+
+        from commons import tasks
+        from commons.models import Witness
+
+        anchors = {"anchors": [self._origin_anchor(["fn_" + "5" * 64])], "count": 1, "enabled": True}
+        with mock.patch.object(tasks, "_get_json", return_value=anchors) as fake:
+            summary = tasks.witness_anchors("https://origin.example/")
+        self.assertEqual(summary["peer"], "https://origin.example", "trailing slash stripped")
+        self.assertEqual(summary["witnessed"], 1, summary)
+        fake.assert_called_once_with("https://origin.example/v0/anchors?limit=100")
+        self.assertEqual(Witness.objects.count(), 1)
+
+
 # --- Merkle set reconciliation (commons.md open question 1) ----------------------------------------
 
 @unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")

@@ -406,6 +406,33 @@ def anchors(request):
     return resp
 
 
+def witnesses(request):
+    """GET /v0/witnesses?limit={n}[&origin={url}] — this node's countersigned PEER anchors,
+    newest first (commons.md open question 2, the federated half). Each payload is a signed
+    witness statement embedding the origin's full signed anchor verbatim, so a third party
+    verifies BOTH signatures (nl_crypto.verify_manifest, twice) and needs neither node's
+    honesty; `agreement: "root-matched"` additionally states this node's replicated corpus
+    computed the same Merkle root at witnessing time. An origin that rewrites its /v0/anchors
+    history is contradicted by every witness that countersigned the original."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    from .models import Witness
+
+    try:
+        limit = max(1, min(int(request.GET.get("limit", "25") or 25), 500))
+    except ValueError:
+        return JsonResponse({"error": "bad_limit"}, status=400)
+    rows = Witness.objects.order_by("-id")
+    origin = request.GET.get("origin")
+    if origin:
+        rows = rows.filter(origin=origin.rstrip("/"))
+    rows = list(rows[:limit])
+    resp = JsonResponse({"witnesses": [r.payload for r in rows], "count": len(rows),
+                         "enabled": bool(settings.COMMONS_ANCHOR_SEED)})
+    resp["Cache-Control"] = "public, max-age=10"
+    return resp
+
+
 def info(request):
     """GET /v0/info — node metadata (peers are hints, not authority)."""
     if request.method != "GET":

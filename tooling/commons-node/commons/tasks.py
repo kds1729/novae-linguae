@@ -236,11 +236,32 @@ def anchor_corpus():
 
 
 @shared_task
+def witness_anchors(base):
+    """Countersign a peer's Merkle-root anchors (commons.md open question 2, the federated half;
+    commons/witness.py). Fetches the peer's /v0/anchors, verifies each signature, checks root
+    agreement against THIS node's corpus, and stores signed witness statements. No-op without
+    COMMONS_ANCHOR_SEED (a witness needs an identity to countersign with)."""
+    from .witness import witness_peer_anchors
+
+    base = base.rstrip("/")
+    if not settings.COMMONS_ANCHOR_SEED:
+        return {"peer": base, "enabled": False}
+    try:
+        got = _get_json(f"{base}/v0/anchors?limit=100")
+    except Exception as exc:
+        return {"peer": base, "error": str(exc)[:200]}
+    return {"peer": base, **witness_peer_anchors(base, got.get("anchors") or [])}
+
+
+@shared_task
 def replicate_all():
-    """Run record + blob replication + Merkle anti-entropy for every configured peer (the
-    beat-scheduled entry point). Reconciliation runs AFTER the cursor tail: in the common case the
-    tail already converged and reconcile is a single equal-digest request."""
-    return [{"records": replicate_peer(p), "blobs": replicate_blobs(p), "reconcile": reconcile_peer(p)}
+    """Run record + blob replication + Merkle anti-entropy + anchor witnessing for every
+    configured peer (the beat-scheduled entry point). Reconciliation runs AFTER the cursor tail:
+    in the common case the tail already converged and reconcile is a single equal-digest request.
+    Witnessing runs LAST, after reconcile has converged the sets, so a moved root is compared
+    against the freshest local corpus and upgrades to "root-matched" as early as possible."""
+    return [{"records": replicate_peer(p), "blobs": replicate_blobs(p), "reconcile": reconcile_peer(p),
+             "witness": witness_anchors(p)}
             for p in settings.COMMONS_PEERS]
 
 
