@@ -417,6 +417,18 @@ fn lower(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
         }
         "app" => lower_app(node, env),
         "case" => lower_case(node, env),
+        // A `let` lowers to SMT-LIB's own binder (the first-order path in prove.rs does the same):
+        // capture-safe by construction and value-sharing preserved — no substitution into the body.
+        // The binder SHADOWS any outer env mapping for the same name (e.g. an induction variable),
+        // exactly as the language's own scoping does.
+        "let" => {
+            let name = node.get("name").and_then(|n| n.as_str()).ok_or_else(|| anyhow!("let has no name"))?;
+            let vsmt = lower(node.get("value").ok_or_else(|| anyhow!("let has no value"))?, env)?;
+            let mut e2 = env.clone();
+            e2.remove(name);
+            let body = lower(node.get("body").ok_or_else(|| anyhow!("let has no body"))?, &e2)?;
+            Ok(format!("(let (({name} {vsmt})) {body})"))
+        }
         other => bail!("unsupported expression kind `{other}` (out of fragment)"),
     }
 }
@@ -608,6 +620,8 @@ fn infer_result_sort(node: &J) -> Sort3 {
             "and" | "or" | "xor" | "not" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "null" => Sort3::Bool,
             _ => Sort3::Int, // length, head, add, sub, mul, …, and recursive `self`
         },
+        // A `let`-bodied function returns whatever its body returns (the binder changes nothing).
+        Some("let") => node.get("body").map(infer_result_sort).unwrap_or(Sort3::Int),
         _ => Sort3::Int,
     }
 }

@@ -644,6 +644,39 @@ mod tests {
     }
 
     #[test]
+    fn let_carrying_recursive_body_proves_by_induction() {
+        let Some(s) = solver() else { return };
+        // sum written through a `let` (bind the head, add it) vs plain sum — both recursive, so
+        // the two-recursive induction path must lower the `let` (SMT-LIB's own binder; production
+        // refused 7 pairs as "unsupported expression kind `let`" before this).
+        let sum = rec_over_list(json!({ "kind": "app", "op": "add", "args": [head_xs(), self_tail()] }));
+        let sum_let = rec_over_list(json!({ "kind": "let", "name": "d", "value": head_xs(),
+            "body": { "kind": "app", "op": "add",
+                      "args": [{ "kind": "var", "name": "d" }, self_tail()] } }));
+        match prove_equivalent(&sum_let, &sum, s) {
+            EquivVerdict::Equivalent(_) | EquivVerdict::EquivalentByNormalization => {}
+            other => panic!("expected EQUIVALENT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn let_carrying_distinct_pair_is_refuted() {
+        let Some(s) = solver() else { return };
+        // The same let shape but doubling the bound head — genuinely NOT sum; the base sweep must
+        // find the concrete counterexample through the lowered `let`, never a false EQUIVALENT.
+        let sum = rec_over_list(json!({ "kind": "app", "op": "add", "args": [head_xs(), self_tail()] }));
+        let double_let = rec_over_list(json!({ "kind": "let", "name": "d", "value": head_xs(),
+            "body": { "kind": "app", "op": "add", "args": [
+                { "kind": "app", "op": "add",
+                  "args": [{ "kind": "var", "name": "d" }, { "kind": "var", "name": "d" }] },
+                self_tail()] } }));
+        match prove_equivalent(&double_let, &sum, s) {
+            EquivVerdict::Distinct(_) => {}
+            other => panic!("expected DISTINCT, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn numeric_recursion_refuses_cleanly_before_the_solver() {
         // Two factorial-style bodies (different base predicates, so normalization can't reconcile
         // them) reach the two-recursive path, whose induction is LIST-structural. The refusal must
