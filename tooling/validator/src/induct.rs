@@ -67,7 +67,7 @@
 //! is supported). Lists-of-lists and multiple distinct function arguments are out of scope (UNSUPPORTED).
 
 use anyhow::{anyhow, bail, Result};
-use serde_json::Value as J;
+use serde_json::{json, Value as J};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Memo of *proved* goals (keyed by canonical statement JSON), so an auxiliary lemma proved once — e.g.
@@ -671,11 +671,14 @@ const MAX_STRIDE: usize = 12;
 /// so the minimal realigning stride is known to be exactly `lcm(stride_f, stride_g)` and the prover makes a
 /// *single* attempt at it (not a search). Because it is one attempt, this cap can be much larger than the
 /// blind-search `MAX_STRIDE` at no cost to common pairs: raising it only affects a genuinely-submitted
-/// large-lcm pair, which then checks `0..k` base cases and one step. Measured 2026-07-13: the old cap of
-/// 24 was purely conservative — 5-vs-6 (lcm 30) proves in ~1 s and 7-vs-8 (lcm 56) in ~2.3 s on z3, so
-/// the cap now sits at 60 with the solver timeout still the backstop. Pairs whose alignment period
-/// exceeds this (or that recurse at a non-constant stride) report UNKNOWN — never a false verdict.
-const MAX_TARGETED_STRIDE: usize = 60;
+/// large-lcm pair, which then checks `0..k` base cases and one step. Measured 2026-07-13 (twice): the old
+/// caps were purely conservative — there is NO cliff, the single attempt's cost grows roughly LINEARLY
+/// with the lcm (the base-case sweep dominates): on z3, lcm 30 ≈ 1.3 s, 56 ≈ 2.4 s, 63 ≈ 2.6 s, 90 ≈ 3.8 s,
+/// 132 ≈ 5.5 s, 240 ≈ 10 s, 380 ≈ 15.7 s. The cap is therefore a TIME-BUDGET choice, not a capability
+/// boundary; 240 keeps the one attempt well inside the solver-timeout backstop on modest hardware. Pairs
+/// whose alignment period exceeds it (or that recurse at a non-constant stride) report UNKNOWN — never a
+/// false verdict.
+const MAX_TARGETED_STRIDE: usize = 240;
 
 /// Greatest common divisor (Euclid).
 fn gcd(a: usize, b: usize) -> usize {
@@ -1633,7 +1636,45 @@ fn prove_rec_inner(
         }
     }
 
-    // Phase B — theory exploration (only if enabled and the catalog left it open). Prove conjectures
+    // Phase B — SELF-homomorphism discovery (the former "non-catalog cross-function lemma"
+    // residual, probed 2026-07-13 by `sum(reverse(xs)) = sum(xs)`: its step needs
+    // `self(append(a,b)) = add(self(a), self(b))`, which no catalog entry can state — catalog
+    // lemmas range over the fixed prelude ops, never the function under proof — and exploration
+    // cannot conjecture — `self` is not in its enumeration alphabet). When the goal itself applies
+    // `self` and `append` is in its prelude closure, conjecture the two homomorphism shapes over
+    // append (Int-valued: `add`; List-valued: `append`), prove each by ITS OWN induction with the
+    // same supplied body (the accumulator-collapse precedent: conjecture + prove-before-assume, so
+    // a non-homomorphic function fails the sub-proof and nothing is asserted), and retry the goal
+    // with the proved one. Two bounded sub-inductions — deliberately BEFORE the wide exploration
+    // sweep, which costs minutes where this costs seconds.
+    if let Some(b) = body {
+        if closure.contains("append") && crate::equiv::references_self(prop_expr) {
+            for (name, stmt) in self_homomorphism_conjectures() {
+                if in_progress.iter().any(|g| g == &stmt) {
+                    continue;
+                }
+                let (out, cert) = prove_rec(&stmt, Some(b), solver, depth - 1, false, in_progress, memo);
+                if !matches!(out, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_)) {
+                    continue;
+                }
+                let mut certs = base_certs.clone();
+                if let Some(c) = cert {
+                    certs = merge_certs(&certs, &c.lemmas);
+                    certs.push(LemmaCertificate { name: name.to_string(), var: c.var, base: c.base, step: c.step });
+                }
+                let mut assumed = base_assumed.clone();
+                assumed.push(stmt.clone());
+                if let (out @ InductionOutcome::ProvedWithLemmas(_), cert) =
+                    close_with(prop_expr, body, solver, &assumed, certs, DISCHARGE_SECS)
+                {
+                    in_progress.pop();
+                    return (out, cert);
+                }
+            }
+        }
+    }
+
+    // Phase C — theory exploration (only if enabled and the catalog left it open). Prove conjectures
     // one at a time and, after each, try closing the goal with **just the catalog set plus that single
     // discovered lemma** — a minimal axiom set. This both stops early (no need to prove the rest once one
     // works) and avoids axiom bloat: piling every discovered lemma into one query overwhelms z3's
@@ -1683,6 +1724,27 @@ fn prove_rec_inner(
     (InductionOutcome::Unknown, Some(bare))
 }
 
+/// The self-homomorphism conjecture shapes over `append` (see prove_rec_inner Phase C):
+/// `∀ xs ys. self(append(xs, ys)) = OP(self(xs), self(ys))` for the Int-valued (`add`) and
+/// List-valued (`append`) results. Stated over fresh variables, so they never capture the goal's.
+fn self_homomorphism_conjectures() -> Vec<(&'static str, J)> {
+    let self_app = |arg: J| json!({ "kind": "app", "op": "apply",
+                                    "args": [{ "kind": "var", "name": "self" }, arg] });
+    let xs = json!({ "kind": "var", "name": "xs" });
+    let ys = json!({ "kind": "var", "name": "ys" });
+    let append = json!({ "kind": "app", "op": "append", "args": [xs.clone(), ys.clone()] });
+    ["add", "append"]
+        .into_iter()
+        .map(|op| {
+            let stmt = json!({ "kind": "forall", "vars": ["xs", "ys"], "body": {
+                "kind": "app", "op": "eq", "args": [
+                    self_app(append.clone()),
+                    { "kind": "app", "op": op, "args": [self_app(xs.clone()), self_app(ys.clone())] }] } });
+            (if op == "add" { "self_append_add" } else { "self_append_append" }, stmt)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1705,6 +1767,60 @@ mod tests {
             }
         }
         None
+    }
+
+    /// `sum` — head + self(tail), the canonical Int-valued list recursion.
+    fn sum_body() -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "op": "null", "args": [{ "kind": "var", "name": "xs" }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": { "kind": "app", "op": "add", "args": [
+                      { "kind": "app", "op": "head", "args": [{ "kind": "var", "name": "xs" }] },
+                      { "kind": "app", "op": "apply", "args": [
+                          { "kind": "var", "name": "self" },
+                          { "kind": "app", "op": "tail", "args": [{ "kind": "var", "name": "xs" }] }] }] } }] } })
+    }
+
+    #[test]
+    fn self_homomorphism_closes_sum_reverse_invariance() {
+        let Some(s) = solver() else { return };
+        // The former "non-catalog cross-function lemma" residual, pinned: sum(reverse(xs)) = sum(xs)
+        // needs self(append(a,b)) = add(self(a), self(b)) — unstatable in the catalog (its lemmas
+        // never mention `self`) and unexplorable (`self` is not in the enumeration alphabet).
+        // Phase C conjectures the homomorphism, proves it by its own induction with the supplied
+        // body, and the goal closes with it alongside the catalog laws.
+        let prop = forall(&["xs"], app("eq", vec![
+            app("apply", vec![var("self"), app("reverse", vec![var("xs")])]),
+            app("apply", vec![var("self"), var("xs")]),
+        ]));
+        let (out, cert) = prove_by_induction_with_exploration(&prop, Some(&sum_body()), s, DEFAULT_LEMMA_DEPTH);
+        match out {
+            InductionOutcome::ProvedWithLemmas(names) => {
+                assert!(names.iter().any(|n| n == "self_append_add"), "{names:?}");
+            }
+            other => panic!("expected ProvedWithLemmas, got {other:?}"),
+        }
+        assert!(cert.is_some(), "the proof carries a re-checkable certificate");
+    }
+
+    #[test]
+    fn self_homomorphism_never_asserts_for_a_false_goal() {
+        let Some(s) = solver() else { return };
+        // Prove-before-assume: the homomorphism machinery must not help a FALSE self-goal —
+        // sum(reverse(xs)) = sum(xs) + 1 stays unproved (refuted or unknown, never proved).
+        let prop = forall(&["xs"], app("eq", vec![
+            app("apply", vec![var("self"), app("reverse", vec![var("xs")])]),
+            app("add", vec![
+                app("apply", vec![var("self"), var("xs")]),
+                { let one: J = json!({ "kind": "lit", "value": { "kind": "int", "value": 1 } }); one },
+            ]),
+        ]));
+        let (out, _) = prove_by_induction_with_exploration(&prop, Some(&sum_body()), s, DEFAULT_LEMMA_DEPTH);
+        assert!(!matches!(out, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_)), "{out:?}");
     }
 
     #[test]

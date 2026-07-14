@@ -707,6 +707,17 @@ mod tests {
     }
 
     #[test]
+    fn lcm63_strides_beyond_the_old_cap_prove() {
+        let Some(s) = solver() else { return };
+        // The former "lcm > 60" residual: 7-per-step vs 9-per-step realign only every 63 elements.
+        // The 2026-07-13 sweep showed the targeted attempt's cost is LINEAR in the lcm (no cliff),
+        // so the cap moved 60 -> 240 as a time budget; this pins the smallest formerly-refused case.
+        let len7 = length_by(7);
+        let len9 = length_by(9);
+        assert_eq!(prove_equivalent(&len7, &len9, s), EquivVerdict::Equivalent(vec![]));
+    }
+
+    #[test]
     fn map_law_beyond_first_order_now_proves() {
         let Some(s) = solver() else { return };
         // `\f xs -> map(f, reverse(xs))` ≡ `\f xs -> reverse(map(f, xs))`. This is a map law over an
