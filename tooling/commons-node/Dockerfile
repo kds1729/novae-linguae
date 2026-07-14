@@ -29,6 +29,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # source-tree REPO_ROOT layout inside the container.
 COPY tooling/commons-node ./commons-node
 COPY spec ./spec
+# The shared signing module (bundle manifests, provenance anchors): commons/bundle.py resolves
+# tooling/crypto-python + tooling/ingest-common relative to itself, which lands at /app here. Pure
+# stdlib — omitting it broke `anchorcorpus` (and signed bundle export) in the container only.
+COPY tooling/crypto-python ./crypto-python
+COPY tooling/ingest-common ./ingest-common
 COPY --from=validator /build/validator/target/release/nl-validator /usr/local/bin/nl-validator
 
 ENV COMMONS_VALIDATOR=/usr/local/bin/nl-validator \
