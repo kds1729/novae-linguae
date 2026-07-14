@@ -74,7 +74,7 @@
     },
     "body_hash": {
       "$ref": "#/$defs/content_address",
-      "description": "Hash of the expression body, stored separately from this metadata record. Allows discovery queries to scan metadata without pulling bodies."
+      "description": "Hash of the expression body, stored separately from this metadata record. Allows discovery queries to scan metadata without pulling bodies. Resolvability is promised only for v0.2+ executable records: a v0.1 description-tier record whose source is outside the ingestion subset carries a SYNTHETIC body_hash (a fingerprint of the normalised source, so re-ingesting the same source reproduces the same record identity) that no stored artifact answers — consumers must treat an unresolvable body as 'this candidate cannot be run/certified here', never as store corruption."
     }
   },
   "$defs": {
