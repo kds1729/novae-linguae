@@ -22,6 +22,8 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -29,8 +31,18 @@ VALIDATOR = str(Path(__file__).resolve().parents[1] / "validator" / "target" / "
 
 
 def get_json(node, path):
-    with urllib.request.urlopen(urllib.request.Request(node + path), timeout=120) as r:
-        return json.load(r)
+    """GET with edge-rate-limit awareness: the reference node's Caddy answers 429 per client IP,
+    so a bulk walk backs off (honoring Retry-After when present) instead of shedding work."""
+    for attempt in range(6):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(node + path), timeout=120) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 or attempt == 5:
+                raise
+            retry_after = exc.headers.get("Retry-After")
+            time.sleep(float(retry_after) if retry_after else 2.0 * (attempt + 1))
+    raise RuntimeError("unreachable")
 
 
 def post_json(node, path, payload):
@@ -77,8 +89,11 @@ def main():
             continue
         p = tmp / f"{bh[:16]}.json"
         p.write_text(json.dumps(body))
-        r = subprocess.run([VALIDATOR, "normalize", str(p), "--hash"], capture_output=True, text=True)
+        r = subprocess.run([VALIDATOR, "normalize", "--body", str(p), "--hash"],
+                           capture_output=True, text=True)
         nf_of_body[bh] = r.stdout.strip() if r.returncode == 0 else None
+        if r.returncode != 0:
+            print(f"  ! {bh[:24]}… does not normalize: {(r.stderr or '').strip()}", file=sys.stderr)
 
     # 3. Classes: same normal form = same behavior (solver-free proof).
     classes = collections.defaultdict(list)
@@ -107,6 +122,7 @@ def main():
             if args.dry_run:
                 print(f"  dry-run: would assert {rep[:20]}… ≡ {other[:20]}…")
                 continue
+            time.sleep(0.5)  # pace the per-pair crawls under the edge rate limit
             r = subprocess.run(
                 [VALIDATOR, "assert-equivalent", "--f", rep, "--g", other,
                  "--node", node, "--seed", args.seed, "--publish",
