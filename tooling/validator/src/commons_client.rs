@@ -68,18 +68,52 @@ pub fn fetch_blob(node: &str, sha256: &str) -> Result<J> {
         .map_err(|e| anyhow!("blob {sha256} is not JSON (a result_blob carries value-expression bytes): {e}"))
 }
 
+/// Parse a `/v0/query` response: the matched addresses, plus — when the collapse view was
+/// requested and the node holds equivalence claims over the matches — the `collapsed` merge map
+/// (representative → the members it stands for). Empty on older nodes or claim-free result sets.
+fn parse_query_results(v: &J) -> Result<(Vec<String>, HashMap<String, Vec<String>>)> {
+    if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+        bail!("node rejected the query: {err}");
+    }
+    let results = v
+        .get("results")
+        .and_then(|r| r.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let mut merges: HashMap<String, Vec<String>> = HashMap::new();
+    if let Some(c) = v.get("collapsed").and_then(|c| c.as_object()) {
+        for (rep, members) in c {
+            let ms = members
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            merges.insert(rep.clone(), ms);
+        }
+    }
+    Ok((results, merges))
+}
+
 /// Typed discovery: `POST /v0/query` with a filter object; returns matched `fn_…` addresses.
 pub fn query(node: &str, filter: &J) -> Result<Vec<String>> {
     let url = format!("{}/v0/query", node.trim_end_matches('/'));
     let text = crate::interp::http_request("POST", &url, Some(&filter.to_string()))?;
     let v: J = serde_json::from_str(&text).map_err(|e| anyhow!("query response not JSON: {e}"))?;
-    if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
-        bail!("node rejected the query: {err}");
-    }
-    Ok(v.get("results")
-        .and_then(|r| r.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-        .unwrap_or_default())
+    Ok(parse_query_results(&v)?.0)
+}
+
+/// Typed discovery through the node's equivalence-collapse view
+/// (`POST /v0/query?collapse=equivalent`, spec/commons.md): the result page holds ONE
+/// representative per stored equivalence class, so the closure walk never fetches a candidate's
+/// proven twins. The merge map is an **efficiency hint from an untrusted store**, not evidence —
+/// a lying merge can only hide candidates, which a node shaping the page could already do, and the
+/// loop's own `collapse` step (local normal-form recompute / policy-trusted attested edges)
+/// remains the proof of any merge it acts on. A node that predates the view ignores the query
+/// parameter and returns the plain page — strictly no worse.
+pub fn query_collapsed(node: &str, filter: &J) -> Result<(Vec<String>, HashMap<String, Vec<String>>)> {
+    let url = format!("{}/v0/query?collapse=equivalent", node.trim_end_matches('/'));
+    let text = crate::interp::http_request("POST", &url, Some(&filter.to_string()))?;
+    let v: J = serde_json::from_str(&text).map_err(|e| anyhow!("query response not JSON: {e}"))?;
+    parse_query_results(&v)
 }
 
 /// Typed discovery by intent tag (the common case) — `{intent_tags: {any: [intent]}, limit}`.
@@ -183,6 +217,34 @@ mod tests {
         assert!(matches!(kind_for_address("fn_ab").unwrap(), ArtifactKind::FunctionRecord));
         assert!(matches!(kind_for_address("expr_ab").unwrap(), ArtifactKind::BodyExpression));
         assert!(kind_for_address("weird_ab").is_err());
+    }
+
+    #[test]
+    fn query_response_parses_collapsed_merge_map() {
+        // The collapse view's page: representatives in `results`, merged members alongside.
+        let v = json!({
+            "results": ["fn_aa", "fn_bb"],
+            "cursor": null, "complete": true,
+            "collapsed": { "fn_aa": ["fn_cc", "fn_dd"] }
+        });
+        let (results, merges) = parse_query_results(&v).unwrap();
+        assert_eq!(results, vec!["fn_aa", "fn_bb"]);
+        assert_eq!(merges["fn_aa"], vec!["fn_cc", "fn_dd"]);
+    }
+
+    #[test]
+    fn query_response_without_collapse_yields_empty_merges() {
+        // An older node (or a claim-free result set) sends no `collapsed` key — strictly no worse.
+        let v = json!({ "results": ["fn_aa"], "cursor": null, "complete": true });
+        let (results, merges) = parse_query_results(&v).unwrap();
+        assert_eq!(results, vec!["fn_aa"]);
+        assert!(merges.is_empty());
+    }
+
+    #[test]
+    fn query_response_error_still_bails() {
+        let v = json!({ "error": "malformed_filter" });
+        assert!(parse_query_results(&v).is_err());
     }
 }
 

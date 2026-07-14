@@ -2134,10 +2134,19 @@ fn commons_view(
                 if let Some(tp) = type_pattern {
                     filter["type_pattern"] = tp.clone();
                 }
-                let matched = nl_validator::commons_client::query(url, &filter)?;
-                match type_pattern {
-                    Some(_) => eprintln!("node query  intent {intent:?} + type pattern -> {} match(es)", matched.len()),
-                    None => eprintln!("node query  intent {intent:?} -> {} match(es)", matched.len()),
+                // The equivalence-collapse view: one representative per class of proven-equivalent
+                // candidates, so the closure walk never fetches a twin the loop would only merge
+                // away again. The server's merge map is an efficiency hint from an untrusted store
+                // — the loop's own `collapse` step stays the proof of any merge it acts on.
+                let (matched, merges) = nl_validator::commons_client::query_collapsed(url, &filter)?;
+                let merged: usize = merges.values().map(|m| m.len()).sum();
+                let with_pattern = if type_pattern.is_some() { " + type pattern" } else { "" };
+                match merged {
+                    0 => eprintln!("node query  intent {intent:?}{with_pattern} -> {} match(es)", matched.len()),
+                    n => eprintln!(
+                        "node query  intent {intent:?}{with_pattern} -> {} match(es) ({n} proven-equivalent twin(s) collapsed server-side)",
+                        matched.len()
+                    ),
                 }
                 seeds.extend(matched);
             }

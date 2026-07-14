@@ -268,7 +268,10 @@ in the response order (id, or relevance under `?rank`), and the response reports
 The node does not JUDGE the claims (each is objective — any consumer re-proves it with
 `verify-claim`, see `GET /v0/records/{hash}/equivalences`); the view only derives the classes the
 gate-verified claims state, for consumers who accept that basis — one candidate per behavior
-instead of one per address. Without the flag nothing changes.
+instead of one per address. Without the flag nothing changes. The verified agent loop's node
+discovery requests this view on every query (agent-loop.md): the saved fetches are the point, and
+because the merge map is only an efficiency hint from an untrusted store, the loop's own local
+`collapse` step remains the proof of any merge it acts on.
 
 This is the **discovery-precision** lever found at ingestion scale: an agent loop's application
 carries its argument and result sorts *in the query* (`orchestrate --verify --node` sends them

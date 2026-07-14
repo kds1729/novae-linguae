@@ -123,7 +123,13 @@ composes `double` twice, confirming `double(double(21)) = 84` (ten messages).
 the project's thesis in one autonomous run: **discover** functions by intent (a query returns a *set*;
 against a live `--node`, the application's argument and result sorts additionally travel *in* the
 query as a structured `type_pattern` — commons.md — so the node's capped page is already
-argument-shaped, instead of a broad intent page that may have truncated the right candidate away),
+argument-shaped, instead of a broad intent page that may have truncated the right candidate away;
+the discovery query also requests the node's **equivalence-collapse view** (`?collapse=equivalent`),
+so the page holds one representative per class of proven-equivalent candidates and the closure walk
+never fetches twins the loop would only merge away again — the server's merge is an *efficiency
+hint* from an untrusted store, not evidence: a lying merge can only hide candidates, which a node
+shaping the page could already do, and the local `collapse` step below remains the proof of any
+merge the loop itself acts on),
 keep only those whose **signature fits the application** — arity *and* parameter types must accept the
 arguments (a binary function is no candidate for a unary apply; a function over lists is no candidate for
 an integer argument), with polymorphic type variables unified consistently across the parameters — and a
