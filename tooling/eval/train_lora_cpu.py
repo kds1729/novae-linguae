@@ -59,35 +59,41 @@ def main():
     ap.add_argument("--threads", type=int, default=0, help="torch CPU threads (0 = leave default)")
     ap.add_argument("--dtype", default="float32", choices=["float32", "bfloat16", "float16"],
                     help="base-model load dtype (use bfloat16 for 3B+ to fit 15 GB CPU; fp32 for <=1.5B)")
+    ap.add_argument("--target-modules",
+                    default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+                    help="comma-separated LoRA target module names (the Qwen2.5 projection set), or "
+                         "the literal `all-linear` — the escape hatch for bases whose attention "
+                         "modules are named differently (the Qwen3.5 hybrid-DeltaNet line)")
     args = ap.parse_args()
 
     import torch
-    from transformers import (AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments,
-                              set_seed)
+    from transformers import Trainer, TrainingArguments, set_seed
     from peft import LoraConfig, get_peft_model
+    from model_client import load_hf_causal_model, load_hf_tokenizer
 
     set_seed(args.seed)
     if args.threads:
         torch.set_num_threads(args.threads)
 
-    tok = AutoTokenizer.from_pretrained(args.base)
+    # The same loaders the eval backend uses (AutoTokenizer→AutoProcessor and causal→multimodal
+    # fallbacks for the Qwen3.5 line) — train and eval must agree on template + architecture.
+    tok = load_hf_tokenizer(args.base)
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
     tok.padding_side = "right"
 
     # float32 on CPU: bf16/fp16 matmul is slow or unsupported for many CPU ops, and a 0.5-1.5B base in
-    # fp32 fits comfortably in 15 GB. Newer transformers takes `dtype`; older took `torch_dtype`.
+    # fp32 fits comfortably in 15 GB.
     dt = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[args.dtype]
-    try:
-        model = AutoModelForCausalLM.from_pretrained(args.base, dtype=dt)
-    except TypeError:
-        model = AutoModelForCausalLM.from_pretrained(args.base, torch_dtype=dt)
+    model = load_hf_causal_model(args.base, dt)
     model.config.use_cache = False
 
+    tmods = args.target_modules if args.target_modules == "all-linear" \
+        else [m for m in args.target_modules.split(",") if m]
     lora = LoraConfig(
         r=args.lora_r, lora_alpha=args.lora_alpha, lora_dropout=args.lora_dropout, bias="none",
         task_type="CAUSAL_LM",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        target_modules=tmods,
     )
     model = get_peft_model(model, lora)
     model.print_trainable_parameters()
@@ -102,9 +108,12 @@ def main():
     def encode(msgs):
         # Full conversation ids (with the assistant turn), and the prompt-only length so we can mask the
         # prompt out of the loss — the model is trained only on the assistant completion.
-        full = ids_of(tok.apply_chat_template(msgs, add_generation_prompt=False))
+        # `enable_thinking=False` matches the eval backend on hybrid-thinking bases (the completion is
+        # the answer, never a reasoning transcript); templates without the variable ignore it.
+        full = ids_of(tok.apply_chat_template(msgs, add_generation_prompt=False, enable_thinking=False))
         prompt_msgs = [m for m in msgs if m["role"] != "assistant"]
-        prompt = ids_of(tok.apply_chat_template(prompt_msgs, add_generation_prompt=True))
+        prompt = ids_of(tok.apply_chat_template(prompt_msgs, add_generation_prompt=True,
+                                                enable_thinking=False))
         full = full[: args.max_seq_len]
         plen = min(len(prompt), len(full))
         labels = [-100] * plen + full[plen:]

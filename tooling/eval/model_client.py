@@ -144,14 +144,11 @@ class HFModel:
 
         repo, _, adapter = spec.partition("::")
         self._torch = torch
-        self._tokenizer = AutoTokenizer.from_pretrained(repo)
+        self._tokenizer = load_hf_tokenizer(repo)
         # fp32 by default (best CPU op support); set NL_HF_DTYPE=bfloat16 to fit a 3B+ base in 15 GB.
         dt = {"float32": torch.float32, "bfloat16": torch.bfloat16,
               "float16": torch.float16}.get(os.environ.get("NL_HF_DTYPE", "float32"), torch.float32)
-        try:  # newer transformers takes `dtype`, older took `torch_dtype`
-            model = AutoModelForCausalLM.from_pretrained(repo, dtype=dt)
-        except TypeError:
-            model = AutoModelForCausalLM.from_pretrained(repo, torch_dtype=dt)
+        model = load_hf_causal_model(repo, dt)
         if adapter:
             from peft import PeftModel
             model = PeftModel.from_pretrained(model, adapter)
@@ -163,10 +160,15 @@ class HFModel:
         self.name = f"hf:{repo}" + (f"::{adapter}" if adapter else "")
 
     def answer(self, task) -> str:
+        # `enable_thinking=False` reaches the chat template's jinja context: hybrid-thinking bases
+        # (the Qwen3/3.5 line default to thinking ON) render the non-thinking prompt; templates
+        # without the variable ignore it (Qwen2.5 — measured no-op). Greedy shots-0 grading needs
+        # the answer, not a reasoning transcript.
         enc = self._tokenizer.apply_chat_template(
             [{"role": "system", "content": task.system},
              {"role": "user", "content": task.user}],
             add_generation_prompt=True, return_tensors="pt", return_dict=True,
+            enable_thinking=False,
         )
         enc = enc.to(self._device)
         input_len = enc["input_ids"].shape[1]
@@ -178,4 +180,51 @@ class HFModel:
                 **enc, max_new_tokens=self.max_tokens, do_sample=False, pad_token_id=pad_id,
             )
         text = self._tokenizer.decode(out[0, input_len:], skip_special_tokens=True)
-        return (text or "").strip()
+        return strip_think_block(text or "").strip()
+
+
+def strip_think_block(text: str) -> str:
+    """Drop a leading `<think>…</think>` reasoning block a hybrid-thinking base may emit despite
+    `enable_thinking=False` (belt and braces — the dialect never contains the closing tag, so
+    taking what follows the LAST closer is lossless for well-formed answers)."""
+    if "</think>" in text:
+        return text.rsplit("</think>", 1)[1]
+    return text
+
+
+def load_hf_tokenizer(repo: str):
+    """AutoTokenizer, falling back to AutoProcessor for multimodal repos (the Qwen3.5 line ships a
+    processor whose tokenizer half carries the chat template). Returns an object exposing
+    `apply_chat_template` / `decode` / `pad_token_id` — both classes do."""
+    from transformers import AutoTokenizer
+
+    try:
+        return AutoTokenizer.from_pretrained(repo)
+    except Exception:
+        from transformers import AutoProcessor
+
+        proc = AutoProcessor.from_pretrained(repo)
+        return getattr(proc, "tokenizer", proc)
+
+
+def load_hf_causal_model(repo: str, dt):
+    """AutoModelForCausalLM (newer transformers: `dtype`, older: `torch_dtype`), falling back to
+    the multimodal auto-class for repos whose architecture registers there (Qwen3.5); text-only
+    usage is unchanged — the language modeling head is what `generate` drives either way."""
+    from transformers import AutoModelForCausalLM
+
+    def _load(cls):
+        try:
+            return cls.from_pretrained(repo, dtype=dt)
+        except TypeError:
+            return cls.from_pretrained(repo, torch_dtype=dt)
+
+    try:
+        return _load(AutoModelForCausalLM)
+    except Exception:
+        import transformers
+
+        cls = getattr(transformers, "AutoModelForMultimodalLM", None) or getattr(
+            transformers, "AutoModelForImageTextToText"
+        )
+        return _load(cls)

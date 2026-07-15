@@ -108,8 +108,8 @@ of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **param
 comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
-parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,180 generated
-function records (3,479 examples total with the curated set)** across fifty-two template families
+parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,252 generated
+function specs (3,506 examples total with the curated set)** across fifty-four template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
 teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — #39, **strings as data**
 (`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
@@ -159,8 +159,19 @@ split-on-opener / `tail` / null-guard / `str_contains`-closer / `head (str_split
 composite existed only as the held-out curated `link_target` gold, so every tier hallucinated an
 API for `write/link_target`; #52 teaches it over bracket/paren/brace pairs bare, the curated
 `<`/`>` pair only with transformed heads (`str_lower`/`str_length`) and an empty-string-default
-string variant, so the curated gold keeps leakage-dropping), every one through the same validate →
-typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
+string variant, so the curated gold keeps leakage-dropping) — and #53, **precondition trust**
+(the round-22 mining's one systematic never-taught write cluster: an intent that STATES a
+pre/postcondition answered by the BARE body — every prior stated-precondition training pair was
+either guarded or leakage-dropped, so all five round-21/22 cycles answered the nonzero-divisor
+contract rows with a hallucinated `error` guard; #53 states the contract in the intent, satisfies
+it in the examples, TRUSTS it in the body (div/mod into and after constants, non-empty `head`/
+`last`/`init` uses, ordering-precondition subtraction, exact postconditions), carries real
+`refinements`, and pairs `checked_*` CONTRAST rows in the same family whose intents ASK for the
+None-guard — trust when told, guard when asked) — and #54, **folds where a section tempts** (the
+round-22 Haskell-bleed cluster: product-like tasks drew operator sections `foldl (*) 1 xs`; #54
+teaches the explicit-lambda fold on product-adjacent shapes plus canonical-`parse_int`-refusal
+read anchors — `"007"`/`" 7"` are `None`, held out in read position via `read_example`), every
+one through the same validate → typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,
 not committed** — the generator is the artifact. Widen the `_K*` constant sets in `combinatorial_specs` to

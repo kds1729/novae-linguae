@@ -4224,6 +4224,170 @@ def combinatorial_specs(exclude_names=()):
                    [{"args": [v], "result": (_between(v, a, b) or "")} for v in _s52_in(a, b)],
                    terminates="always"))
 
+    # 53. PRECONDITION TRUST — the round-22 mining's one systematic, never-taught write cluster:
+    # an intent that STATES a pre/postcondition, answered by the BARE body. The eval contract
+    # rows (divide/modulo/head_of/sum2_spec) render their contracts only through the intent
+    # text, and no training completion carried the idiom — the bare golds are leakage-dropped
+    # and every guarded shape (safe_*, #48) pairs the guard with an intent that ASKS for it — so
+    # all five round-21/22 cycles answered a nonzero-divisor precondition with
+    # `case b == 0 of true => error "…"` (a hallucinated builtin; `error` breaks totality by
+    # design). Teach the idiom on NON-colliding shapes: the precondition is stated, the worked
+    # examples satisfy it, the body TRUSTS it — plus `checked_*` CONTRAST rows in the same
+    # family whose intents instead ask for the None-guard, so the distinction is carried, not
+    # just the idiom. Real `refinements` ride along (honest contracts, gated by
+    # check-refinement); the TRAINING signal is the intent phrasing. Predicate ASTs are built
+    # with a local `_p` — the module-level `op(...)` helper is shadowed by loop variables above.
+    _p = lambda name, *args: {"kind": "app", "op": name, "args": list(args)}
+    aa, bb = var("a"), var("b")
+    n, x, xs = var("n"), var("x"), var("xs")  # re-bind: loop variables above may shadow these
+    # div/mod examples keep every operand positive so the Python-side expectations (`//`, `%`)
+    # match the evaluator on all conventions; the precondition (nonzero) is satisfied throughout.
+    for K in (60, 100):
+        add(_cspec(f"div_into_{K}", f"Divide {K} by a number, with a nonzero-argument precondition.",
+                   f"div {K} n", ["arithmetic", "partial", "refinement"], fn([INT], INT),
+                   lam(["n"], bapp("div", int_lit(K), n)),
+                   [{"args": [v], "result": K // v} for v in (1, 2, 3, 7, 12)],
+                   refinements=[{"kind": "pre", "expr": _p("neq", n, int_lit(0))}]))
+        add(_cspec(f"mod_into_{K}", f"The remainder of {K} divided by a number, with a nonzero-argument precondition.",
+                   f"mod {K} n", ["arithmetic", "partial", "refinement"], fn([INT], INT),
+                   lam(["n"], bapp("mod", int_lit(K), n)),
+                   [{"args": [v], "result": K % v} for v in (7, 9, 11, 13)],
+                   refinements=[{"kind": "pre", "expr": _p("neq", n, int_lit(0))}]))
+    for o53, k53 in (("add", 1), ("mul", 2), ("sub", 3)):
+        pf53 = _AOP[o53]
+        add(_cspec(f"div_then_{o53}{k53}",
+                   f"Integer division, then {_OPWORD[o53]} {k53}, with a nonzero-divisor precondition.",
+                   f"{o53} (div a b) {k53}", ["arithmetic", "partial", "refinement"], fn([INT, INT], INT),
+                   lam(["a", "b"], bapp(o53, bapp("div", aa, bb), int_lit(k53))),
+                   [{"args": [x, y], "result": pf53(x // y, k53)} for x, y in ((6, 2), (9, 3), (7, 1), (12, 5))],
+                   refinements=[{"kind": "pre", "expr": _p("neq", bb, int_lit(0))}]))
+        add(_cspec(f"mod_then_{o53}{k53}",
+                   f"Integer modulo, then {_OPWORD[o53]} {k53}, with a nonzero-divisor precondition.",
+                   f"{o53} (mod a b) {k53}", ["arithmetic", "partial", "refinement"], fn([INT, INT], INT),
+                   lam(["a", "b"], bapp(o53, bapp("mod", aa, bb), int_lit(k53))),
+                   [{"args": [x, y], "result": pf53(x % y, k53)} for x, y in ((7, 3), (8, 5), (9, 4), (10, 7))],
+                   refinements=[{"kind": "pre", "expr": _p("neq", bb, int_lit(0))}]))
+    # Non-empty-list preconditions over the partial list builtins (head/last/init are partial on
+    # empty BY DESIGN, like the eval head_of row — the intent states the precondition, the body
+    # applies the builtin bare).
+    add(_cspec("head_plus_1", "The first element plus one, with a non-empty precondition.",
+               "add (head xs) 1", ["list", "partial", "refinement"], fn([list_of(INT)], INT),
+               lam(["xs"], bapp("add", bapp("head", xs), int_lit(1))),
+               [{"args": [[1, 2, 3]], "result": 2}, {"args": [[9]], "result": 10}, {"args": [[0, 7]], "result": 1}],
+               refinements=[{"kind": "pre", "expr": _p("not", _p("null", xs))}]))
+    add(_cspec("last_doubled", "Twice the last element, with a non-empty precondition.",
+               "mul 2 (last xs)", ["list", "partial", "refinement"], fn([list_of(INT)], INT),
+               lam(["xs"], bapp("mul", int_lit(2), bapp("last", xs))),
+               [{"args": [[1, 2, 3]], "result": 6}, {"args": [[9]], "result": 18}, {"args": [[4, 0]], "result": 0}],
+               refinements=[{"kind": "pre", "expr": _p("not", _p("null", xs))}]))
+    add(_cspec("init_length", "How many elements precede the last, with a non-empty precondition.",
+               "length (init xs)", ["list", "partial", "refinement"], fn([list_of(INT)], NAT),
+               lam(["xs"], bapp("length", bapp("init", xs))),
+               [{"args": [[1, 2, 3]], "result": 2}, {"args": [[9]], "result": 0}, {"args": [[4, 0, 1, 5]], "result": 3}],
+               refinements=[{"kind": "pre", "expr": _p("not", _p("null", xs))}]))
+    # An ordering precondition trusted by a bare subtraction (the safe_sub eval row's contract,
+    # on a transformed body so the generalization must carry it).
+    for k53 in (1, 2):
+        add(_cspec(f"gap_plus_{k53}",
+                   f"The difference a - b plus {k53}, with an a >= b precondition (the difference is never negative).",
+                   f"add (sub a b) {k53}", ["arithmetic", "refinement"], fn([INT, INT], INT),
+                   lam(["a", "b"], bapp("add", bapp("sub", aa, bb), int_lit(k53))),
+                   [{"args": [x, y], "result": (x - y) + k53} for x, y in ((5, 2), (7, 7), (3, 0))],
+                   refinements=[{"kind": "pre", "expr": _p("ge", aa, bb)}]))
+    # Exact postconditions answered by the bare closed form (the sum2_spec/inc_spec contract
+    # class). NB bodies must dodge families #1/#6 (all one/two-step add/sub/mul closed forms are
+    # already emitted there and `add()` dedups by body — a first draft's `sub 10 n` and
+    # `add (mul n 3) 1` silently vanished into them); these two are outside those grids.
+    add(_cspec("double_length_spec", "Twice the length of a list, specified by an exact postcondition.",
+               "mul 2 (length xs)", ["list", "refinement"], fn([list_of(INT)], NAT),
+               lam(["xs"], bapp("mul", int_lit(2), bapp("length", xs))),
+               [{"args": [[1, 2, 3]], "result": 6}, {"args": [[]], "result": 0}, {"args": [[5]], "result": 2}],
+               refinements=[{"kind": "post",
+                             "expr": _p("eq", var("result"), _p("mul", int_lit(2), _p("length", xs)))}]))
+    add(_cspec("square_less_self_spec", "A number squared minus itself, specified by an exact postcondition.",
+               "sub (mul n n) n", ["arithmetic", "refinement"], fn([INT], INT),
+               lam(["n"], bapp("sub", bapp("mul", n, n), n)),
+               [{"args": [v], "result": v * v - v} for v in (0, 3, -2)],
+               refinements=[{"kind": "post",
+                             "expr": _p("eq", var("result"), _p("sub", _p("mul", n, n), n))}]))
+    # CONTRAST rows: the same operations where the intent ASKS for the None-guard — the models
+    # already produce these correctly; their presence in the same family pins the distinction
+    # (guard when asked, trust when told).
+    for K in (60, 100):
+        add(_cspec(f"checked_div_into_{K}",
+                   f"Divide {K} by a number, returning None when the argument is zero.",
+                   f"case n == 0 => None / Just(div {K} n)", ["arithmetic", "maybe", "guarded"],
+                   fn([INT], maybe_t(INT)),
+                   lam(["n"], case_bool(bapp("eq", n, int_lit(0)), variant_expr("None"),
+                                        variant_expr("Just", bapp("div", int_lit(K), n)))),
+                   [{"args": [v], "result": (V("None") if v == 0 else V("Just", K // v))}
+                    for v in (0, 2, 5)]))
+    add(_cspec("checked_second", "The second element as a Just, or None when the list has fewer than two.",
+               "case null xs => None / case null (tail xs) => None / Just(head (tail xs))",
+               ["list", "maybe", "guarded", "case"], fn([list_of(INT)], maybe_t(INT)),
+               lam(["xs"], case_bool(bapp("null", xs), variant_expr("None"),
+                                     case_bool(bapp("null", bapp("tail", xs)), variant_expr("None"),
+                                               variant_expr("Just", bapp("head", bapp("tail", xs)))))),
+               [{"args": [[1, 2, 3]], "result": V("Just", 2)}, {"args": [[9]], "result": V("None")},
+                {"args": [[]], "result": V("None")}]))
+
+    # 54. FOLDS WHERE A SECTION TEMPTS — the round-22 Haskell-bleed cluster: product-like write
+    # tasks draw operator sections (`foldl (*) 1 xs`, `foldr * int(1) xs`) — surface the dialect
+    # lacks. Teach the explicit-lambda fold on product-ADJACENT shapes (transformed element,
+    # guarded max) so the tempting sites have in-dialect mass without equalling held-out golds.
+    def _prod53(vals):
+        r = 1
+        for v in vals:
+            r *= v
+        return r
+    acc = var("acc")
+    for o54, k54 in (("add", 1), ("mul", 2), ("add", 3)):
+        pf54 = _AOP[o54]
+        add(_cspec(f"product_of_{o54}{k54}",
+                   f"The product of every element after {_OPWORD[o54]} {k54} is applied to it.",
+                   f"foldl (\\acc x -> mul acc ({o54} x {k54})) 1 xs", ["list", "fold", "lambda"],
+                   fn([list_of(INT)], INT),
+                   lam(["xs"], bapp("foldl",
+                                    lam(["acc", "x"], bapp("mul", acc, bapp(o54, x, int_lit(k54)))),
+                                    int_lit(1), xs)),
+                   [{"args": [lst], "result": _prod53([pf54(v, k54) for v in lst])} for lst in _LIST_IN]))
+    add(_cspec("sum_squares_fold", "The sum of the squares of the elements, as a single fold.",
+               "foldl (\\acc x -> add acc (mul x x)) 0 xs", ["list", "fold", "lambda"],
+               fn([list_of(INT)], INT),
+               lam(["xs"], bapp("foldl", lam(["acc", "x"], bapp("add", acc, bapp("mul", x, x))),
+                                int_lit(0), xs)),
+               [{"args": [lst], "result": sum(v * v for v in lst)} for lst in _LIST_IN]))
+    for k54 in (0, 1):
+        add(_cspec(f"fold_max_from_{k54}",
+                   f"The largest element, folded from a floor of {k54}.",
+                   f"foldl (\\acc x -> max acc x) {k54} xs", ["list", "fold", "lambda"],
+                   fn([list_of(INT)], INT),
+                   lam(["xs"], bapp("foldl", lam(["acc", "x"], bapp("max", acc, x)), int_lit(k54), xs)),
+                   [{"args": [lst], "result": max([k54] + lst)} for lst in _LIST_IN]))
+    # Counterintuitive-read anchors (the round-22 read cluster): parse_int accepts only the
+    # CANONICAL decimal rendering — "007" is None, not Just(7). Each read pair holds out exactly
+    # that example via `read_example`; the write pair is a plain Maybe-consuming case. (A first
+    # draft's `… None => 0` body deduped into the existing parse-or-zero shape — the default and
+    # transform here keep the bodies novel while the read anchor carries the refusal semantics.)
+    add(_cspec("parse_or_neg_hundred",
+               "The integer a string denotes in canonical decimal form, or -100 when it does not parse.",
+               "case parse_int s of Just(n) => n; None => -100", ["string", "parse", "variant", "case"],
+               fn([STRING], INT),
+               lam(["s"], _case_of(bapp("parse_int", var("s")),
+                                   (_vpat("Just", "n"), n), (_vpat("None"), int_lit(-100)))),
+               [{"args": ["12"], "result": 12}, {"args": ["x"], "result": -100}, {"args": ["-4"], "result": -4},
+                {"args": ["007"], "result": -100}],
+               read_example=3))
+    add(_cspec("parse_tripled_or_zero",
+               "Three times the integer a string denotes in canonical decimal form, or 0 when it does not parse.",
+               "case parse_int s of Just(n) => mul 3 n; None => 0", ["string", "parse", "variant", "case"],
+               fn([STRING], INT),
+               lam(["s"], _case_of(bapp("parse_int", var("s")),
+                                   (_vpat("Just", "n"), bapp("mul", int_lit(3), n)), (_vpat("None"), int_lit(0)))),
+               [{"args": ["4"], "result": 12}, {"args": ["no"], "result": 0}, {"args": ["-2"], "result": -6},
+                {"args": [" 7"], "result": 0}],
+               read_example=3))
+
     return out
 
 
