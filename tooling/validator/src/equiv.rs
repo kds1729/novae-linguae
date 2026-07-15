@@ -489,6 +489,47 @@ mod tests {
     }
 
     #[test]
+    fn filter_lambda_pair_proves_end_to_end() {
+        let Some(s) = solver() else { return };
+        // The production refusal shape (count-negatives): `\xs -> length(filter(\x -> lt(x,0), xs))`
+        // vs the recursive count. The filter's lambda is now a DEFINED model (the fragment
+        // widening), so the equivalence law proves by induction instead of refusing with
+        // "not `id` or a quantified variable".
+        let f = json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body":
+            { "kind": "app", "op": "length", "args": [
+                { "kind": "app", "op": "filter", "args": [
+                    { "kind": "lambda", "params": [{ "name": "x" }], "body":
+                        { "kind": "app", "op": "lt", "args": [
+                            { "kind": "var", "name": "x" },
+                            { "kind": "lit", "value": { "kind": "int", "value": 0 } } ] } },
+                    { "kind": "var", "name": "xs" } ] } ] } });
+        let g = json!({ "kind": "lambda", "params": [{ "name": "ys" }], "body": {
+            "kind": "case",
+            "scrutinee": { "kind": "app", "op": "null", "args": [{ "kind": "var", "name": "ys" }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": { "kind": "app", "op": "add", "args": [
+                      { "kind": "case",
+                        "scrutinee": { "kind": "app", "op": "lt", "args": [
+                            { "kind": "app", "op": "head", "args": [{ "kind": "var", "name": "ys" }] },
+                            { "kind": "lit", "value": { "kind": "int", "value": 0 } } ] },
+                        "arms": [
+                            { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                              "body": { "kind": "lit", "value": { "kind": "int", "value": 1 } } },
+                            { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                              "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } } ] },
+                      { "kind": "app", "op": "self", "args": [
+                          { "kind": "app", "op": "tail", "args": [{ "kind": "var", "name": "ys" }] } ] } ] } } ] } });
+        assert!(
+            matches!(prove_equivalent(&f, &g, s), EquivVerdict::Equivalent(_)),
+            "{:?}",
+            prove_equivalent(&f, &g, s)
+        );
+    }
+
+    #[test]
     fn equivalent_by_normalization_double() {
         // double-via-add ≡ double-via-mul: `add(n,n)` and `mul(2,n)` now share a normal form (the linear
         // like-term combining), so this is decided solver-free — no longer the first-order SMT path.

@@ -336,9 +336,14 @@ the tool supplies the induction principle and lets the solver discharge each cas
 Each case is an SMT-LIB obligation: the list operations the law uses (`length`, `append`, `reverse`,
 `map`, `filter`, `cons`, …) are emitted as z3 `define-fun-rec` definitions over the `Lst` datatype, the
 case substitution is applied, the IH is asserted (step only), and the negated goal is checked. **Both
-`unsat` ⇒ PROVED by induction.** `map`/`filter` take at most one function/predicate, modelled as `id`
-or a single uninterpreted symbol — so `forall f xs. length(map(f, xs)) = length(xs)` is proved with `f`
-*uninterpreted* (i.e. for every f). The base and step scripts together are the re-checkable certificate.
+`unsat` ⇒ PROVED by induction.** `map`/`filter` take at most one function/predicate, modelled as `id`,
+a single uninterpreted symbol — so `forall f xs. length(map(f, xs)) = length(xs)` is proved with `f`
+*uninterpreted* (i.e. for every f) — or a single **closed lambda literal**, which is emitted as a
+`define-fun` over its actual body (so `length(filter(\x -> lt(x, 0), xs)) = <the recursive count>`
+proves: the induction reasons about the real element predicate; alpha-equal lambdas are one form;
+a capturing lambda, or two *different* lambdas across one goal, refuse — one shared symbol for
+different functions could prove a false equivalence). The base and step scripts together are the
+re-checkable certificate.
 
 ### Lemma discovery
 

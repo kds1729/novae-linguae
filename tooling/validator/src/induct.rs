@@ -132,6 +132,11 @@ enum FnModel {
     Identity,
     /// An uninterpreted symbol named after the quantified variable it stands for.
     Uninterpreted(String),
+    /// A closed lambda literal (`\x -> lt(x, 0)`), DEFINED in the prelude: the carried string is
+    /// the lambda body lowered over the reserved binder `nl_elem`. This is what admits the
+    /// ubiquitous `filter(\x -> …, xs)` / `map(\x -> …, xs)` shapes into the induction fragment —
+    /// previously refused as "not `id` or a quantified variable".
+    Defined(String),
 }
 
 // --- AST helpers (shared shapes with prove.rs, kept local to avoid cross-module coupling) ----------
@@ -331,45 +336,231 @@ fn walk_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Option<Sor
 
 // --- function/predicate model + used-op collection ------------------------------------------------
 
+/// The reserved binder name for a DEFINED map/filter lambda (`FnModel::Defined`). Lambdas are
+/// alpha-renamed to it before keying and lowering, so `\x -> lt(x,0)` and `\y -> lt(y,0)` are one
+/// form; a closed lambda's body can't otherwise mention it (closedness admits only the param).
+const LAMBDA_BINDER: &str = "nl_elem";
+
+/// Free variable names of a fragment expression, respecting the fragment's binders (`let`, case
+/// `bind` patterns, nested lambda params). Operator-position names (`lt`, `add`, …) are not
+/// variables. Used for the lambda closedness check — a capturing lambda can't become a closed
+/// SMT `define-fun`.
+fn free_vars(node: &J, bound: &BTreeSet<String>, out: &mut BTreeSet<String>) {
+    match node.get("kind").and_then(|k| k.as_str()) {
+        Some("var") => {
+            let n = node.get("name").and_then(|x| x.as_str()).unwrap_or_default();
+            if n != "nil" && !n.is_empty() && !bound.contains(n) {
+                out.insert(n.to_string());
+            }
+        }
+        Some("app") => {
+            // The `fn` position is an operator when it's a var; anything else is walked.
+            if let Some(f) = node.get("fn") {
+                if var_name(f).is_none() {
+                    free_vars(f, bound, out);
+                }
+            }
+            for a in args_of(node) {
+                free_vars(a, bound, out);
+            }
+        }
+        Some("let") => {
+            if let Some(v) = node.get("value") {
+                free_vars(v, bound, out);
+            }
+            let mut b2 = bound.clone();
+            if let Some(n) = node.get("name").and_then(|n| n.as_str()) {
+                b2.insert(n.to_string());
+            }
+            if let Some(b) = node.get("body") {
+                free_vars(b, &b2, out);
+            }
+        }
+        Some("case") => {
+            if let Some(s) = node.get("scrutinee") {
+                free_vars(s, bound, out);
+            }
+            for arm in node.get("arms").and_then(|a| a.as_array()).into_iter().flatten() {
+                let mut b2 = bound.clone();
+                if arm.pointer("/pattern/kind").and_then(|k| k.as_str()) == Some("bind") {
+                    if let Some(n) = arm.pointer("/pattern/name").and_then(|n| n.as_str()) {
+                        b2.insert(n.to_string());
+                    }
+                }
+                if let Some(b) = arm.get("body") {
+                    free_vars(b, &b2, out);
+                }
+            }
+        }
+        Some("lambda") => {
+            let mut b2 = bound.clone();
+            for p in node.get("params").and_then(|p| p.as_array()).into_iter().flatten() {
+                if let Some(n) = p.get("name").and_then(|n| n.as_str()) {
+                    b2.insert(n.to_string());
+                }
+            }
+            if let Some(b) = node.get("body") {
+                free_vars(b, &b2, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Rename free occurrences of variable `from` to `to`, stopping at shadowing binders.
+fn rename_var(node: &J, from: &str, to: &str) -> J {
+    match node.get("kind").and_then(|k| k.as_str()) {
+        Some("var") if node.get("name").and_then(|n| n.as_str()) == Some(from) => {
+            json!({ "kind": "var", "name": to })
+        }
+        Some("let") if node.get("name").and_then(|n| n.as_str()) == Some(from) => {
+            // The binder shadows: rename only the (still-outer-scoped) bound value.
+            let mut m = node.as_object().cloned().unwrap_or_default();
+            if let Some(v) = m.get("value").cloned() {
+                m.insert("value".into(), rename_var(&v, from, to));
+            }
+            J::Object(m)
+        }
+        Some("lambda")
+            if node
+                .get("params")
+                .and_then(|p| p.as_array())
+                .is_some_and(|ps| ps.iter().any(|p| p.get("name").and_then(|n| n.as_str()) == Some(from))) =>
+        {
+            node.clone() // shadowed throughout
+        }
+        _ => match node {
+            J::Object(m) => J::Object(m.iter().map(|(k, v)| (k.clone(), rename_var(v, from, to))).collect()),
+            J::Array(items) => J::Array(items.iter().map(|v| rename_var(v, from, to)).collect()),
+            other => other.clone(),
+        },
+    }
+}
+
+/// Validate + lower a lambda literal in `map`/`filter` position into a defined SMT body over the
+/// reserved binder. Requirements, each a clean refusal: exactly one parameter; CLOSED (a captured
+/// outer variable can't live in a top-level `define-fun`); no nested list operations (the global
+/// single-level `mapf`/`filterp` machinery can't nest); a `filter` lambda must be boolean-valued
+/// (the coarse `expr_is_bool` — the solver's sort check backstops); and the body must lower into
+/// the Int/Bool fragment.
+fn lambda_fn_smt(which: &str, lambda: &J) -> Result<String> {
+    let params: Vec<&str> = lambda
+        .get("params")
+        .and_then(|p| p.as_array())
+        .map(|a| a.iter().filter_map(|x| x.get("name").and_then(|n| n.as_str())).collect())
+        .unwrap_or_default();
+    let [param] = params[..] else {
+        bail!("`{which}`'s lambda takes {} parameters, not 1 (out of fragment)", params.len());
+    };
+    let body = lambda.get("body").ok_or_else(|| anyhow!("`{which}`'s lambda has no body"))?;
+    let mut free = BTreeSet::new();
+    free_vars(body, &BTreeSet::from([param.to_string()]), &mut free);
+    if !free.is_empty() {
+        bail!(
+            "`{which}`'s lambda captures outer variable(s) {} (out of fragment)",
+            free.into_iter().collect::<Vec<_>>().join(", ")
+        );
+    }
+    let mut inner_ops = BTreeSet::new();
+    collect_ops(body, &mut inner_ops);
+    if !inner_ops.is_empty() {
+        bail!(
+            "`{which}`'s lambda uses list operations ({}) — the modelled {which} is element-level (out of fragment)",
+            inner_ops.into_iter().collect::<Vec<_>>().join(", ")
+        );
+    }
+    if which == "filter" && !expr_is_bool(body) {
+        bail!("`filter`'s lambda is not a boolean predicate (out of fragment)");
+    }
+    if which == "map" && expr_is_bool(body) {
+        bail!("`map`'s lambda is boolean-valued — the modelled map is Int-elementwise (out of fragment)");
+    }
+    lower(&rename_var(body, param, LAMBDA_BINDER), &BTreeMap::new())
+}
+
 /// Determine how `map`'s function argument is modelled across the predicate (must be consistent: all
-/// `id`, or all the same quantified variable). `which` is "map" or "filter".
+/// `id`, all the same quantified variable, or all the same closed lambda up to alpha-renaming).
+/// `which` is "map" or "filter".
 fn model_of(pred: &J, which: &str, vars: &[String]) -> Result<FnModel> {
-    let mut forms: BTreeSet<String> = BTreeSet::new();
+    let mut forms: BTreeMap<String, J> = BTreeMap::new();
     collect_fn_forms(pred, which, &mut forms);
+    resolve_fn_model(which, forms, vars)
+}
+
+/// Resolve collected function forms to a single [`FnModel`] (shared by the property path's
+/// `model_of` and the two-recursive equivalence path, which collects across BOTH bodies — the
+/// single-form rule is what makes one global `mapfn` symbol sound).
+fn resolve_fn_model(which: &str, forms: BTreeMap<String, J>, vars: &[String]) -> Result<FnModel> {
     if forms.is_empty() {
         return Ok(FnModel::None);
     }
     if forms.len() > 1 {
         bail!("`{which}` is applied to more than one distinct function (out of fragment)");
     }
-    let form = forms.into_iter().next().unwrap();
+    let (form, node) = forms.into_iter().next().unwrap();
     if form == "id" {
         Ok(FnModel::Identity)
+    } else if form.starts_with("lambda:") {
+        Ok(FnModel::Defined(lambda_fn_smt(which, &node)?))
     } else if vars.iter().any(|v| *v == form) {
         Ok(FnModel::Uninterpreted(form))
     } else {
-        bail!("`{which}`'s function `{form}` is not `id` or a quantified variable (out of fragment)")
+        bail!("`{which}`'s function `{form}` is not `id`, a quantified variable, or a closed lambda (out of fragment)")
     }
 }
 
-fn collect_fn_forms(node: &J, which: &str, out: &mut BTreeSet<String>) {
+fn collect_fn_forms(node: &J, which: &str, out: &mut BTreeMap<String, J>) {
     if node.get("kind").and_then(|k| k.as_str()) == Some("app") {
         let op = head_op(node).unwrap_or_default();
         let args = args_of(node);
         if op == which {
             if let Some(f) = args.first() {
                 if let Some(n) = var_name(f) {
-                    out.insert(n.to_string());
+                    out.insert(n.to_string(), (*f).clone());
                 } else if head_op(f).as_deref() == Some("id") {
-                    out.insert("id".to_string());
+                    out.insert("id".to_string(), (*f).clone());
+                } else if f.get("kind").and_then(|k| k.as_str()) == Some("lambda") {
+                    // Key by the alpha-canonical rendering (param renamed to the reserved
+                    // binder), so the same lambda spelled with different parameter names is
+                    // ONE form. Malformed lambdas key distinctly and refuse in resolution.
+                    let key = match f
+                        .get("params")
+                        .and_then(|p| p.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|p| p.get("name"))
+                        .and_then(|n| n.as_str())
+                    {
+                        Some(param) => format!(
+                            "lambda:{}",
+                            rename_var(f.get("body").unwrap_or(f), param, LAMBDA_BINDER)
+                        ),
+                        None => "lambda:<malformed>".to_string(),
+                    };
+                    out.insert(key, (*f).clone());
                 } else {
-                    out.insert("<unsupported>".to_string());
+                    out.insert("<unsupported>".to_string(), (*f).clone());
                 }
             }
         }
         for a in &args {
             collect_fn_forms(a, which, out);
         }
+        return;
+    }
+    // Descend through non-app nodes too (lambda bodies, let values/bodies, case arms) so a
+    // nested `map`/`filter` occurrence still participates in the single-form consistency rule.
+    match node {
+        J::Object(m) => {
+            for v in m.values() {
+                collect_fn_forms(v, which, out);
+            }
+        }
+        J::Array(items) => {
+            for v in items {
+                collect_fn_forms(v, which, out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -889,11 +1080,27 @@ pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> Inducti
     };
 
     // Prelude defines the list operations either body uses (element ops / `self` are not list ops, so
-    // `collect_ops` ignores them); map/filter, if present, are modelled by the shared global `mapfn`.
+    // `collect_ops` ignores them); map/filter, if present, are modelled by the shared global `mapfn` —
+    // resolved across BOTH bodies (a var form here is a higher-order parameter, already refused
+    // above, so `vars` is empty): a single shared closed lambda is DEFINED, and two DIFFERENT
+    // lambdas refuse — one uninterpreted symbol for both would prove a false equivalence.
     let mut used = BTreeSet::new();
     collect_ops(body_f, &mut used);
     collect_ops(body_g, &mut used);
-    let preamble = format!("{}{def_f}{def_g}", build_prelude(&used, &FnModel::None, &FnModel::None));
+    let mut map_forms = BTreeMap::new();
+    let mut filter_forms = BTreeMap::new();
+    for b in [body_f, body_g] {
+        collect_fn_forms(b, "map", &mut map_forms);
+        collect_fn_forms(b, "filter", &mut filter_forms);
+    }
+    let (map_fn, filter_pred) = match (
+        resolve_fn_model("map", map_forms, &[]),
+        resolve_fn_model("filter", filter_forms, &[]),
+    ) {
+        (Ok(m), Ok(f)) => (m, f),
+        (Err(e), _) | (_, Err(e)) => return InductionOutcome::Unsupported(format!("{e:#}")),
+    };
+    let preamble = format!("{}{def_f}{def_g}", build_prelude(&used, &map_fn, &filter_pred));
 
     // Spectator goal constants (`s0`, `s1`, …) and the call-argument suffixes for the goal (free consts)
     // and the IH (separate bound vars `y0`, `y1`, …). Distinct names avoid any shadowing in the IH forall.
@@ -1198,6 +1405,10 @@ fn build_prelude(used: &BTreeSet<String>, map_fn: &FnModel, filter_pred: &FnMode
     if used.contains("map") {
         match map_fn {
             FnModel::Identity => s.push_str("(define-fun mapfn ((x Int)) Int x)\n"),
+            // A closed lambda is DEFINED — the induction reasons about the actual element function.
+            FnModel::Defined(smt) => {
+                s.push_str(&format!("(define-fun mapfn (({LAMBDA_BINDER} Int)) Int {smt})\n"))
+            }
             _ => s.push_str("(declare-fun mapfn (Int) Int)\n"), // uninterpreted (covers `forall f`)
         }
         s.push_str("(define-fun-rec mapf ((xs Lst)) Lst (ite ((_ is nil) xs) nil (cons (mapfn (hd xs)) (mapf (tl xs)))))\n");
@@ -1205,6 +1416,9 @@ fn build_prelude(used: &BTreeSet<String>, map_fn: &FnModel, filter_pred: &FnMode
     if used.contains("filter") {
         match filter_pred {
             FnModel::Identity => s.push_str("(define-fun filterpred ((x Int)) Bool true)\n"),
+            FnModel::Defined(smt) => {
+                s.push_str(&format!("(define-fun filterpred (({LAMBDA_BINDER} Int)) Bool {smt})\n"))
+            }
             _ => s.push_str("(declare-fun filterpred (Int) Bool)\n"),
         }
         s.push_str("(define-fun-rec filterp ((xs Lst)) Lst (ite ((_ is nil) xs) nil (ite (filterpred (hd xs)) (cons (hd xs) (filterp (tl xs))) (filterp (tl xs)))))\n");
@@ -1909,6 +2123,19 @@ fn smt_int(n: i64) -> String {
     if n < 0 { format!("(- {})", -n) } else { n.to_string() }
 }
 
+/// Read an Int constant's value out of a solver model dump: `(define-fun <name> () Int 90)` or
+/// `… (- 5))`. `None` when the shape isn't recognized — the caller treats that as UNKNOWN.
+fn model_int_value(model: &str, name: &str) -> Option<i64> {
+    let idx = model.find(&format!("define-fun {name} "))?;
+    let after = model[idx..].split("Int").nth(1)?.trim_start();
+    if let Some(neg) = after.strip_prefix("(-") {
+        let digits: String = neg.trim_start().chars().take_while(|c| c.is_ascii_digit()).collect();
+        return digits.parse::<i64>().ok().map(|v| -v);
+    }
+    let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
 /// Rewrite op-form applications (`{kind: "app", op: X, args}` — the property/equiv dialect) to
 /// the fn-form the interpreter evaluates (`{kind: "app", fn: {var X}, args}`). Purely mechanical;
 /// fn-form input passes through untouched, so both dialects evaluate.
@@ -2029,6 +2256,40 @@ pub fn prove_equiv_on_int_ge(body_f: &J, body_g: &J, c: i64, solver: &str) -> In
         return InductionOutcome::Unsupported("the two bodies' result sorts differ".into());
     }
 
+    // Both bodies NON-recursive: the two `define-fun`s fully pin both functions over Int, so the
+    // domain claim is decided DIRECTLY — one satisfiability check of the negated ∀n ≥ c goal, no
+    // induction (whose step `P(n) ⇒ P(n+1)` is weaker than the goal for non-inductive
+    // definitions and reports UNKNOWN on decidable pairs — measured on the production
+    // grade-bucketing-vs-constant pair, distinct only from n = 90 up, past the evaluation
+    // sweep's reach). The verdict discipline stays eval-based on the SAT side: the model's
+    // witness re-runs through the real interpreter before DISTINCT is reported (SMT div/mod are
+    // total where the language errors — a witness that doesn't evaluate is UNKNOWN, never a
+    // false verdict). The UNSAT side is sound outright: non-recursive definitions have exactly
+    // one model per input.
+    if !recursive[0] && !recursive[1] {
+        let script = format!(
+            "{}{}(declare-const n Int)\n(assert (>= n {}))\n(assert (not (= (self n) (self__g n))))\n(check-sat)\n(get-model)\n",
+            def_f.decl,
+            def_g.decl,
+            smt_int(c)
+        );
+        return match run_smt(&script, solver) {
+            Ok(SatAnswer::Unsat) => InductionOutcome::Proved,
+            Ok(SatAnswer::Sat(model)) => match model_int_value(&model, "n") {
+                Some(w) if w >= c => match (eval_int_point(body_f, w), eval_int_point(body_g, w)) {
+                    (Some(va), Some(vb)) if va != vb => InductionOutcome::Failed(format!(
+                        "the functions differ inside the domain, at n = {w}: {va} vs {vb}"
+                    )),
+                    _ => InductionOutcome::Unknown,
+                },
+                _ => InductionOutcome::Unknown,
+            },
+            Ok(SatAnswer::Unknown) => InductionOutcome::Unknown,
+            Ok(SatAnswer::NoSolver) => InductionOutcome::NoSolver,
+            Err(e) => InductionOutcome::Unsupported(format!("solver error (direct): {e:#}")),
+        };
+    }
+
     let script = format!(
         "{}{}(declare-const n Int)\n(assert (>= n {}))\n{}{}; IH at n, goal at n + 1\n(assert (= (self n) (self__g n)))\n(assert (not (= (self (+ n 1)) (self__g (+ n 1)))))\n(check-sat)\n",
         def_f.decl,
@@ -2068,6 +2329,131 @@ mod tests {
             }
         }
         None
+    }
+
+    fn ilit(n: i64) -> J {
+        json!({ "kind": "lit", "value": { "kind": "int", "value": n } })
+    }
+    fn lam1(param: &str, body: J) -> J {
+        json!({ "kind": "lambda", "params": [{ "name": param }], "body": body })
+    }
+
+    // --- lambda-literal map/filter functions (the fragment widening) --------------------------
+
+    #[test]
+    fn lambda_fn_model_validation() {
+        let vars = vec!["xs".to_string(), "y".to_string()];
+        // A closed lambda is a DEFINED model.
+        let p = app("filter", vec![lam1("x", app("lt", vec![var("x"), ilit(0)])), var("xs")]);
+        assert!(matches!(model_of(&p, "filter", &vars).unwrap(), FnModel::Defined(_)));
+        // A capturing lambda refuses (its body mentions the quantified `y`).
+        let p = app("filter", vec![lam1("x", app("lt", vec![var("x"), var("y")])), var("xs")]);
+        assert!(model_of(&p, "filter", &vars).is_err());
+        // A non-boolean filter lambda refuses.
+        let p = app("filter", vec![lam1("x", app("add", vec![var("x"), ilit(1)])), var("xs")]);
+        assert!(model_of(&p, "filter", &vars).is_err());
+        // Alpha-equal lambdas are ONE form; genuinely different lambdas refuse.
+        let same = app("append", vec![
+            app("map", vec![lam1("x", app("add", vec![var("x"), ilit(1)])), var("xs")]),
+            app("map", vec![lam1("y", app("add", vec![var("y"), ilit(1)])), var("xs")]),
+        ]);
+        assert!(matches!(model_of(&same, "map", &vars).unwrap(), FnModel::Defined(_)));
+        let diff = app("append", vec![
+            app("map", vec![lam1("x", app("add", vec![var("x"), ilit(1)])), var("xs")]),
+            app("map", vec![lam1("x", app("add", vec![var("x"), ilit(2)])), var("xs")]),
+        ]);
+        assert!(model_of(&diff, "map", &vars).is_err());
+    }
+
+    #[test]
+    fn filter_lambda_law_proves_by_induction() {
+        let Some(s) = solver() else { return };
+        // ∀xs. length(filter(\x -> lt(x,0), xs)) ≤ length(xs) — a law over the DEFINED predicate;
+        // the shape previously refused as "not `id` or a quantified variable".
+        let lam = lam1("x", app("lt", vec![var("x"), ilit(0)]));
+        let prop = forall(&["xs"], app("le", vec![
+            app("length", vec![app("filter", vec![lam, var("xs")])]),
+            app("length", vec![var("xs")]),
+        ]));
+        let (out, _) = prove_by_induction(&prop, None, s);
+        assert!(matches!(out, InductionOutcome::Proved), "{out:?}");
+    }
+
+    /// A recursive body that maps a lambda over its own recursive result:
+    /// `case null(xs) of true -> nil | false -> cons(head xs, map(\x -> add(x, inc), self(tail xs)))`.
+    fn map_lambda_rec_body(inc: i64, lam_param: &str) -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "xs" }], "body": {
+            "kind": "case",
+            "scrutinee": app("null", vec![var("xs")]),
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": var("nil") },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": app("cons", vec![
+                      app("head", vec![var("xs")]),
+                      app("map", vec![
+                          lam1(lam_param, app("add", vec![var(lam_param), ilit(inc)])),
+                          app("self", vec![app("tail", vec![var("xs")])]),
+                      ]),
+                  ]) } ] } })
+    }
+
+    #[test]
+    fn two_recursive_map_lambdas_must_not_merge_under_one_symbol() {
+        let Some(s) = solver() else { return };
+        // ADVERSARIAL (the latent hole this widening closes): two recursions whose map lambdas
+        // DIFFER (+1 vs +2) must never prove equivalent — under the old uninterpreted global
+        // `mapfn`, both bodies lowered to the SAME symbol and the induction closed a false claim.
+        let f = map_lambda_rec_body(1, "x");
+        let g = map_lambda_rec_body(2, "x");
+        let out = prove_equiv_by_induction(&f, &g, s);
+        assert!(
+            !matches!(out, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_)),
+            "a false equivalence was proved: {out:?}"
+        );
+        // The same pair with EQUAL lambdas (alpha-renamed) proves — the defined model at work.
+        let g_eq = map_lambda_rec_body(1, "y");
+        let out = prove_equiv_by_induction(&f, &g_eq, s);
+        assert!(
+            matches!(out, InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_)),
+            "{out:?}"
+        );
+    }
+
+    // --- non-recursive Int-domain pairs decide directly ---------------------------------------
+
+    #[test]
+    fn model_int_value_parses_solver_models() {
+        assert_eq!(model_int_value("(model (define-fun n () Int 90))", "n"), Some(90));
+        assert_eq!(model_int_value("((define-fun n () Int (- 5)))", "n"), Some(-5));
+        assert_eq!(model_int_value("no such constant", "n"), None);
+    }
+
+    #[test]
+    fn nonrecursive_int_pair_decides_directly_on_domain() {
+        let Some(s) = solver() else { return };
+        // max(n, 0) ≡ n ON n ≥ 0 (distinct below): decidable only DIRECTLY — the inductive step
+        // `P(n) ⇒ P(n+1)` is weaker than the goal for non-recursive definitions and reported
+        // UNKNOWN on this decidable pair.
+        let f = lam1("n", app("max", vec![var("n"), ilit(0)]));
+        let g = lam1("n", var("n"));
+        assert!(matches!(prove_equiv_on_int_ge(&f, &g, 0, s), InductionOutcome::Proved));
+
+        // Distinct past the evaluation sweep's reach (the production grade-bucketing shape):
+        // a step at n = 90 vs constant 0 — the direct check finds a witness and the REAL
+        // interpreter confirms it in-domain before DISTINCT is reported.
+        let f2 = lam1("n", json!({ "kind": "case",
+            "scrutinee": app("ge", vec![var("n"), ilit(90)]),
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": ilit(1) },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": ilit(0) } ] }));
+        let g2 = lam1("n", app("mul", vec![var("n"), ilit(0)]));
+        match prove_equiv_on_int_ge(&f2, &g2, 0, s) {
+            InductionOutcome::Failed(msg) => {
+                assert!(msg.contains("differ inside the domain"), "{msg}")
+            }
+            other => panic!("expected an in-domain witness, got {other:?}"),
+        }
     }
 
     /// `sum` — head + self(tail), the canonical Int-valued list recursion.

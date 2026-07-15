@@ -19,8 +19,19 @@ in `--state` (a local JSON verdict cache) so a re-run resumes instead of re-payi
 pairs need no cache — the node's claims make them skippable. Idempotent on the NF tier: pairs
 already claimed on the node (per `GET /v0/records/{hash}/equivalences`) are skipped.
 
+The third tier is `--domain-tier`: the solver tier's cached refusals (UNSUPPORTED / DISTINCT /
+UNKNOWN — dominated by guarded numeric recursions the full-domain claim is honestly FALSE or
+undecidable for) are retried as DOMAIN-QUALIFIED claims, `∀n. n ≥ 0 ⇒ f(n) = g(n)`
+(`assert-equivalent --domain`, the Int-domain induction). Unary pairs only (the v1 prover's
+shape — checked locally from the summary types before any crawl is paid). A domain-proved pair
+is a published claim but NEVER a class merge: domain-qualified claims don't become attestation
+edges and no collapse view merges on them, so this tier's yield is curated knowledge
+("equal on n ≥ 0"), not fewer behavior classes. Verdicts cache under `ge0|a|b` keys in the
+same `--state` file.
+
     python3 equiv_sweep.py --node https://nl.1105software.com [--seed …] [--dry-run]
     python3 equiv_sweep.py --node … --solver-tier [--solver-pairs 200] [--state sweep_state.json]
+    python3 equiv_sweep.py --node … --domain-tier --state sweep_state.json
 """
 
 import argparse
@@ -73,6 +84,9 @@ def main():
                     help="hard per-pair backstop in seconds (the prover's own budgets sit below it)")
     ap.add_argument("--state", type=Path, default=None,
                     help="local JSON verdict cache; refused pairs are skipped on re-runs")
+    ap.add_argument("--domain-tier", action="store_true",
+                    help="retry the solver tier's cached refusals as domain-qualified claims on n ≥ 0 "
+                         "(requires --state holding solver-tier verdicts)")
     args = ap.parse_args()
     node = args.node.rstrip("/")
 
@@ -153,6 +167,97 @@ def main():
                 print(f"  ! assert failed: {(r.stdout or r.stderr).strip().splitlines()[-1]}",
                       file=sys.stderr)
     print(f"\npublished {published} claim(s), skipped {skipped} already-claimed, {failed} failed")
+
+    # 4.5 Domain tier (opt-in): retry the solver tier's cached refusals as DOMAIN-QUALIFIED
+    # claims on n ≥ 0 (`assert-equivalent --domain` — the Int-domain induction;
+    # spec/claim-expression `equivalent.domain`). The refusals it targets are dominated by the
+    # guarded-numeric-recursion class: distinct or divergent below the guard, where the
+    # full-domain claim is honestly FALSE or undecidable but the guarded-domain one proves
+    # (the factorial eq(n,0)-vs-le(n,0) trap). Unary pairs only (the v1 prover's shape),
+    # decided locally from the summary types before any crawl is paid. A proved pair is a
+    # PUBLISHED CLAIM but never a union — domain-qualified claims are not attestation edges
+    # and no collapse view merges on them; the yield is curated knowledge, not fewer classes.
+    if args.domain_tier:
+        print("\n== domain tier (n ≥ 0) ==")
+        state = json.loads(args.state.read_text()) if args.state and args.state.exists() else {}
+
+        def save_domain_state():
+            if args.state:
+                args.state.write_text(json.dumps(state, indent=1, sort_keys=True) + "\n")
+
+        def unary(fn):
+            s = summary_of.get(fn, {})
+            try:
+                t = json.loads(s.get("type") or "")
+            except (ValueError, TypeError):
+                return False
+            if isinstance(t, dict) and t.get("kind") == "forall":
+                t = t.get("body") or {}
+            return isinstance(t, dict) and t.get("kind") == "fn" and len(t.get("params") or []) == 1
+
+        refusals = sorted(k for k, v in state.items()
+                          if k.count("|") == 1 and v in ("unsupported", "distinct", "unknown"))
+        domain = {"vars": ["n"], "expr": {"kind": "app", "op": "ge", "args": [
+            {"kind": "var", "name": "n"},
+            {"kind": "lit", "value": {"kind": "int", "value": 0}}]}}
+        domain_file = tmp / "domain_ge0.json"
+        domain_file.write_text(json.dumps(domain))
+        dtally = collections.Counter()
+        print(f"cached full-domain refusals: {len(refusals)}")
+        for key in refusals:
+            a, b = key.split("|")
+            dkey = f"ge0|{key}"
+            if dkey in state:
+                dtally[f"cached-{state[dkey]}"] += 1
+                continue
+            if not (unary(a) and unary(b)):
+                dtally["skipped-arity"] += 1
+                continue
+            try:  # an existing claim on the pair (either form) makes the attempt redundant
+                existing = get_json(node, f"/v0/records/{a}/equivalences")["equivalences"]
+                if any(tuple(sorted((e["body"]["claim"]["a"], e["body"]["claim"]["b"])))
+                       == tuple(sorted((a, b))) for e in existing):
+                    dtally["already-claimed"] += 1
+                    continue
+            except Exception:
+                pass
+            if args.dry_run:
+                print(f"  dry-run: would attempt {a[:20]}… ≡ {b[:20]}… on n ≥ 0")
+                continue
+            print(f"pair ge0  {a[:20]}… vs {b[:20]}…")
+            time.sleep(0.5)  # pace the per-pair crawls under the edge rate limit
+            try:
+                r = subprocess.run(
+                    [VALIDATOR, "assert-equivalent", "--f", a, "--g", b,
+                     "--node", node, "--seed", args.seed, "--publish",
+                     "--domain", str(domain_file), "--out", str(tmp / "assert.json")],
+                    capture_output=True, text=True, timeout=args.pair_timeout)
+            except subprocess.TimeoutExpired:
+                dtally["timeout"] += 1
+                state[dkey] = "timeout"
+                save_domain_state()
+                print("  timeout — cached, resume skips it")
+                continue
+            if r.returncode == 0:
+                dtally["domain-proved"] += 1
+                state[dkey] = "proved"
+                save_domain_state()
+                line = next((ln for ln in r.stdout.splitlines()
+                             if ln.startswith(("EQUIVALENT", "published"))), "EQUIVALENT")
+                print(f"  {line}")
+                continue
+            full = (r.stderr or r.stdout).strip()
+            verdict = next((v for v in ("DISTINCT", "UNKNOWN", "UNSUPPORTED", "NO-SOLVER")
+                            if v in full), "error")
+            dtally[verdict.lower()] += 1
+            if verdict != "error":
+                state[dkey] = verdict.lower()
+                save_domain_state()
+            line = next((ln for ln in full.splitlines() if verdict in ln),
+                        full.splitlines()[-1] if full else "")
+            print(f"  {line}")
+        print("domain tier: " + (", ".join(f"{k} {v}" for k, v in sorted(dtally.items()))
+                                 or "nothing to attempt"))
 
     # 5. Solver tier (opt-in): the equivalences normalization cannot see. One representative per
     # NF class (singletons included — merging CLASSES is this tier's whole job), bucketed by exact
