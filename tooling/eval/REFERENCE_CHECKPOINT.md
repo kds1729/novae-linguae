@@ -8,9 +8,9 @@ made on **shared tasks**, never raw totals:
 
 | tier | base | pin | notes |
 |---|---|---|---|
-| **best write** | **Coder-7B** (corpus14, s1) | **176 / 185 of 189 (97.9% best, 95.5% mean)** on the 380-task eval | best ever by a wide margin; seed-1 passes **every historical residual** — its only misses are 4 long-known churn tasks. c21-7B-s0 came within −1 of it on shared tasks (and is the best post-c14 7B: +4 vs r18, +6 vs r19) but does not displace it |
-| **best total / read** | **Coder-14B (corpus21, s1)** | **total semantic 396/416 = 95.2%, read 189/197 = 95.9%, write 195/207** | **re-pinned in round 20 (2026-07-11)**: beats the c14-14B pin **+2 on the 378 shared tasks** AND covers the GW14/15 header/link families (13/16 first-contact) the c14 pins never saw |
-| **efficient** | Coder-3B (corpus14, s0) | 181 / 173 of 189 (95.8% best, 93.7% mean) on the 380-task eval | best 3B ever; c21 3B seeds are −7/−9 on shared tasks — the pin stands |
+| **best write** | **Coder-7B** (corpus14, s1) | **176 / 185 of 189 (97.9% best, 95.5% mean)** on the 380-task eval | best ever by a wide margin; seed-1 passes **every historical residual** — its only misses are 4 long-known churn tasks. **c23-7B-s0 exactly TIES it on the 188 shared write tasks (184 = 184)** — the first post-c14 cycle to reach the pin's level — and adds the contract/fold capabilities, but a tie does not move a pin (the round-17 convention) |
+| **best total / read** | **Coder-14B (corpus23, s1)** | **total semantic 400/414 = 96.6%, read 191/196 = 97.4%, write 197/206** | **re-pinned in round 23 (2026-07-15)**: beats the c21-s1 pin **+3 shared-write / +6 full-set** on the same 416-task eval, and carries family #53 (precondition trust — `divide`/`modulo` pass every c23 cycle). Hosted on Arca: `wgt_80f97246a182…` + signed eval attestation `evl_21f590f38342…`, superseding `wgt_2d1dcd3d78e6…` (resolvable, append-only); consumer `certified` → CERTIFIED |
+| **efficient** | Coder-3B (corpus14, s0) | 181 / 173 of 189 (95.8% best, 93.7% mean) on the 380-task eval | best 3B ever; c23 3B seeds are −2/−6 on shared write (best post-c14 yet, up from c22's −9) — the pin stands |
 
 > **The capacity boundary (2026-07-03, Coder-14B 2-seed).** 14B moved the total to **96.2%** but taught the sharpest lesson: **capacity fixes *reading*, not *writing*.** `read` climbed 91→98.6% (the off-by-one / sign / absorption-law arithmetic errors are capacity-bound and mostly gone), and the two genuine reasoning-*write* residuals `foldr_with`/`member` cracked on both seeds — yet the `write` count is **dead-stable at 147/157 across both seeds AND across 7B↔14B**. The remaining write misses are not capacity-bound: they are the dialect's **totality by design** (no `^`, no `!!`, no `error`). Two of them were a missing-*idiom* gap, closed at $0/local: adding **`last`/`init`** list builtins made the model's already-correct `reverse` valid, and **corpus family #38** (index recursion) flipped `nth` `.`→`P` at 14B (`min_of_list` too, via #37). Genuinely stuck: `pow2` (its exact gold is the already-covered `rec_pow` shape → leakage-dropped → a generalization limit, not a coverage gap) and a small arithmetic core (`fib`, sign). Adapters (275 MB each) pulled to `/var/tmp/claude/adapter-coder14b-c{7,8}-s*`.
 
@@ -223,12 +223,37 @@ made on **shared tasks**, never raw totals:
 > composition/churn-bound, consistent with the parked-loop reading. Adapters+evals in
 > `/home/claude/sandbox/round22/` (names `c22-*`).
 
+> **Round 23 (2026-07-15, corpus23/ftdata23 — families #53 precondition-trust + #54
+> section-tempting-folds, from the round-22 failure mining — RTX PRO 6000 Blackwell, 7 cycles
+> ≈ 3h50m ≈ $8): the cleanest corpus win the loop has produced, and the 14B re-pins.**
+> `write/divide`, `write/modulo`, `write/product` pass **all seven cycles** (3B/7B 2-seed,
+> 14B-s1, and both seeds of an architecturally unrelated probe base) — the
+> stated-contract→bare-body idiom was structurally untaught (ftdata22 carried ZERO such
+> completions; every cycle answered with a hallucinated `error` guard) and one family closed
+> it at every tier. Totals (id-dedup, 414 unique): 3B 380/375 (+11/+3 vs c22), 7B 388/386
+> (+12/−3; **c23-7B-s0 write 198/206 TIES the c14 pin on the 188 shared write tasks** — first
+> ever — but a tie doesn't move the pin), **14B 400/414 = 96.6% — best total ever, +3
+> shared-write/+6 full-set vs the c21-s1 pin → RE-PINNED** (hosted: `wgt_80f97246a182…` +
+> `evl_21f590f38342…`, superseding `wgt_2d1dcd3d78e6…`; consumer `certified` → CERTIFIED).
+> The same batch ran the **base-generation probe: Qwen3.5-9B** (Apache-2.0, hybrid
+> Gated-DeltaNet, 2026-03) on the same corpus — write 182/187, total 372/383: **loses to
+> Coder-7B by 5–16 write despite being newer and larger. Code-pretraining still beats
+> generational recency for this dialect at ≤9B; the Coder pins stand until a code-pretrained
+> successor ships.** Ops: the Qwen3.5 line needs `flash-linear-attention` installed or it
+> trains 3.5× slower on the torch fallback (fla alone sufficed; `causal-conv1d` failed to
+> build on the Blackwell image and wasn't needed); its LoRA targets must be chosen from the
+> module inventory — the default Qwen2.5 list touches only 8 of its 32 attention layers.
+> Durable residue unchanged in kind: `run_command` (composition depth, 0/17 across three
+> rounds), `read/parse_int_maybe` (the refusal anchor transfers only to consuming position),
+> `read/min_string`/`read/implies` (14B-only). Adapters+evals in
+> `/home/claude/sandbox/round23/` (names `c23-*`).
+
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
-`adapter-coder7b-c14-s1`, sha256 `91d8940345630806…`, seed 1; the 14B read-champion weights are
-now `adapter-c21-14b-s1` — round 20's re-pin, **hosted on the commons** as
-`wgt_2d1dcd3d78e6be98…` (safetensors sha256 `ec8045b6f2a33311…`, signed eval attestation
-`evl_1746bb29ed93b95d…`, superseding the c14 record `wgt_95885e217035dc18…`, which stays
+`adapter-coder7b-c14-s1`, sha256 `91d8940345630806…`, seed 1; the 14B total/read-champion weights
+are now `adapter-c23-14b-s1` — round 23's re-pin, **hosted on the commons** as
+`wgt_80f97246a182a2c1…` (safetensors sha256 `2a8bf37c5f77ca75…`, signed eval attestation
+`evl_21f590f38342c557…`, superseding the c21 record `wgt_2d1dcd3d78e6be98…`, which stays
 resolvable — append-only)).
 
 A LoRA adapter is small, but the *recipe* is what makes it a checkpoint: the run is **deterministic**
