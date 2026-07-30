@@ -489,6 +489,51 @@ class SchemaDerivedTest(unittest.TestCase):
         resp["content"] = {"text/html": {"schema": {"type": "string"}}}
         built, skipped, pending = oi.walk(spec, None)
         self.assertEqual(pending, [], "a non-JSON content type licenses nothing")
+        self.assertTrue(any("text/html" in n for n in built[0][2]),
+                        "and it SAYS so — a declined body is an explicit refusal, not a silence")
+
+    def test_media_range_response_is_noted_not_silent(self):
+        # A media RANGE (`*/*`) is what a Swagger 2.0 description WITHOUT `produces` converts to
+        # (swagger2openapi has no media type to key the response content by), so it is the common
+        # real-world shape, not an exotic one. `*/*` promises ANY type, so declining to project is
+        # correct — it cannot license the parses-as-JSON promise. Declining SILENTLY is the defect:
+        # the status record builds, certifies, and reports nothing, so a consumer cannot tell the
+        # projections were dropped from a description that never promised a body at all.
+        spec = self._health_spec("http://127.0.0.1:1", {
+            "type": "object", "properties": {"status": {"type": "string"}},
+            "required": ["status"]})
+        resp = spec["paths"]["/health"]["get"]["responses"]["200"]
+        resp["content"] = {"*/*": resp["content"].pop("application/json")}
+        built, skipped, pending = oi.walk(spec, None)
+        self.assertEqual(skipped, [])
+        self.assertEqual(pending, [], "`*/*` promises any type — it licenses no projection")
+        self.assertEqual([r["name_hints"][0] for r, _, _ in built], ["gethealth"],
+                         "the status record still builds — only the projections are declined")
+        notes = built[0][2]
+        self.assertTrue(any("not projected" in n and "*/*" in n for n in notes),
+                        f"the declined body must be explained, not silent; got: {notes}")
+
+    def test_bodyless_response_stays_silent(self):
+        # The other half of the contract: a response that declares NO body has nothing to refuse,
+        # so the note must NOT fire. Silence is correct here.
+        spec = {**self.BASE, "servers": [{"url": "http://127.0.0.1:1"}],
+                "paths": {"/health": {"get": {
+                    "operationId": "getHealth", "security": [],
+                    "responses": {"204": {"description": "no content"}}}}}}
+        built, skipped, pending = oi.walk(spec, None)
+        self.assertEqual(pending, [])
+        self.assertFalse(any("not projected" in n for n in built[0][2]),
+                         "a description that promised no body must not be reported as declined")
+
+    def test_json_response_emits_no_nonjson_note(self):
+        # The control for the two above: a concrete JSON type projects, so the non-JSON refusal
+        # must not fire alongside the pending-projection note.
+        spec = self._health_spec("http://127.0.0.1:1", {
+            "type": "object", "properties": {"status": {"type": "string"}},
+            "required": ["status"]})
+        built, skipped, pending = oi.walk(spec, None)
+        self.assertEqual({p["name"] for p in pending}, {"getHealthBody", "getHealthStatus"})
+        self.assertFalse(any("not JSON" in n for n in built[0][2]))
 
     def test_documented_example_wins_over_schema(self):
         # A response documenting BOTH an example and a schema takes the example path (spec-time
