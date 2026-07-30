@@ -131,3 +131,14 @@ unauthenticated liveness probe — is net-new, certified, and published to the c
 Reuses [`ingest-common`](../ingest-common/) (the shared BLAKE3+JCS core and body-AST builders), so
 its records agree byte-for-byte with every other adapter on canonical form and content-hash.
 Requires only `python3` (3.10+) and the built `nl-validator` on the sibling `target/release` path.
+
+## At production scale
+
+[`evolution/gcp-sdk-poc`](../../evolution/gcp-sdk-poc/) reports this adapter run against a whole
+cloud API — Google Cloud Storage v1, all **81 operations**, **0 refused**, every record certified,
+with no modifications to this repository — and a bucket then provisioned create → verify → delete by
+executing the generated records. It quantifies where the description layer runs out: the projection
+constructibility rule admits **1 of 81** operations (so every leaf record projects `.status` and
+discards `.body`), the live observation gate cannot be used for mutating verbs without creating real
+resources during ingestion, and every record comes out with empty `refinements` because descriptions
+carry no pre/postconditions. It also documents the two defects that run surfaced.
