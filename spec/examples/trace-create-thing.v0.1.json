@@ -8,6 +8,10 @@
           {
             "name": "Authorization",
             "value": "Bearer {{secret:api_token}}"
+          },
+          {
+            "name": "Content-Type",
+            "value": "application/json"
           }
         ],
         "method": "POST",
@@ -45,7 +49,7 @@
                   "key": "date",
                   "value": {
                     "kind": "string",
-                    "value": "Sat, 11 Jul 2026 19:33:52 GMT"
+                    "value": "Fri, 31 Jul 2026 12:15:25 GMT"
                   }
                 },
                 {
@@ -59,7 +63,7 @@
                   "key": "server",
                   "value": {
                     "kind": "string",
-                    "value": "BaseHTTP/0.6 Python/3.10.12"
+                    "value": "BaseHTTP/0.6 Python/3.14.2"
                   }
                 }
               ],

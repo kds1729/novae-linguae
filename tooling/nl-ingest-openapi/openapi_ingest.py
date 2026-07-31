@@ -663,12 +663,24 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
 
     body_spec = None
     mp_parts, mp_ct, mp_boundary = [], None, None
+    body_ct = None
     if "requestBody" in op:
         body_spec = deref(spec, op["requestBody"])
         if not isinstance(body_spec, dict):
             return ("skip", op_id, "unresolvable requestBody $ref (external or dangling)")
         content = body_spec.get("content") or {}
         mp_types = sorted(ct for ct in content if ct.startswith("multipart/"))
+        # The DECLARED request media type, for the `Content-Type` request header. Data-driven, never
+        # a blanket `application/json` guess: exactly one non-multipart type is unambiguous, while
+        # several are a choice the description leaves open — note that and send none. (Multipart
+        # carries its own Content-Type with the boundary; see mp_ct below.)
+        declared_cts = [ct for ct in sorted(content) if not ct.startswith("multipart/")]
+        if len(declared_cts) == 1:
+            body_ct = declared_cts[0]
+        elif len(declared_cts) > 1:
+            offered = ", ".join(f"`{c}`" for c in declared_cts)
+            notes.append(f"request `Content-Type` omitted — the body declares {offered} and the "
+                         f"description does not say which one to send")
         if content and len(mp_types) == len(content):
             # MULTIPART-ONLY body: compiled, not refused. The old refusal ("no deterministic
             # boundary construction") dissolves the same way url_encode's did — the boundary is a
@@ -741,6 +753,11 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
     if mp_ct:
         headers = curried_app(b_var("map_put"), s_lit("Content-Type"),
                               s_lit(f"{mp_ct}; boundary={mp_boundary}"), headers)
+    elif body_ct:
+        # A request body without its declared Content-Type is rejected by real services, so a
+        # record generated without this header does not execute. Symmetric with the multipart case
+        # directly above, which has always emitted the header.
+        headers = curried_app(b_var("map_put"), s_lit("Content-Type"), s_lit(body_ct), headers)
 
     if has_body:
         body_arg = b_var("body")

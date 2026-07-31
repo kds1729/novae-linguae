@@ -1,6 +1,6 @@
 {
  "schema_version": "0.2.0",
- "hash": "fn_e9af0aa5c2c47654c6e311507cae27ab87bb44ab14777b664827a07e795dd9c5",
+ "hash": "fn_2f99b93416aa2c2514eb493cc55cf745cb099fbe165d97ef4e61ec1c840b81a8",
  "name_hints": [
   "create_thing",
   "post_thing"
@@ -60,7 +60,7 @@
      "value": "/things/th_38f2ad4dabfe"
     }
    },
-   "trace": "trc_d8eaf498e9f62dd004e6711b2911d9c96a847a8ad7e1701e96d57b0ae627fb2d"
+   "trace": "trc_15942db0be5395c8ec9184a14f86c8a1b8d32ee6aaac4927abc8f9a1d1602729"
   }
  ],
  "intent_tags": [
@@ -69,5 +69,5 @@
  ],
  "derived_from": null,
  "supersedes": null,
- "body_hash": "expr_d58ab102a7257b399452181ddbdef6a46f782f07eee1ec26a74dd7f8d152504d"
+ "body_hash": "expr_ca095472d138e0789c1993761ba93fd950772f46a951565c226db6f049210fd3"
 }
