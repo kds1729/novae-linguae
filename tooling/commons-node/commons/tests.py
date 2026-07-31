@@ -2068,6 +2068,51 @@ class EquivalenceClaimTests(TestCase):
         self.assertNotIn("collapsed", merged)
 
 
+# --- derivations (`derived_from` provenance, walked forward) ---------------------------------------
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class DerivationsTests(TestCase):
+    """GET /v0/records/{hash}/derivations — the reverse face of `derived_from` (gcp-sdk-poc open
+    question 3): what has been BUILT from this function. An assembled composite names its stages
+    there, so accumulated designs become discoverable by part instead of write-only."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def _publish(self, record):
+        return self.client.post("/v0/records", data=json.dumps(record),
+                                content_type="application/json")
+
+    def _derived(self, parent, name):
+        """A real record, re-derived: `derived_from` names the parent, address recomputed by the
+        validator (the gate re-verifies it, so the fixture goes through the front door)."""
+        child = json.loads(json.dumps(parent))
+        child["name_hints"] = [name]
+        child["derived_from"] = [parent["hash"]]
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(child, f)
+        out = subprocess.run([str(VALIDATOR), "hash", f.name], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        child["hash"] = out.stdout.strip()
+        return child
+
+    def test_derivations_walk_provenance_forward(self):
+        parent = _load("double-second-field.v0.2.json")
+        self.assertEqual(self._publish(parent).status_code, 201)
+        child = self._derived(parent, "derived_child")
+        self.assertEqual(self._publish(child).status_code, 201, "the derived record passes the gate")
+
+        about = self.client.get(f"/v0/records/{parent['hash']}/derivations").json()
+        self.assertEqual(about["count"], 1)
+        self.assertEqual(about["derivations"][0]["hash"], child["hash"])
+        # The child derives from nothing served here; an unrelated record likewise.
+        self.assertEqual(self.client.get(f"/v0/records/{child['hash']}/derivations").json()["count"], 0)
+
+    def test_derivations_get_only(self):
+        resp = self.client.post(f"/v0/records/{'fn_' + '1' * 64}/derivations")
+        self.assertEqual(resp.status_code, 405)
+
+
 # --- body storage tiering (commons.md open question 4) ---------------------------------------------
 
 @unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
