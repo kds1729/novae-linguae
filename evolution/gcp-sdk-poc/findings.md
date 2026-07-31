@@ -28,7 +28,8 @@ Google publishes Discovery documents rather than OpenAPI 3, so the pipeline is
 | operations with a `requestBody` | 31 (30 `application/json`, 1 `application/octet-stream`) |
 | 2xx responses declaring a body | 69 |
 | distinct 2xx response content types across the spec | 1 — `*/*` |
-| operations passing the projection constructibility filter | 1 (`storage.buckets.list`) |
+| body projections actually licensed by the run | **0** — `*/*` fails the media-type check first |
+| operations that would pass the constructibility filter, computed from the spec | 1 (`storage.buckets.list`) |
 | notes emitted by the run | 877, all "optional query param … omitted" |
 | notes about the 69 declined response bodies | 0 |
 | records with non-empty `refinements` | 0 |
@@ -113,9 +114,14 @@ One detail from fixing it, worth keeping: the existing suite had locked the sile
 `test_suffixed_json_content_type_licenses_schema` asserted `text/html` → `pending == []` and never
 checked whether anything was said, so the assertion was extended rather than replaced.
 
-## 3. The constructibility rule admits 1 of 81 operations
+## 3. The constructibility rule would admit 1 of 81 operations
 
-**Measured.** A body projection requires a bodyless `GET` with no path parameters.
+**Measured — in the run: zero.** No body projection was licensed at all, because every 2xx response
+arrives as `*/*` (finding 2) and fails the media-type check *before* the constructibility rule is
+reached. Nothing in the shipped corpus is a projection.
+
+**Computed from the spec, not observed.** Applying the constructibility filter — a bodyless `GET`
+with no path parameters — to the description directly, with a script rather than through the adapter:
 
 | filter | operations |
 |---|---|
@@ -123,8 +129,9 @@ checked whether anything was said, so the assertion was extended rather than rep
 | 2xx response declaring a body | 69 |
 | `GET`, no path parameters, no request body | **1** (`storage.buckets.list`) |
 
-Everything under `/b/{bucket}` — `buckets.get`, `objects.get` — is excluded by the path parameter, and
-every mutating verb by the verb.
+So 1 is what the rule *would* admit once the media type no longer gates it. Everything under
+`/b/{bucket}` — `buckets.get`, `objects.get` — is excluded by the path parameter, and every mutating
+verb by the verb.
 
 **Concluded.** The rule's reasoning is sound: a path parameter names server state the description
 cannot promise, so no worked example is derivable from the spec alone. But the consequence is not
@@ -174,7 +181,7 @@ density. Exact prefix query is the right tool when the caller knows the operatio
 the case for execution. It is unavailable to a caller searching for a *design* it cannot name, which
 is the case for finding prior art.
 
-## 7. The two description transforms, and why each is faithful
+## 7. The description transforms — one applied, one identified and not applied
 
 **OAuth2 → a plain `Bearer` HTTP scheme.** GCP Discovery declares OAuth2 (implicit /
 clientCredentials), and `resolve_auth` refuses interactive flows because a browser/redirect principal
@@ -188,10 +195,16 @@ description launder past a boundary this project chose on principle. If it were 
 honest shape is narrower: an explicit operator-supplied bearer credential for an oauth2-declared
 operation, recorded as operator-supplied.
 
-**`*/*` → `application/json` on responses.** Downstream compensation for the conversion artifact in
-finding 2, applied only because Cloud Storage is independently known to serve JSON. It is not
-proposed upstream either — the adapter's correct fix is the note, and a description that means
-`application/json` should say so.
+**`*/*` → `application/json` on responses — identified, NOT applied.** An earlier revision of this
+document described this as a second transform the pipeline performs. It does not: the pipeline
+applies only the security normalization above, and the ingested description still carries `*/*` on
+all 69 body-bearing responses. That is precisely why the run licensed zero projections (finding 3).
+
+The transform remains the right downstream compensation for the conversion artifact in finding 2 —
+Cloud Storage is independently known to serve JSON, so declaring what it actually serves is faithful
+rather than a workaround — and applying it is the necessary first step to licensing any projection
+from this description. It is still not proposed upstream: the adapter's correct fix is the note, and
+a description that means `application/json` should say so.
 
 ## Reproducing
 

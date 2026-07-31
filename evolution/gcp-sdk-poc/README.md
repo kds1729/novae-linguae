@@ -19,16 +19,18 @@
 Google Cloud Storage v1 — **all 81 operations** — was compiled into Nova Lingua records by
 `nl-ingest-openapi` and loaded into a local commons node, and a bucket was then provisioned
 create → verify → delete against live GCS by executing those records through `nl-validator run`.
-Nothing was hand-authored, and **no modification to this repository was required**: the two
-transforms the pipeline applies are to the *description*, not to the adapter or the language.
+Nothing was hand-authored, and **no modification to this repository was required**: the one transform
+the pipeline applies is to the *description*, not to the adapter or the language.
 
 So the description-layer bet holds at cloud scale. The useful content of this module is the negative
 space, and it is uncomfortable in one specific way: **the generated corpus cannot express a plan.**
-Every leaf record projects `.status` and discards `.body`, because the projection constructibility
-rule admits 1 of 81 operations here. A set of operations returning `int` has nodes and no edges, so
-no value can flow from one call into the next regardless of how many operations are ingested. For a
-consumer whose goal is composing multi-resource work, that is the binding constraint — and it is a
-constraint on where a worked example may come from, not on anything the runtime cannot do.
+Every leaf record projects `.status` and discards `.body`. The run licensed **zero** body projections
+— every response arrives as `*/*` and fails the media-type check (finding 2) — and even once that is
+compensated for, the constructibility rule would admit only **1 of 81** operations (finding 3). A set
+of operations returning `int` has nodes and no edges, so no value can flow from one call into the
+next regardless of how many operations are ingested. For a consumer whose goal is composing
+multi-resource work, that is the binding constraint — and it is a constraint on where a worked example
+may come from, not on anything the runtime cannot do.
 
 Two defects surfaced along the way, one of them silent for days.
 
@@ -78,8 +80,8 @@ carry:
 Where the next person should start, most consequential first.
 
 1. **Can a projection's worked example come from an observation rather than the spec?** The
-   constructibility rule — bodyless `GET`, no path parameters — is sound in its reasoning and
-   admits 1 of 81 real operations. The live gate *already* sources examples from observations for
+   constructibility rule — bodyless `GET`, no path parameters — is sound in its reasoning and would
+   admit 1 of 81 real operations. The live gate *already* sources examples from observations for
    schema-derived projections, so the machinery exists; the question is whether the faithfulness
    contract can accommodate it more widely. This is the gate on dataflow, and therefore on
    composition.
