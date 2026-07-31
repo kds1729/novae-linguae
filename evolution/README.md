@@ -53,6 +53,12 @@ Every module's `README.md` opens with:
 `Provenance` is not optional and not approximate. A result nobody can reproduce is an anecdote, and
 the whole value of a module is that a stranger can re-run it and disagree with you on the evidence.
 
+**`Status` describes the module, not its proposals.** Merging a module means its findings are in the
+tree; it does not mean anyone has agreed to its proposals. So the two track separately: the module
+becomes `accepted` when it merges, while each file under `proposals/` carries its own status line and
+resolves on its own schedule. A module reaches `absorbed` only once its conclusions have landed
+somewhere normative — a `spec/` change, a code change, a pulled primitive.
+
 ## The one discipline that matters
 
 **Separate what you measured from what you argue.** State numbers with the command that produced
@@ -80,6 +86,10 @@ to its successor and the successor links back. Nothing is rewritten to look corr
 the same immutability-plus-lineage discipline that `supersedes` / `derived_from` give a function
 record, applied to the work *about* the project.
 
+Proposals run the same lifecycle independently, so a module can sit at `accepted` with one proposal
+`declined` and another still `proposed`. Update a status by editing it in place and filling in
+`Resolution` — the history carries what it used to say.
+
 ## Adding a module
 
 1. Copy [`TEMPLATE.md`](TEMPLATE.md) to `evolution/<kebab-case-name>/README.md`.
@@ -92,4 +102,4 @@ record, applied to the work *about* the project.
 
 | module | status | what |
 |---|---|---|
-| [`gcp-sdk-poc`](gcp-sdk-poc/) | `proposed` | A whole cloud API (Google Cloud Storage v1, 81 operations) through `nl-ingest-openapi`, then provisioned live by executing the generated records. Two defects, three quantified design boundaries, and what the description layer cannot supply. |
+| [`gcp-sdk-poc`](gcp-sdk-poc/) | `accepted` | A whole cloud API (Google Cloud Storage v1, 81 operations) through `nl-ingest-openapi`, then provisioned live by executing the generated records. Two defects, three quantified design boundaries, and what the description layer cannot supply. One proposal still open. |
