@@ -42,22 +42,32 @@ provenance for the change it caused.
 Every module's `README.md` opens with:
 
 ```markdown
-- **Status:** exploring | proposed | accepted | declined | absorbed | superseded
+- **Status:** exploring | published | absorbed | superseded
 - **Author:** name <contact>
 - **Dates:** first published YYYY-MM-DD, last updated YYYY-MM-DD
 - **Scope:** which parts of the project this touches
 - **Provenance:** upstream commit, plus pinned versions/revisions of every external input
-- **Resolution:** (once not `exploring`/`proposed`) the PR, commit, or issue that resolved it
+- **Resolution:** (once not `exploring`) the PR, commit, or issue that resolved it
 ```
 
 `Provenance` is not optional and not approximate. A result nobody can reproduce is an anecdote, and
 the whole value of a module is that a stranger can re-run it and disagree with you on the evidence.
 
-**`Status` describes the module, not its proposals.** Merging a module means its findings are in the
-tree; it does not mean anyone has agreed to its proposals. So the two track separately: the module
-becomes `accepted` when it merges, while each file under `proposals/` carries its own status line and
-resolves on its own schedule. A module reaches `absorbed` only once its conclusions have landed
-somewhere normative — a `spec/` change, a code change, a pulled primitive.
+**`Status` describes the module, not its proposals**, and the two use *different vocabularies* —
+because merging a module means its findings are in the tree, and nothing more. Nobody has agreed to
+anything by merging it, so the module axis has no word for agreement:
+
+| axis | statuses | what the terminal state means |
+|---|---|---|
+| **module** | `exploring` → `published` → `absorbed`, plus `superseded` | every proposal it raised has landed or been declined |
+| **proposal** (one per file under `proposals/`) | `proposed` → `accepted` \| `declined`, then `absorbed` | the accepted change is actually in the tree |
+
+`published` is deliberately flat: it states the fact that merging establishes — the evidence is here,
+reproducible, and open to disagreement — and claims no endorsement of what the author concluded from
+it. A module reaches `absorbed` only once its conclusions have landed somewhere normative: a `spec/`
+change, a code change, a pulled primitive. A module whose only proposal is `declined` never reaches
+`absorbed` and correctly rests at `published` — the evidence stands even where the recommendation
+did not.
 
 ## The one discipline that matters
 
@@ -74,21 +84,24 @@ to be wrong.
 Statuses move forward; **a module is never deleted.**
 
 ```
-exploring ──▶ proposed ──▶ accepted ──▶ absorbed
-                  │
-                  ╰──────▶ declined
+module:    exploring ──▶ published ──▶ absorbed
+                              │
+                              ╰──▶ (stays here if every proposal was declined)
 
-any of the above ──▶ superseded   (a later module supersedes it; link both ways)
+proposal:  proposed ──▶ accepted ──▶ absorbed
+               │
+               ╰──────▶ declined
+
+either ──▶ superseded   (a later module supersedes it; link both ways)
 ```
 
-A declined module keeps its reasoning and gains the reason it was declined. A superseded one links
-to its successor and the successor links back. Nothing is rewritten to look correct in hindsight —
-the same immutability-plus-lineage discipline that `supersedes` / `derived_from` give a function
-record, applied to the work *about* the project.
-
-Proposals run the same lifecycle independently, so a module can sit at `accepted` with one proposal
-`declined` and another still `proposed`. Update a status by editing it in place and filling in
-`Resolution` — the history carries what it used to say.
+The two run independently, so a module sits at `published` with one proposal `declined` and another
+still `proposed`, and only moves to `absorbed` once none are outstanding. A declined proposal keeps
+its reasoning and gains the reason it was declined. A superseded module links to its successor and
+the successor links back. Nothing is rewritten to look correct in hindsight — the same
+immutability-plus-lineage discipline that `supersedes` / `derived_from` give a function record,
+applied to the work *about* the project. Update a status by editing it in place and filling in
+`Resolution`; the history carries what it used to say.
 
 ## Adding a module
 
@@ -102,4 +115,4 @@ Proposals run the same lifecycle independently, so a module can sit at `accepted
 
 | module | status | what |
 |---|---|---|
-| [`gcp-sdk-poc`](gcp-sdk-poc/) | `accepted` | A whole cloud API (Google Cloud Storage v1, 81 operations) through `nl-ingest-openapi`, then provisioned live by executing the generated records. Two defects, three quantified design boundaries, and what the description layer cannot supply. One proposal still open. |
+| [`gcp-sdk-poc`](gcp-sdk-poc/) | `absorbed` | A whole cloud API (Google Cloud Storage v1, 81 operations) through `nl-ingest-openapi`, then provisioned live by executing the generated records. Two defects, three quantified design boundaries, and what the description layer cannot supply. Both defects now fixed in the tree. |

@@ -1,7 +1,8 @@
 # A whole cloud API through the description layer
 
-- **Status:** accepted — findings merged. [Proposal 01](proposals/01-request-content-type.md) remains
-  `proposed` and resolves separately; this module reaches `absorbed` if and when it is decided.
+- **Status:** absorbed — findings merged, and both defects it reported are now fixed in the tree.
+  [Proposal 01](proposals/01-request-content-type.md) is `accepted` and implemented; nothing this
+  module raised is outstanding.
 - **Author:** Keith Sprochi <ksprochi@elementalmachines.com>
 - **Dates:** first published 2026-07-30, last updated 2026-07-31
 - **Scope:** `tooling/nl-ingest-openapi`; touches on `tooling/commons-node` retrieval and on
@@ -9,8 +10,9 @@
 - **Provenance:** upstream commit `76fc6ba` (2026-07-15); Google Cloud Storage Discovery document
   `storage:v1` revision **20260719**; `google-discovery-to-swagger` **2.1.0**;
   `swagger2openapi` **7.0.8**; run date 2026-07-26
-- **Resolution:** module merged in #2. Defect 2 fixed in #1
-  (`2659c09`). Defect 1 open, carried as proposal 01.
+- **Resolution:** module merged in #2. Defect 2 fixed in #1 (`2659c09`); defect 1 fixed by
+  accepting [proposal 01](proposals/01-request-content-type.md). The module's **open questions**
+  remain open — they are pointers for the next author, not outstanding proposals.
 
 ## Summary
 
@@ -35,7 +37,7 @@ Two defects surfaced along the way, one of them silent for days.
 | file | what |
 |---|---|
 | [`findings.md`](findings.md) | The seven findings, each with the measurement behind it |
-| [`proposals/01-request-content-type.md`](proposals/01-request-content-type.md) | Emit the declared request `Content-Type` — needs a decision on record re-addressing |
+| [`proposals/01-request-content-type.md`](proposals/01-request-content-type.md) | Emit the declared request `Content-Type` — **accepted**, applied, and its three questions answered |
 
 ## Defects reported
 
@@ -43,7 +45,9 @@ Two defects surfaced along the way, one of them silent for days.
    `http` call whose header argument is `map_empty`, so the record is rejected by any service that
    requires the header, while still reporting `certify=OK`. **31 of 81** operations affected, which
    is every write operation in the API. Reproduces on hand-authored OpenAPI 3 with no converter
-   involved. See [proposal 01](proposals/01-request-content-type.md).
+   involved. **Fixed** — [proposal 01](proposals/01-request-content-type.md) accepted and applied;
+   the adapter now emits the declared media type, and notes-and-omits when the description declares
+   more than one.
 
 2. **A non-JSON 2xx response body was declined silently** — no projection *and* no note, so a
    consumer could not distinguish "the description promised no body" from "the description promised

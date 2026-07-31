@@ -1,10 +1,14 @@
 # Proposal 01 — emit the declared request `Content-Type`
 
-- **Status:** proposed
+- **Status:** accepted — applied as proposed, with all three questions answered below.
 - **Module:** [`gcp-sdk-poc`](../README.md)
 - **Addresses:** [finding 1](../findings.md#1-the-request-content-type-is-dropped)
-- **Blast radius:** re-addresses every body-carrying record. Needs a maintainer decision.
+- **Blast radius:** re-addresses every body-carrying record. Accepted knowingly; see the decisions.
 - **Spike:** measured against the full test suite; the complete diff is inline below.
+- **Resolution:** applied to `tooling/nl-ingest-openapi/openapi_ingest.py` exactly as the diff below
+  specifies, with three tests added for the emitted header, the bodyless case, and the
+  ambiguous-media-type note; `spec/examples/body-create-thing.json` regenerated in the same change
+  (see decision 3). Adapter suite 52/52, Rust suite 416/416.
 
 ## The change
 
@@ -116,3 +120,29 @@ also means the repair step disappears downstream with no change to the resulting
 2. Should the multi-declared-type case note-and-omit (proposed), or refuse the operation outright?
 3. Regenerating `spec/examples/body-create-thing.json` to restore the GW16 α-equivalence result — in
    this change, or as its own?
+
+## Decisions (2026-07-31)
+
+**1. Take the re-addressing now.** A version boundary exists to protect artifacts that *work*; these
+do not — they cannot perform the call they document. What gets re-addressed is a set of records whose
+current addresses point at something broken, and the commons is monotonic, so the old addresses keep
+resolving to exactly what they always did. The stronger reason is that the defect is not really the
+missing header but the **false `certify=OK`**: a record that cannot execute reporting itself verified
+is the failure mode principle 3 exists to prevent, and carrying it to a version boundary would mean
+knowingly publishing more of it in the meantime.
+
+**2. Note-and-omit, as proposed.** Refusing the operation discards everything else correct about it
+over one header the description genuinely left ambiguous, and inventing `application/json` would
+manufacture a promise the description withheld. Note-and-omit *is* the adapter's stated contract —
+what it cannot carry gets a printed reason — which is the same principle #1 enforced for response
+bodies. The two now behave alike, which is the point.
+
+**3. In this change.** The α-equivalence test guards precisely the property this change moves, so
+splitting it would leave `main` red in between; a distinct commit inside the same change is what
+"explicit and reviewed" actually requires. One consequence worth recording: the fixture's example
+carries a **trace**, and the recorded request no longer matched what the body sends, so the trace was
+**re-captured live** against the in-repo fake service rather than hand-edited. That re-capture also
+moved the response's `date` and `server` values — real observations from a real run on a different
+day and Python build. Doctoring the old trace to suppress that churn would have produced an artifact
+that records no run that ever happened, which is the worse trade for a project whose traces are
+evidence.

@@ -57,6 +57,11 @@ data-driven from each operation's own declared media type — a blanket `applica
 wrong for `storage.objects.insert`, which declares `application/octet-stream`. See
 [proposal 01](proposals/01-request-content-type.md).
 
+**Resolved.** [Proposal 01](proposals/01-request-content-type.md) accepted and applied: the adapter
+emits the single declared non-multipart media type, and notes-and-omits when a description declares
+more than one. The re-addressing it causes was taken deliberately rather than deferred to a version
+boundary — the affected records could not execute, and the real defect was the false `certify=OK`.
+
 ## 2. A non-JSON 2xx response body was declined silently
 
 **Measured.** Two descriptions differing in exactly one key — the response content type — produce

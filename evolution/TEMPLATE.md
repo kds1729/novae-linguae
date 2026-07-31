@@ -6,7 +6,7 @@ Delete these comments and any section that genuinely does not apply.
 
 # <Module title — what was done, in one line>
 
-- **Status:** exploring
+- **Status:** exploring <!-- module axis: exploring | published | absorbed | superseded. `accepted`/`declined` belong to a PROPOSAL, never here. -->
 - **Author:** <name> <<contact>>
 - **Dates:** first published YYYY-MM-DD, last updated YYYY-MM-DD
 - **Scope:** <which parts of the project this touches, e.g. `tooling/nl-ingest-openapi`, `spec/expressiveness.md`>
@@ -46,9 +46,11 @@ including the uncomfortable parts.
 
 ## Proposals
 
-<!-- Changes needing a maintainer decision. One file each under proposals/NN-short-name.md.
-     State the change, its blast radius, what it breaks, and the questions only a maintainer can
-     answer. Include the diff inline if it is small, so the proposal is self-contained. -->
+<!-- Changes needing a maintainer decision. One file each under proposals/NN-short-name.md, each
+     opening with its OWN status line (proposed | accepted | declined | absorbed) that moves
+     independently of this module's. State the change, its blast radius, what it breaks, and the
+     questions only a maintainer can answer. Include the diff inline if it is small, so the
+     proposal is self-contained. -->
 
 ## Open questions
 
