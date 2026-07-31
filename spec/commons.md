@@ -181,6 +181,21 @@ candidates into one class ([`agent-loop.md`](agent-loop.md), the `collapse` step
 200 OK   { "subject": "fn_…", "equivalences": [ <signed assert>, … ], "count": 1 }
 ```
 
+### `GET /v0/records/{hash}/derivations` — records derived from a function
+
+Returns the stored function records whose `derived_from` names this address — the **reverse face
+of provenance**: what has been *built from* this function. An assembled composite
+(`nl-validator assemble`) records its stage addresses in `derived_from`, so this walks the
+derivation graph *forward*: discovery **by part**, for the caller who can name one piece of an
+outcome but not the outcome itself (without it, accumulated designs are write-only —
+`evolution/gcp-sdk-poc` open question 3). The node serves gate-verified records and does not
+judge what a derivation is worth; each returned record is self-verifying by its hash, and
+certification/trust remain the consumer's own checks.
+
+```
+200 OK   { "subject": "fn_…", "derivations": [ <function record>, … ], "count": 1 }
+```
+
 ### `GET /v0/blobs/{sha256}` — binary blobs, by content hash
 
 Serves opaque binary bytes keyed by their sha256 — adapter weights ([`weights.md`](weights.md)) and

@@ -429,7 +429,7 @@ pub fn assemble(
     // body — certify the composite record itself. Because the body is inlined (no opaque fn_refs),
     // typecheck/terminate/complexity see through it, so this genuinely checks the derived type,
     // effects, termination, and complexity rather than trusting compose's derivation.
-    let composite_record = build_composite_record(&stages, &composite, examples, &body)?;
+    let composite_record = build_composite_record(&stages, &stage_records, &composite, examples, &body)?;
     let cert = crate::certify_record(&composite_record, &body, records, solver);
     let composite_checks: Vec<(String, String)> =
         cert.checks.iter().map(|c| (c.check.clone(), c.verdict.to_string())).collect();
@@ -456,9 +456,51 @@ fn identity_metadata() -> CompositionMetadata {
     }
 }
 
+/// The most specific intent tag a record declares: the longest (hierarchical tags grow more
+/// specific rightward), ties broken lexicographically-first — deterministic.
+fn most_specific_tag(record: &J) -> Option<String> {
+    record
+        .pointer("/intent_tags")?
+        .as_array()?
+        .iter()
+        .filter_map(|t| t.as_str())
+        .max_by_key(|s| (s.len(), std::cmp::Reverse(s.to_string())))
+        .map(|s| s.to_string())
+}
+
+/// Derived discovery metadata for a composite (gcp-sdk-poc open question 3 — an assembly nobody
+/// can find is write-only): the composite is honestly `composite`, it `uses` each stage's most
+/// specific declared tag, and it `yields` the terminal stage's — re-rooted under the composite
+/// axis, so a pipeline *containing* a parse never claims to *be* one, while a caller searching
+/// the composite axis finds it by any part or by its outcome face. Deterministic (stage order,
+/// deduplicated), derived only from what the verified stages declare (an untagged stage
+/// contributes nothing — never invented), and the 64-char tag bound is honored by omission (an
+/// over-long re-rooted tag is dropped, never truncated into a different tag).
+fn derived_intent_tags(stage_records: &[J]) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    let mut push = |t: String, tags: &mut Vec<String>| {
+        if t.len() <= 64 && !tags.contains(&t) {
+            tags.push(t);
+        }
+    };
+    if !stage_records.is_empty() {
+        push("composite".to_string(), &mut tags);
+        for sr in stage_records {
+            if let Some(t) = most_specific_tag(sr) {
+                push(format!("composite/uses/{t}"), &mut tags);
+            }
+        }
+        if let Some(t) = stage_records.last().and_then(most_specific_tag) {
+            push(format!("composite/yields/{t}"), &mut tags);
+        }
+    }
+    tags
+}
+
 /// Build the derived composite function record (its body_hash addresses the synthesized composite body).
 fn build_composite_record(
     stages: &[Stage],
+    stage_records: &[J],
     composite: &CompositionMetadata,
     examples: &[(Vec<J>, J)],
     body: &J,
@@ -483,10 +525,19 @@ fn build_composite_record(
     let uniq: Vec<J> = stages.iter().map(|s| s.hash.clone()).filter(|h| seen.insert(h.clone())).map(|h| json!(h)).collect();
     let derived_from_arr = if uniq.is_empty() { J::Null } else { J::Array(uniq) };
     let body_hash = crate::hash_artifact_with_kind(body, crate::ArtifactKind::BodyExpression)?;
+    // Discovery metadata (open question 3): the stage names join the hints — they are the
+    // constituents, honest by construction, and they give the token-poor composite record (a
+    // body of content addresses) the lexical surface search and name-affinity rank feed on.
+    let mut hints: Vec<String> = vec![name.clone()];
+    for s in stages {
+        if !hints.contains(&s.name) {
+            hints.push(s.name.clone());
+        }
+    }
     let mut record = json!({
         "schema_version": "0.2.0",
         "hash": "fn_".to_string() + &"0".repeat(64),
-        "name_hints": [name],
+        "name_hints": hints,
         "signature": {
             "type": ty, "refinements": [],
             "effects": composite.effects.clone(), "capabilities": composite.capabilities.clone(),
@@ -496,7 +547,7 @@ fn build_composite_record(
             "complexity": composite.complexity.clone(),
         },
         "examples": examples_j,
-        "intent_tags": [],
+        "intent_tags": derived_intent_tags(stage_records),
         // Provenance: the (deduplicated) stage addresses this composite was assembled from. Per the
         // schema, `derived_from` is null or a non-empty unique array of content addresses.
         "derived_from": derived_from_arr,
@@ -535,12 +586,17 @@ mod tests {
     }
 
     fn insert(name: &str, ty: &J, body: J, records: &mut HashMap<String, J>, bodies: &mut HashMap<String, J>) {
+        insert_tagged(name, ty, body, &[], records, bodies)
+    }
+
+    fn insert_tagged(name: &str, ty: &J, body: J, tags: &[&str],
+                     records: &mut HashMap<String, J>, bodies: &mut HashMap<String, J>) {
         let bh = crate::hash_artifact_with_kind(&body, crate::ArtifactKind::BodyExpression).unwrap();
         let mut rec = json!({
             "schema_version": "0.2.0", "hash": "fn_".to_string() + &"0".repeat(64), "name_hints": [name],
             "signature": { "type": ty, "refinements": [], "effects": [], "capabilities": [], "terminates": "always" },
             "examples": [{ "args": [int(2)], "result": int(2) }],
-            "intent_tags": [], "derived_from": J::Null, "supersedes": J::Null, "body_hash": bh });
+            "intent_tags": tags, "derived_from": J::Null, "supersedes": J::Null, "body_hash": bh });
         let h = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
         rec["hash"] = json!(h.clone());
         records.insert(h.clone(), rec);
@@ -630,5 +686,52 @@ mod tests {
         let ex = vec![(vec![int(3)], int(36)), (vec![int(2)], int(16))];
         let a = assemble(&r, &b, &ex, 3, true, "z3").unwrap().expect("certified");
         assert!(a.certified);
+    }
+
+    #[test]
+    fn composite_carries_derived_discovery_metadata() {
+        // Open question 3 (gcp-sdk-poc): the composite record carries intent tags DERIVED from
+        // its stages — the axis marker, one `uses` per stage's most specific tag, and the
+        // terminal stage's tag as the outcome face — plus the stage names as extra name hints,
+        // so the token-poor record (a body of content addresses) has a lexical surface.
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        let unary = |op: &str| json!({ "kind": "lambda", "params": [{ "name": "n" }], "body":
+            { "kind": "app", "fn": { "kind": "var", "name": op },
+              "args": [{ "kind": "var", "name": "n" }, { "kind": "var", "name": "n" }] } });
+        let int_ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
+            "result": { "kind": "builtin", "name": "int" } });
+        // `arithmetic/scalar/double` is longer than `arithmetic` — the most specific wins.
+        insert_tagged("double", &int_ty, unary("add"), &["arithmetic", "arithmetic/scalar/double"], &mut r, &mut b);
+        insert_tagged("square", &int_ty, unary("mul"), &["arithmetic/scalar/square"], &mut r, &mut b);
+        let ex = vec![(vec![int(3)], int(36)), (vec![int(2)], int(16))];
+        let a = assemble(&r, &b, &ex, 3, false, "z3").unwrap().expect("a pipeline");
+        let tags: Vec<&str> = a.composite_record["intent_tags"].as_array().unwrap()
+            .iter().filter_map(|t| t.as_str()).collect();
+        assert_eq!(tags, ["composite",
+                          "composite/uses/arithmetic/scalar/double",
+                          "composite/uses/arithmetic/scalar/square",
+                          "composite/yields/arithmetic/scalar/square"]);
+        let hints: Vec<&str> = a.composite_record["name_hints"].as_array().unwrap()
+            .iter().filter_map(|h| h.as_str()).collect();
+        assert_eq!(hints, ["double_then_square", "double", "square"]);
+        // Provenance already named the stages; the tags make it queryable.
+        assert_eq!(a.composite_record["derived_from"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn untagged_stages_derive_only_the_axis_marker() {
+        // Derived only from what the stages declare — an untagged stage contributes nothing,
+        // and nothing is invented (no `uses`, no `yields`).
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        add_unary("double", "add", &mut r, &mut b);
+        add_unary("square", "mul", &mut r, &mut b);
+        let ex = vec![(vec![int(3)], int(36)), (vec![int(2)], int(16))];
+        let a = assemble(&r, &b, &ex, 3, false, "z3").unwrap().expect("a pipeline");
+        let tags: Vec<&str> = a.composite_record["intent_tags"].as_array().unwrap()
+            .iter().filter_map(|t| t.as_str()).collect();
+        assert_eq!(tags, ["composite"]);
+        // The identity pipeline is not an assembly — no axis marker either.
+        let ident = assemble(&r, &b, &[(vec![int(5)], int(5))], 3, false, "z3").unwrap().unwrap();
+        assert!(ident.composite_record["intent_tags"].as_array().unwrap().is_empty());
     }
 }

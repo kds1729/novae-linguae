@@ -174,6 +174,27 @@ Generic collection operations not covered by transform / filter / aggregate.
 - `coll/zip`
 - `coll/unzip`
 
+### `composite/<…>` (derived — never hand-invented)
+
+An **assembled pipeline** of commons functions. This category is special: its tags are **derived
+mechanically from the verified stages** by the assembler (`nl-validator assemble`), never authored
+by hand — a composite *containing* a parse must not claim to *be* one, so stage tags are re-rooted
+under this axis rather than copied to the top level.
+
+- `composite` — the axis marker every assembled composite carries
+- `composite/uses/<stage-tag>` — one per stage: the stage's most specific declared tag
+  (longest, ties lexicographically-first), re-rooted — discovery *by part*
+- `composite/yields/<stage-tag>` — the terminal stage's most specific tag: the pipeline's
+  outcome face (its output is the composite's output) — discovery *by outcome*
+
+Derivation rules: deterministic (stage order, deduplicated); an untagged stage contributes
+nothing (nothing is invented); a re-rooted tag exceeding the 64-character bound is **omitted,
+never truncated** (a truncation would be a different tag). Together with `derived_from` (which
+names the stage addresses — served in reverse by the node's
+`GET /v0/records/{hash}/derivations`) and the stage names joining `name_hints`, this is what
+makes an accumulated design *discoverable* instead of write-only: the record's own tokens say
+what it uses and what it yields.
+
 ## Modifier tags (no category)
 
 These describe a *property* a function has rather than a category it belongs to. Stackable freely with category tags.

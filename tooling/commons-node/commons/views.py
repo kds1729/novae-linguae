@@ -169,6 +169,38 @@ def equivalences(request, address):
     return resp
 
 
+@csrf_exempt
+def derivations(request, address):
+    """GET /v0/records/{hash}/derivations — the function records DERIVED FROM this address.
+
+    The reverse face of `derived_from` provenance (evolution/gcp-sdk-poc open question 3 —
+    "accumulated designs are write-only"): a client that resolved a function asks what has been
+    BUILT from it. An assembled composite names its stages in `derived_from`, so this makes the
+    provenance graph walkable *forward* — discovery by part, for the caller who can name one
+    piece of an outcome but not the outcome itself. The node serves stored gate-verified records
+    and does not judge what a derivation is worth (principle 7) — certification and trust stay
+    the consumer's own checks, and each returned record is self-verifying by its hash.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    from django.db import connection
+
+    if connection.vendor == "postgresql":
+        # JSONB containment pushes the membership test into the database (indexable at scale).
+        rows = (Record.objects.filter(kind="function-record",
+                                      raw__derived_from__contains=[address]).order_by("id"))[:2000]
+        recs = [r.raw for r in rows]
+    else:
+        # SQLite has no JSON containment lookup — bounded scan, membership confirmed in Python
+        # (the search view's pgvector-vs-scan split, applied to provenance).
+        rows = Record.objects.filter(kind="function-record").order_by("id")[:10000]
+        recs = [r.raw for r in rows if address in (r.raw.get("derived_from") or [])]
+    resp = JsonResponse({"subject": address, "derivations": recs, "count": len(recs)})
+    # Immutable individually, but the set about a subject grows — cache briefly, like the others.
+    resp["Cache-Control"] = "public, max-age=10"
+    return resp
+
+
 def blob(request, sha256):
     """GET /v0/blobs/{sha256} — serve a binary blob by content hash (spec/weights.md).
 
