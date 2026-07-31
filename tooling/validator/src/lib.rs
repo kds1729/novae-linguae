@@ -105,7 +105,7 @@ pub use orchestrate::{
 };
 
 pub mod assemble;
-pub use assemble::{assemble, Assembled, Stage};
+pub use assemble::{assemble, record_solves_goal, Assembled, Stage};
 
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {
