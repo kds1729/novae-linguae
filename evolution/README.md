@@ -1,0 +1,95 @@
+# `evolution/` — evidentiary modules
+
+This directory holds **self-contained records of work done against Novae Linguae from the outside**:
+what was tried, what was measured, what it implies, and what remains open. Each subdirectory is one
+**module**, owned by its author, isolated from every other module and from the rest of the tree.
+
+It exists because the project had no landing zone for this kind of contribution. A body of
+evidence is not a patch and not a specification: patching core code needs design agreement before
+the evidence has even been read, and writing into `spec/` edits the normative voice of the language.
+A module needs neither. It can be reviewed on whether its measurements are sound, merged without
+committing the project to anything, and built on by the next person.
+
+## The boundary with `spec/`
+
+| | |
+|---|---|
+| **`spec/`** | **normative** — what the language and its artifacts *are*. Changing it changes the definition. |
+| **`evolution/`** | **evidentiary** — what was tried and observed, by whom, under what conditions, and what the author concludes. Changing it changes nobody's obligations. |
+
+A module **graduates** when its conclusions land somewhere normative — a `spec/` change, a code
+change, a pulled primitive. At that point its status becomes `absorbed` and it stays in place as
+provenance for the change it caused.
+
+## What belongs here
+
+- Results from running the toolchain at a scale or against inputs the in-repo references don't cover.
+- Proposals that need a maintainer decision before any code is worth writing.
+- Explorations that reached a negative result. **These are as valuable as the positive ones** and
+  have nowhere else to live.
+
+## What does not belong here
+
+- **Fixes for defects.** A bug with a reproduction is an ordinary code PR. A module may *report* a
+  defect, but the fix travels separately.
+- **Generated corpora.** Records belong published to a commons node — content-addressed, gate-verified,
+  replicable — not committed to this repository. A module should say how to regenerate them.
+- **Vendor- or product-specific machinery** the project would then have to maintain. Describe the
+  pipeline and pin its inputs; keep the pipeline itself in your own repository.
+
+## Required front matter
+
+Every module's `README.md` opens with:
+
+```markdown
+- **Status:** exploring | proposed | accepted | declined | absorbed | superseded
+- **Author:** name <contact>
+- **Dates:** first published YYYY-MM-DD, last updated YYYY-MM-DD
+- **Scope:** which parts of the project this touches
+- **Provenance:** upstream commit, plus pinned versions/revisions of every external input
+- **Resolution:** (once not `exploring`/`proposed`) the PR, commit, or issue that resolved it
+```
+
+`Provenance` is not optional and not approximate. A result nobody can reproduce is an anecdote, and
+the whole value of a module is that a stranger can re-run it and disagree with you on the evidence.
+
+## The one discipline that matters
+
+**Separate what you measured from what you argue.** State numbers with the command that produced
+them; label inferences as inferences; keep recommendations in their own section where a reader can
+reject them without discarding the data.
+
+This is what keeps the directory trustworthy rather than a pile of opinions, and it is what makes a
+module worth building on: the measurements stay useful even when the author's conclusions turn out
+to be wrong.
+
+## Lifecycle
+
+Statuses move forward; **a module is never deleted.**
+
+```
+exploring ──▶ proposed ──▶ accepted ──▶ absorbed
+                  │
+                  ╰──────▶ declined
+
+any of the above ──▶ superseded   (a later module supersedes it; link both ways)
+```
+
+A declined module keeps its reasoning and gains the reason it was declined. A superseded one links
+to its successor and the successor links back. Nothing is rewritten to look correct in hindsight —
+the same immutability-plus-lineage discipline that `supersedes` / `derived_from` give a function
+record, applied to the work *about* the project.
+
+## Adding a module
+
+1. Copy [`TEMPLATE.md`](TEMPLATE.md) to `evolution/<kebab-case-name>/README.md`.
+2. Fill in the front matter. Pin your inputs.
+3. Put detail in sibling files (`findings.md`, `proposals/NN-name.md`, …) and index them from the
+   `README.md`, so the entry point stays readable.
+4. Open one PR for the module. If it also reports a defect, open the fix separately and cross-link.
+
+## Modules
+
+| module | status | what |
+|---|---|---|
+| [`gcp-sdk-poc`](gcp-sdk-poc/) | `proposed` | A whole cloud API (Google Cloud Storage v1, 81 operations) through `nl-ingest-openapi`, then provisioned live by executing the generated records. Two defects, three quantified design boundaries, and what the description layer cannot supply. |
