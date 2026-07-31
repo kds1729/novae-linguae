@@ -106,6 +106,8 @@ pub use orchestrate::{
 
 pub mod assemble;
 pub use assemble::{assemble, record_solves_goal, Assembled, Stage};
+pub mod plan;
+pub use plan::{check_plan, PlanOutcome, PlanReport};
 
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {

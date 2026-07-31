@@ -8,6 +8,8 @@ touching any real, billable, or mutable-in-the-world system:
     PUT    /items/{name}   store the request body under {name}; 201 if new, 200 if replaced
     GET    /items/{name}   200 + the stored body, or 404
     DELETE /items/{name}   204 if it existed, 404 otherwise
+    PUT    /items/{name}/note   store a note ON an item — 404 unless the item exists (the
+                                world-state dependency surface, spec/world-state.md)
 
 Every /items request must carry `Authorization: Bearer <token>` (the --token argument), else
 401 — which is what makes the gate exercise the secret-placeholder path ({{secret:...}} header
@@ -74,6 +76,7 @@ from urllib.parse import parse_qs, urlparse
 class Handler(BaseHTTPRequestHandler):
     store = {}
     things = {}
+    notes = {}
     token = "test-token"
     api_key = "test-token"  # the X-Api-Key credential; main() defaults it to --token
     oauth_client = ("gw13-client", "gw13-secret")
@@ -165,6 +168,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         if not self._authed():
+            return
+        # World-state dependency surface (spec/world-state.md — the requires-a-VPC/guarantees-a-
+        # subnet shape at fake-service scale): a NOTE lives ON an item, so storing one REQUIRES
+        # the item to exist (404 otherwise) and leaves the note existing. The smallest operation
+        # with a genuine world-state precondition — what `check-plan` discharges symbolically
+        # before any effect, and what a live run confirms the declaration truthful about.
+        if self.path.startswith("/items/") and self.path.endswith("/note"):
+            name = self.path[len("/items/"):-len("/note")]
+            if not name:
+                self._reply(404, b'{"error":"not found"}')
+                return
+            if name not in self.store:
+                self._reply(404, b'{"error":"no such item"}')
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length)
+            existed = name in self.notes
+            self.notes[name] = body
+            self._reply(200 if existed else 201, body)
             return
         name = self._name()
         if name is None:

@@ -1,0 +1,52 @@
+{
+ "assume": [],
+ "steps": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
+    },
+    {
+     "kind": "string",
+     "value": "plan-widget"
+    },
+    {
+     "kind": "string",
+     "value": "{}"
+    }
+   ],
+   "target": "fn_6f285a7fa3304232d5814118da32421e22ceb95dd56a01cf036654ed85154bb9"
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
+    },
+    {
+     "kind": "string",
+     "value": "plan-widget"
+    }
+   ],
+   "target": "fn_10dc8c033874b9c1fab357a1998a043d374e81347b02053b185ef0a91924571a"
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
+    },
+    {
+     "kind": "string",
+     "value": "plan-widget"
+    },
+    {
+     "kind": "string",
+     "value": "checked before any effect"
+    }
+   ],
+   "target": "fn_921246dc3ce48e201b06b3e903fc2db60f73dbb1f81ee19b3b50bd6c7ed683ad"
+  }
+ ]
+}

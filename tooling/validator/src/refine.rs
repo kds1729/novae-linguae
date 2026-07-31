@@ -213,6 +213,20 @@ pub fn check_refinements(sig_type: &J, refinements: &[J], body: &J, solver: &str
             outcome: RefinementOutcome::Unverifiable("`inv` refinements are not checked in v0.1".into()),
         });
     }
+    // World-state refinements (spec/world-state.md) are contracts over EXTERNAL state — nothing a
+    // body proof can discharge. They are checked against a plan by `check-plan`; surfaced here so
+    // they never read as silently proved.
+    for r in refinements.iter().filter(|r| {
+        matches!(r.get("kind").and_then(|k| k.as_str()), Some("requires") | Some("ensures"))
+    }) {
+        let kind = r.get("kind").and_then(|k| k.as_str()).unwrap_or("world");
+        reports.push(RefinementReport {
+            label: kind.to_string(),
+            outcome: RefinementOutcome::Unverifiable(
+                "a declared contract over world state — checked against a plan by `check-plan`, not provable from the body".into(),
+            ),
+        });
+    }
 
     if reports.is_empty() {
         return one("refinements".into(), RefinementOutcome::NotApplicable);

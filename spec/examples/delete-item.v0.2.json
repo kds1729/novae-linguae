@@ -1,59 +1,77 @@
 {
-  "schema_version": "0.2.0",
-  "hash": "fn_5030ec711dc6e5a06ab3b7260987312651884394dc799d0210744925656a9b53",
-  "name_hints": [
-    "delete_item"
-  ],
-  "signature": {
-    "type": {
-      "kind": "fn",
-      "params": [
-        {
-          "kind": "builtin",
-          "name": "string"
-        },
-        {
-          "kind": "builtin",
-          "name": "string"
-        }
-      ],
-      "result": {
-        "kind": "builtin",
-        "name": "int"
-      }
-    },
-    "refinements": [],
-    "effects": [
-      "net.write"
-    ],
-    "capabilities": [],
-    "complexity": "O(n)",
-    "terminates": "always"
-  },
-  "examples": [
+ "body_hash": "expr_aaecd244109d551272b32d479fe6f06449ae68424f0a80c4af36c54104ffa16a",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
     {
-      "args": [
-        {
-          "kind": "string",
-          "value": "http://127.0.0.1:8878"
-        },
-        {
-          "kind": "string",
-          "value": "gw6-never-created"
-        }
-      ],
-      "result": {
-        "kind": "int",
-        "value": 404
-      }
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
+    },
+    {
+     "kind": "string",
+     "value": "gw6-never-created"
     }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 404
+   }
+  }
+ ],
+ "hash": "fn_10dc8c033874b9c1fab357a1998a043d374e81347b02053b185ef0a91924571a",
+ "intent_tags": [
+  "io",
+  "io/network/http"
+ ],
+ "name_hints": [
+  "delete_item"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [
+   "net.write"
   ],
-  "properties": [],
-  "intent_tags": [
-    "io",
-    "io/network/http"
+  "refinements": [
+   {
+    "kind": "ensures",
+    "resource": {
+     "class": "item",
+     "key": [
+      {
+       "kind": "var",
+       "name": "base"
+      },
+      {
+       "kind": "var",
+       "name": "name"
+      }
+     ]
+    },
+    "state": "absent"
+   }
   ],
-  "derived_from": null,
-  "supersedes": null,
-  "body_hash": "expr_aaecd244109d551272b32d479fe6f06449ae68424f0a80c4af36c54104ffa16a"
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "int"
+   }
+  }
+ },
+ "supersedes": "fn_5030ec711dc6e5a06ab3b7260987312651884394dc799d0210744925656a9b53"
 }
