@@ -1,14 +1,16 @@
 # A whole cloud API through the description layer
 
-- **Status:** proposed
+- **Status:** accepted — findings merged. [Proposal 01](proposals/01-request-content-type.md) remains
+  `proposed` and resolves separately; this module reaches `absorbed` if and when it is decided.
 - **Author:** Keith Sprochi <ksprochi@elementalmachines.com>
-- **Dates:** first published 2026-07-30, last updated 2026-07-30
+- **Dates:** first published 2026-07-30, last updated 2026-07-31
 - **Scope:** `tooling/nl-ingest-openapi`; touches on `tooling/commons-node` retrieval and on
   `spec/expressiveness.md` GW7/GW10/GW16 as the results this extends
 - **Provenance:** upstream commit `76fc6ba` (2026-07-15); Google Cloud Storage Discovery document
   `storage:v1` revision **20260719**; `google-discovery-to-swagger` **2.1.0**;
   `swagger2openapi` **7.0.8**; run date 2026-07-26
-- **Resolution:** —
+- **Resolution:** module merged in #2. Defect 2 fixed in #1
+  (`2659c09`). Defect 1 open, carried as proposal 01.
 
 ## Summary
 
@@ -49,7 +51,8 @@ Two defects surfaced along the way, one of them silent for days.
    an optional query parameter, and **zero** about the **69** response bodies it declined. The
    trigger is the media range `*/*`, which is what *any* Swagger 2.0 description without `produces`
    converts to — so the exposed class is far wider than one vendor.
-   *Fix submitted separately (diagnostics only, no artifact changes).*
+   **Fixed in #1** (`2659c09`) — diagnostics only, no artifact changes. The adapter now names the
+   media type it declined and why.
 
 ## What worked well
 

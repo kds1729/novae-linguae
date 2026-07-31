@@ -88,12 +88,13 @@ because it contradicts the adapter's own contract that what it cannot carry gets
 that conversion path loses every body projection without a word — a large class, and Swagger 2.0
 conversion is a common way OpenAPI 3 descriptions come into existence.
 
-Only the note is proposed as a fix. Whether `*/*` accompanied by a JSON Schema should be *treated*
-as JSON is a separate judgement, deliberately not taken here.
+**Resolved.** Fixed in #1 (`2659c09`): the adapter now names the media type it declined and why.
+Only the note changed — whether `*/*` accompanied by a JSON Schema should be *treated* as JSON is a
+separate judgement, deliberately not taken. Diagnostics only, so no generated artifact moved.
 
-Worth noting for whoever reviews it: the existing suite had locked the silence in.
+One detail from fixing it, worth keeping: the existing suite had locked the silence in.
 `test_suffixed_json_content_type_licenses_schema` asserted `text/html` → `pending == []` and never
-checked whether anything was said.
+checked whether anything was said, so the assertion was extended rather than replaced.
 
 ## 3. The constructibility rule admits 1 of 81 operations
 
