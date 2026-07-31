@@ -456,6 +456,46 @@ fn identity_metadata() -> CompositionMetadata {
     }
 }
 
+/// Does an EXISTING record already solve the goal — every example reproduced through its body?
+/// The REUSE check (gcp-sdk-poc open question 3's loop face): before a pipeline is searched for,
+/// a previously published record — typically an assembled composite — that maps every goal input
+/// to its output IS the assembly, found rather than rebuilt. Verify-before-run discipline: the
+/// body must be statically pure (no effects, nothing opaque or unresolved) and terminating, or it
+/// simply isn't run — discovered code is never executed on spec. A match is bounded evidence (the
+/// goal's own examples), so the caller still certifies the record before relying on it.
+pub fn record_solves_goal(
+    record: &J,
+    records: &HashMap<String, J>,
+    bodies: &HashMap<String, J>,
+    examples: &[(Vec<J>, J)],
+) -> bool {
+    let Some(want_arity) = arity(record) else { return false };
+    if examples.is_empty() || examples.iter().any(|(args, _)| args.len() != want_arity) {
+        return false;
+    }
+    let Some(body) = record
+        .pointer("/body_hash")
+        .and_then(|b| b.as_str())
+        .and_then(|bh| bodies.get(bh))
+    else {
+        return false;
+    };
+    let inf = crate::infer_effects(body, records);
+    let safe = inf.effects.is_empty()
+        && !inf.opaque
+        && !inf.unresolved
+        && matches!(crate::analyze_termination(body), crate::TerminationOutcome::Always);
+    if !safe {
+        return false;
+    }
+    crate::set_resolver(bodies.clone());
+    let solves = examples
+        .iter()
+        .all(|(args, want)| matches!(crate::eval_body(body, args), Ok(got) if &got == want));
+    crate::clear_resolver();
+    solves
+}
+
 /// The most specific intent tag a record declares: the longest (hierarchical tags grow more
 /// specific rightward), ties broken lexicographically-first — deterministic.
 fn most_specific_tag(record: &J) -> Option<String> {
@@ -716,6 +756,28 @@ mod tests {
         assert_eq!(hints, ["double_then_square", "double", "square"]);
         // Provenance already named the stages; the tags make it queryable.
         assert_eq!(a.composite_record["derived_from"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn record_solves_goal_is_the_reuse_check() {
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        add_unary("double", "add", &mut r, &mut b);
+        let h = r.keys().find(|k| r[*k]["name_hints"][0] == "double").unwrap().clone();
+        let rec = r[&h].clone();
+        // Reproduces every example -> the goal is already solved.
+        assert!(record_solves_goal(&rec, &r, &b, &[(vec![int(3)], int(6)), (vec![int(5)], int(10))]));
+        // One mismatching example kills it; so does an arity mismatch; so does an empty goal.
+        assert!(!record_solves_goal(&rec, &r, &b, &[(vec![int(3)], int(6)), (vec![int(5)], int(11))]));
+        assert!(!record_solves_goal(&rec, &r, &b, &[(vec![int(3), int(1)], int(6))]));
+        assert!(!record_solves_goal(&rec, &r, &b, &[]));
+        // Verify-before-run: an effectful body is never executed on spec, whatever it might return.
+        let eff = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body":
+            { "kind": "app", "fn": { "kind": "var", "name": "print" },
+              "args": [{ "kind": "var", "name": "n" }] } });
+        insert("shout", &json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
+            "result": { "kind": "builtin", "name": "int" } }), eff, &mut r, &mut b);
+        let sh = r.keys().find(|k| r[*k]["name_hints"][0] == "shout").unwrap().clone();
+        assert!(!record_solves_goal(&r[&sh], &r, &b, &[(vec![int(3)], int(3))]));
     }
 
     #[test]

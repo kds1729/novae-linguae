@@ -435,7 +435,11 @@ enum Commands {
     /// `compose`'s type-composability), then VERIFY it — it must `compose`, its synthesized composite
     /// body must run every example through the resolved stages, and with `--require-certified` every
     /// stage must certify. Emits the discovered pipeline and a derived composite record whose body
-    /// chains the stages by content-address. Exit 1 if no pipeline within `--max-stages` fits.
+    /// chains the stages by content-address. With `--node`, a REUSE pre-pass runs first: the goal's
+    /// argument/output sorts go to the node as a `type_pattern`, and a statically pure + terminating
+    /// candidate that reproduces every example — typically a previously published assembly — is
+    /// returned as REUSED (its existing address is the deliverable; nothing new is minted).
+    /// Exit 1 if no pipeline within `--max-stages` fits.
     Assemble {
         /// Directory of records + bodies (the local commons view). Exactly one of `--records`/`--node`.
         #[arg(long)]
@@ -1804,6 +1808,51 @@ fn cmd_assemble(
     let (records, bodies) = match (records_dir, node) {
         (Some(dir), None) => (nl_validator::build_record_map(dir)?, nl_validator::build_link_map(dir)?),
         (None, Some(url)) => {
+            // REUSE PRE-PASS (gcp-sdk-poc open question 3's loop face): before searching for a
+            // pipeline, ask the node for functions already SHAPED like the goal end-to-end — the
+            // goal's argument and output sorts as a `type_pattern`, so specificity travels in the
+            // query and a previously published assembly is on the capped page even when the broad
+            // enumeration below would trim it (the GitHub-scale lesson, applied to assembly).
+            // A statically pure + terminating candidate that reproduces EVERY goal example IS the
+            // assembly, found rather than rebuilt: its existing address is the deliverable
+            // (principle 2 — re-deriving would mint the identical artifact), so nothing is
+            // assembled and nothing is published. The pattern narrows, it never decides — a miss
+            // falls through to the ordinary search unchanged.
+            let pat = nl_validator::discovery_type_pattern(&examples[0].0, Some(&examples[0].1));
+            let reuse_filter = serde_json::json!({ "type_pattern": pat, "limit": limit });
+            if let Ok(sums) = nl_validator::commons_client::query_summaries(url, &reuse_filter) {
+                let hashes: Vec<String> = sums.iter()
+                    .filter_map(|s| s.get("hash").and_then(|h| h.as_str()).map(String::from))
+                    .collect();
+                if !hashes.is_empty() {
+                    if let Ok((recs, bods)) =
+                        nl_validator::commons_client::maps_from_node_lenient(url, &hashes, hashes.len() * 8 + 64)
+                    {
+                        for h in &hashes {
+                            let Some(rec) = recs.get(h) else { continue };
+                            if !nl_validator::record_solves_goal(rec, &recs, &bods, &examples) {
+                                continue;
+                            }
+                            if require_certified {
+                                let Some(body) = rec.pointer("/body_hash").and_then(|b| b.as_str())
+                                    .and_then(|bh| bods.get(bh)) else { continue };
+                                if !nl_validator::certify_record(rec, body, &recs, solver).certified {
+                                    continue;
+                                }
+                            }
+                            let name = rec.pointer("/name_hints/0").and_then(|n| n.as_str()).unwrap_or("fn");
+                            println!("REUSED       {name}  {h}");
+                            println!("  type        {}", rec.pointer("/signature/type").map(|t| t.to_string()).unwrap_or_default());
+                            println!("  examples    {}/{} verified through the existing record", examples.len(), examples.len());
+                            if require_certified {
+                                println!("  certified   true (re-certified locally)");
+                            }
+                            println!("  the goal is already solved by a published record — nothing assembled, nothing published (the address is the deliverable)");
+                            return Ok(());
+                        }
+                    }
+                }
+            }
             // Function records carry no `kind` column, but every one has a `terminates` field
             // (values `always`/`conditional`/`unknown`) that non-function artifacts lack — so this
             // enumerates exactly the commons's functions (v0.1 string-typed and v0.2 structured
