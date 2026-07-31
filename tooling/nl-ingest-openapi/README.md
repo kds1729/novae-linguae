@@ -59,6 +59,24 @@ nothing**. Numeric properties are noted, never projected: `JNum` carries an int 
 typed numeric promise cannot be narrowed soundly by pattern alone. A response documenting both an
 example and a schema takes the example path.
 
+**Operator-supplied observation arguments** (`--observe-arg <opId>.<param>=<value>`, repeatable —
+the answer to `evolution/gcp-sdk-poc` open questions 1 and 2) widen the same gate to the case the
+constructibility rule excludes: a **path parameter names server state** the description can promise
+nothing about, so no worked example is derivable from the spec alone — but the *operator* can name
+it. With a binding, a **GET** operation's schema-derived projections materialize through the
+ordinary observation gate at the supplied arguments: same single execution, same trace-attached
+offline-replayable example, same held-to-the-declared-shape check — and the operator's values are
+visible in the record's example, so the artifact says exactly where its knowledge came from
+(schema = shape, observation = value, operator = arguments). The gate stays **read-only by rule**:
+a mutating verb refuses (an observation must not create state during ingestion), a `HEAD` refuses
+(no body to project), an unbound path parameter refuses naming what is missing, and a binding that
+touches nothing — unknown operationId, unknown parameter, an operation whose example is already
+documented — refuses loudly *before* any artifact is written or any live call is made. The
+rightmost dot before `=` splits opId from param, so Google-Discovery-style dotted operationIds
+(`storage.buckets.get.bucket=b1`) bind naturally. Without this, a corpus of path-parameter
+operations projects only `.status` — nodes without edges, no value flowing between calls; this is
+the gate on dataflow, and therefore on composition.
+
 ## Honest refusals
 
 What the language (or determinism) can't carry refuses the operation with a printed reason rather
@@ -141,4 +159,7 @@ executing the generated records. It quantifies where the description layer runs 
 constructibility rule admits **1 of 81** operations (so every leaf record projects `.status` and
 discards `.body`), the live observation gate cannot be used for mutating verbs without creating real
 resources during ingestion, and every record comes out with empty `refinements` because descriptions
-carry no pre/postconditions. It also documents the two defects that run surfaced.
+carry no pre/postconditions. It also documents the two defects that run surfaced. The first two of
+those boundaries are since answered by `--observe-arg` (operator-supplied observation arguments,
+read-only by rule — above): a `GET` with path parameters now projects its declared response body
+wherever the operator can name the state, so values flow between calls again.

@@ -57,6 +57,17 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
                     example (trace-attached, offline-replayable), and the observed document is
                     HELD TO the declared shape — required properties present, declared types
                     match — so a description the service does not honor refuses to publish.
+                    Where the description cannot CONSTRUCT the success call (a path parameter
+                    names server state the spec can promise nothing about), the OPERATOR may
+                    supply the arguments: `--observe-arg <opId>.<param>=<value>` widens the
+                    same gate to path-parameter GETs — read-only by rule (a mutating verb
+                    refuses: an observation must not create state during ingestion), unbound
+                    path parameters refuse naming what is missing, and a binding that touches
+                    nothing refuses loudly, never silently. Schema promises shape, observation
+                    supplies the value, operator supplies the arguments — three sources, one
+                    record, each visible in the artifact (the answer to evolution/gcp-sdk-poc
+                    open questions 1 and 2: without this, a corpus of path-parameter operations
+                    projects only `.status` — nodes without edges, no dataflow between calls).
     resp headers -> a header the documented response DECLARES with an example (Location being
                     the canonical case — server-assigned identity, redirect targets) yields a
                     header-projection record `<opId><Header> : … -> Maybe string` over the
@@ -77,6 +88,7 @@ record is verified-by-default exactly like a hand-authored one.
                               [--verify-against http://127.0.0.1:8878]
                               [--token VALUE | --token SCHEME=VALUE ...]
                               [--oauth-client id:secret] [--blob-threshold 65536]
+                              [--observe-arg OPID.PARAM=VALUE ...]
 
 An example's expected value larger than --blob-threshold JCS-canonical bytes (observed OR
 documented) rides BY ADDRESS: a `result_blob` {sha256, bytes} pointer in the record + the value's
@@ -624,11 +636,67 @@ def _value_conforms(doc, check):
     return True, ""
 
 
-def build_operation(spec, base_url, path, verb, op, shared_params, global_security, secret_name):
-    """Compile one operation. Returns ("ok", records, notes, pending) or ("skip", op_id, reason).
-    `pending` holds SCHEMA-DERIVED projections that cannot become records yet: a schema promises
-    shape, not a value, so their worked example must be OBSERVED against a live service
-    (--verify-against) before a v0.2 record (>=1 example) can exist at all."""
+def parse_observe_args(values):
+    """`--observe-arg OPID.PARAM=VALUE` bindings -> {op_id: {param: value}}. The RIGHTMOST dot
+    before the `=` splits opId from param, because operationIds may themselves contain dots
+    (Google Discovery-derived ids like `storage.buckets.get`). A malformed or duplicate binding
+    exits up front — an operator-supplied observation argument is never guessed around."""
+    out = {}
+    for v in values or []:
+        head, sep, val = v.partition("=")
+        op_id, dot, param = head.rpartition(".")
+        if not sep or not dot or not op_id or not param:
+            sys.exit(f"--observe-arg `{v}`: expected OPID.PARAM=VALUE "
+                     "(the rightmost dot before `=` splits opId from param)")
+        if param in out.setdefault(op_id, {}):
+            sys.exit(f"--observe-arg `{v}`: duplicate binding for `{op_id}.{param}`")
+        out[op_id][param] = val
+    return out
+
+
+def _observed_call_args(base_url, by_kind, int_params, observe):
+    """Positional example args for an observation at OPERATOR-supplied values (the answer to
+    gcp-sdk-poc open question 1: the description cannot name server state, but the operator
+    can). Same positional order as the record's parameters (base, path, query, header). Every
+    path parameter MUST be bound — no honest default exists for a name of server state; query
+    and header bindings override the spec-derived defaults. Returns (args, None) or
+    (None, refusal_reason) — a binding that cannot be honored refuses, never guesses."""
+    declared = {p["name"] for kind in ("path", "query", "header") for p in by_kind[kind]}
+    unknown = sorted(set(observe) - declared)
+    if unknown:
+        return None, ("binding names no declared required parameter: "
+                      + ", ".join(f"`{u}`" for u in unknown))
+    missing = sorted(p["name"] for p in by_kind["path"] if p["name"] not in observe)
+    if missing:
+        return None, ("path parameter(s) unbound: " + ", ".join(f"`{m}`" for m in missing)
+                      + " — a path parameter names server state only the operator can supply")
+    args = [{"kind": "string", "value": base_url}]
+    for p in by_kind["path"]:
+        args.append({"kind": "string", "value": observe[p["name"]]})
+    for p in by_kind["query"]:
+        name = p["name"]
+        if _param_name(name) in int_params:
+            raw = observe.get(name, "5")
+            try:
+                args.append({"kind": "int", "value": int(raw)})
+            except ValueError:
+                return None, f"binding for integer parameter `{name}` is not an integer: `{raw}`"
+        else:
+            args.append({"kind": "string", "value": observe.get(name, "hello world")})
+    for p in by_kind["header"]:
+        args.append({"kind": "string", "value": observe.get(p["name"], "gw10-client")})
+    return args, None
+
+
+def build_operation(spec, base_url, path, verb, op, shared_params, global_security, secret_name,
+                    observe=None):
+    """Compile one operation. Returns ("ok", records, notes, pending, observe_status) or
+    ("skip", op_id, reason). `pending` holds SCHEMA-DERIVED projections that cannot become
+    records yet: a schema promises shape, not a value, so their worked example must be OBSERVED
+    against a live service (--verify-against) before a v0.2 record (>=1 example) can exist at
+    all. `observe` is this operation's --observe-arg bindings ({param: value}) or None;
+    `observe_status` is None (no bindings), "consumed" (the bindings shaped an observation),
+    or the stated reason they could not — the caller refuses an unheeded binding loudly."""
     verb = verb.upper()
     op_id = op.get("operationId") or _param_name(f"{verb}_{path}")
 
@@ -811,8 +879,16 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
     # parameters and no request body (path parameters name server state the description cannot
     # promise). Field access composes in-language (json_get / json_path), principle 4.
     pending = []
+    # --observe-arg accounting: None = no bindings for this operation; "consumed" = the bindings
+    # shaped an observation; any other string = the stated reason they could not (main refuses an
+    # unheeded binding loudly — an operator asked for an observation that will not happen).
+    observe_status = None if observe is None else \
+        "no declared 2xx JSON response schema to observe (nothing pends on an observation)"
     proj = _response_json_example(spec, op)
     if proj is not None:
+        if observe is not None:
+            observe_status = ("the documented response example already supplies the worked "
+                              "example — nothing to observe")
         proj_code, proj_doc = proj
         expected = _json_to_value(proj_doc)
         if verb != "GET" or path_param_names or has_body:
@@ -851,10 +927,35 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
         sch = _response_json_schema(spec, op)
         if sch is not None:
             s_code, s_schema = sch
-            if verb != "GET" or path_param_names or has_body:
+            constructible = verb == "GET" and not path_param_names and not has_body
+            obs_args = None
+            if observe is not None:
+                # Operator-supplied arguments (gcp-sdk-poc open question 1). Read-only by rule
+                # (question 2): an observation must not create state during ingestion, so only
+                # GET is eligible — a HEAD response carries no body to project, and a mutating
+                # verb refuses outright. Unbound path parameters and stray bindings refuse with
+                # the reason; nothing is ever guessed.
+                if verb != "GET":
+                    observe_status = ("observation-sourced examples are read-only — a live "
+                                      f"`{verb}` during ingestion would "
+                                      + ("carry no body to project" if verb == "HEAD"
+                                         else "mutate server state") + " (GET only)")
+                elif has_body:
+                    observe_status = ("the operation declares a request body — caller data an "
+                                      "observation must not invent")
+                else:
+                    obs_args, obs_why = _observed_call_args(base_url, by_kind, int_params,
+                                                            observe)
+                    observe_status = "consumed" if obs_args is not None else obs_why
+            if not constructible and obs_args is None:
                 notes.append("declared response schema not projected — only a bodyless GET "
-                             "without path parameters has a spec-constructible success call")
+                             "without path parameters has a spec-constructible success call; "
+                             "operator-supplied arguments can observe one "
+                             "(--observe-arg <opId>.<param>=<value>, GET only)")
             elif s_schema.get("type") != "object" and not s_schema.get("properties"):
+                if observe_status == "consumed":
+                    observe_status = ("the declared schema is not an object document — "
+                                      "nothing to project")
                 notes.append("declared response schema not projected — this increment "
                              "projects object documents only")
             else:
@@ -864,11 +965,12 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
                 if not fields:
                     notes.append("schema declares no named properties (a map-shaped object) "
                                  "— whole-document projection only")
+                p_args = obs_args if obs_args is not None else example["args"]
                 pending.append({
                     "name": op_id + "Body", "hint": _param_name(op_id + "Body"),
                     "type_ast": {"kind": "fn", "params": param_types, "result": MAYBE_JSON},
                     "body_ast": _schema_projection_body(lam_params, call, s_code, None, None),
-                    "args": example["args"], "effect": effect,
+                    "args": p_args, "effect": effect,
                     "intent": intent + ["parse"] + _intent_ext("parse", op_id + "Body"),
                     "field": None, "required_field": False,
                     "check": check, "code": s_code,
@@ -882,14 +984,15 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
                                      "result": kinds[kind]},
                         "body_ast": _schema_projection_body(lam_params, call, s_code,
                                                             prop, kind),
-                        "args": example["args"], "effect": effect,
+                        "args": p_args, "effect": effect,
                         "intent": intent + ["parse"] + _intent_ext("parse", op_id + suffix),
                         "field": prop,
                         "required_field": prop in check["required"],
                         "check": check, "code": s_code,
                     })
                 declared = ", ".join(f"{p}:{k}" for p, k in fields) or "(none)"
-                notes.append(f"schema-derived projections pending a live observation gate: "
+                src = " at operator-supplied arguments" if obs_args is not None else ""
+                notes.append(f"schema-derived projections pending a live observation gate{src}: "
                              f"{op_id}Body -> Maybe Json; fields {declared} "
                              f"(declared {s_code} schema)")
         else:
@@ -949,7 +1052,7 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
         records.append((hdr_record, hdr_body))
         notes.append(f"header projection: {op_id}{suffix} -> Maybe string "
                      f"(documented {want} `{hname}` example)")
-    return ("ok", records, notes, pending)
+    return ("ok", records, notes, pending, observe_status)
 
 
 def _example_for(base_url, verb, path_param_names, has_body, op,
@@ -993,12 +1096,16 @@ def _example_for(base_url, verb, path_param_names, has_body, op,
     return {"args": args, "result": {"kind": "int", "value": want}}
 
 
-def walk(spec, secret_name):
-    """-> (built, skipped, pending): built = [(record, body_ast, notes)], skipped =
-    [(op_id, reason)], pending = schema-derived projections awaiting a live observation gate."""
+def walk(spec, secret_name, observe_map=None):
+    """-> (built, skipped, pending, observe_report): built = [(record, body_ast, notes)],
+    skipped = [(op_id, reason)], pending = schema-derived projections awaiting a live
+    observation gate, observe_report = {op_id: "consumed" | refusal reason} for every
+    --observe-arg-bound operation the walk saw (a bound opId absent from the report never
+    compiled — or does not exist)."""
     base_url = (spec.get("servers") or [{}])[0].get("url", "http://localhost")
     global_security = spec.get("security", [])
-    built, skipped, pending = [], [], []
+    observe_map = observe_map or {}
+    built, skipped, pending, observe_report = [], [], [], {}
     for path, item in spec.get("paths", {}).items():
         item = deref(spec, item)
         if not isinstance(item, dict):
@@ -1008,17 +1115,24 @@ def walk(spec, secret_name):
         for verb, op in item.items():
             if verb.lower() not in ("get", "put", "post", "delete", "head", "patch"):
                 continue
+            op_id = (op.get("operationId") if isinstance(op, dict) else None) \
+                or _param_name(f"{verb.upper()}_{path}")
             got = build_operation(spec, base_url, path, verb, op, shared_params,
-                                  global_security, secret_name)
+                                  global_security, secret_name,
+                                  observe=observe_map.get(op_id))
             if got[0] == "ok":
                 # One operation may compile to several records (status + body projection);
                 # the notes ride with the first so they print once.
                 for i, (record, body_ast) in enumerate(got[1]):
                     built.append((record, body_ast, got[2] if i == 0 else []))
                 pending.extend(got[3])
+                if got[4] is not None:
+                    observe_report[op_id] = got[4]
             else:
                 skipped.append((got[1], got[2]))
-    return built, skipped, pending
+                if op_id in observe_map:
+                    observe_report[op_id] = f"the operation did not compile — {got[2]}"
+    return built, skipped, pending, observe_report
 
 
 # Above this many JCS-canonical bytes an example's expected value is carried BY ADDRESS
@@ -1245,6 +1359,13 @@ def main(argv=None):
                     help="JCS-canonical bytes above which an example's expected value is carried by "
                          "address (a result_blob pointer + a blob-<sha256>.json sidecar for the "
                          f"gate-free /v0/blobs store; default {BLOB_THRESHOLD_DEFAULT})")
+    ap.add_argument("--observe-arg", action="append", default=None, metavar="OPID.PARAM=VALUE",
+                    help="operator-supplied argument for the live observation gate: makes a "
+                         "path-parameter GET eligible for schema-derived projections by naming "
+                         "the server state the description cannot (repeatable; the rightmost dot "
+                         "before `=` splits opId from param). Read-only by rule — a mutating "
+                         "verb, an unbound path parameter, or a binding that touches nothing "
+                         "refuses with the reason. Requires --verify-against.")
     args = ap.parse_args(argv)
 
     spec = load_spec(args.spec)
@@ -1272,9 +1393,27 @@ def main(argv=None):
                 oauth_ids.append((secret_name or key, f"{cc['tokenUrl']}|{cid}|{csec}"))
     os.makedirs(args.out, exist_ok=True)
 
-    ops, skipped, pending = walk(spec, secret_name)
+    observe_map = parse_observe_args(args.observe_arg)
+    if observe_map and not args.verify_against:
+        sys.exit("--observe-arg supplies arguments for the live observation gate; "
+                 "it requires --verify-against (an observation needs a live service)")
+
+    ops, skipped, pending, observe_report = walk(spec, secret_name, observe_map)
     for op_id, reason in skipped:
         print(f"{op_id:16} SKIPPED: {reason}")
+    # An operator asked for an observation: every binding must have shaped one. A refused or
+    # unknown binding halts BEFORE any artifact is written or any live call is made — the
+    # operator's intent was not met, and silence here would read as "observed".
+    unheeded = []
+    for op_id in sorted(observe_map):
+        status = observe_report.get(op_id)
+        if status is None:
+            unheeded.append(f"--observe-arg binds `{op_id}` — no such operationId "
+                            "in the description")
+        elif status != "consumed":
+            unheeded.append(f"--observe-arg for `{op_id}` refused — {status}")
+    if unheeded:
+        sys.exit("\n".join(unheeded))
     if not ops:
         sys.exit("no supported operations found in the spec")
 
