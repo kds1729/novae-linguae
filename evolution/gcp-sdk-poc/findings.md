@@ -62,6 +62,18 @@ emits the single declared non-multipart media type, and notes-and-omits when a d
 more than one. The re-addressing it causes was taken deliberately rather than deferred to a version
 boundary — the affected records could not execute, and the real defect was the false `certify=OK`.
 
+**Residual, recorded rather than acted on.** The note-and-omit branch leaves the multi-declared-type
+case in the state decision 1 identified as the actual defect: body present, no `Content-Type`,
+`certify=OK`. The symmetry with finding 2 that justifies it is not quite exact — declining a
+*projection* still leaves a working status record, while declining a *request* header leaves one a
+strict service answers 415 — and a generation-time note does not travel with the record to a commons,
+which is the same "diagnostics stay local, records travel" gap that made finding 2 invisible at
+scale. **Zero of the 81 operations here declare more than one request media type**, so this is
+latent, not live, and it is logged instead of reopened. If a real description hits it, the principled
+resolution is probably to make the media type a caller parameter — the description says "one of
+these", which makes the choice caller data, the same literal-scaffold/caller-data split `url_encode`
+established — rather than to refuse the operation outright.
+
 ## 2. A non-JSON 2xx response body was declined silently
 
 **Measured.** Two descriptions differing in exactly one key — the response content type — produce
