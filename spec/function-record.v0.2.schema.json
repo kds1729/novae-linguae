@@ -157,8 +157,14 @@
       }
     },
     "refinement": {
+      "oneOf": [
+        { "$ref": "#/$defs/value_refinement" },
+        { "$ref": "#/$defs/world_refinement" }
+      ]
+    },
+    "value_refinement": {
       "type": "object",
-      "description": "A contract on the function. `expr` is a predicate over the function's parameters (by name); a `post` predicate additionally refers to the function's output through the reserved variable `result`. Conventionally `pre` is a precondition on the inputs (assumed when discharging the posts), `post` a postcondition on `result` given the pres, and `inv` an invariant. The reference validator's `check-refinement` proves each `post` as `forall params. (and pre) => post[result := body(params)]` (folding in the non-negativity of `nat`-typed params); `inv` is reserved (not yet checked).",
+      "description": "A contract on the function's VALUES. `expr` is a predicate over the function's parameters (by name); a `post` predicate additionally refers to the function's output through the reserved variable `result`. Conventionally `pre` is a precondition on the inputs (assumed when discharging the posts), `post` a postcondition on `result` given the pres, and `inv` an invariant. The reference validator's `check-refinement` proves each `post` as `forall params. (and pre) => post[result := body(params)]` (folding in the non-negativity of `nat`-typed params); `inv` is reserved (not yet checked).",
       "required": ["kind", "expr"],
       "additionalProperties": false,
       "properties": {
@@ -168,6 +174,63 @@
         },
         "expr": { "$ref": "#/$defs/pe_predicate" }
       }
+    },
+    "world_refinement": {
+      "type": "object",
+      "description": "A contract on WORLD STATE (spec/world-state.md — evolution/gcp-sdk-poc open question 4): what an effectful call needs true of the external system before it runs (`requires`) and what it leaves true after (`ensures`), stated over an abstract resource — a `class` (free lowercase-kebab convention, like intent tags) keyed by the call's own parameters and/or literals. Semantics: `requires` is the AUTHOR'S DECLARED precondition on the world, `ensures` the declared postcondition; the reference validator's `check-plan` symbolically executes a SEQUENCE of applications against these declarations (each step's requires discharged by prior steps' ensures or the plan's stated assumptions), so a multi-step effectful plan is checked BEFORE any effect is performed. Honest grading: the plan check verifies the plan against the declarations, never the declarations against the world — a declaration is the record author's testimony, priced like any other (and exposed by the effectful run itself when false).",
+      "required": ["kind", "resource", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["requires", "ensures"]
+        },
+        "resource": { "$ref": "#/$defs/world_resource" },
+        "state": {
+          "type": "string",
+          "enum": ["exists", "absent"]
+        }
+      }
+    },
+    "world_resource": {
+      "type": "object",
+      "description": "An abstract external resource: a class plus a key of the function's parameters (by name, the body's lambda binders — the check-refinement convention) and/or literal values. Instantiating the key at a call's actual arguments grounds the resource; an empty key names a class-wide singleton.",
+      "required": ["class", "key"],
+      "additionalProperties": false,
+      "properties": {
+        "class": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "key": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/world_key_part" }
+        }
+      }
+    },
+    "world_key_part": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "name"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "var" },
+            "name": { "type": "string", "minLength": 1, "maxLength": 64 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "lit" },
+            "value": { "$ref": "#/$defs/ve_value" }
+          }
+        }
+      ]
     },
     "property": {
       "type": "object",

@@ -1,88 +1,106 @@
 {
-  "schema_version": "0.2.0",
-  "hash": "fn_0fc670822f913770e5750bc15bb5d0b99202c7b3495b0fa0c27f6121ed06368a",
-  "name_hints": [
-    "put_item",
-    "create_item"
-  ],
-  "signature": {
-    "type": {
-      "kind": "fn",
-      "params": [
-        {
-          "kind": "builtin",
-          "name": "string"
-        },
-        {
-          "kind": "builtin",
-          "name": "string"
-        },
-        {
-          "kind": "builtin",
-          "name": "string"
-        }
-      ],
-      "result": {
-        "kind": "builtin",
-        "name": "int"
-      }
-    },
-    "refinements": [],
-    "effects": [
-      "net.write"
-    ],
-    "capabilities": [],
-    "complexity": "O(n)",
-    "terminates": "always"
-  },
-  "examples": [
+ "body_hash": "expr_e5167a180b4ac91c59078323a1d8563b20c90effd88de01d701576f6eb362dd1",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
     {
-      "args": [
-        {
-          "kind": "string",
-          "value": "http://127.0.0.1:8878"
-        },
-        {
-          "kind": "string",
-          "value": "gw6-a"
-        },
-        {
-          "kind": "string",
-          "value": "{\"v\":1}"
-        }
-      ],
-      "result": {
-        "kind": "int",
-        "value": 201
-      }
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
     },
     {
-      "args": [
-        {
-          "kind": "string",
-          "value": "http://127.0.0.1:8878"
-        },
-        {
-          "kind": "string",
-          "value": "gw6-a"
-        },
-        {
-          "kind": "string",
-          "value": "{\"v\":2}"
-        }
-      ],
-      "result": {
-        "kind": "int",
-        "value": 200
-      }
+     "kind": "string",
+     "value": "gw6-a"
+    },
+    {
+     "kind": "string",
+     "value": "{\"v\":1}"
     }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 201
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "http://127.0.0.1:8878"
+    },
+    {
+     "kind": "string",
+     "value": "gw6-a"
+    },
+    {
+     "kind": "string",
+     "value": "{\"v\":2}"
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 200
+   }
+  }
+ ],
+ "hash": "fn_6f285a7fa3304232d5814118da32421e22ceb95dd56a01cf036654ed85154bb9",
+ "intent_tags": [
+  "io",
+  "io/network/http"
+ ],
+ "name_hints": [
+  "put_item",
+  "create_item"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [
+   "net.write"
   ],
-  "properties": [],
-  "intent_tags": [
-    "io",
-    "io/network/http"
+  "refinements": [
+   {
+    "kind": "ensures",
+    "resource": {
+     "class": "item",
+     "key": [
+      {
+       "kind": "var",
+       "name": "base"
+      },
+      {
+       "kind": "var",
+       "name": "name"
+      }
+     ]
+    },
+    "state": "exists"
+   }
   ],
-  "derived_from": null,
-  "supersedes": null,
-  "body_hash": "expr_e5167a180b4ac91c59078323a1d8563b20c90effd88de01d701576f6eb362dd1"
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "int"
+   }
+  }
+ },
+ "supersedes": "fn_0fc670822f913770e5750bc15bb5d0b99202c7b3495b0fa0c27f6121ed06368a"
 }

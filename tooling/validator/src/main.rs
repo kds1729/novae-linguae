@@ -295,6 +295,26 @@ enum Commands {
         #[arg(long, default_value = "z3")]
         solver: String,
     },
+    /// Check a PLAN — a sequence of concrete applications — against the records' declared
+    /// **world-state refinements** (`requires`/`ensures` over abstract resources,
+    /// spec/world-state.md), BEFORE any effect is performed: each step's requires must be
+    /// established by a prior step's ensures or the plan's stated assumptions. Prints the
+    /// symbolic execution and PLAN-SOUND (exit 0) / UNVERIFIABLE (a requirement nothing
+    /// establishes — state the assumption or reorder; exit 1) / REJECTED (a requirement the
+    /// symbolic state contradicts — e.g. use-after-delete; exit 1). Verifies the plan against
+    /// the DECLARATIONS — a declaration is the record author's testimony, priced like any other.
+    CheckPlan {
+        /// Path to the plan JSON: { "assume": [ {resource, state}… ], "steps": [ {target, args}… ] }.
+        #[arg(long)]
+        plan: PathBuf,
+        /// Directory of records + bodies (the local commons view). Exactly one of `--records`/`--node`.
+        #[arg(long)]
+        records: Option<PathBuf>,
+        /// A LIVE commons node URL: each step's record and body fetched by content-address,
+        /// hash-verified locally (the store stays untrusted).
+        #[arg(long)]
+        node: Option<String>,
+    },
     /// Verify a record's declared `signature.terminates: always` by **structural** analysis (no solver):
     /// a non-recursive first-order body, or one whose every `self`-call descends `tail^k` of a fixed
     /// parameter, provably halts. Prints SOUND (declared `always`, verified), VERIFIED (provably always
@@ -965,6 +985,7 @@ fn main() -> ExitCode {
         }
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
         Commands::CheckRefinement { record, body, solver } => (cmd_check_refinement(&record, &body, &solver), false),
+        Commands::CheckPlan { plan, records, node } => (cmd_check_plan(&plan, records.as_deref(), node.as_deref()), false),
         Commands::CheckTermination { record, body } => (cmd_check_termination(&record, &body), false),
         Commands::CheckComplexity { record, body } => (cmd_check_complexity(&record, &body), false),
         Commands::Certify { record, body, records, solver, json, sign, timestamp } => {
@@ -1237,6 +1258,50 @@ fn cmd_typecheck(record: &PathBuf, body: &PathBuf) -> Result<()> {
     let body = nl_validator::read_json(body)?;
     println!("{}", nl_validator::typecheck_record(&record, &body)?);
     Ok(())
+}
+
+fn cmd_check_plan(plan_path: &Path, records_dir: Option<&Path>, node: Option<&str>) -> Result<()> {
+    let plan = nl_validator::read_json(&plan_path.to_path_buf())?;
+    let (records, bodies) = match (records_dir, node) {
+        (Some(dir), None) => (nl_validator::build_record_map(dir)?, nl_validator::build_link_map(dir)?),
+        (None, Some(url)) => {
+            // Seed the hash-verified closure walk with the plan's own step targets — the
+            // records and their bodies are all the checker needs.
+            let mut targets: Vec<String> = Vec::new();
+            for s in plan.get("steps").and_then(|s| s.as_array()).cloned().unwrap_or_default() {
+                if let Some(t) = s.get("target").and_then(|t| t.as_str()) {
+                    if !targets.iter().any(|x| x == t) {
+                        targets.push(t.to_string());
+                    }
+                }
+            }
+            if targets.is_empty() {
+                return Err(anyhow::anyhow!("the plan has no steps with `target` addresses"));
+            }
+            nl_validator::commons_client::maps_from_node_lenient(url, &targets, targets.len() * 8 + 64)?
+        }
+        _ => return Err(anyhow::anyhow!("supply exactly one of --records / --node")),
+    };
+    let report = nl_validator::check_plan(&plan, &records, &bodies)?;
+    for l in &report.lines {
+        println!("{l}");
+    }
+    match report.outcome {
+        nl_validator::PlanOutcome::Sound => {
+            println!("PLAN-SOUND   every requirement discharged from assumptions and prior ensures — checked before any effect");
+            Ok(())
+        }
+        nl_validator::PlanOutcome::Unverifiable(msgs) => {
+            for m in &msgs {
+                println!("UNKNOWN      {m}");
+            }
+            Err(anyhow::anyhow!(
+                "UNVERIFIABLE  {} requirement(s) nothing establishes — the plan did not check, so it must not run",
+                msgs.len()
+            ))
+        }
+        nl_validator::PlanOutcome::Rejected(msg) => Err(anyhow::anyhow!("REJECTED     {msg}")),
+    }
 }
 
 fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str) -> Result<()> {

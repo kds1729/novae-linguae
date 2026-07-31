@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_aaecd244109d551272b32d479fe6f06449ae68424f0a80c4af36c54104ffa16a",
+ "body_hash": "expr_cb1a50a99078583a4b4a0875559be73161e4227686817291f72d55c7b1b58401",
  "derived_from": null,
  "examples": [
   {
@@ -10,7 +10,11 @@
     },
     {
      "kind": "string",
-     "value": "gw6-never-created"
+     "value": "gw7-absent-x"
+    },
+    {
+     "kind": "string",
+     "value": "hello"
     }
    ],
    "result": {
@@ -19,15 +23,16 @@
    }
   }
  ],
- "hash": "fn_10dc8c033874b9c1fab357a1998a043d374e81347b02053b185ef0a91924571a",
+ "hash": "fn_921246dc3ce48e201b06b3e903fc2db60f73dbb1f81ee19b3b50bd6c7ed683ad",
  "intent_tags": [
   "io",
-  "io/network/http"
+  "io/network/http",
+  "io/network/http/put-note"
  ],
  "name_hints": [
-  "delete_item"
+  "put_note",
+  "annotate_item"
  ],
- "properties": [],
  "schema_version": "0.2.0",
  "signature": {
   "capabilities": [],
@@ -37,7 +42,7 @@
   ],
   "refinements": [
    {
-    "kind": "ensures",
+    "kind": "requires",
     "resource": {
      "class": "item",
      "key": [
@@ -51,13 +56,34 @@
       }
      ]
     },
-    "state": "absent"
+    "state": "exists"
+   },
+   {
+    "kind": "ensures",
+    "resource": {
+     "class": "note",
+     "key": [
+      {
+       "kind": "var",
+       "name": "base"
+      },
+      {
+       "kind": "var",
+       "name": "name"
+      }
+     ]
+    },
+    "state": "exists"
    }
   ],
   "terminates": "always",
   "type": {
    "kind": "fn",
    "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
     {
      "kind": "builtin",
      "name": "string"
@@ -73,5 +99,5 @@
    }
   }
  },
- "supersedes": "fn_5030ec711dc6e5a06ab3b7260987312651884394dc799d0210744925656a9b53"
+ "supersedes": null
 }

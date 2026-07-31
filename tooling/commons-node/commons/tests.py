@@ -2113,6 +2113,29 @@ class DerivationsTests(TestCase):
         self.assertEqual(resp.status_code, 405)
 
 
+# --- world-state refinements (spec/world-state.md) -------------------------------------------------
+
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class WorldRefinementGateTests(TestCase):
+    """A record carrying `requires`/`ensures` world-state refinements passes the verify-then-store
+    gate (strict schemas: an unupdated gate would refuse these records rather than misread them —
+    the reason this pin exists)."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def test_world_refined_records_pass_the_gate(self):
+        for name in ("put-note.v0.2.json", "put-item.v0.2.json", "delete-item.v0.2.json"):
+            rec = _load(name)
+            kinds = [r["kind"] for r in rec["signature"]["refinements"]]
+            self.assertTrue(set(kinds) & {"requires", "ensures"}, f"{name} carries world contracts")
+            resp = self.client.post("/v0/records", data=json.dumps(rec),
+                                    content_type="application/json")
+            self.assertEqual(resp.status_code, 201, f"{name}: {resp.content}")
+            got = self.client.get(f"/v0/records/{rec['hash']}")
+            self.assertEqual(got.json()["signature"]["refinements"], rec["signature"]["refinements"])
+
+
 # --- body storage tiering (commons.md open question 4) ---------------------------------------------
 
 @unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
