@@ -447,6 +447,27 @@ def _json_media(content):
     return None
 
 
+def _nonjson_2xx_media(spec, op):
+    """The (status, content-type keys) of the first 2xx response that DECLARES a body, or None if
+    no 2xx response declares one. Meaningful only once the JSON paths have already declined (no
+    documented example, no declared schema) — then it names what the description offered instead.
+
+    This exists so a non-JSON response body is an EXPLICIT refusal rather than a silent one: the
+    adapter's contract is that what it cannot carry gets a printed reason, never a silent omission.
+    A media RANGE (`*/*`) is the case that motivated it — it is what a Swagger 2.0 description
+    without `produces` converts to, and it promises *any* type, so it cannot license the
+    parses-as-JSON promise `parse_json` needs."""
+    responses = op.get("responses", {})
+    for code in sorted(c for c in responses if c.isdigit() and 200 <= int(c) < 300):
+        resp = deref(spec, responses[code])
+        if not isinstance(resp, dict):
+            continue
+        content = resp.get("content")
+        if isinstance(content, dict) and content:
+            return int(code), sorted(content)
+    return None
+
+
 def _response_json_example(spec, op):
     """The documented JSON EXAMPLE of the operation's first 2xx response (see `_json_media` for
     which content types count), as (status_code, parsed_example), or None. This is spec-time
@@ -854,6 +875,21 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
                 notes.append(f"schema-derived projections pending a live observation gate: "
                              f"{op_id}Body -> Maybe Json; fields {declared} "
                              f"(declared {s_code} schema)")
+        else:
+            # Neither a documented example nor a declared schema arrived through a JSON media type,
+            # yet the description DOES declare a response body. Say so: a body we decline to carry
+            # is an honest refusal, and silence here reads as "the description promised nothing".
+            # `*/*` is the common case — a Swagger 2.0 description without `produces` converts to
+            # it — and a media range promises any type, so it licenses no parses-as-JSON promise.
+            nonjson = _nonjson_2xx_media(spec, op)
+            if nonjson is not None:
+                nj_code, nj_types = nonjson
+                offered = ", ".join(f"`{t}`" for t in nj_types)
+                notes.append(f"response body not projected — the {nj_code} response declares "
+                             f"{offered}, which is not JSON (`application/json` or an RFC 6839 "
+                             f"`+json` subtype); a media range like `*/*` promises any type, so "
+                             f"it cannot license the parses-as-JSON promise — declare the "
+                             f"concrete media type to get projections")
 
     # HEADER PROJECTION (GW16 — the description-layer counterpart of the GW14 pull): a header the
     # documented response declares WITH an example is spec-time knowledge of where the answer
