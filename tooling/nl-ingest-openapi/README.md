@@ -155,11 +155,19 @@ Requires only `python3` (3.10+) and the built `nl-validator` on the sibling `tar
 [`evolution/gcp-sdk-poc`](../../evolution/gcp-sdk-poc/) reports this adapter run against a whole
 cloud API — Google Cloud Storage v1, all **81 operations**, **0 refused**, every record certified,
 with no modifications to this repository — and a bucket then provisioned create → verify → delete by
-executing the generated records. It quantifies where the description layer runs out: the projection
-constructibility rule admits **1 of 81** operations (so every leaf record projects `.status` and
-discards `.body`), the live observation gate cannot be used for mutating verbs without creating real
-resources during ingestion, and every record comes out with empty `refinements` because descriptions
-carry no pre/postconditions. It also documents the two defects that run surfaced. The first two of
-those boundaries are since answered by `--observe-arg` (operator-supplied observation arguments,
-read-only by rule — above): a `GET` with path parameters now projects its declared response body
-wherever the operator can name the state, so values flow between calls again.
+executing the generated records. It quantifies where the description layer runs out: the run
+licensed **zero** body projections (every GCS response is declared `*/*`, which fails the
+parses-as-JSON media-type check before anything else is reached), the constructibility rule *would*
+admit **1 of 81** operations even once that is compensated for (so every leaf record projects
+`.status` and discards `.body`), the live observation gate cannot be used for mutating verbs without
+creating real resources during ingestion, and every record comes out with empty `refinements`
+because descriptions carry no pre/postconditions. It also documents the two defects that run
+surfaced. Two of those boundaries are since answered in-tree: `--observe-arg` (operator-supplied
+observation arguments, read-only by rule — above) takes the constructibility and read-only-gate
+limits, so a `GET` with path parameters projects its declared response body wherever the operator
+can name the state; the empty-`refinements` boundary is answered at the language layer by
+world-state refinements + `check-plan` ([`spec/world-state.md`](../../spec/world-state.md)) —
+authored, since descriptions cannot supply them. The `*/*` media-type gate is the boundary that
+remains the description's own to fix: a media range promises any type, so it licenses no
+parses-as-JSON promise — declare the concrete type (or transform the description to) and the
+projections follow.
