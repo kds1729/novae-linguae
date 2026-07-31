@@ -97,6 +97,41 @@ class OpenApiIngestTest(unittest.TestCase):
         put = json.dumps(json.load(open(Path(self.tmp) / "body-putitem.json")))
         self.assertIn("{{secret:api_token}}", put)
 
+    def test_request_content_type_is_emitted(self):
+        # Proposal 01: a body-carrying operation sends the media type its description DECLARES.
+        # Without it the record reports certify=OK and is then rejected by any service requiring
+        # the header — a generated artifact that cannot perform its own documented call.
+        for name in ("putitem", "creatething"):
+            body = json.dumps(json.load(open(Path(self.tmp) / f"body-{name}.json")))
+            self.assertIn('"Content-Type"', body, f"{name} must send its declared media type")
+            self.assertIn('"application/json"', body)
+
+    def test_bodyless_verbs_send_no_content_type(self):
+        # The other half: nothing to describe, so nothing is claimed. This is also what keeps the
+        # GW6 byte-identity result above intact.
+        for name in ("getitemstatus", "deleteitem", "healthcheck"):
+            body = json.dumps(json.load(open(Path(self.tmp) / f"body-{name}.json")))
+            self.assertNotIn("Content-Type", body)
+
+    def test_ambiguous_request_media_types_note_and_omit(self):
+        # More than one declared non-multipart type is a choice the description leaves open, so
+        # the adapter sends none and SAYS so — the same contract the non-JSON response note keeps.
+        # Guessing `application/json` here would be inventing a promise the description withheld.
+        spec = {"openapi": "3.0.0", "info": {"title": "t", "version": "1"},
+                "servers": [{"url": "http://127.0.0.1:1"}],
+                "paths": {"/things": {"post": {
+                    "operationId": "createThing", "security": [],
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"type": "string"}},
+                        "application/xml": {"schema": {"type": "string"}}}},
+                    "responses": {"201": {"description": "created"}}}}}}
+        built, skipped, pending = oi.walk(spec, None)
+        self.assertEqual(skipped, [])
+        rec, body, notes = built[0]
+        self.assertTrue(any("Content-Type` omitted" in n for n in notes),
+                        f"the omission must be explained, not silent; got: {notes}")
+        self.assertNotIn("Content-Type", json.dumps(body))
+
     def test_header_projection_from_documented_header(self):
         # GW16: createThing's 201 documents a `Location` example -> a second record
         # `createThingLocation : … -> Maybe string` over http_full — the call bound once,

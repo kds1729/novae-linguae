@@ -99,8 +99,41 @@
      {
       "args": [
        {
-        "kind": "var",
-        "name": "map_empty"
+        "args": [
+         {
+          "kind": "var",
+          "name": "map_empty"
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "kind": "lit",
+           "value": {
+            "kind": "string",
+            "value": "Bearer {{secret:api_token}}"
+           }
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "kind": "lit",
+            "value": {
+             "kind": "string",
+             "value": "Authorization"
+            }
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "map_put"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
        }
       ],
       "fn": {
@@ -109,7 +142,7 @@
          "kind": "lit",
          "value": {
           "kind": "string",
-          "value": "Bearer {{secret:api_token}}"
+          "value": "application/json"
          }
         }
        ],
@@ -119,7 +152,7 @@
           "kind": "lit",
           "value": {
            "kind": "string",
-           "value": "Authorization"
+           "value": "Content-Type"
           }
          }
         ],
