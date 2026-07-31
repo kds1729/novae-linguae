@@ -125,7 +125,7 @@ class OpenApiIngestTest(unittest.TestCase):
                         "application/json": {"schema": {"type": "string"}},
                         "application/xml": {"schema": {"type": "string"}}}},
                     "responses": {"201": {"description": "created"}}}}}}
-        built, skipped, pending = oi.walk(spec, None)
+        built, skipped, pending, _report = oi.walk(spec, None)
         self.assertEqual(skipped, [])
         rec, body, notes = built[0]
         self.assertTrue(any("Content-Type` omitted" in n for n in notes),
@@ -339,7 +339,7 @@ class RefusalBoundaryTest(unittest.TestCase):
             "servers": [{"url": "http://127.0.0.1:1"}]}
 
     def _walk(self, spec):
-        built, skipped, _pending = oi.walk({**self.BASE, **spec}, None)
+        built, skipped, _pending, _report = oi.walk({**self.BASE, **spec}, None)
         return built, skipped
 
     def test_api_key_in_query_refused(self):
@@ -425,7 +425,7 @@ class RefusalBoundaryTest(unittest.TestCase):
                                               "parameters": [{"$ref": "shared.json#/components/parameters/Q"}]}}}}
         json.dump(main_spec, open(Path(tmp) / "main.json", "w"))
         spec = oi.load_spec(str(Path(tmp) / "main.json"))
-        built, skipped, _ = oi.walk(spec, None)
+        built, skipped, _, _ = oi.walk(spec, None)
         self.assertEqual(skipped, [])
         record, body_ast, _ = built[0]
 
@@ -433,7 +433,7 @@ class RefusalBoundaryTest(unittest.TestCase):
                        "paths": {"/x": {"get": {**op,
                                                 "parameters": [{"name": "q", "in": "query", "required": True,
                                                                 "schema": {"type": "string"}}]}}}}
-        built_inline, _, _ = oi.walk(inline_spec, None)
+        built_inline, _, _, _ = oi.walk(inline_spec, None)
         record_inline, body_inline, _ = built_inline[0]
         self.assertEqual(json.dumps(body_ast, sort_keys=True), json.dumps(body_inline, sort_keys=True))
         self.assertEqual(record["hash"], record_inline["hash"])
@@ -454,7 +454,7 @@ class RefusalBoundaryTest(unittest.TestCase):
                                               "responses": {"200": {"description": "ok"}}}}}}
         json.dump(main_spec, open(inner / "main.json", "w"))
         spec = oi.load_spec(str(inner / "main.json"))
-        built, skipped, _ = oi.walk(spec, None)
+        built, skipped, _, _ = oi.walk(spec, None)
         self.assertEqual(built, [])
         self.assertIn("$ref", skipped[0][1])
 
@@ -496,7 +496,7 @@ class SchemaDerivedTest(unittest.TestCase):
             "properties": {"status": {"type": "string"}, "ready": {"type": "boolean"},
                            "detail": {"type": "object"}, "pid": {"type": "integer"}},
             "required": ["status"]})
-        built, skipped, pending = oi.walk(spec, None)
+        built, skipped, pending, _report = oi.walk(spec, None)
         self.assertEqual(skipped, [])
         self.assertEqual([r["name_hints"][0] for r, _, _ in built], ["gethealth"])
         by_name = {p["name"]: p for p in pending}
@@ -519,10 +519,10 @@ class SchemaDerivedTest(unittest.TestCase):
         resp = spec["paths"]["/health"]["get"]["responses"]["200"]
         resp["content"] = {"application/ld+json; charset=utf-8":
                            resp["content"].pop("application/json")}
-        built, skipped, pending = oi.walk(spec, None)
+        built, skipped, pending, _report = oi.walk(spec, None)
         self.assertEqual({p["name"] for p in pending}, {"getHealthBody", "getHealthStatus"})
         resp["content"] = {"text/html": {"schema": {"type": "string"}}}
-        built, skipped, pending = oi.walk(spec, None)
+        built, skipped, pending, _report = oi.walk(spec, None)
         self.assertEqual(pending, [], "a non-JSON content type licenses nothing")
         self.assertTrue(any("text/html" in n for n in built[0][2]),
                         "and it SAYS so — a declined body is an explicit refusal, not a silence")
@@ -539,7 +539,7 @@ class SchemaDerivedTest(unittest.TestCase):
             "required": ["status"]})
         resp = spec["paths"]["/health"]["get"]["responses"]["200"]
         resp["content"] = {"*/*": resp["content"].pop("application/json")}
-        built, skipped, pending = oi.walk(spec, None)
+        built, skipped, pending, _report = oi.walk(spec, None)
         self.assertEqual(skipped, [])
         self.assertEqual(pending, [], "`*/*` promises any type — it licenses no projection")
         self.assertEqual([r["name_hints"][0] for r, _, _ in built], ["gethealth"],
@@ -555,7 +555,7 @@ class SchemaDerivedTest(unittest.TestCase):
                 "paths": {"/health": {"get": {
                     "operationId": "getHealth", "security": [],
                     "responses": {"204": {"description": "no content"}}}}}}
-        built, skipped, pending = oi.walk(spec, None)
+        built, skipped, pending, _report = oi.walk(spec, None)
         self.assertEqual(pending, [])
         self.assertFalse(any("not projected" in n for n in built[0][2]),
                          "a description that promised no body must not be reported as declined")
@@ -566,7 +566,7 @@ class SchemaDerivedTest(unittest.TestCase):
         spec = self._health_spec("http://127.0.0.1:1", {
             "type": "object", "properties": {"status": {"type": "string"}},
             "required": ["status"]})
-        built, skipped, pending = oi.walk(spec, None)
+        built, skipped, pending, _report = oi.walk(spec, None)
         self.assertEqual({p["name"] for p in pending}, {"getHealthBody", "getHealthStatus"})
         self.assertFalse(any("not JSON" in n for n in built[0][2]))
 
@@ -576,7 +576,7 @@ class SchemaDerivedTest(unittest.TestCase):
         spec = self._health_spec("http://127.0.0.1:1", {"type": "object"})
         media = spec["paths"]["/health"]["get"]["responses"]["200"]["content"]["application/json"]
         media["example"] = {"status": "ok"}
-        built, skipped, pending = oi.walk(spec, None)
+        built, skipped, pending, _report = oi.walk(spec, None)
         self.assertEqual(pending, [])
         self.assertIn("gethealthbody", [r["name_hints"][0] for r, _, _ in built])
 
@@ -727,6 +727,161 @@ class SchemaObservationGateTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertFalse((Path(tmp) / "gethealthbody.v0.2.json").exists())
         self.assertFalse((Path(tmp) / "gethealthstatus.v0.2.json").exists())
+
+
+class ObserveArgTest(unittest.TestCase):
+    """Operator-supplied observation arguments (--observe-arg — the answer to
+    evolution/gcp-sdk-poc open questions 1+2): a path-parameter GET becomes eligible for
+    schema-derived projections when the operator names the server state the description
+    cannot; the observation is read-only by rule, and every binding that cannot be honored
+    refuses loudly with the reason, before any artifact is written or any live call made."""
+
+    PORT = 18879
+
+    @classmethod
+    def setUpClass(cls):
+        import time
+        import urllib.request
+        cls.base = f"http://127.0.0.1:{cls.PORT}"
+        cls.svc = subprocess.Popen(
+            [sys.executable, str(REPO_ROOT / "tooling" / "fake-service" / "fake_service.py"),
+             "--port", str(cls.PORT)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(f"{cls.base}/health", timeout=0.2)
+                break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("fake service did not come up")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.svc.terminate()
+        cls.svc.wait()
+
+    @staticmethod
+    def _get_item_op(extra_params=(), responses=None):
+        return {"operationId": "getItem",
+                "parameters": [{"name": "name", "in": "path", "required": True,
+                                "schema": {"type": "string"}}, *extra_params],
+                "responses": responses or {
+                    "200": {"description": "the stored item",
+                            "content": {"application/json": {"schema": {
+                                "type": "object",
+                                "properties": {"kind": {"type": "string"}},
+                                "required": ["kind"]}}}},
+                    "404": {"description": "absent"}}}
+
+    @classmethod
+    def _spec(cls, base, ops):
+        return {"openapi": "3.0.0", "info": {"title": "t", "version": "1"},
+                "servers": [{"url": base}],
+                "components": {"securitySchemes": {
+                    "api_token": {"type": "http", "scheme": "bearer"}}},
+                "security": [{"api_token": []}],
+                "paths": {"/items/{name}": ops}}
+
+    def _main(self, spec, extra):
+        tmp = tempfile.mkdtemp(prefix="nl-openapi-observe-")
+        sp = Path(tmp) / "spec.json"
+        json.dump(spec, open(sp, "w"))
+        code = 0
+        try:
+            oi.main([str(sp), "--out", tmp, *extra])
+        except SystemExit as e:
+            code = e.code
+        return tmp, code
+
+    def test_observation_at_operator_arguments_materializes_and_replays(self):
+        # The headline: GET /items/{name} is inadmissible under the constructibility rule (the
+        # path parameter names server state), but the OPERATOR knows a name — the observation
+        # runs once at the supplied arguments, the observed document is held to the declared
+        # schema, and the projection records exist with the operator's values visible in the
+        # example. The leaf record's own example stays the spec-derived absent-name 404 probe.
+        import urllib.request
+        req = urllib.request.Request(f"{self.base}/items/oq1-widget",
+                                     data=b'{"kind": "widget"}', method="PUT",
+                                     headers={"Authorization": "Bearer test-token"})
+        urllib.request.urlopen(req, timeout=5)
+        tmp, code = self._main(self._spec(self.base, {"get": self._get_item_op()}),
+                               ["--verify-against", self.base,
+                                "--observe-arg", "getItem.name=oq1-widget"])
+        self.assertEqual(code, 0)
+        body_rec = json.load(open(Path(tmp) / "getitembody.v0.2.json"))
+        ex = body_rec["examples"][0]
+        self.assertEqual(ex["args"], [{"kind": "string", "value": self.base},
+                                      {"kind": "string", "value": "oq1-widget"}])
+        self.assertEqual(ex["result"]["tag"], "Just")
+        self.assertTrue(ex["trace"].startswith("trc_"))
+        kind_rec = json.load(open(Path(tmp) / "getitemkind.v0.2.json"))
+        self.assertEqual(kind_rec["examples"][0]["result"],
+                         {"kind": "variant", "tag": "Just",
+                          "payload": {"kind": "string", "value": "widget"}})
+        leaf = json.load(open(Path(tmp) / "getitem.v0.2.json"))
+        self.assertEqual(leaf["examples"][0]["result"], {"kind": "int", "value": 404})
+        r = subprocess.run([str(VALIDATOR), "run", str(Path(tmp) / "getitembody.v0.2.json"),
+                            "--records", tmp], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_mutating_verb_refuses(self):
+        # Read-only by rule (open question 2): an observation must not create server state
+        # during ingestion. The refusal happens before any artifact or live call.
+        spec = self._spec("http://127.0.0.1:1", {
+            "put": {"operationId": "putItem",
+                    "parameters": [{"name": "name", "in": "path", "required": True,
+                                    "schema": {"type": "string"}}],
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"type": "object"}}}},
+                    "responses": {"201": {"description": "created",
+                                          "content": {"application/json": {"schema": {
+                                              "type": "object"}}}}}}})
+        tmp, code = self._main(spec, ["--verify-against", "http://127.0.0.1:1",
+                                      "--observe-arg", "putItem.name=x"])
+        self.assertIn("read-only", str(code))
+        self.assertEqual(list(Path(tmp).glob("*.v0.2.json")), [])
+
+    def test_unbound_path_parameter_refuses(self):
+        op = self._get_item_op(extra_params=[{"name": "verbose", "in": "query",
+                                              "required": True,
+                                              "schema": {"type": "string"}}])
+        tmp, code = self._main(self._spec("http://127.0.0.1:1", {"get": op}),
+                               ["--verify-against", "http://127.0.0.1:1",
+                                "--observe-arg", "getItem.verbose=yes"])
+        self.assertIn("path parameter(s) unbound: `name`", str(code))
+
+    def test_unknown_parameter_binding_refuses(self):
+        tmp, code = self._main(self._spec("http://127.0.0.1:1", {"get": self._get_item_op()}),
+                               ["--verify-against", "http://127.0.0.1:1",
+                                "--observe-arg", "getItem.name=x",
+                                "--observe-arg", "getItem.color=red"])
+        self.assertIn("binding names no declared required parameter: `color`", str(code))
+
+    def test_unknown_operation_refuses(self):
+        tmp, code = self._main(self._spec("http://127.0.0.1:1", {"get": self._get_item_op()}),
+                               ["--verify-against", "http://127.0.0.1:1",
+                                "--observe-arg", "noSuchOp.name=x"])
+        self.assertIn("no such operationId", str(code))
+
+    def test_no_declared_schema_refuses(self):
+        op = self._get_item_op(responses={"200": {"description": "no body promised"},
+                                          "404": {"description": "absent"}})
+        tmp, code = self._main(self._spec("http://127.0.0.1:1", {"get": op}),
+                               ["--verify-against", "http://127.0.0.1:1",
+                                "--observe-arg", "getItem.name=x"])
+        self.assertIn("no declared 2xx JSON response schema", str(code))
+
+    def test_requires_verify_against(self):
+        tmp, code = self._main(self._spec("http://127.0.0.1:1", {"get": self._get_item_op()}),
+                               ["--observe-arg", "getItem.name=x"])
+        self.assertIn("requires --verify-against", str(code))
+
+    def test_binding_grammar_rightmost_dot(self):
+        # operationIds may themselves contain dots (Google Discovery ids): the RIGHTMOST dot
+        # before `=` splits opId from param.
+        self.assertEqual(oi.parse_observe_args(["storage.buckets.get.bucket=b1"]),
+                         {"storage.buckets.get": {"bucket": "b1"}})
 
 
 class TokenBindingTests(unittest.TestCase):
