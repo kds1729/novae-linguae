@@ -1,0 +1,3 @@
+{"examples":[{"input":[{"kind":"string","value":"https://storage.googleapis.com/storage/v1"},
+                       {"kind":"string","value":"em-devops-miscellaneous-stuff"}],
+              "output":{"kind":"variant","tag":"Just","payload":{"kind":"string","value":"US"}}}]}

@@ -5,7 +5,7 @@
   [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) is a new
   defect found after publication and is outstanding, so the module no longer qualifies as absorbed.
 - **Author:** Keith Sprochi <ksprochi@elementalmachines.com>
-- **Dates:** first published 2026-07-30, last updated 2026-07-31
+- **Dates:** first published 2026-07-30, last updated 2026-08-01
 - **Scope:** `tooling/nl-ingest-openapi`; touches on `tooling/commons-node` retrieval and on
   `spec/expressiveness.md` GW7/GW10/GW16 as the results this extends
 - **Provenance:** upstream commit `76fc6ba` (2026-07-15); Google Cloud Storage Discovery document
@@ -39,7 +39,7 @@ Two defects surfaced along the way, one of them silent for days.
 
 | file | what |
 |---|---|
-| [`findings.md`](findings.md) | The eight findings, each with the measurement behind it |
+| [`findings.md`](findings.md) | The ten findings, each with the measurement behind it |
 | [`repro/`](repro/) | Hermetic fixtures — no cloud account, no credentials, no vendor input |
 | [`proposals/01-request-content-type.md`](proposals/01-request-content-type.md) | Emit the declared request `Content-Type` — **accepted**, applied, and its three questions answered |
 
@@ -90,26 +90,37 @@ carry:
 
 ## Open questions
 
-Where the next person should start, most consequential first.
+The four this module first raised have all been answered in-tree. Recorded here with what exercising
+each against the corpus then showed — the answers work, and each surfaced the next constraint.
 
-1. **Can a projection's worked example come from an observation rather than the spec?** The
-   constructibility rule — bodyless `GET`, no path parameters — is sound in its reasoning and would
-   admit 1 of 81 real operations. The live gate *already* sources examples from observations for
-   schema-derived projections, so the machinery exists; the question is whether the faithfulness
-   contract can accommodate it more widely. This is the gate on dataflow, and therefore on
-   composition.
-2. **Should the live observation gate be usable read-only?** It cannot be used at all here, because
-   it would create real resources during ingestion for mutating verbs. `GET`/`HEAD` are `net.read`
-   and create nothing, so a read-only gate would be safe and would materialise projections wherever
-   question 1 permits them.
-3. **Composite-level intent tags and retrieval.** Leaf tags describe a *call*, and exact
-   `name_hint_prefix` query resolves one when the caller knows its name. Finding a prior *assembly*
-   means searching for an outcome the caller cannot name, which the stdlib lexical embedder does not
-   serve. Without this, accumulated designs are write-only.
-4. **Refinements over world state.** "Requires a VPC, guarantees a subnet" is what would let an agent
-   check a plan before performing any effect. Distinct from argument/result refinements, and the one
-   genuinely new capability on this list rather than a gap — every record here carries
-   `refinements: []` because descriptions carry no pre/postconditions.
+1. ~~Can a projection's worked example come from an observation rather than the spec?~~ and
+   2. ~~Should the live observation gate be usable read-only?~~ — **answered by `--observe-arg`**
+   (operator-supplied observation arguments, read-only by rule). Exercised: `storage.buckets.get`,
+   excluded by the constructibility rule since day one, now yields **40 records** — one status, one
+   whole-document projection, 38 typed field projections, each trace-attached and offline-replayable
+   (`getName -> Just("em-devops-…")`, `getLocation -> Just("US")`). The corpus can carry values, not
+   just `int`s. Keeping the operator's values out of the description and in the invocation is the
+   right split; an earlier local spike that declared them in the description was worse, because it
+   would bake one operator's environment into a shared artifact.
+3. ~~Composite-level intent tags and retrieval.~~ — **answered by `assemble`'s derived discovery
+   metadata and the node's `/v0/records/{hash}/derivations`.** Not reachable from this corpus yet:
+   `/derivations` needs a composite to exist, and [finding 10](findings.md#10-assemble-cannot-admit-any-record-from-this-corpus)
+   is why none can be assembled.
+4. ~~Refinements over world state.~~ — **answered by `check-plan` and `spec/world-state.md`.**
+   Exercised: it correctly `REJECTED` a use-after-delete, naming the step, the resource, and the
+   prior step whose `ensures` contradicted it. [Finding 9](findings.md#9-world-refinements-cannot-key-a-resource-the-request-body-names)
+   is what exercising it surfaced — the create half of every lifecycle cannot declare its `ensures`,
+   because the new resource is named in the request body.
+
+### Still open
+
+- **Matching an effectful candidate by replayed evidence** rather than live execution
+  ([finding 10](findings.md#10-assemble-cannot-admit-any-record-from-this-corpus)). Without it,
+  `assemble` admits nothing from any service-derived corpus — 121 of 121 records here are effectful.
+- **Keying a world resource the request body names**
+  ([finding 9](findings.md#9-world-refinements-cannot-key-a-resource-the-request-body-names)) — the
+  driver the v0.1 world-state spec says richer vocabulary should be earned by.
+- **The finding 8 defect**, unfixed at `ca24c88`.
 
 ## Reproducing
 

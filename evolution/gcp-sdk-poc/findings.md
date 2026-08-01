@@ -269,6 +269,127 @@ verdict. It already computes exactly the right conclusion for the whole response
 applies to every projection over it. Failing that, at minimum do not print `schema-checked` when no
 document was checked.
 
+---
+
+*Findings 9 and 10 come from pointing the architect machinery — `check-plan`, `assemble` — at this
+corpus for the first time, at upstream `c482645`. They are not defect reports: the plan checker and
+the assembler each behave exactly as specified. Both findings are about what a corpus derived from an
+API description can and cannot feed them.*
+
+## 9. World refinements cannot key a resource the request body names
+
+**Measured — the corpus as shipped approves a use-after-delete.** A two-step plan, delete then read
+the same bucket, checked against the 81 records:
+
+```
+PLAN-SOUND   every requirement discharged from assumptions and prior ensures
+exit=0
+```
+
+Every record carries `refinements: []` (finding 5), so there is nothing to contradict. The verdict is
+honest — vacuously.
+
+**Measured — with refinements authored, the checker works.** `storage_buckets_get(base, bucket)` and
+`storage_buckets_delete(base, bucket)` take the bucket as a parameter, so both are expressible:
+
+```json
+{ "kind": "requires", "resource": { "class": "bucket",
+    "key": [ { "kind": "var", "name": "bucket" } ] }, "state": "exists" }
+{ "kind": "ensures",  "resource": { "class": "bucket",
+    "key": [ { "kind": "var", "name": "bucket" } ] }, "state": "absent" }
+```
+
+Three plans, three verdicts:
+
+| plan | verdict |
+|---|---|
+| delete → get | `REJECTED` — *step 2: requires bucket("nl-plan-demo") = exists, but it is absent (step 1 (storage_buckets_delete))* |
+| create → verify → delete | `UNVERIFIABLE` — 2 requirements nothing establishes |
+| the same, plus a stated assumption | `PLAN-SOUND` |
+
+**Concluded — the correct plan is the one that cannot verify.**
+`storage_buckets_insert(base, project, body)` carries the new bucket's name **inside the JSON body
+argument**. A resource key may reference parameters by name or literals, and the name is neither, so
+`ensures bucket(…) exists` is unexpressible — nothing discharges the later `requires`. The only route
+to `PLAN-SOUND` is the third plan's assumption, and that assumption is *false at plan start*: it
+asserts the bucket exists before the step that creates it.
+
+**This is the REST creation idiom, not a GCS quirk.** All **9 of 9** create operations name the new
+resource in the request body; their path parameters name the *container*:
+
+| operation | path params | where the new resource is named |
+|---|---|---|
+| `storage.buckets.insert` | — | body |
+| `storage.folders.insert`, `…managedFolders…`, `…notifications…`, `…anywhereCaches…`, `…bucketAccessControls…`, `…defaultObjectAccessControls…` | `bucket` (the container) | body |
+| `storage.objectAccessControls.insert` | `bucket`, `object` (both containers) | body |
+| `storage.objects.insert` | `bucket` (the container) | body — **or** `?name=`, which is *optional* and therefore dropped |
+
+`objects.insert` is the sharpest case: the API does offer a URL-level name, and two rules interact to
+remove it — the minimal-documented-call rule drops optional query parameters, so the one parameter
+that could have keyed the resource never reaches the record.
+
+`ensures` on creates is exactly the clause a lifecycle plan needs, so the gap falls on the half that
+matters. Widening the key vocabulary to reach into a body argument would mean the checker parsing
+caller data, which is a real design question rather than an oversight — noted here as the driver the
+v0.1 spec says richer vocabulary should be earned by.
+
+## 10. `assemble` cannot admit any record from this corpus
+
+**Measured.** A goal one record satisfies exactly — given a base URL and a bucket name, produce
+`Just("US")`, which is `storage_buckets_getlocation`'s own worked example — against a node holding
+the corpus and its bodies:
+
+```
+discovered 120 candidate(s); arity-pruned 65 (unusable at arity 1..=2), fetching 55 by content-address…
+NO PIPELINE  no composition of ≤2 commons functions reproduces the 1 example(s)
+```
+
+The cause is `record_solves_goal` in `assemble.rs`, and it is deliberate:
+
+```rust
+let inf = crate::infer_effects(body, records);
+let safe = inf.effects.is_empty() && !inf.opaque && !inf.unresolved
+        && matches!(crate::analyze_termination(body), TerminationOutcome::Always);
+if !safe { return false; }
+```
+
+documented as *"discovered code is never executed on spec"*, with a test asserting *"an effectful
+body is never executed on spec, whatever it might return."*
+
+**Measured — the exclusion is total.** Of the 121 records (81 status + 40 observed projections),
+**121 are effectful** — 70 `net.read`, 51 `net.write` — and **0 are pure**. The purity gate rejects
+every candidate, so no assembly over an API-derived commons can ever succeed.
+
+**Measured — the evidence assemble needs already exists, effect-free.** The same record replays its
+worked example offline, with no grants, no secrets and no network, producing precisely the goal's
+expected output:
+
+```
+$ nl-validator run storage_buckets_getlocation.v0.2.json --records .
+example  0  PASS  {"kind":"variant","payload":{"kind":"string","value":"US"},"tag":"Just"}
+run: 1/1 examples passed
+```
+
+**Concluded.** Two correct principles are in tension. Assembly verifies a candidate by *running* it
+against the goal's examples; and discovered code from an untrusted commons must never be executed on
+spec — a search choosing which network writes to perform would be reckless. Both are right, and
+together they exclude precisely the corpus an infrastructure architect needs to compose, because
+service operations are effectful by definition.
+
+The resolution suggested by the measurement above: match an effectful candidate against a goal by
+**replaying its recorded example** rather than executing it. That performs no effect, so it preserves
+"never execute discovered effectful code" exactly as written; the evidence is the publisher's
+trace-attached observation, priced by the trust model like any other observed claim; and the
+machinery already exists and already works (GW12). Whether the faithfulness contract should accept
+replayed evidence for goal-matching is a maintainer's question, not a patch.
+
+**One caveat for anyone reproducing this.** The pipeline publishes only *function records* to the
+commons, never their body ASTs — so a node loaded from it holds records that cannot be fetched for
+execution, and the first `assemble --node` run skipped all 120 candidates with `absent`. Loading the
+bodies as well (the node already accepts `kind: body`) is a one-line pipeline change, and without it
+the commons cannot execute or assemble its own corpus. That is a defect in this PoC's pipeline, not
+in the toolchain.
+
 ## Reproducing
 
 Findings 1–3 need no credentials and no network.
@@ -306,6 +427,46 @@ python3 openapi_ingest.py \
 python3 -c "import json;print(json.load(open('/tmp/f8/getabsentalpha.v0.2.json'))['examples'][0]['result'])"
 # -> {'kind': 'variant', 'tag': 'None'}
 ```
+
+Findings 9 and 10 need the generated corpus (regenerate it with the pipeline above); neither needs
+credentials, because nothing is executed live.
+
+```bash
+# finding 9 — the corpus as shipped approves a use-after-delete
+#   a plan of [buckets.delete(b), buckets.get(b)] over records with empty refinements
+nl-validator check-plan --plan use-after-delete.json --records records/storage-v1
+# -> PLAN-SOUND   (exit 0)
+#
+# then author the two refinements shown above onto buckets.get / buckets.delete, rehash
+# (`nl-validator hash <rec> --kind function-record`), and re-check the same plan:
+# -> REJECTED  step 2: requires bucket("…") = exists, but it is absent (step 1 …)
+# a create -> verify -> delete plan over the same records:
+# -> UNVERIFIABLE  2 requirement(s) nothing establishes   (buckets.insert cannot declare `ensures`)
+
+# which creates can name what they create?  (9 of 9: in the body)
+python3 - <<'PY'
+import json; s=json.load(open("specs/storage.v1.openapi3.normalized.json"))
+for path,item in s["paths"].items():
+    for m,op in item.items():
+        if m!="post" or not isinstance(op,dict) or "requestBody" not in op: continue
+        if not any(k in op["operationId"] for k in ("insert","create")): continue
+        print(op["operationId"], "path=", [p["name"] for p in op.get("parameters",[])
+                                           if p.get("in")=="path"])
+PY
+
+# finding 10 — a goal one record satisfies exactly, against a node holding records AND bodies
+nl-validator assemble --node http://127.0.0.1:8010 --max-stages 2 \
+    --goal evolution/gcp-sdk-poc/repro/finding-10-goal-bucket-location.json
+# -> discovered 120 candidate(s); arity-pruned 65, fetching 55 …
+# -> NO PIPELINE            (every candidate is effectful; the purity gate rejects all of them)
+
+# the same record reproduces the goal's output with no grants, no secrets, no network
+nl-validator run storage_buckets_getlocation.v0.2.json --records .
+# -> example 0 PASS {"kind":"variant","payload":{"kind":"string","value":"US"},"tag":"Just"}
+```
+
+Loading the node for finding 10 needs the **bodies** as well as the records — the pipeline emits only
+the latter, so append the `body-*.json` ASTs to the JSONL (the node detects `kind: body` itself).
 
 The live provisioning step needs a GCP project and `gcloud auth print-access-token`; it is not
 required for any finding above.
