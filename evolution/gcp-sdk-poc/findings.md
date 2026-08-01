@@ -436,6 +436,76 @@ checkable. Failing that, an operation whose description documents no non-2xx out
 spec-derivable example for the absent-name convention, and saying so would be more honest than
 asserting a success that cannot hold.
 
+## 12. `certify` admits records the commons cannot accept
+
+**Measured.** Ingesting `iam v1` produced 48 records that all certified, and the node then refused
+seven of them:
+
+```
+$ manage.py loadrecords iam-v1.jsonl
+reject schema_invalid: validation failed (1 error):
+  - at /name_hints/1: "iam_locations_workforce_pools_providers_scim_ten…
+stored=89 skipped=0 failed=7
+```
+
+`function-record.v0.2.schema.json` caps a `name_hint` at **64 characters**. Google's deeply-nested
+resource paths sanitise well past that — IAM reaches **100** — and
+`iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.…` is not an exotic
+operation, it is how that API is shaped. `nl-validator certify` is untroubled:
+
+```
+$ nl-validator certify iam_locations_workforcepools_providers_scimtenants_tokens_create.v0.2.json …
+  => CERTIFIED
+```
+
+**Concluded.** `certify` does not validate a record against the function-record JSON schema, so the
+producer and the admitting authority disagree about what a valid record is. A record can be
+generated, certified, written to disk and reported as verified, and still be unpublishable — which
+is the same family as findings 1, 8 and 11, except the later, stricter gate here is the commons
+itself, so the artifact simply cannot exist in one.
+
+The cheap fix is for `certify` to schema-validate; the cheaper one is for the adapter to refuse (or
+truncate-with-a-note) a name it cannot publish, rather than emitting it. Which of those is right
+depends on whether the 64-character cap is itself the thing to revisit — a limit that excludes real
+operations from a real cloud API may be the defect.
+
+---
+
+## Do these findings generalise? Four APIs, 1,208 records
+
+The findings above were all measured on Cloud Storage. To see which are properties of *that*
+description and which are properties of the description layer, three more Google Cloud APIs went
+through the same pipeline, unmodified.
+
+| corpus | records | certified | refused | unpublishable (finding 12) |
+|---|---:|---:|---:|---:|
+| `storage v1` | 125 | 125 | 0 | 0 |
+| `cloudresourcemanager v3` | 28 | 28 | 0 | 0 |
+| `iam v1` | 48 | 48 | 0 | 7 |
+| `compute v1` (734 paths) | **1007** | 1007 | 0 | 5 |
+| **total** | **1208** | **1208** | **0** | **12** |
+
+**The description-layer path holds at SDK scale.** Compute v1 — the largest surface Google
+publishes — compiles to 1007 records with nothing refused and everything certified, no modification
+to the toolchain.
+
+**Finding 9 generalises completely.** Counting a create as naming its resource outside the body only
+when a path or required-query parameter matches the resource noun in its `operationId`:
+
+> **131 of 131** create-shaped operations across all four APIs name the new resource **in the request
+> body**. Not one names it in the URL.
+
+So the `body-field` key part that `b689ce5` added is not a GCS accommodation — without it, the
+`ensures` clause is inexpressible for every create in every one of these APIs.
+
+**Finding 11 generalises completely.** Across **1,164 operations** in four APIs, **zero** document a
+404 — or any non-2xx. Discovery describes success and nothing else. So every path-parameterised
+GET/DELETE in any Discovery-derived corpus carries the unsatisfiable example finding 11 describes;
+it is a property of the format, not of one API.
+
+**Finding 12 is scale-dependent**, which is why Cloud Storage never showed it: its longest
+`name_hint` is 50 characters, comfortably inside the cap. Only the deeply-nested APIs reach it.
+
 ## Reproducing
 
 Findings 1–3 need no credentials and no network.
