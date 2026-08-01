@@ -1,4 +1,4 @@
-# Findings — Google Cloud Storage v1 through `nl-ingest-openapi`
+# Findings — Google Cloud APIs through `nl-ingest-openapi`
 
 Companion to [`README.md`](README.md). Per [`evolution/README.md`](../README.md), measurements and
 inferences are kept separate: each finding states what was observed, then what the author concludes
@@ -8,14 +8,17 @@ from it. A reader may reject every conclusion here and keep every number.
 
 | input | pinned value |
 |---|---|
-| Discovery document | `storage:v1`, revision **20260719**, from `https://storage.googleapis.com/$discovery/rest?version=v1` |
+| Discovery documents | `storage:v1` rev **20260719** (findings 1–11); plus `cloudresourcemanager:v3`, `iam:v1` and `compute:v1`, all fetched 2026-08-01, for finding 12 and the generalisation results |
 | Discovery → Swagger 2.0 | `google-discovery-to-swagger` **2.1.0** (npm) |
 | Swagger 2.0 → OpenAPI 3 | `swagger2openapi` **7.0.8** (npm) |
-| upstream commit | `76fc6ba` (2026-07-15) |
-| run date | 2026-07-26 |
+| upstream commit | `76fc6ba` (2026-07-15) for findings 1–7; `c482645` for 8–11; `ff1c258`/`b689ce5` for the fix verifications; `ca24c88` for finding 12 |
+| run dates | 2026-07-26 (storage), 2026-08-01 (the other three APIs, and every re-verification) |
 
 Google publishes Discovery documents rather than OpenAPI 3, so the pipeline is
 `Discovery → Swagger 2.0 → OpenAPI 3 → normalize → nl-ingest-openapi → commons node`.
+
+Findings 1–11 were all measured on **Cloud Storage v1**; the section at the end reports which of them
+survive contact with three further APIs, and finding 12 is one only the larger ones show.
 
 ## What was measured
 
