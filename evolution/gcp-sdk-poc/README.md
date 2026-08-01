@@ -1,9 +1,12 @@
 # A whole cloud API through the description layer
 
-- **Status:** published — back from `absorbed`. The two original defects are fixed and
-  [proposal 01](proposals/01-request-content-type.md) is `accepted` and implemented, but
-  [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) is a new
-  defect found after publication and is outstanding, so the module no longer qualifies as absorbed.
+- **Status:** published. Three of the four defects it has reported are fixed —
+  [proposal 01](proposals/01-request-content-type.md) is `accepted` and implemented, and
+  [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) was fixed in
+  `ff1c258` (verified against its own fixture: all three projections now refuse, and the legitimate
+  path is unaffected). [Finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
+  and [finding 12](findings.md#12-certify-admits-records-the-commons-cannot-accept) are open, so the
+  module does not yet qualify as absorbed.
 - **Author:** Keith Sprochi <ksprochi@elementalmachines.com>
 - **Dates:** first published 2026-07-30, last updated 2026-08-01
 - **Scope:** `tooling/nl-ingest-openapi`; touches on `tooling/commons-node` retrieval and on
@@ -11,9 +14,11 @@
 - **Provenance:** upstream commit `76fc6ba` (2026-07-15); Google Cloud Storage Discovery document
   `storage:v1` revision **20260719**; `google-discovery-to-swagger` **2.1.0**;
   `swagger2openapi` **7.0.8**; run date 2026-07-26
-- **Resolution:** module merged in #2. Defect 2 fixed in #1 (`2659c09`); defect 1 fixed by
-  accepting [proposal 01](proposals/01-request-content-type.md). The module's **open questions**
-  remain open — they are pointers for the next author, not outstanding proposals.
+- **Resolution:** module merged in #2. Defect 1 fixed by accepting
+  [proposal 01](proposals/01-request-content-type.md); defect 2 in `2659c09`; defect 3 in `ff1c258`.
+  All four original **open questions** are answered in-tree, and findings 9 and 10 — raised by
+  exercising those answers — are fixed in `b689ce5`. Defect 4 ([finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction))
+  is outstanding.
 
 ## Summary
 
@@ -22,6 +27,10 @@ Google Cloud Storage v1 — **all 81 operations** — was compiled into Nova Lin
 create → verify → delete against live GCS by executing those records through `nl-validator run`.
 Nothing was hand-authored, and **no modification to this repository was required**: the one transform
 the pipeline applies is to the *description*, not to the adapter or the language.
+
+Since extended to three more APIs — `cloudresourcemanager v3`, `iam v1` and `compute v1` — for
+**1,208 records, all certified, none refused**, which is where the generalisation results at the end
+of [`findings.md`](findings.md) come from.
 
 So the description-layer bet holds at cloud scale. The useful content of this module is the negative
 space, and it is uncomfortable in one specific way: **the generated corpus cannot express a plan.**
@@ -39,7 +48,7 @@ Two defects surfaced along the way, one of them silent for days.
 
 | file | what |
 |---|---|
-| [`findings.md`](findings.md) | The ten findings, each with the measurement behind it |
+| [`findings.md`](findings.md) | The twelve findings, each with the measurement behind it, and how they generalise across four APIs |
 | [`repro/`](repro/) | Hermetic fixtures — no cloud account, no credentials, no vendor input |
 | [`proposals/01-request-content-type.md`](proposals/01-request-content-type.md) | Emit the declared request `Content-Type` — **accepted**, applied, and its three questions answered |
 
@@ -69,9 +78,17 @@ Two defects surfaced along the way, one of them silent for days.
    verdicts. The guard that would catch it is `required_field`, and Google Discovery emits no
    `required` at all — **0 of 34** schemas here declare one — so it is dead code for this entire
    class of description. An expired token would silently mint a `None`-valued, certified projection
-   for every field of every operation in a corpus. **Open**; found after publication, reproduced
-   against `c482645`, hermetic fixture in [`repro/`](repro/). See
+   for every field of every operation in a corpus. **Fixed in `ff1c258`** — each projection's verdict
+   now rests on its own recorded observation. Found after publication; hermetic fixture in
+   [`repro/`](repro/). See
    [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call).
+
+4. **A path-parameterised GET's worked example is unsatisfiable by construction** — the synthesized
+   example fills the path parameter with a deliberately-absent name and then asserts the *documented*
+   status. Where a description documents a 404 those agree; **0 of 81** here do, so the example
+   asserts that a GET on an absent bucket returns 200. `certify` passes it because certify does not
+   execute. **Open.** See
+   [finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction).
 
 ## What worked well
 
@@ -103,24 +120,52 @@ each against the corpus then showed — the answers work, and each surfaced the 
    right split; an earlier local spike that declared them in the description was worse, because it
    would bake one operator's environment into a shared artifact.
 3. ~~Composite-level intent tags and retrieval.~~ — **answered by `assemble`'s derived discovery
-   metadata and the node's `/v0/records/{hash}/derivations`.** Not reachable from this corpus yet:
-   `/derivations` needs a composite to exist, and [finding 10](findings.md#10-assemble-cannot-admit-any-record-from-this-corpus)
-   is why none can be assembled.
+   metadata and the node's `/v0/records/{hash}/derivations`.** `/derivations` is still unexercised
+   here, but no longer because nothing can be assembled: the goal tried was solved by **reuse**, so
+   an existing address came back and no composite was created. Exercising `/derivations` needs a
+   goal that genuinely requires composing two stages.
 4. ~~Refinements over world state.~~ — **answered by `check-plan` and `spec/world-state.md`.**
    Exercised: it correctly `REJECTED` a use-after-delete, naming the step, the resource, and the
    prior step whose `ensures` contradicted it. [Finding 9](findings.md#9-world-refinements-cannot-key-a-resource-the-request-body-names)
    is what exercising it surfaced — the create half of every lifecycle cannot declare its `ensures`,
    because the new resource is named in the request body.
 
+### Fixed since, and verified against this corpus
+
+- **[Finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call)** —
+  fixed in `ff1c258`, by a better route than the one suggested: each projection's verdict rests on
+  its *own* recorded observation rather than inheriting the whole-document projection's, which is
+  right, since those are separate executions. Re-run against the module's own fixture: all three
+  projections refuse, only the status record is written, and the legitimate path is untouched
+  (39 projections still admitted, `getLocation` still observes `Just("US")`).
+- **[Finding 9](findings.md#9-world-refinements-cannot-key-a-resource-the-request-body-names)** —
+  fixed in `b689ce5` by a `body-field` key part, grounded at plan-check time from the step's literal
+  argument, so decidability is untouched. The create → verify → delete plan that could only come back
+  `UNVERIFIABLE` is now **`PLAN-SOUND`**, and discharged by *step 1's own `ensures`* rather than by a
+  stated assumption — which was the whole point, since the assumption that made it pass before was
+  false at plan start.
+- **[Finding 10](findings.md#10-assemble-cannot-admit-any-record-from-this-corpus)** — fixed in
+  `b689ce5` by exactly the suggested resolution. `assemble` now answers the same goal:
+
+  ```
+  REUSED  storage_buckets_getlocation  fn_777700ffa716f1cf…
+    examples  1/1 matched by REPLAYED OBSERVATION — the publisher's recorded evidence,
+              verified offline; no effect performed (testimony, priced by your trust policy)
+  ```
+
+  A service-derived corpus is assemblable for the first time, with no effect performed and no
+  credentials — and the reuse pre-pass returns the address rather than rebuilding.
+
 ### Still open
 
-- **Matching an effectful candidate by replayed evidence** rather than live execution
-  ([finding 10](findings.md#10-assemble-cannot-admit-any-record-from-this-corpus)). Without it,
-  `assemble` admits nothing from any service-derived corpus — 121 of 121 records here are effectful.
-- **Keying a world resource the request body names**
-  ([finding 9](findings.md#9-world-refinements-cannot-key-a-resource-the-request-body-names)) — the
-  driver the v0.1 world-state spec says richer vocabulary should be earned by.
-- **The finding 8 defect**, unfixed at `ca24c88`.
+- **The [finding 12](findings.md#12-certify-admits-records-the-commons-cannot-accept) defect** —
+  `certify` does not schema-validate, so a record can be generated, certified and written while the
+  commons refuses it. 12 of 1,208 records across four APIs are unpublishable because a `name_hint`
+  exceeds the schema's 64-character cap (IAM reaches 100).
+- **The [finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
+  defect** — a path-parameterised GET's synthesized example asserts a documented success at a
+  deliberately-absent name, which no description omitting its error cases can satisfy (0 of 81 here
+  document a 404).
 
 ## Reproducing
 

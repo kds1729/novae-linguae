@@ -1,4 +1,4 @@
-# Findings — Google Cloud Storage v1 through `nl-ingest-openapi`
+# Findings — Google Cloud APIs through `nl-ingest-openapi`
 
 Companion to [`README.md`](README.md). Per [`evolution/README.md`](../README.md), measurements and
 inferences are kept separate: each finding states what was observed, then what the author concludes
@@ -8,14 +8,17 @@ from it. A reader may reject every conclusion here and keep every number.
 
 | input | pinned value |
 |---|---|
-| Discovery document | `storage:v1`, revision **20260719**, from `https://storage.googleapis.com/$discovery/rest?version=v1` |
+| Discovery documents | `storage:v1` rev **20260719** (findings 1–11); plus `cloudresourcemanager:v3`, `iam:v1` and `compute:v1`, all fetched 2026-08-01, for finding 12 and the generalisation results |
 | Discovery → Swagger 2.0 | `google-discovery-to-swagger` **2.1.0** (npm) |
 | Swagger 2.0 → OpenAPI 3 | `swagger2openapi` **7.0.8** (npm) |
-| upstream commit | `76fc6ba` (2026-07-15) |
-| run date | 2026-07-26 |
+| upstream commit | `76fc6ba` (2026-07-15) for findings 1–7; `c482645` for 8–11; `ff1c258`/`b689ce5` for the fix verifications; `ca24c88` for finding 12 |
+| run dates | 2026-07-26 (storage), 2026-08-01 (the other three APIs, and every re-verification) |
 
 Google publishes Discovery documents rather than OpenAPI 3, so the pipeline is
 `Discovery → Swagger 2.0 → OpenAPI 3 → normalize → nl-ingest-openapi → commons node`.
+
+Findings 1–11 were all measured on **Cloud Storage v1**; the section at the end reports which of them
+survive contact with three further APIs, and finding 12 is one only the larger ones show.
 
 ## What was measured
 
@@ -271,10 +274,10 @@ document was checked.
 
 ---
 
-*Findings 9 and 10 come from pointing the architect machinery — `check-plan`, `assemble` — at this
-corpus for the first time, at upstream `c482645`. They are not defect reports: the plan checker and
-the assembler each behave exactly as specified. Both findings are about what a corpus derived from an
-API description can and cannot feed them.*
+*Findings 9, 10 and 11 come from pointing the architect machinery — `check-plan`, `assemble` — at this
+corpus for the first time, at upstream `c482645`. Nine and ten are not defect reports: the plan checker and
+the assembler each behave exactly as specified, and both are about what a corpus derived from an
+API description can and cannot feed them. Eleven is a defect, and the live gate is what exposed it.*
 
 ## 9. World refinements cannot key a resource the request body names
 
@@ -383,12 +386,148 @@ trace-attached observation, priced by the trust model like any other observed cl
 machinery already exists and already works (GW12). Whether the faithfulness contract should accept
 replayed evidence for goal-matching is a maintainer's question, not a patch.
 
-**One caveat for anyone reproducing this.** The pipeline publishes only *function records* to the
-commons, never their body ASTs — so a node loaded from it holds records that cannot be fetched for
-execution, and the first `assemble --node` run skipped all 120 candidates with `absent`. Loading the
-bodies as well (the node already accepts `kind: body`) is a one-line pipeline change, and without it
-the commons cannot execute or assemble its own corpus. That is a defect in this PoC's pipeline, not
-in the toolchain.
+**A defect in this PoC's pipeline, since fixed.** It published only *function records* — never the
+body ASTs, and never the observation traces — so a node loaded from it held records that could not be
+fetched for execution. The first `assemble --node` run skipped all 120 candidates as `absent`;
+publishing the bodies dropped that to 4 (the `trc_…` artifacts the observed examples reference), and
+publishing the traces too dropped it to **0**. A commons that cannot execute or replay its own corpus
+is not a commons, and the replay-based resolution suggested above would have been impossible from a
+node without the traces.
+
+### Addendum after the fix: reuse is unblocked, composition is not
+
+`b689ce5` makes an effectful record matchable **as a whole** — `record_solves_goal` accepts a
+`Replayed` match against the record's own trace-carrying example. Multi-stage assembly is a separate
+path and did not change. `search()` builds its candidate list with no purity filter and then advances
+each state by `crate::eval_body(&c.body, &call)` — it *executes* a stage to produce the next stage's
+input. An effectful body evaluated without grants simply errors, so effectful candidates never
+advance a pipeline; they contribute nothing beyond the single-record reuse check.
+
+So the practical position for a service-derived corpus is: **an agent can now find a design that
+already exists, but still cannot compose a new one from effectful parts.** For the prior-art half of
+the architect story that is the important half — the reuse pre-pass returns an address rather than
+rebuilding. For the assembly half it is not yet enough.
+
+Composing by replay is harder than matching by replay, and possibly the honest answer is that it
+should not be attempted: chaining recorded observations would require stage 1's recorded *output* to
+be the input stage 2 was recorded *at*, so the pipeline would only assemble where the traces happen
+to line up — a much narrower and more fragile guarantee than the whole-record match. Recorded as an
+observation, not a request.
+
+## 11. A path-parameterised GET's worked example is unsatisfiable by construction
+
+Found by the first pass that ever live-gated this corpus.
+
+**Measured.** `_example_for` fills a path parameter with `gw7-absent-x` — deliberately "a name no
+test writes" — and then chooses the expected status:
+
+```python
+if verb in ("GET", "DELETE"):
+    if path_param_names:
+        want = 404 if 404 in codes else (codes[0] if codes else 200)
+```
+
+**Not one of the 81 operations documents a 404** — Google Discovery describes only the success case.
+So `want` falls through to `200`, and the example asserts *a GET on a deliberately-absent bucket
+returns 200*. Live:
+
+```
+storage_buckets_get   live-gate=FAIL: example 0 live result does not match the documented one:
+                      {"kind": "int", "value": 404} != {"kind": "int", "value": 200}
+storage_buckets_list  live-gate=FAIL: … {"kind": "int", "value": 400} != {"kind": "int", "value": 200}
+```
+
+`buckets.list` is the same shape one level over: its required `project` query parameter gets the
+synthesized `"hello world"`, which cannot produce the documented 200 either.
+
+**Concluded.** Two conventions that are individually sound contradict each other whenever a
+description omits its error cases: *use a name nothing has written* and *assert the documented
+status*. Against the in-repo fake service they agree, because it documents its 404s. Against a
+Discovery-derived description they never can — the example is false for every operation of that
+shape, and `certify` passes it because certify does not execute. It is the same family as findings 1
+and 8: an artifact that reports itself verified while carrying a claim nothing has checked.
+
+It also interacts with `--observe-arg`, which binds the *projections'* arguments but not the status
+record's. In the run above, 44 projections observed and schema-checked cleanly while both status
+records failed — so a live gate over such an operation reports failure even when every observation
+succeeded, which makes the exit code useless as a signal.
+
+**Suggested resolution, reusing what already exists:** when an `--observe-arg` binding names a real
+resource for an operation, use it for the status record's example too. The operator has supplied a
+value that *does* exist, so the documented success becomes reachable and the example becomes
+checkable. Failing that, an operation whose description documents no non-2xx outcome has no
+spec-derivable example for the absent-name convention, and saying so would be more honest than
+asserting a success that cannot hold.
+
+## 12. `certify` admits records the commons cannot accept
+
+**Measured.** Ingesting `iam v1` produced 48 records that all certified, and the node then refused
+seven of them:
+
+```
+$ manage.py loadrecords iam-v1.jsonl
+reject schema_invalid: validation failed (1 error):
+  - at /name_hints/1: "iam_locations_workforce_pools_providers_scim_ten…
+stored=89 skipped=0 failed=7
+```
+
+`function-record.v0.2.schema.json` caps a `name_hint` at **64 characters**. Google's deeply-nested
+resource paths sanitise well past that — IAM reaches **100** — and
+`iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.…` is not an exotic
+operation, it is how that API is shaped. `nl-validator certify` is untroubled:
+
+```
+$ nl-validator certify iam_locations_workforcepools_providers_scimtenants_tokens_create.v0.2.json …
+  => CERTIFIED
+```
+
+**Concluded.** `certify` does not validate a record against the function-record JSON schema, so the
+producer and the admitting authority disagree about what a valid record is. A record can be
+generated, certified, written to disk and reported as verified, and still be unpublishable — which
+is the same family as findings 1, 8 and 11, except the later, stricter gate here is the commons
+itself, so the artifact simply cannot exist in one.
+
+The cheap fix is for `certify` to schema-validate; the cheaper one is for the adapter to refuse (or
+truncate-with-a-note) a name it cannot publish, rather than emitting it. Which of those is right
+depends on whether the 64-character cap is itself the thing to revisit — a limit that excludes real
+operations from a real cloud API may be the defect.
+
+---
+
+## Do these findings generalise? Four APIs, 1,208 records
+
+The findings above were all measured on Cloud Storage. To see which are properties of *that*
+description and which are properties of the description layer, three more Google Cloud APIs went
+through the same pipeline, unmodified.
+
+| corpus | records | certified | refused | unpublishable (finding 12) |
+|---|---:|---:|---:|---:|
+| `storage v1` | 125 | 125 | 0 | 0 |
+| `cloudresourcemanager v3` | 28 | 28 | 0 | 0 |
+| `iam v1` | 48 | 48 | 0 | 7 |
+| `compute v1` (734 paths) | **1007** | 1007 | 0 | 5 |
+| **total** | **1208** | **1208** | **0** | **12** |
+
+**The description-layer path holds at SDK scale.** Compute v1 — the largest surface Google
+publishes — compiles to 1007 records with nothing refused and everything certified, no modification
+to the toolchain.
+
+**Finding 9 generalises completely.** Counting a create as naming its resource outside the body only
+when a path or required-query parameter matches the resource noun in its `operationId`:
+
+> **131 of 131** create-shaped operations across all four APIs name the new resource **in the request
+> body**. Not one names it in the URL.
+
+So the `body-field` key part that `b689ce5` added is not a GCS accommodation — without it, the
+`ensures` clause is inexpressible for every create in every one of these APIs.
+
+**Finding 11 generalises completely.** Across **1,164 operations** in four APIs, **zero** document a
+404 — or any non-2xx. Discovery describes success and nothing else. So every path-parameterised
+GET/DELETE in any Discovery-derived corpus carries the unsatisfiable example finding 11 describes;
+it is a property of the format, not of one API.
+
+**Finding 12 is scale-dependent**, which is why Cloud Storage never showed it: its longest
+`name_hint` is 50 characters, comfortably inside the cap. Only the deeply-nested APIs reach it.
 
 ## Reproducing
 
