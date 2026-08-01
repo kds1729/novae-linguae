@@ -271,10 +271,10 @@ document was checked.
 
 ---
 
-*Findings 9 and 10 come from pointing the architect machinery — `check-plan`, `assemble` — at this
-corpus for the first time, at upstream `c482645`. They are not defect reports: the plan checker and
-the assembler each behave exactly as specified. Both findings are about what a corpus derived from an
-API description can and cannot feed them.*
+*Findings 9, 10 and 11 come from pointing the architect machinery — `check-plan`, `assemble` — at this
+corpus for the first time, at upstream `c482645`. Nine and ten are not defect reports: the plan checker and
+the assembler each behave exactly as specified, and both are about what a corpus derived from an
+API description can and cannot feed them. Eleven is a defect, and the live gate is what exposed it.*
 
 ## 9. World refinements cannot key a resource the request body names
 
@@ -383,12 +383,58 @@ trace-attached observation, priced by the trust model like any other observed cl
 machinery already exists and already works (GW12). Whether the faithfulness contract should accept
 replayed evidence for goal-matching is a maintainer's question, not a patch.
 
-**One caveat for anyone reproducing this.** The pipeline publishes only *function records* to the
-commons, never their body ASTs — so a node loaded from it holds records that cannot be fetched for
-execution, and the first `assemble --node` run skipped all 120 candidates with `absent`. Loading the
-bodies as well (the node already accepts `kind: body`) is a one-line pipeline change, and without it
-the commons cannot execute or assemble its own corpus. That is a defect in this PoC's pipeline, not
-in the toolchain.
+**A defect in this PoC's pipeline, since fixed.** It published only *function records* — never the
+body ASTs, and never the observation traces — so a node loaded from it held records that could not be
+fetched for execution. The first `assemble --node` run skipped all 120 candidates as `absent`;
+publishing the bodies dropped that to 4 (the `trc_…` artifacts the observed examples reference), and
+publishing the traces too dropped it to **0**. A commons that cannot execute or replay its own corpus
+is not a commons, and the replay-based resolution suggested above would have been impossible from a
+node without the traces.
+
+## 11. A path-parameterised GET's worked example is unsatisfiable by construction
+
+Found by the first pass that ever live-gated this corpus.
+
+**Measured.** `_example_for` fills a path parameter with `gw7-absent-x` — deliberately "a name no
+test writes" — and then chooses the expected status:
+
+```python
+if verb in ("GET", "DELETE"):
+    if path_param_names:
+        want = 404 if 404 in codes else (codes[0] if codes else 200)
+```
+
+**Not one of the 81 operations documents a 404** — Google Discovery describes only the success case.
+So `want` falls through to `200`, and the example asserts *a GET on a deliberately-absent bucket
+returns 200*. Live:
+
+```
+storage_buckets_get   live-gate=FAIL: example 0 live result does not match the documented one:
+                      {"kind": "int", "value": 404} != {"kind": "int", "value": 200}
+storage_buckets_list  live-gate=FAIL: … {"kind": "int", "value": 400} != {"kind": "int", "value": 200}
+```
+
+`buckets.list` is the same shape one level over: its required `project` query parameter gets the
+synthesized `"hello world"`, which cannot produce the documented 200 either.
+
+**Concluded.** Two conventions that are individually sound contradict each other whenever a
+description omits its error cases: *use a name nothing has written* and *assert the documented
+status*. Against the in-repo fake service they agree, because it documents its 404s. Against a
+Discovery-derived description they never can — the example is false for every operation of that
+shape, and `certify` passes it because certify does not execute. It is the same family as findings 1
+and 8: an artifact that reports itself verified while carrying a claim nothing has checked.
+
+It also interacts with `--observe-arg`, which binds the *projections'* arguments but not the status
+record's. In the run above, 44 projections observed and schema-checked cleanly while both status
+records failed — so a live gate over such an operation reports failure even when every observation
+succeeded, which makes the exit code useless as a signal.
+
+**Suggested resolution, reusing what already exists:** when an `--observe-arg` binding names a real
+resource for an operation, use it for the status record's example too. The operator has supplied a
+value that *does* exist, so the documented success becomes reachable and the example becomes
+checkable. Failing that, an operation whose description documents no non-2xx outcome has no
+spec-derivable example for the absent-name convention, and saying so would be more honest than
+asserting a success that cannot hold.
 
 ## Reproducing
 
