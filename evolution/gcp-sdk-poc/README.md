@@ -1,9 +1,11 @@
 # A whole cloud API through the description layer
 
-- **Status:** published — back from `absorbed`. The two original defects are fixed and
-  [proposal 01](proposals/01-request-content-type.md) is `accepted` and implemented, but
-  [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) is a new
-  defect found after publication and is outstanding, so the module no longer qualifies as absorbed.
+- **Status:** published. Three of the four defects it has reported are fixed —
+  [proposal 01](proposals/01-request-content-type.md) is `accepted` and implemented, and
+  [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) was fixed in
+  `ff1c258` (verified against its own fixture: all three projections now refuse, and the legitimate
+  path is unaffected). [Finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
+  is open, so the module does not yet qualify as absorbed.
 - **Author:** Keith Sprochi <ksprochi@elementalmachines.com>
 - **Dates:** first published 2026-07-30, last updated 2026-08-01
 - **Scope:** `tooling/nl-ingest-openapi`; touches on `tooling/commons-node` retrieval and on
@@ -120,7 +122,14 @@ each against the corpus then showed — the answers work, and each surfaced the 
 - **Keying a world resource the request body names**
   ([finding 9](findings.md#9-world-refinements-cannot-key-a-resource-the-request-body-names)) — the
   driver the v0.1 world-state spec says richer vocabulary should be earned by.
-- **The finding 8 defect**, unfixed at `ca24c88`.
+- **The finding 11 defect** — a path-parameterised GET's synthesized example asserts a documented
+  success at a deliberately-absent name, which no description omitting its error cases can satisfy
+  (0 of 81 here document a 404).
+
+[Finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) is **fixed**
+in `ff1c258`, by a better route than the one suggested: each projection's verdict now rests on its
+*own* recorded observation rather than inheriting the whole-document projection's — which is right,
+since those are separate executions.
 
 ## Reproducing
 
