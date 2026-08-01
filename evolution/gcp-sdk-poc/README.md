@@ -5,7 +5,7 @@
   [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) was fixed in
   `ff1c258` (verified against its own fixture: all three projections now refuse, and the legitimate
   path is unaffected). [Finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
-  is open, so the module does not yet qualify as absorbed.
+  is the only one still open, so the module does not yet qualify as absorbed.
 - **Author:** Keith Sprochi <ksprochi@elementalmachines.com>
 - **Dates:** first published 2026-07-30, last updated 2026-08-01
 - **Scope:** `tooling/nl-ingest-openapi`; touches on `tooling/commons-node` retrieval and on
@@ -114,22 +114,38 @@ each against the corpus then showed — the answers work, and each surfaced the 
    is what exercising it surfaced — the create half of every lifecycle cannot declare its `ensures`,
    because the new resource is named in the request body.
 
+### Fixed since, and verified against this corpus
+
+- **[Finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call)** —
+  fixed in `ff1c258`, by a better route than the one suggested: each projection's verdict rests on
+  its *own* recorded observation rather than inheriting the whole-document projection's, which is
+  right, since those are separate executions. Re-run against the module's own fixture: all three
+  projections refuse, only the status record is written, and the legitimate path is untouched
+  (39 projections still admitted, `getLocation` still observes `Just("US")`).
+- **[Finding 9](findings.md#9-world-refinements-cannot-key-a-resource-the-request-body-names)** —
+  fixed in `b689ce5` by a `body-field` key part, grounded at plan-check time from the step's literal
+  argument, so decidability is untouched. The create → verify → delete plan that could only come back
+  `UNVERIFIABLE` is now **`PLAN-SOUND`**, and discharged by *step 1's own `ensures`* rather than by a
+  stated assumption — which was the whole point, since the assumption that made it pass before was
+  false at plan start.
+- **[Finding 10](findings.md#10-assemble-cannot-admit-any-record-from-this-corpus)** — fixed in
+  `b689ce5` by exactly the suggested resolution. `assemble` now answers the same goal:
+
+  ```
+  REUSED  storage_buckets_getlocation  fn_777700ffa716f1cf…
+    examples  1/1 matched by REPLAYED OBSERVATION — the publisher's recorded evidence,
+              verified offline; no effect performed (testimony, priced by your trust policy)
+  ```
+
+  A service-derived corpus is assemblable for the first time, with no effect performed and no
+  credentials — and the reuse pre-pass returns the address rather than rebuilding.
+
 ### Still open
 
-- **Matching an effectful candidate by replayed evidence** rather than live execution
-  ([finding 10](findings.md#10-assemble-cannot-admit-any-record-from-this-corpus)). Without it,
-  `assemble` admits nothing from any service-derived corpus — 121 of 121 records here are effectful.
-- **Keying a world resource the request body names**
-  ([finding 9](findings.md#9-world-refinements-cannot-key-a-resource-the-request-body-names)) — the
-  driver the v0.1 world-state spec says richer vocabulary should be earned by.
-- **The finding 11 defect** — a path-parameterised GET's synthesized example asserts a documented
-  success at a deliberately-absent name, which no description omitting its error cases can satisfy
-  (0 of 81 here document a 404).
-
-[Finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) is **fixed**
-in `ff1c258`, by a better route than the one suggested: each projection's verdict now rests on its
-*own* recorded observation rather than inheriting the whole-document projection's — which is right,
-since those are separate executions.
+- **The [finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
+  defect** — a path-parameterised GET's synthesized example asserts a documented success at a
+  deliberately-absent name, which no description omitting its error cases can satisfy (0 of 81 here
+  document a 404).
 
 ## Reproducing
 
