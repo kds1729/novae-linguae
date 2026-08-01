@@ -1,8 +1,9 @@
 # A whole cloud API through the description layer
 
-- **Status:** absorbed — findings merged, and both defects it reported are now fixed in the tree.
-  [Proposal 01](proposals/01-request-content-type.md) is `accepted` and implemented; nothing this
-  module raised is outstanding.
+- **Status:** published — back from `absorbed`. The two original defects are fixed and
+  [proposal 01](proposals/01-request-content-type.md) is `accepted` and implemented, but
+  [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) is a new
+  defect found after publication and is outstanding, so the module no longer qualifies as absorbed.
 - **Author:** Keith Sprochi <ksprochi@elementalmachines.com>
 - **Dates:** first published 2026-07-30, last updated 2026-07-31
 - **Scope:** `tooling/nl-ingest-openapi`; touches on `tooling/commons-node` retrieval and on
@@ -38,7 +39,8 @@ Two defects surfaced along the way, one of them silent for days.
 
 | file | what |
 |---|---|
-| [`findings.md`](findings.md) | The seven findings, each with the measurement behind it |
+| [`findings.md`](findings.md) | The eight findings, each with the measurement behind it |
+| [`repro/`](repro/) | Hermetic fixtures — no cloud account, no credentials, no vendor input |
 | [`proposals/01-request-content-type.md`](proposals/01-request-content-type.md) | Emit the declared request `Content-Type` — **accepted**, applied, and its three questions answered |
 
 ## Defects reported
@@ -59,6 +61,17 @@ Two defects surfaced along the way, one of them silent for days.
    converts to — so the exposed class is far wider than one vendor.
    **Fixed in #1** (`2659c09`) — diagnostics only, no artifact changes. The adapter now names the
    media type it declined and why.
+
+3. **An optional field projection materialises off a FAILED call** — when the observation gate's call
+   does not yield the declared 2xx document, the whole-document projection correctly refuses while
+   every *optional* field projection falls through and materialises with a `None` worked example,
+   reported `live=OBSERVED+schema-checked certify=OK examples=PASS`. One run, one response, opposite
+   verdicts. The guard that would catch it is `required_field`, and Google Discovery emits no
+   `required` at all — **0 of 34** schemas here declare one — so it is dead code for this entire
+   class of description. An expired token would silently mint a `None`-valued, certified projection
+   for every field of every operation in a corpus. **Open**; found after publication, reproduced
+   against `c482645`, hermetic fixture in [`repro/`](repro/). See
+   [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call).
 
 ## What worked well
 

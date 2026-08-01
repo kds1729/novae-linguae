@@ -1,0 +1,42 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Finding 8 — an optional field projection materialises off a FAILED call",
+    "version": "1.0.0",
+    "description": "A bodyless GET with no path parameters (so its projections are constructible) whose literal path the fake service does not serve, so the call answers 404. The declared 200 schema has only OPTIONAL properties — exactly what a Google Discovery-derived description produces, since Discovery emits no `required` at all. The whole-document Body projection correctly refuses. The optional field projections fall through the gate and materialise with a `None` worked example, reported as OBSERVED+schema-checked and certify=OK."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:18879"
+    }
+  ],
+  "paths": {
+    "/items/definitely-absent": {
+      "get": {
+        "operationId": "getAbsent",
+        "summary": "Reads an item the service does not have; answers 404.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The item document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "alpha": {
+                      "type": "string"
+                    },
+                    "beta": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
