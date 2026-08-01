@@ -95,6 +95,43 @@ fn ground(resource: &J, params: &[String], args: &[J]) -> Result<Ground> {
             Some("lit") => {
                 key.push(part.get("value").cloned().ok_or_else(|| anyhow!("lit key part has no value"))?);
             }
+            // Finding 9 (evolution/gcp-sdk-poc): the REST creation idiom names the new resource
+            // INSIDE the request body, so a create's `ensures` needs a key part read from a
+            // top-level field of a JSON body parameter. Grounded from the step's LITERAL
+            // argument — the checker parses the plan's own concrete data, never runtime values —
+            // and anything that cannot ground (non-string arg, unparseable JSON, absent field,
+            // non-scalar field) is a malformed plan/declaration pair: an error, not a verdict.
+            Some("body-field") => {
+                let pname = part.get("param").and_then(|n| n.as_str()).unwrap_or("");
+                let fname = part.get("field").and_then(|f| f.as_str()).unwrap_or("");
+                let pos = params
+                    .iter()
+                    .position(|p| p == pname)
+                    .ok_or_else(|| anyhow!("world resource key reads body field `{fname}` of `{pname}`, not a parameter"))?;
+                let arg = args.get(pos).ok_or_else(|| anyhow!("argument {pos} missing"))?;
+                let s = (arg.get("kind").and_then(|k| k.as_str()) == Some("string"))
+                    .then(|| arg.get("value").and_then(|v| v.as_str()))
+                    .flatten()
+                    .ok_or_else(|| anyhow!("`{pname}` is not a string argument — a body-field key needs a JSON body literal"))?;
+                let doc: J = serde_json::from_str(s)
+                    .map_err(|_| anyhow!("the plan's `{pname}` argument is not JSON — the body-field key `{fname}` cannot ground"))?;
+                let v = doc
+                    .get(fname)
+                    .ok_or_else(|| anyhow!("the plan's `{pname}` argument carries no field `{fname}` — the resource this call is declared to affect is unnamed"))?;
+                let encoded = match v {
+                    J::String(x) => serde_json::json!({ "kind": "string", "value": x }),
+                    J::Bool(x) => serde_json::json!({ "kind": "bool", "value": x }),
+                    J::Number(n) if n.is_i64() => {
+                        serde_json::json!({ "kind": "int", "value": n.as_i64() })
+                    }
+                    _ => {
+                        return Err(anyhow!(
+                            "field `{fname}` of `{pname}` is not a scalar — a resource key must be"
+                        ))
+                    }
+                };
+                key.push(encoded);
+            }
             other => return Err(anyhow!("unsupported world key part kind {other:?}")),
         }
     }
@@ -357,6 +394,62 @@ mod tests {
         assert!(matches!(rep.outcome, PlanOutcome::Sound), "{:?}", rep.lines);
     }
 
+    /// A record over (container, body) — the REST creation shape: the new resource's name
+    /// travels INSIDE the JSON body argument (finding 9).
+    fn rec2(name: &str, refs: Vec<J>, records: &mut HashMap<String, J>, bodies: &mut HashMap<String, J>) -> String {
+        let body = json!({ "kind": "lambda",
+            "params": [{ "name": "container" }, { "name": "body" }],
+            "body": { "kind": "var", "name": "container" } });
+        let bh = crate::hash_artifact_with_kind(&body, crate::ArtifactKind::BodyExpression).unwrap();
+        let mut r = json!({
+            "schema_version": "0.2.0", "hash": "fn_".to_string() + &"0".repeat(64),
+            "name_hints": [name],
+            "signature": { "type": { "kind": "fn",
+                                     "params": [{ "kind": "builtin", "name": "string" },
+                                                { "kind": "builtin", "name": "string" }],
+                                     "result": { "kind": "builtin", "name": "int" } },
+                           "refinements": refs, "effects": ["net.write"], "capabilities": [],
+                           "terminates": "always" },
+            "examples": [], "intent_tags": [], "derived_from": J::Null, "supersedes": J::Null,
+            "body_hash": bh });
+        let h = crate::hash_artifact_with_kind(&r, crate::ArtifactKind::FunctionRecord).unwrap();
+        r["hash"] = json!(h.clone());
+        records.insert(h.clone(), r);
+        bodies.insert(bh, body);
+        h
+    }
+
+    fn body_field(param: &str, field: &str) -> J {
+        json!({ "kind": "body-field", "param": param, "field": field })
+    }
+
+    #[test]
+    fn create_names_its_resource_in_the_body_and_the_lifecycle_discharges() {
+        // Finding 9 (evolution/gcp-sdk-poc): `insert(container, body)` creates the resource
+        // NAMED IN the body — `ensures bucket(body.name) exists` was inexpressible, so the
+        // correct create -> verify plan could only come back UNVERIFIABLE. With a body-field
+        // key it grounds from the plan's literal body argument, and the same ground resource
+        // discharges a later step's parameter-keyed requires.
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        let ins = rec2("insert", vec![ensures(
+            json!({ "class": "bucket", "key": [body_field("body", "name")] }), "exists")],
+            &mut r, &mut b);
+        let get = rec("get", vec![requires(
+            json!({ "class": "bucket", "key": [var_x()] }), "exists")], &mut r, &mut b);
+        let p = json!({ "steps": [
+            { "target": ins, "args": [s("proj"), s("{\"name\": \"nl-demo\"}")] },
+            { "target": get, "args": [s("nl-demo")] },
+        ]});
+        let rep = check_plan(&p, &r, &b).unwrap();
+        assert!(matches!(rep.outcome, PlanOutcome::Sound), "{:?}", rep.lines);
+        // A DIFFERENT name in the body does not discharge the read — unknown, never silent.
+        let p = json!({ "steps": [
+            { "target": ins, "args": [s("proj"), s("{\"name\": \"other\"}")] },
+            { "target": get, "args": [s("nl-demo")] },
+        ]});
+        assert!(matches!(check_plan(&p, &r, &b).unwrap().outcome, PlanOutcome::Unverifiable(_)));
+    }
+
     #[test]
     fn malformed_declarations_are_errors_not_verdicts() {
         let (mut r, mut b) = (HashMap::new(), HashMap::new());
@@ -368,6 +461,21 @@ mod tests {
         // An arity mismatch likewise.
         let (put, _, _) = trio(&mut r, &mut b);
         let p = json!({ "steps": [{ "target": put, "args": [] }] });
+        assert!(check_plan(&p, &r, &b).is_err());
+    }
+
+    #[test]
+    fn ungroundable_body_field_is_an_error_not_a_verdict() {
+        // A body-field key that cannot ground from the plan's literal body argument — not
+        // JSON, or the field absent — is a malformed plan/declaration pair: an error, never a
+        // silent verdict (the resource the call is declared to affect would be unnamed).
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        let ins = rec2("insert", vec![ensures(
+            json!({ "class": "bucket", "key": [body_field("body", "name")] }), "exists")],
+            &mut r, &mut b);
+        let p = json!({ "steps": [{ "target": ins, "args": [s("proj"), s("not json")] }] });
+        assert!(check_plan(&p, &r, &b).is_err());
+        let p = json!({ "steps": [{ "target": ins, "args": [s("proj"), s("{\"other\": 1}")] }] });
         assert!(check_plan(&p, &r, &b).is_err());
     }
 }

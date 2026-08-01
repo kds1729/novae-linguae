@@ -105,7 +105,7 @@ pub use orchestrate::{
 };
 
 pub mod assemble;
-pub use assemble::{assemble, record_solves_goal, Assembled, Stage};
+pub use assemble::{assemble, record_solves_goal, Assembled, GoalMatch, Stage};
 pub mod plan;
 pub use plan::{check_plan, PlanOutcome, PlanReport};
 

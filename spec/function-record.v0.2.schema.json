@@ -229,6 +229,17 @@
             "kind": { "const": "lit" },
             "value": { "$ref": "#/$defs/ve_value" }
           }
+        },
+        {
+          "type": "object",
+          "description": "A key part read from a top-level field of a JSON request-body parameter — the REST creation idiom names the new resource INSIDE the body (evolution/gcp-sdk-poc finding 9: 9 of 9 GCS creates), so `ensures` on a create was inexpressible without it. `param` names the record's body parameter (a string parameter carrying JSON); `field` a top-level scalar field of that document. Grounded at PLAN-CHECK time from the step's literal argument — the checker parses the plan's own concrete data, never runtime values, so decidability is untouched; a plan whose body argument is not a JSON object carrying the field is malformed (an error, not a verdict).",
+          "required": ["kind", "param", "field"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "body-field" },
+            "param": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "field": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
         }
       ]
     },

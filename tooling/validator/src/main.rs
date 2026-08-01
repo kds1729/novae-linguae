@@ -1895,9 +1895,10 @@ fn cmd_assemble(
                     {
                         for h in &hashes {
                             let Some(rec) = recs.get(h) else { continue };
-                            if !nl_validator::record_solves_goal(rec, &recs, &bods, &examples) {
+                            let Some(tier) = nl_validator::record_solves_goal(rec, &recs, &bods, &examples)
+                            else {
                                 continue;
-                            }
+                            };
                             if require_certified {
                                 let Some(body) = rec.pointer("/body_hash").and_then(|b| b.as_str())
                                     .and_then(|bh| bods.get(bh)) else { continue };
@@ -1908,7 +1909,18 @@ fn cmd_assemble(
                             let name = rec.pointer("/name_hints/0").and_then(|n| n.as_str()).unwrap_or("fn");
                             println!("REUSED       {name}  {h}");
                             println!("  type        {}", rec.pointer("/signature/type").map(|t| t.to_string()).unwrap_or_default());
-                            println!("  examples    {}/{} verified through the existing record", examples.len(), examples.len());
+                            match tier {
+                                nl_validator::GoalMatch::Executed => println!(
+                                    "  examples    {}/{} verified by EXECUTION on the goal's arguments",
+                                    examples.len(), examples.len()),
+                                // Finding 10 (evolution/gcp-sdk-poc): the tier that admits an
+                                // EFFECTFUL record — no effect was performed; the goal matched
+                                // the record's recorded worked examples, each verified by
+                                // offline replay of its trace. Honest scope rides in the label.
+                                nl_validator::GoalMatch::Replayed => println!(
+                                    "  examples    {}/{} matched by REPLAYED OBSERVATION — the publisher's recorded evidence, verified offline; no effect performed (testimony, priced by your trust policy)",
+                                    examples.len(), examples.len()),
+                            }
                             if require_certified {
                                 println!("  certified   true (re-certified locally)");
                             }

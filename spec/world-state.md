@@ -23,10 +23,21 @@ A function record's `signature.refinements[]` may carry, alongside the value ref
   behavior; **`ensures`** — what the call leaves true.
 - A **resource** is a `class` (free lowercase-kebab convention, like intent tags — `item`,
   `bucket`, `vpc`, `subnet`) plus a **key**: parameters of the function (by name — the body's
-  lambda binders, the same convention `check-refinement` uses for value refinements) and/or
-  literal values. Instantiating the key at a call's actual arguments **grounds** the resource:
-  `item(name)` applied at `name = "widget"` is the ground resource `item("widget")`. An empty key
-  names a class-wide singleton.
+  lambda binders, the same convention `check-refinement` uses for value refinements), literal
+  values, and/or **body fields**. Instantiating the key at a call's actual arguments **grounds**
+  the resource: `item(name)` applied at `name = "widget"` is the ground resource
+  `item("widget")`. An empty key names a class-wide singleton.
+- A **`body-field` key part** (`{ "kind": "body-field", "param": "body", "field": "name" }`) reads
+  a top-level scalar field of a JSON request-body parameter — earned by
+  [`evolution/gcp-sdk-poc` finding 9](../evolution/gcp-sdk-poc/findings.md): the REST creation
+  idiom names the new resource *inside* the body (9 of 9 GCS creates), so without this a create's
+  `ensures` — exactly the clause a lifecycle plan needs — was inexpressible and the correct plan
+  could only come back unverifiable. It grounds at **plan-check time from the step's literal
+  argument**: the checker parses the plan's own concrete data, never runtime values, so
+  decidability is untouched — and a grounded `bucket(body.name)` is the *same* resource as a later
+  step's parameter-keyed `bucket(bucket)`, which is what lets the create discharge the read. A
+  body argument that is not a JSON object carrying the field is a malformed plan/declaration pair:
+  an **error**, never a verdict (the resource the call is declared to affect would be unnamed).
 - **`state`** is `exists` or `absent` — deliberately the whole v0.1 state vocabulary. It covers
   the driver cases (create/verify/delete lifecycles, requires-a-VPC/guarantees-a-subnet); richer
   state (attributes, quantities, ownership) is future vocabulary, earned by a driver, not
