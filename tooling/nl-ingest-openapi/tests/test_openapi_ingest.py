@@ -862,8 +862,11 @@ class ObserveArgTest(unittest.TestCase):
         self.assertEqual(kind_rec["examples"][0]["result"],
                          {"kind": "variant", "tag": "Just",
                           "payload": {"kind": "string", "value": "widget"}})
+        # Finding 11's constructive half: the LEAF example also takes the operator's arguments
+        # and asserts the documented success — real, reachable, live-checked above.
         leaf = json.load(open(Path(tmp) / "getitem.v0.2.json"))
-        self.assertEqual(leaf["examples"][0]["result"], {"kind": "int", "value": 404})
+        self.assertEqual(leaf["examples"][0]["args"][1], {"kind": "string", "value": "oq1-widget"})
+        self.assertEqual(leaf["examples"][0]["result"], {"kind": "int", "value": 200})
         r = subprocess.run([str(VALIDATOR), "run", str(Path(tmp) / "getitembody.v0.2.json"),
                             "--records", tmp], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -907,13 +910,36 @@ class ObserveArgTest(unittest.TestCase):
                                 "--observe-arg", "noSuchOp.name=x"])
         self.assertIn("no such operationId", str(code))
 
-    def test_no_declared_schema_refuses(self):
+    def test_binding_a_schemaless_get_supplies_the_leaf_example(self):
+        # A binding on a GET with no declared response schema is still consumed — it supplies
+        # the STATUS record's worked example (finding 11's constructive half): the operator's
+        # arguments, asserting the documented success, live-checked against the real item.
+        import urllib.request
+        req = urllib.request.Request(f"{self.base}/items/oq1-leaf",
+                                     data=b'{"kind": "leaf"}', method="PUT",
+                                     headers={"Authorization": "Bearer test-token"})
+        urllib.request.urlopen(req, timeout=5)
         op = self._get_item_op(responses={"200": {"description": "no body promised"},
                                           "404": {"description": "absent"}})
-        tmp, code = self._main(self._spec("http://127.0.0.1:1", {"get": op}),
-                               ["--verify-against", "http://127.0.0.1:1",
-                                "--observe-arg", "getItem.name=x"])
-        self.assertIn("no declared 2xx JSON response schema", str(code))
+        tmp, code = self._main(self._spec(self.base, {"get": op}),
+                               ["--verify-against", self.base,
+                                "--observe-arg", "getItem.name=oq1-leaf"])
+        self.assertEqual(code, 0)
+        leaf = json.load(open(Path(tmp) / "getitem.v0.2.json"))
+        self.assertEqual(leaf["examples"][0]["args"][1], {"kind": "string", "value": "oq1-leaf"})
+        self.assertEqual(leaf["examples"][0]["result"], {"kind": "int", "value": 200})
+
+    def test_pathparam_get_without_documented_404_refuses(self):
+        # Finding 11: the absent-name convention would assert a documented success at a name
+        # deliberately chosen to be absent — false by construction (Discovery documents only
+        # success). Without a binding the operation is REFUSED with the reason, not compiled
+        # with an unsatisfiable example; certify cannot catch it, so generation must.
+        op = self._get_item_op(responses={"200": {"description": "the item",
+            "content": {"application/json": {"schema": {"type": "object"}}}}})
+        tmp, code = self._main(self._spec("http://127.0.0.1:1", {"get": op}), [])
+        self.assertNotEqual(code, 0)
+        out_records = list(Path(tmp).glob("*.v0.2.json"))
+        self.assertEqual(out_records, [], "an unsatisfiable example must not be written")
 
     def test_requires_verify_against(self):
         tmp, code = self._main(self._spec("http://127.0.0.1:1", {"get": self._get_item_op()}),

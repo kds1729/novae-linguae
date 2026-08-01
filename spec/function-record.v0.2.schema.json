@@ -71,7 +71,7 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$",
       "minLength": 1,
-      "maxLength": 64
+      "maxLength": 128
     },
     "intent_tag": {
       "type": "string",

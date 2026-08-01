@@ -171,3 +171,13 @@ authored, since descriptions cannot supply them. The `*/*` media-type gate is th
 remains the description's own to fix: a media range promises any type, so it licenses no
 parses-as-JSON promise — declare the concrete type (or transform the description to) and the
 projections follow.
+
+Two further defects the module's 1,208-record generalisation surfaced are fixed in-tree: a
+**path-parameterised GET/DELETE whose description documents no 404 is refused** rather than
+compiled with an example asserting a documented success at a deliberately-absent name (finding 11
+— false by construction, and `certify` cannot see it because certify does not execute; an
+`--observe-arg` binding dissolves the refusal for GET by making the leaf example real — the
+operator's arguments, the documented success, live-checked), and **`certify` now
+schema-validates the record as its zeroth check** (finding 12 — a record the commons gate would
+refuse can no longer report itself certified; the `name_hint` cap also widened 64 → 128, since a
+real cloud API's operation names legitimately reach 100 characters).
