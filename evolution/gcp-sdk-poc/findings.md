@@ -391,6 +391,26 @@ publishing the traces too dropped it to **0**. A commons that cannot execute or 
 is not a commons, and the replay-based resolution suggested above would have been impossible from a
 node without the traces.
 
+### Addendum after the fix: reuse is unblocked, composition is not
+
+`b689ce5` makes an effectful record matchable **as a whole** — `record_solves_goal` accepts a
+`Replayed` match against the record's own trace-carrying example. Multi-stage assembly is a separate
+path and did not change. `search()` builds its candidate list with no purity filter and then advances
+each state by `crate::eval_body(&c.body, &call)` — it *executes* a stage to produce the next stage's
+input. An effectful body evaluated without grants simply errors, so effectful candidates never
+advance a pipeline; they contribute nothing beyond the single-record reuse check.
+
+So the practical position for a service-derived corpus is: **an agent can now find a design that
+already exists, but still cannot compose a new one from effectful parts.** For the prior-art half of
+the architect story that is the important half — the reuse pre-pass returns an address rather than
+rebuilding. For the assembly half it is not yet enough.
+
+Composing by replay is harder than matching by replay, and possibly the honest answer is that it
+should not be attempted: chaining recorded observations would require stage 1's recorded *output* to
+be the input stage 2 was recorded *at*, so the pipeline would only assemble where the traces happen
+to line up — a much narrower and more fragile guarantee than the whole-record match. Recorded as an
+observation, not a request.
+
 ## 11. A path-parameterised GET's worked example is unsatisfiable by construction
 
 Found by the first pass that ever live-gated this corpus.
