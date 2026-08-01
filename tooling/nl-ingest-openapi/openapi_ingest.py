@@ -1298,6 +1298,24 @@ def materialize_schema_projection(p, out_dir, secrets, oauth_ids=(),
     if r.returncode != 0:
         return False, f"live observation failed: {(r.stderr or '').strip()}"
     got = json.loads(r.stdout)
+    # FINDING 8 (evolution/gcp-sdk-poc): a projection's `None` is only a legitimate observation
+    # when the declared document WAS OBTAINED and the field is genuinely absent — a failed call
+    # (401, 404, an expired token) produces the very same `None`, and the `required` guard below
+    # never fires on descriptions that declare no `required` at all (Google Discovery: 0 of 34
+    # schemas). So EVERY projection's own recorded observation is held to the declared status
+    # and a parseable JSON body first — each call judged on its own evidence (not inherited from
+    # the whole-document projection, whose call is a separate execution): no document, nothing
+    # to observe, nothing materialises.
+    t_status, t_body = _traced_call(trace_path)
+    if t_status != p["code"]:
+        return False, (f"the call answered {t_status}, not the declared {p['code']} — no "
+                       "document was obtained, so nothing can be observed (a failed call must "
+                       "not mint a worked example)")
+    try:
+        json.loads(t_body if t_body is not None else "")
+    except (ValueError, TypeError):
+        return False, (f"the {p['code']} response body is not JSON — no document was obtained, "
+                       "so nothing can be observed")
     is_none = isinstance(got, dict) and got.get("kind") == "variant" and got.get("tag") == "None"
     if p["field"] is None:
         if is_none:
@@ -1325,6 +1343,27 @@ def materialize_schema_projection(p, out_dir, secrets, oauth_ids=(),
     rp = os.path.join(out_dir, f"{fbase}.v0.2.json")
     json.dump(record, open(rp, "w"), indent=2)
     return True, record
+
+
+def _traced_call(trace_path):
+    """The (status, body) the recorded observation actually holds — the evidence a projection's
+    verdict must rest on. A projection body collapses a failed call and an absent field into the
+    same `None`; the trace does not: it records the one http op's real status and body. Returns
+    (None, None) when the trace holds no call at all."""
+    try:
+        trace = json.load(open(trace_path))
+    except (OSError, ValueError):
+        return None, None
+    ops = trace.get("ops") or []
+    if not ops:
+        return None, None
+    status = body = None
+    for f in (ops[0].get("result") or {}).get("fields", []):
+        if f.get("name") == "status":
+            status = (f.get("value") or {}).get("value")
+        elif f.get("name") == "body":
+            body = (f.get("value") or {}).get("value")
+    return status, body
 
 
 def verify_examples(record_path, out_dir, base_url, secret_names, token):
