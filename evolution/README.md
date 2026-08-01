@@ -115,4 +115,4 @@ applied to the work *about* the project. Update a status by editing it in place 
 
 | module | status | what |
 |---|---|---|
-| [`gcp-sdk-poc`](gcp-sdk-poc/) | `absorbed` | A whole cloud API (Google Cloud Storage v1, 81 operations) through `nl-ingest-openapi`, then provisioned live by executing the generated records. Two defects, three quantified design boundaries, and what the description layer cannot supply. Both defects now fixed in the tree. |
+| [`gcp-sdk-poc`](gcp-sdk-poc/) | `published` | A whole cloud API (Google Cloud Storage v1, 81 operations) through `nl-ingest-openapi`, then provisioned live by executing the generated records. Three defects (the third, finding 8, found after publication), quantified design boundaries, and what the description layer cannot supply. All three defect fixes are in the tree; the module's own resolution note is its author's to record. |

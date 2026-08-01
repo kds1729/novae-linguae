@@ -728,6 +728,49 @@ class SchemaObservationGateTest(unittest.TestCase):
         self.assertFalse((Path(tmp) / "gethealthbody.v0.2.json").exists())
         self.assertFalse((Path(tmp) / "gethealthstatus.v0.2.json").exists())
 
+    def test_failed_call_never_mints_an_optional_projection(self):
+        # FINDING 8 (evolution/gcp-sdk-poc): a constructible GET whose call FAILS (here: the
+        # service requires auth the spec doesn't declare, so 401) must not materialise ANY
+        # projection — including the optional-field ones the `required` guard never covered
+        # (Discovery-derived descriptions declare no `required` at all). Every projection's own
+        # recorded observation is held to the declared status: no document, nothing observed.
+        spec = {"openapi": "3.0.0", "info": {"title": "f8", "version": "1"},
+                "servers": [{"url": self.base}],
+                "paths": {"/items/definitely-absent": {"get": {
+                    "operationId": "getAbsent", "security": [],
+                    "responses": {"200": {"description": "the item",
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "properties": {"alpha": {"type": "string"},
+                                           "beta": {"type": "string"}}}}}}}}}}}
+        tmp = tempfile.mkdtemp(prefix="nl-openapi-schema-f8-")
+        sp = Path(tmp) / "spec.json"
+        json.dump(spec, open(sp, "w"))
+        code = 0
+        try:
+            oi.main([str(sp), "--out", tmp, "--verify-against", self.base])
+        except SystemExit as e:
+            code = e.code
+        self.assertEqual(code, 1)
+        for name in ("getabsentbody", "getabsentalpha", "getabsentbeta"):
+            self.assertFalse((Path(tmp) / f"{name}.v0.2.json").exists(),
+                             f"{name} materialised off a failed call")
+
+    def test_optional_none_with_obtained_document_still_materialises(self):
+        # The other half of finding 8's distinction: when the declared document WAS obtained and
+        # an optional field is genuinely absent, `None` is a legitimate observation — the record
+        # materialises, trace-attached, and replays offline.
+        tmp, code = self._ingest({"type": "object",
+                                  "properties": {"status": {"type": "string"},
+                                                 "uptime": {"type": "string"}}}, "optabsent")
+        self.assertEqual(code, 0)
+        up = json.load(open(Path(tmp) / "gethealthuptime.v0.2.json"))
+        ex = up["examples"][0]
+        self.assertEqual(ex["result"], {"kind": "variant", "tag": "None"})
+        self.assertTrue(ex["trace"].startswith("trc_"))
+        st = json.load(open(Path(tmp) / "gethealthstatus.v0.2.json"))
+        self.assertEqual(st["examples"][0]["result"]["tag"], "Just")
+
 
 class ObserveArgTest(unittest.TestCase):
     """Operator-supplied observation arguments (--observe-arg — the answer to
