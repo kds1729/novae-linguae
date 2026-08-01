@@ -206,6 +206,69 @@ rather than a workaround — and applying it is the necessary first step to lice
 from this description. It is still not proposed upstream: the adapter's correct fix is the note, and
 a description that means `application/json` should say so.
 
+## 8. An optional field projection materialises off a FAILED call
+
+Found after the module was first published, while applying `*/*` → `application/json` (finding 7) and
+then pointing the observation gate at real GCS. Reproduced against upstream `c482645`.
+
+**Measured — hermetically, no cloud and no credentials.** A bodyless `GET` with no path parameters
+(so its projections are constructible), a literal path the in-repo fake service does not serve, and a
+declared 200 schema whose two properties are **optional**. The call answers 401; the gate then
+disagrees with itself:
+
+```
+getAbsentBody    observation-gate=FAIL: live response did not yield the declared 200 JSON document
+getabsent        live-gate=FAIL: example 0 live result does not match the documented one: 401 != 200
+getabsentalpha   live=OBSERVED+schema-checked  certify=OK  examples=PASS (replayed offline)
+getabsentbeta    live=OBSERVED+schema-checked  certify=OK  examples=PASS (replayed offline)
+```
+
+Two records are written, each with `result: {"kind": "variant", "tag": "None"}` and a trace of the
+failed request. The same behaviour reproduces against live GCS, where a synthesized `?project=hello
+world` answers 400 and four `storage.buckets.list` field projections materialise identically.
+
+**The branch is exact** (`openapi_ingest.py`, `materialize_schema_projection`):
+
+```python
+is_none = … got.get("tag") == "None"
+if p["field"] is None:                    # whole document
+    if is_none:
+        return False, "live response did not yield the declared … JSON document …"
+    …_value_conforms(…)
+elif p["required_field"] and is_none:     # a REQUIRED field
+    return False, "required property … absent or mistyped …"
+# an OPTIONAL field with is_none falls through and materialises
+```
+
+**And the guard that would catch it cannot fire on a Discovery-derived corpus.** Google's Discovery
+documents emit no `required` at all: **0 of the 34** schemas in the Cloud Storage description declare
+one, so `required_field` is `False` for every field projection in the corpus. The `elif` is dead code
+for this whole class of description, and every field projection of a failed call materialises.
+
+**Concluded.** For an optional field, `None` is a legitimate observation when the document *was*
+obtained and the field was simply absent. The gate never distinguishes that from `None` because no
+document was obtained at all — and the information needed to tell them apart is already computed, two
+branches up, by the whole-document projection.
+
+Three consequences, in increasing order:
+
+1. **The `schema-checked` label is false.** Nothing was held to the declared shape, because there was
+   no document to hold.
+2. **The record is vacuous but certified.** A `Maybe`-typed projection whose only worked example is
+   `None` demonstrates nothing about extracting the field; `None` is what it returns for any failing
+   call. It ships `certify=OK`, `examples=PASS`, trace attached, ready to publish.
+3. **The gate contradicts itself** — one run, one response, opposite verdicts. That needs no
+   agreement about what *should* happen; the adapter already disagrees with itself.
+
+The failure mode is the one proposal 01's decision 1 named: an artifact reporting itself verified
+when its evidence establishes nothing. And an expired token would silently mint a `None`-valued,
+`certify=OK` projection for every field of every operation in a corpus.
+
+**Smallest fix that restores consistency:** let the field projections inherit the whole-document
+verdict. It already computes exactly the right conclusion for the whole response; that conclusion
+applies to every projection over it. Failing that, at minimum do not print `schema-checked` when no
+document was checked.
+
 ## Reproducing
 
 Findings 1–3 need no credentials and no network.
@@ -231,6 +294,17 @@ python3 openapi_ingest.py storage.v1.openapi3.bearer.json --out /tmp/gcs 2>&1 | 
 grep -c "optional query param" /tmp/gcs.log         # 877
 grep -c "response body not projected" /tmp/gcs.log  #  69   (after the fix; 0 before)
 ls /tmp/gcs/*.v0.2.json | wc -l                     #  81
+
+# finding 8 — fully hermetic: the in-repo fake service, no cloud, no credentials
+python3 tooling/fake-service/fake_service.py --port 18879 &
+python3 openapi_ingest.py \
+    evolution/gcp-sdk-poc/repro/finding-8-optional-projection.openapi.json \
+    --out /tmp/f8 --verify-against http://127.0.0.1:18879
+# getAbsentBody   observation-gate=FAIL          <- correct
+# getabsentalpha  live=OBSERVED+schema-checked   <- from a 401, example is None
+# getabsentbeta   live=OBSERVED+schema-checked   <- ditto
+python3 -c "import json;print(json.load(open('/tmp/f8/getabsentalpha.v0.2.json'))['examples'][0]['result'])"
+# -> {'kind': 'variant', 'tag': 'None'}
 ```
 
 The live provisioning step needs a GCP project and `gcloud auth print-access-token`; it is not
