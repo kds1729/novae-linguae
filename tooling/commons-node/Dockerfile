@@ -10,6 +10,10 @@
 FROM rust:1-bookworm AS validator
 WORKDIR /build
 COPY tooling/validator ./validator
+# certify's zeroth check compiles the pinned v0.2 record schema INTO the binary
+# (include_str!("../../../spec/…") from validator/src/ resolves to /spec here) — the schema must
+# be present at build time, matching the repo layout one level up from tooling/.
+COPY spec /spec
 # Only the nl-validator binary is needed (verify/validate); building just it skips the other bins.
 RUN cargo build --release --manifest-path validator/Cargo.toml --bin nl-validator
 
