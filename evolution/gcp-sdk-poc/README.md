@@ -5,7 +5,8 @@
   [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) was fixed in
   `ff1c258` (verified against its own fixture: all three projections now refuse, and the legitimate
   path is unaffected). [Finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
-  is the only one still open, so the module does not yet qualify as absorbed.
+  and [finding 12](findings.md#12-certify-admits-records-the-commons-cannot-accept) are open, so the
+  module does not yet qualify as absorbed.
 - **Author:** Keith Sprochi <ksprochi@elementalmachines.com>
 - **Dates:** first published 2026-07-30, last updated 2026-08-01
 - **Scope:** `tooling/nl-ingest-openapi`; touches on `tooling/commons-node` retrieval and on
@@ -27,6 +28,10 @@ create → verify → delete against live GCS by executing those records through
 Nothing was hand-authored, and **no modification to this repository was required**: the one transform
 the pipeline applies is to the *description*, not to the adapter or the language.
 
+Since extended to three more APIs — `cloudresourcemanager v3`, `iam v1` and `compute v1` — for
+**1,208 records, all certified, none refused**, which is where the generalisation results at the end
+of [`findings.md`](findings.md) come from.
+
 So the description-layer bet holds at cloud scale. The useful content of this module is the negative
 space, and it is uncomfortable in one specific way: **the generated corpus cannot express a plan.**
 Every leaf record projects `.status` and discards `.body`. The run licensed **zero** body projections
@@ -43,7 +48,7 @@ Two defects surfaced along the way, one of them silent for days.
 
 | file | what |
 |---|---|
-| [`findings.md`](findings.md) | The eleven findings, each with the measurement behind it |
+| [`findings.md`](findings.md) | The twelve findings, each with the measurement behind it, and how they generalise across four APIs |
 | [`repro/`](repro/) | Hermetic fixtures — no cloud account, no credentials, no vendor input |
 | [`proposals/01-request-content-type.md`](proposals/01-request-content-type.md) | Emit the declared request `Content-Type` — **accepted**, applied, and its three questions answered |
 
@@ -153,6 +158,10 @@ each against the corpus then showed — the answers work, and each surfaced the 
 
 ### Still open
 
+- **The [finding 12](findings.md#12-certify-admits-records-the-commons-cannot-accept) defect** —
+  `certify` does not schema-validate, so a record can be generated, certified and written while the
+  commons refuses it. 12 of 1,208 records across four APIs are unpublishable because a `name_hint`
+  exceeds the schema's 64-character cap (IAM reaches 100).
 - **The [finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
   defect** — a path-parameterised GET's synthesized example asserts a documented success at a
   deliberately-absent name, which no description omitting its error cases can satisfy (0 of 81 here
