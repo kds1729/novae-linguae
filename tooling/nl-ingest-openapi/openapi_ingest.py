@@ -38,7 +38,15 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
                     and the imported subtree comes back fully inlined. URL references (no network
                     at ingestion time), absolute paths, paths escaping the spec's directory, and
                     dangling/cyclic references refuse the operation honestly
-    responses    -> the documented status the worked example asserts; a 2xx response that
+    responses    -> the documented status the worked example asserts. A path-parameterised
+                    GET/DELETE whose description documents NO 404 is REFUSED (finding 11,
+                    evolution/gcp-sdk-poc: the absent-name convention would assert a documented
+                    success at a name deliberately chosen to be absent — false by construction,
+                    and certify cannot see it; Discovery-derived descriptions document only
+                    success, 0 of 1,164 ops across four APIs carry any non-2xx). An
+                    `--observe-arg` binding dissolves the refusal for GET: the leaf example
+                    takes the operator's arguments and asserts the documented success, which is
+                    now reachable and live-checkable. A 2xx response that
                     documents an application/json EXAMPLE additionally yields a body-projection
                     record `<opId>Body : … -> Maybe Json` (`parse_json` over the response body —
                     field access then composes in-language via the certified json_get/json_path
@@ -856,6 +864,46 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
     example = _example_for(base_url, verb, path_param_names, has_body, op,
                            query_ps=query_ps, header_ps=header_ps, int_params=int_params, spec=spec,
                            mp_parts=mp_parts)
+
+    # --observe-arg accounting (validated ONCE, used by the leaf example and the schema-derived
+    # projections alike): None = no bindings; "consumed" = they shaped the observation; any other
+    # string = the stated reason they could not (main refuses an unheeded binding loudly).
+    obs_args = None
+    observe_status = None
+    if observe is not None:
+        # Read-only by rule: an observation must not create state during ingestion — only GET is
+        # eligible (a HEAD carries no body to project); unbound path parameters and stray
+        # bindings refuse with the reason; nothing is ever guessed.
+        if verb != "GET":
+            observe_status = ("observation-sourced examples are read-only — a live "
+                              f"`{verb}` during ingestion would "
+                              + ("carry no body to project" if verb == "HEAD"
+                                 else "mutate server state") + " (GET only)")
+        elif has_body or mp_parts:
+            observe_status = ("the operation declares a request body — caller data an "
+                              "observation must not invent")
+        else:
+            obs_args, obs_why = _observed_call_args(base_url, by_kind, int_params, observe)
+            observe_status = "consumed" if obs_args is not None else obs_why
+
+    # FINDING 11 (evolution/gcp-sdk-poc): the absent-name convention asserts the DOCUMENTED
+    # status, but a Discovery-derived description documents only success (0 of 1,164 operations
+    # across four APIs carry any non-2xx) — so a path-parameterised GET/DELETE example would
+    # assert a documented success at a name deliberately chosen to be absent: false by
+    # construction, and certify cannot see it (certify does not execute). Two ways out:
+    #   - an --observe-arg binding names a REAL resource — the leaf example takes the operator's
+    #     arguments and asserts the documented success, which is now reachable and live-checkable;
+    #   - otherwise the operation is REFUSED with the reason: no spec-derivable example exists.
+    resp_codes = sorted(int(c) for c in op.get("responses", {}) if c.isdigit())
+    if obs_args is not None:
+        success = next((c for c in resp_codes if 200 <= c < 300), 200)
+        example = {"args": obs_args, "result": {"kind": "int", "value": success}}
+    elif path_param_names and verb in ("GET", "DELETE") and 404 not in resp_codes:
+        return ("skip", op_id,
+                f"path-parameterised {verb} documents no 404 — the absent-name convention "
+                "cannot reach any documented outcome, so no spec-derivable worked example "
+                "exists (for GET, `--observe-arg` names a real resource and makes the "
+                "documented success reachable)")
     intent = ["io", "io/network/http"] + (["query/lookup"] if verb in _READ_VERBS else [])
     # Discovery precision (the GitHub-scale finding: 10 same-sort effectful fits the rank could
     # not split, because every generated record carried the SAME four tags): each record gets ONE
@@ -879,16 +927,8 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
     # parameters and no request body (path parameters name server state the description cannot
     # promise). Field access composes in-language (json_get / json_path), principle 4.
     pending = []
-    # --observe-arg accounting: None = no bindings for this operation; "consumed" = the bindings
-    # shaped an observation; any other string = the stated reason they could not (main refuses an
-    # unheeded binding loudly — an operator asked for an observation that will not happen).
-    observe_status = None if observe is None else \
-        "no declared 2xx JSON response schema to observe (nothing pends on an observation)"
     proj = _response_json_example(spec, op)
     if proj is not None:
-        if observe is not None:
-            observe_status = ("the documented response example already supplies the worked "
-                              "example — nothing to observe")
         proj_code, proj_doc = proj
         expected = _json_to_value(proj_doc)
         if verb != "GET" or path_param_names or has_body:
@@ -927,35 +967,16 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
         sch = _response_json_schema(spec, op)
         if sch is not None:
             s_code, s_schema = sch
+            # Eligible when the call is spec-constructible (bodyless GET, no path parameters) OR
+            # the operator supplied the arguments (--observe-arg — gcp-sdk-poc open question 1;
+            # validated once, above, where the leaf example also took them).
             constructible = verb == "GET" and not path_param_names and not has_body
-            obs_args = None
-            if observe is not None:
-                # Operator-supplied arguments (gcp-sdk-poc open question 1). Read-only by rule
-                # (question 2): an observation must not create state during ingestion, so only
-                # GET is eligible — a HEAD response carries no body to project, and a mutating
-                # verb refuses outright. Unbound path parameters and stray bindings refuse with
-                # the reason; nothing is ever guessed.
-                if verb != "GET":
-                    observe_status = ("observation-sourced examples are read-only — a live "
-                                      f"`{verb}` during ingestion would "
-                                      + ("carry no body to project" if verb == "HEAD"
-                                         else "mutate server state") + " (GET only)")
-                elif has_body:
-                    observe_status = ("the operation declares a request body — caller data an "
-                                      "observation must not invent")
-                else:
-                    obs_args, obs_why = _observed_call_args(base_url, by_kind, int_params,
-                                                            observe)
-                    observe_status = "consumed" if obs_args is not None else obs_why
             if not constructible and obs_args is None:
                 notes.append("declared response schema not projected — only a bodyless GET "
                              "without path parameters has a spec-constructible success call; "
                              "operator-supplied arguments can observe one "
                              "(--observe-arg <opId>.<param>=<value>, GET only)")
             elif s_schema.get("type") != "object" and not s_schema.get("properties"):
-                if observe_status == "consumed":
-                    observe_status = ("the declared schema is not an object document — "
-                                      "nothing to project")
                 notes.append("declared response schema not projected — this increment "
                              "projects object documents only")
             else:
@@ -1401,10 +1422,12 @@ def main(argv=None):
     ap.add_argument("--observe-arg", action="append", default=None, metavar="OPID.PARAM=VALUE",
                     help="operator-supplied argument for the live observation gate: makes a "
                          "path-parameter GET eligible for schema-derived projections by naming "
-                         "the server state the description cannot (repeatable; the rightmost dot "
-                         "before `=` splits opId from param). Read-only by rule — a mutating "
-                         "verb, an unbound path parameter, or a binding that touches nothing "
-                         "refuses with the reason. Requires --verify-against.")
+                         "the server state the description cannot, AND supplies the status "
+                         "record's worked example (the documented success becomes reachable — "
+                         "finding 11's constructive half). Repeatable; the rightmost dot before "
+                         "`=` splits opId from param. Read-only by rule — a mutating verb, an "
+                         "unbound path parameter, or a binding that touches nothing refuses "
+                         "with the reason. Requires --verify-against.")
     args = ap.parse_args(argv)
 
     spec = load_spec(args.spec)

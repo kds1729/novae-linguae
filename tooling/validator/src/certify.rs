@@ -4,13 +4,17 @@
 //! ([`crate::orchestrate`]), so a discovered function is *certified before it is applied* — principle 3
 //! (verified by default) made operational in "assemble, don't write".
 //!
-//! The checks are `typecheck` (type), `check-effects` (effects ⊆ declared), `check-refinement` (the
-//! type-implied `nat` + declared `pre`/`post`), `check-termination` (a declared `terminates: always`), and
-//! `check-complexity` (a declared `complexity` and the structured `cost`). A record is **certified** unless a
-//! check *actively fails its declaration* — an ILL-TYPED body, an UNDER-DECLARED effect, or a VIOLATED
-//! refinement (`hard_fail`); the conservative UNVERIFIABLE verdicts (a bound/termination the structural
-//! analysis can't confirm) are recorded but do not revoke certification, since none of those checks can
-//! *disprove* a claim, only fail to establish it.
+//! The checks are `schema` (the record validates against the pinned v0.2 function-record schema —
+//! the ZEROTH check, evolution/gcp-sdk-poc finding 12: without it a record could certify and still
+//! be refused by the commons gate, because the producer's checker and the admitting authority
+//! disagreed about what a valid record even is), `typecheck` (type), `check-effects` (effects ⊆
+//! declared), `check-refinement` (the type-implied `nat` + declared `pre`/`post`),
+//! `check-termination` (a declared `terminates: always`), and `check-complexity` (a declared
+//! `complexity` and the structured `cost`). A record is **certified** unless a check *actively
+//! fails its declaration* — a SCHEMA-INVALID record, an ILL-TYPED body, an UNDER-DECLARED effect,
+//! or a VIOLATED refinement (`hard_fail`); the conservative UNVERIFIABLE verdicts (a
+//! bound/termination the structural analysis can't confirm) are recorded but do not revoke
+//! certification, since none of those checks can *disprove* a claim, only fail to establish it.
 
 use serde_json::Value as J;
 use std::collections::HashMap;
@@ -72,11 +76,53 @@ fn time_verdict_parts(declared: &str, inferred: &ComplexityOutcome) -> (&'static
     }
 }
 
+/// The pinned v0.2 function-record schema, compiled into the binary (it is self-contained —
+/// inlined `$defs`, no cross-file refs — so the check runs wherever the binary does, with no
+/// spec tree on disk). Single source: the file in `spec/` at build time.
+const FN_RECORD_V02_SCHEMA: &str = include_str!("../../../spec/function-record.v0.2.schema.json");
+
+fn v02_validator() -> Option<&'static jsonschema::Validator> {
+    static V: std::sync::OnceLock<Option<jsonschema::Validator>> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        let schema: J = serde_json::from_str(FN_RECORD_V02_SCHEMA).ok()?;
+        jsonschema::options().with_draft(jsonschema::Draft::Draft202012).build(&schema).ok()
+    })
+    .as_ref()
+}
+
 /// Run every "verified by default" check against `record` + `body`, resolving `fn_ref` effect callees
 /// against `records`. See the module docs for the certification rule.
 pub fn certify_record(record: &J, body: &J, records: &HashMap<String, J>, solver: &str) -> Certification {
     let sig = record.pointer("/signature");
     let mut checks: Vec<CertCheck> = Vec::new();
+
+    // 0. Schema (finding 12): "certified" must imply "the commons gate will accept it". A v0.2
+    // record is held to the pinned record schema; SCHEMA-INVALID revokes certification. Other
+    // schema versions predate the structured schema this binary pins — noted, never failed.
+    match record.get("schema_version").and_then(|v| v.as_str()) {
+        Some("0.2.0") => match v02_validator() {
+            Some(v) => {
+                let errors: Vec<String> = v
+                    .iter_errors(record)
+                    .map(|e| format!("at {}: {e}", e.instance_path))
+                    .collect();
+                if errors.is_empty() {
+                    checks.push(CertCheck::new("schema", "VALID", "v0.2 function-record schema", false));
+                } else {
+                    checks.push(CertCheck::new("schema", "SCHEMA-INVALID", errors.join("; "), true));
+                }
+            }
+            None => checks.push(CertCheck::new(
+                "schema", "UNVERIFIABLE", "embedded v0.2 schema failed to compile", false,
+            )),
+        },
+        v => checks.push(CertCheck::new(
+            "schema", "N/A",
+            format!("schema_version {} — only v0.2 records are schema-pinned here",
+                    v.unwrap_or("(absent)")),
+            false,
+        )),
+    }
 
     // 1. Type.
     match typecheck_record(record, body) {
@@ -184,4 +230,60 @@ pub fn certify_record(record: &J, body: &J, records: &HashMap<String, J>, solver
     let subject = record.get("hash").and_then(|h| h.as_str()).unwrap_or("<unknown>").to_string();
     let body_hash = record.get("body_hash").and_then(|h| h.as_str()).unwrap_or("<unknown>").to_string();
     Certification { subject, body_hash, checks, certified }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A minimal well-formed v0.2 record over `\n -> add(n, n)` with the given primary name.
+    fn record_named(name: &str) -> (J, J) {
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body":
+            { "kind": "app", "fn": { "kind": "var", "name": "add" },
+              "args": [{ "kind": "var", "name": "n" }, { "kind": "var", "name": "n" }] } });
+        let bh = crate::hash_artifact_with_kind(&body, crate::ArtifactKind::BodyExpression).unwrap();
+        let mut rec = json!({
+            "schema_version": "0.2.0", "hash": "fn_".to_string() + &"0".repeat(64),
+            "name_hints": [name],
+            "signature": { "type": { "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
+                                     "result": { "kind": "builtin", "name": "int" } },
+                           "refinements": [], "effects": [], "capabilities": [],
+                           "terminates": "always" },
+            "examples": [{ "args": [{ "kind": "int", "value": 2 }],
+                           "result": { "kind": "int", "value": 4 } }],
+            "intent_tags": [], "derived_from": J::Null, "supersedes": J::Null, "body_hash": bh });
+        let h = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
+        rec["hash"] = json!(h);
+        (rec, body)
+    }
+
+    fn schema_check(cert: &Certification) -> &CertCheck {
+        cert.checks.iter().find(|c| c.check == "schema").expect("a schema check row")
+    }
+
+    #[test]
+    fn certified_implies_the_gate_will_accept_it() {
+        // Finding 12 (evolution/gcp-sdk-poc): certify's zeroth check is the record schema, so a
+        // record the commons gate would refuse can no longer report itself certified. The IAM
+        // case — a deeply-nested API's 100-char name_hint — is VALID under the widened cap.
+        let (rec, body) = record_named(&"n".repeat(100));
+        let cert = certify_record(&rec, &body, &HashMap::new(), "z3");
+        assert_eq!(schema_check(&cert).verdict, "VALID");
+        assert!(cert.certified, "{:?}", cert.checks);
+
+        // Past the cap (129) the record is SCHEMA-INVALID and certification is revoked — the
+        // producer and the admitting authority agree again.
+        let (rec, body) = record_named(&"n".repeat(129));
+        let cert = certify_record(&rec, &body, &HashMap::new(), "z3");
+        assert_eq!(schema_check(&cert).verdict, "SCHEMA-INVALID");
+        assert!(!cert.certified);
+
+        // A non-v0.2 record is noted, never failed — it predates the pinned schema.
+        let (mut rec, body) = record_named("plain");
+        rec["schema_version"] = json!("0.1.0");
+        let cert = certify_record(&rec, &body, &HashMap::new(), "z3");
+        assert_eq!(schema_check(&cert).verdict, "N/A");
+        assert!(!schema_check(&cert).hard_fail);
+    }
 }
