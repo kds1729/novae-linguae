@@ -13,9 +13,11 @@
 - **Provenance:** upstream commit `76fc6ba` (2026-07-15); Google Cloud Storage Discovery document
   `storage:v1` revision **20260719**; `google-discovery-to-swagger` **2.1.0**;
   `swagger2openapi` **7.0.8**; run date 2026-07-26
-- **Resolution:** module merged in #2. Defect 2 fixed in #1 (`2659c09`); defect 1 fixed by
-  accepting [proposal 01](proposals/01-request-content-type.md). The module's **open questions**
-  remain open — they are pointers for the next author, not outstanding proposals.
+- **Resolution:** module merged in #2. Defect 1 fixed by accepting
+  [proposal 01](proposals/01-request-content-type.md); defect 2 in `2659c09`; defect 3 in `ff1c258`.
+  All four original **open questions** are answered in-tree, and findings 9 and 10 — raised by
+  exercising those answers — are fixed in `b689ce5`. Defect 4 ([finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction))
+  is outstanding.
 
 ## Summary
 
@@ -71,9 +73,17 @@ Two defects surfaced along the way, one of them silent for days.
    verdicts. The guard that would catch it is `required_field`, and Google Discovery emits no
    `required` at all — **0 of 34** schemas here declare one — so it is dead code for this entire
    class of description. An expired token would silently mint a `None`-valued, certified projection
-   for every field of every operation in a corpus. **Open**; found after publication, reproduced
-   against `c482645`, hermetic fixture in [`repro/`](repro/). See
+   for every field of every operation in a corpus. **Fixed in `ff1c258`** — each projection's verdict
+   now rests on its own recorded observation. Found after publication; hermetic fixture in
+   [`repro/`](repro/). See
    [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call).
+
+4. **A path-parameterised GET's worked example is unsatisfiable by construction** — the synthesized
+   example fills the path parameter with a deliberately-absent name and then asserts the *documented*
+   status. Where a description documents a 404 those agree; **0 of 81** here do, so the example
+   asserts that a GET on an absent bucket returns 200. `certify` passes it because certify does not
+   execute. **Open.** See
+   [finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction).
 
 ## What worked well
 
@@ -105,9 +115,10 @@ each against the corpus then showed — the answers work, and each surfaced the 
    right split; an earlier local spike that declared them in the description was worse, because it
    would bake one operator's environment into a shared artifact.
 3. ~~Composite-level intent tags and retrieval.~~ — **answered by `assemble`'s derived discovery
-   metadata and the node's `/v0/records/{hash}/derivations`.** Not reachable from this corpus yet:
-   `/derivations` needs a composite to exist, and [finding 10](findings.md#10-assemble-cannot-admit-any-record-from-this-corpus)
-   is why none can be assembled.
+   metadata and the node's `/v0/records/{hash}/derivations`.** `/derivations` is still unexercised
+   here, but no longer because nothing can be assembled: the goal tried was solved by **reuse**, so
+   an existing address came back and no composite was created. Exercising `/derivations` needs a
+   goal that genuinely requires composing two stages.
 4. ~~Refinements over world state.~~ — **answered by `check-plan` and `spec/world-state.md`.**
    Exercised: it correctly `REJECTED` a use-after-delete, naming the step, the resource, and the
    prior step whose `ensures` contradicted it. [Finding 9](findings.md#9-world-refinements-cannot-key-a-resource-the-request-body-names)
