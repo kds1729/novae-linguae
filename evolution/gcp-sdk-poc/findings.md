@@ -529,6 +529,80 @@ it is a property of the format, not of one API.
 **Finding 12 is scale-dependent**, which is why Cloud Storage never showed it: its longest
 `name_hint` is 50 characters, comfortably inside the cap. Only the deeply-nested APIs reach it.
 
+---
+
+## 13. Finding 11's refusal makes path-parameterised DELETE unreachable
+
+Found by re-running the pipeline after `25fe525` fixed findings 11 and 12. The fix is right; this is
+its cost, and one verb bears all of it.
+
+**Measured — the fix works, and for GET it improves on what it replaced.** A path-parameterised
+GET/DELETE documenting no non-2xx is now skipped with an honest reason instead of minting a false
+example, and an `--observe-arg` binding dissolves the refusal for GET. Bound against a real bucket,
+`storage.buckets.get` now compiles to 40 records **and the leaf example itself carries the observed
+arguments and a trace**:
+
+```
+storage_buckets_get  body=expr_fcdf12ae227259f…  live=PASS+traces  certify=OK  examples=PASS (replayed offline)
+  args   ['https://storage.googleapis.com/storage/v1', 'em-devops-miscellaneous-stuff']
+  result {"kind": "int", "value": 200}   trace: yes
+```
+
+That is strictly better than before: the status record used to assert an unreachable 200 at
+`gw7-absent-x`, and now it is trace-verified. It also closes finding 11's second half — the gate's
+exit code means something again, because the leaf no longer fails while its projections succeed.
+
+**Measured — the cost.** Re-ingesting Cloud Storage from the same description: **81 records → 43**.
+Across the four corpora:
+
+| api | operations | GET skipped | DELETE skipped |
+|---|---:|---:|---:|
+| `storage v1` | 81 | 29 | 9 |
+| `cloudresourcemanager v3` | 28 | 2 | 1 |
+| `iam v1` | 48 | 15 | 1 |
+| `compute v1` | 1007 | 375 | 98 |
+| **total** | **1164** | **421** | **109** |
+
+The **421 GETs are recoverable** — bind a resource and they come back carrying observed values.
+The **109 DELETEs are not recoverable by any route.** `--observe-arg` is read-only by rule, and the
+refusal fires structurally, before any network activity — pointed at a dead port so nothing could be
+contacted, binding a DELETE still gives:
+
+```
+storage.buckets.delete SKIPPED: path-parameterised DELETE documents no 404 …
+--observe-arg for `storage.buckets.delete` refused — the operation did not compile
+records written: 0
+```
+
+**Concluded.** A path-parameterised DELETE whose description documents no 404 can no longer be
+generated from a Discovery-derived description at all, and **0 of 1,164 operations across four APIs
+document one**. That is every such DELETE in every one of these APIs.
+
+The concrete loss is `storage.buckets.delete`, so the create → verify → delete lifecycle this module
+demonstrated end to end — the thing that showed provisioning by executing commons records — can no
+longer be assembled from a description. Deletes are half of what provisioning means, and the corpus
+now has none.
+
+The tension is real and both sides are sound. An observation must not create or destroy state during
+ingestion, so the read-only rule is right. And a worked example must not assert an outcome it cannot
+reach, so the refusal is right. But together they remove a verb rather than a bad example.
+
+Two directions, neither obviously correct, both for a maintainer:
+
+- **Let the operator vouch for the outcome without performing it.** The blocker is not that the
+  DELETE's documented outcome is unreachable — bound to a real resource it is perfectly reachable —
+  it is that reaching it costs the resource. An operator-supplied *expected status* would give the
+  example a documented outcome to assert without the gate ever running it, leaving the claim as
+  ordinary spec-derived testimony rather than an observation.
+- **Treat the absent-name convention as reaching an undocumented outcome honestly.** A DELETE on a
+  name nothing has written answers 404 whether or not the description admits it. Asserting a 404 the
+  description does not document would be unfaithful to the *description* while faithful to the
+  *service* — which is a judgement about which the record is supposed to describe.
+
+Recorded before regenerating anything: this module's corpus should not be republished until the
+delete surface is settled, because a corpus that cannot express teardown is worse than the one it
+would replace.
+
 ## Reproducing
 
 Findings 1–3 need no credentials and no network.
