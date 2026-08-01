@@ -2135,6 +2135,25 @@ class WorldRefinementGateTests(TestCase):
             got = self.client.get(f"/v0/records/{rec['hash']}")
             self.assertEqual(got.json()["signature"]["refinements"], rec["signature"]["refinements"])
 
+    def test_body_field_keyed_refinement_passes_the_gate(self):
+        # Finding 9 (evolution/gcp-sdk-poc): the REST creation idiom names the new resource in
+        # the request body, so a create's `ensures` keys it by `body-field`. The strict gate
+        # must accept the widened key vocabulary — this is the parity pin.
+        rec = _load("put-note.v0.2.json")
+        rec["name_hints"] = ["put_note_bodykeyed"]
+        rec["signature"]["refinements"].append(
+            {"kind": "ensures", "state": "exists",
+             "resource": {"class": "annotation",
+                          "key": [{"kind": "body-field", "param": "note", "field": "id"}]}})
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(rec, f)
+        out = subprocess.run([str(VALIDATOR), "hash", f.name], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        rec["hash"] = out.stdout.strip()
+        resp = self.client.post("/v0/records", data=json.dumps(rec),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+
 
 # --- body storage tiering (commons.md open question 4) ---------------------------------------------
 

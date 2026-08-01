@@ -456,44 +456,91 @@ fn identity_metadata() -> CompositionMetadata {
     }
 }
 
-/// Does an EXISTING record already solve the goal — every example reproduced through its body?
-/// The REUSE check (gcp-sdk-poc open question 3's loop face): before a pipeline is searched for,
-/// a previously published record — typically an assembled composite — that maps every goal input
-/// to its output IS the assembly, found rather than rebuilt. Verify-before-run discipline: the
-/// body must be statically pure (no effects, nothing opaque or unresolved) and terminating, or it
-/// simply isn't run — discovered code is never executed on spec. A match is bounded evidence (the
-/// goal's own examples), so the caller still certifies the record before relying on it.
+/// How an existing record was matched to a goal — the evidence tier, surfaced so the caller can
+/// label the reuse honestly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GoalMatch {
+    /// The body EXECUTED on the goal's own arguments (statically pure + terminating) and
+    /// reproduced every example — the strongest tier.
+    Executed,
+    /// Every goal example coincides with one of the record's trace-carrying worked examples,
+    /// each verified by OFFLINE REPLAY — no effect performed, no grants, no secrets. The
+    /// evidence is the publisher's recorded observations, priced like any other testimony
+    /// (evolution/gcp-sdk-poc finding 10: without this tier, assembly admits nothing from a
+    /// service-derived corpus — every record of one is effectful by definition).
+    Replayed,
+}
+
+/// Does an EXISTING record already solve the goal? The REUSE check (gcp-sdk-poc open question
+/// 3's loop face): before a pipeline is searched for, a previously published record that maps
+/// every goal input to its output IS the assembly, found rather than rebuilt. Two evidence
+/// tiers, strongest first, under the standing verify-before-run discipline — a body this node
+/// cannot statically verify pure + terminating is NEVER executed on spec:
+///
+/// 1. **Executed** — a pure, terminating body runs on the goal's own arguments.
+/// 2. **Replayed** (finding 10) — an effectful (or statically opaque) record matches when every
+///    goal example equals one of its recorded worked examples — same args, same result, a trace
+///    attached — and those examples verify by offline replay against the recorded observations.
+///    No effect is performed; the match rests on the publisher's testimony, exactly the GW12
+///    grading, and the honest label rides back to the caller.
+///
+/// Either way the match is bounded evidence (the goal's own examples), so the caller still
+/// certifies the record before relying on it.
 pub fn record_solves_goal(
     record: &J,
     records: &HashMap<String, J>,
     bodies: &HashMap<String, J>,
     examples: &[(Vec<J>, J)],
-) -> bool {
-    let Some(want_arity) = arity(record) else { return false };
+) -> Option<GoalMatch> {
+    let want_arity = arity(record)?;
     if examples.is_empty() || examples.iter().any(|(args, _)| args.len() != want_arity) {
-        return false;
+        return None;
     }
-    let Some(body) = record
+    let body = record
         .pointer("/body_hash")
         .and_then(|b| b.as_str())
-        .and_then(|bh| bodies.get(bh))
-    else {
-        return false;
-    };
+        .and_then(|bh| bodies.get(bh))?;
     let inf = crate::infer_effects(body, records);
     let safe = inf.effects.is_empty()
         && !inf.opaque
         && !inf.unresolved
         && matches!(crate::analyze_termination(body), crate::TerminationOutcome::Always);
-    if !safe {
-        return false;
+    if safe {
+        crate::set_resolver(bodies.clone());
+        let solves = examples
+            .iter()
+            .all(|(args, want)| matches!(crate::eval_body(body, args), Ok(got) if &got == want));
+        crate::clear_resolver();
+        // An executed mismatch is definitive counter-evidence — never fall through to a weaker tier.
+        return if solves { Some(GoalMatch::Executed) } else { None };
     }
+    // Evidence tier: every goal example must equal a RECORDED example (args and result
+    // identical, structurally) that carries a trace — an example without recorded observations
+    // is a claim this node cannot check without performing the effect, so it is no evidence.
+    let rec_examples = record.get("examples").and_then(|e| e.as_array()).cloned().unwrap_or_default();
+    let mut matched: Vec<usize> = Vec::new();
+    for (args, want) in examples {
+        let idx = rec_examples.iter().position(|ex| {
+            ex.get("args").and_then(|a| a.as_array()) == Some(args)
+                && ex.get("result") == Some(want)
+                && ex.get("trace").and_then(|t| t.as_str()).is_some()
+        })?;
+        matched.push(idx);
+    }
+    // Replay-verify offline: the recorded observations are served from the trace (resolved
+    // through the same link map), no grants installed, the trace consumed exactly.
     crate::set_resolver(bodies.clone());
-    let solves = examples
-        .iter()
-        .all(|(args, want)| matches!(crate::eval_body(body, args), Ok(got) if &got == want));
+    let runs = crate::run_examples(record, body);
     crate::clear_resolver();
-    solves
+    let runs = runs.ok()?;
+    let verified = matched
+        .iter()
+        .all(|i| runs.iter().any(|r| r.index == *i && r.passed));
+    if verified {
+        Some(GoalMatch::Replayed)
+    } else {
+        None
+    }
 }
 
 /// The most specific intent tag a record declares: the longest (hierarchical tags grow more
@@ -764,20 +811,73 @@ mod tests {
         add_unary("double", "add", &mut r, &mut b);
         let h = r.keys().find(|k| r[*k]["name_hints"][0] == "double").unwrap().clone();
         let rec = r[&h].clone();
-        // Reproduces every example -> the goal is already solved.
-        assert!(record_solves_goal(&rec, &r, &b, &[(vec![int(3)], int(6)), (vec![int(5)], int(10))]));
+        // Reproduces every example -> the goal is already solved, by the strongest tier.
+        assert_eq!(record_solves_goal(&rec, &r, &b, &[(vec![int(3)], int(6)), (vec![int(5)], int(10))]),
+                   Some(GoalMatch::Executed));
         // One mismatching example kills it; so does an arity mismatch; so does an empty goal.
-        assert!(!record_solves_goal(&rec, &r, &b, &[(vec![int(3)], int(6)), (vec![int(5)], int(11))]));
-        assert!(!record_solves_goal(&rec, &r, &b, &[(vec![int(3), int(1)], int(6))]));
-        assert!(!record_solves_goal(&rec, &r, &b, &[]));
-        // Verify-before-run: an effectful body is never executed on spec, whatever it might return.
+        assert!(record_solves_goal(&rec, &r, &b, &[(vec![int(3)], int(6)), (vec![int(5)], int(11))]).is_none());
+        assert!(record_solves_goal(&rec, &r, &b, &[(vec![int(3), int(1)], int(6))]).is_none());
+        assert!(record_solves_goal(&rec, &r, &b, &[]).is_none());
+        // Verify-before-run: an effectful body is never EXECUTED on spec, whatever it might
+        // return — and with no recorded example matching the goal, no evidence tier admits it.
         let eff = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body":
             { "kind": "app", "fn": { "kind": "var", "name": "print" },
               "args": [{ "kind": "var", "name": "n" }] } });
         insert("shout", &json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
             "result": { "kind": "builtin", "name": "int" } }), eff, &mut r, &mut b);
         let sh = r.keys().find(|k| r[*k]["name_hints"][0] == "shout").unwrap().clone();
-        assert!(!record_solves_goal(&r[&sh], &r, &b, &[(vec![int(3)], int(3))]));
+        assert!(record_solves_goal(&r[&sh], &r, &b, &[(vec![int(3)], int(3))]).is_none());
+    }
+
+    /// An EFFECTFUL record whose worked example carries a real recorded trace: build it by
+    /// actually running the body once under a grant and capturing the observations — the same
+    /// artifact the adapters' live gates attach.
+    fn effectful_record_with_trace(records: &mut HashMap<String, J>, bodies: &mut HashMap<String, J>)
+                                   -> (String, J, J) {
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body":
+            { "kind": "app", "fn": { "kind": "var", "name": "print" },
+              "args": [{ "kind": "var", "name": "n" }] } });
+        crate::interp::set_effect_grants(["io.console".to_string()]);
+        let got = crate::eval_body(&body, &[int(7)]).unwrap();
+        let ops = crate::interp::take_effect_trace();
+        crate::interp::set_effect_grants(Vec::<String>::new());
+        let trace = json!({ "kind": "trace", "ops": ops });
+        let trc = crate::hash_artifact_with_kind(&trace, crate::ArtifactKind::Trace).unwrap();
+        let bh = crate::hash_artifact_with_kind(&body, crate::ArtifactKind::BodyExpression).unwrap();
+        let mut rec = json!({
+            "schema_version": "0.2.0", "hash": "fn_".to_string() + &"0".repeat(64),
+            "name_hints": ["announce"],
+            "signature": { "type": { "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
+                                     "result": { "kind": "builtin", "name": "unit" } },
+                           "refinements": [], "effects": ["io.console"], "capabilities": [],
+                           "terminates": "always" },
+            "examples": [{ "args": [int(7)], "result": got, "trace": trc }],
+            "intent_tags": [], "derived_from": J::Null, "supersedes": J::Null, "body_hash": bh });
+        let h = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
+        rec["hash"] = json!(h.clone());
+        records.insert(h.clone(), rec);
+        bodies.insert(bh, body);
+        bodies.insert(trc, trace);
+        (h, got, int(7))
+    }
+
+    #[test]
+    fn effectful_record_matches_by_replayed_observation() {
+        // Finding 10 (evolution/gcp-sdk-poc): an effectful record is admitted when the goal
+        // coincides with its RECORDED worked example, verified by offline replay — no effect
+        // performed, no grants installed. The label says which tier matched.
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        let (h, got, arg) = effectful_record_with_trace(&mut r, &mut b);
+        let rec = r[&h].clone();
+        assert_eq!(record_solves_goal(&rec, &r, &b, &[(vec![arg.clone()], got.clone())]),
+                   Some(GoalMatch::Replayed));
+        // A goal the recorded evidence does not cover is no match — argument or result.
+        assert!(record_solves_goal(&rec, &r, &b, &[(vec![int(8)], got.clone())]).is_none());
+        assert!(record_solves_goal(&rec, &r, &b, &[(vec![arg.clone()], int(0))]).is_none());
+        // Tampered evidence: without the trace artifact the example cannot replay — no match.
+        let trc = rec["examples"][0]["trace"].as_str().unwrap().to_string();
+        b.remove(&trc);
+        assert!(record_solves_goal(&rec, &r, &b, &[(vec![arg], got)]).is_none());
     }
 
     #[test]
