@@ -53,6 +53,7 @@ Two defects surfaced along the way, one of them silent for days.
 | [`findings.md`](findings.md) | The thirteen findings, each with the measurement behind it, and how they generalise across four APIs |
 | [`repro/`](repro/) | Hermetic fixtures — no cloud account, no credentials, no vendor input |
 | [`proposals/01-request-content-type.md`](proposals/01-request-content-type.md) | Emit the declared request `Content-Type` — **accepted**, applied, and its three questions answered |
+| [`proposals/02-idempotent-delete-observation.md`](proposals/02-idempotent-delete-observation.md) | Observe the idempotent DELETE at the absent name, recovering the 109 unreachable deletes — **proposed** |
 
 ## Defects reported
 
@@ -173,6 +174,9 @@ each against the corpus then showed — the answers work, and each surfaced the 
   `--observe-arg` is read-only by rule, so **109 path-parameterised DELETEs across four APIs are
   unreachable by any route**, `storage.buckets.delete` among them. The create → verify → delete
   lifecycle this module demonstrated can no longer be assembled from a description.
+  [Proposal 02](proposals/02-idempotent-delete-observation.md) offers a route: the absent-name DELETE
+  is the verb's *idempotent* case and provably changes nothing (measured live: 404 → DELETE 404 →
+  404), so the blocking rule — enforced on the verb — over-refuses a call that has no effect.
 
 
 ## Reproducing
