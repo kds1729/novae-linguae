@@ -75,6 +75,12 @@ did not.
 them; label inferences as inferences; keep recommendations in their own section where a reader can
 reject them without discarding the data.
 
+The same discipline applies to a proposal's open questions: **separate what you settled from what
+you are asking.** A question a measurement or a precedent settles is the author's to resolve, and
+recording it as settled is more useful than asking it. Only a judgement between two goods genuinely
+blocks — see [`TEMPLATE.md`](TEMPLATE.md) under *Proposals*. Most proposals collapse to one real
+question, and finding that one is the author's job, not the reviewer's.
+
 This is what keeps the directory trustworthy rather than a pile of opinions, and it is what makes a
 module worth building on: the measurements stay useful even when the author's conclusions turn out
 to be wrong.

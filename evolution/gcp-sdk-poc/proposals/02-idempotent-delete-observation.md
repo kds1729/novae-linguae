@@ -1,4 +1,4 @@
-# Proposal 02 — observe the idempotent DELETE, and narrow the read-only rule to match its intent
+# Proposal 02 — observe the effect-free DELETE, and narrow the read-only rule to match its intent
 
 - **Status:** proposed
 - **Module:** [`gcp-sdk-poc`](../README.md)
@@ -20,16 +20,20 @@ predicate.
 
 ## Why the rule does not apply to this call
 
-`_example_for` fills the path parameter with `gw7-absent-x`, "a name no test writes". A DELETE
-there is **DELETE's idempotent case**: applied to a resource that is not present it changes nothing
-and reports absence. That is not an awkward edge of the verb, it is the defining property of it.
+`_example_for` fills the path parameter with `gw7-absent-x`, "a name no test writes". A DELETE there
+is the verb's **effect-free** case: applied where nothing is present it changes nothing and reports
+absence.
+
+Idempotency is how this case comes to notice — DELETE is *the* idempotent verb — but effect-freeness
+is the property doing the work, and the two come apart: `PUT` at an absent name is equally idempotent
+and **creates**. The boundary belongs at effect-freeness.
 
 So the call the gate is refusing is one that provably has no effect. Measured live against Cloud
 Storage, on a name deliberately never created:
 
 ```
 GET    /b/nl-gw7-absent-probe-never-created -> 404      (probe: it is absent)
-DELETE /b/nl-gw7-absent-probe-never-created -> 404      (the idempotent case)
+DELETE /b/nl-gw7-absent-probe-never-created -> 404      (the effect-free case)
 GET    /b/nl-gw7-absent-probe-never-created -> 404      (re-probe: nothing changed)
 ```
 
@@ -60,7 +64,7 @@ binding, nothing to supply. Finding 13 lists two other directions; this is bette
 |---|---|---|
 | Operator-supplied expected status | unverified testimony | a value per operation |
 | Assert an undocumented 404 | an invented claim | none, but unfaithful |
-| **Observe the idempotent DELETE** | **a real observation, trace-attached, replayable** | **none** |
+| **Observe the effect-free DELETE** | **a real observation, trace-attached, replayable** | **none** |
 
 The faithfulness objection that made the second direction uncomfortable does not apply here. Nothing
 is asserted that the description did not say — the description licenses the *shape*, and the
@@ -85,11 +89,38 @@ is what makes teardown safe to compose — and without it a corpus can provision
 - **The probe costs a call.** Two requests per operation instead of one, which for 109 operations is
   219 rather than 109. Cheap for the guarantee it buys.
 
-## Questions only a maintainer can answer
+## Settled here — not asked
 
-1. Is *no call that can change state* the right narrowing of the read-only rule, or does the
-   verb-level refusal earn its conservatism even where it provably over-refuses?
-2. Should the probe be mandatory, or should an operator be able to assert absence and skip it?
-3. `PUT`/`PATCH` at an absent name are also idempotent-ish in principle and are refused by the same
-   rule — deliberately out of scope here, since neither is safe in the way DELETE is (both may
-   *create*). Worth confirming that boundary is where you want it.
+Per [`evolution/TEMPLATE.md`](../../TEMPLATE.md), a question a measurement or a precedent settles is
+the author's to resolve. Two of the three this proposal originally asked were.
+
+**The criterion is effect-freeness, not idempotency — settled by measurement.** An earlier draft
+leaned on the word *idempotent*, and that is not the property doing the work. `PUT` at an absent
+name is idempotent too — repeat it, get the same result — but it **creates**. What makes the DELETE
+case admissible is that at an absent name it changes *nothing at all*. Drawing the boundary at
+effect-freeness admits DELETE-at-absent and excludes `PUT`/`PATCH` cleanly, so the scope question
+answers itself and the proposal's language is corrected throughout: idempotency is how the case was
+noticed, effect-freeness is why it is safe.
+
+**The probe is mandatory — settled by precedent.** "Verified by default" is the project's existing
+posture, and an optional safety check on a destructive verb is not a safety check. Letting an
+operator assert absence and skip the `GET` reintroduces exactly the risk the probe removes, for a
+saving of one request.
+
+## The one question that needs you
+
+**Is *no call that can change state* the right narrowing of the read-only rule?**
+
+The argument for is above: the verb-level rule provably over-refuses, and it costs 109 operations.
+
+The argument against deserves stating plainly, because it is not weak. A verb-level rule is
+**auditable by anyone**: *"ingestion never issues a DELETE"* is checkable from a request log, by
+someone who trusts nothing about the implementation. *"Ingestion never issues a call that changes
+state"* is only ever as good as the probe logic. That trades an externally-verifiable guarantee for
+a broader one that requires trusting this adapter — and for a project built on content-addressing,
+offline replay, and *the store stays untrusted*, that is a real cost rather than a technicality.
+
+My recommendation is to narrow it: 109 unreachable operations is a steep price for an audit property
+that the opt-in flag largely preserves anyway, since an operator who wants the strong guarantee
+simply does not pass the flag. But this is a judgement between two goods, not a measurement, and it
+is the only thing in this proposal that genuinely blocks.

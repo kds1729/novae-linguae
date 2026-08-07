@@ -50,7 +50,30 @@ including the uncomfortable parts.
      opening with its OWN status line (proposed | accepted | declined | absorbed) that moves
      independently of this module's. State the change, its blast radius, what it breaks, and the
      questions only a maintainer can answer. Include the diff inline if it is small, so the
-     proposal is self-contained. -->
+     proposal is self-contained.
+
+     CLASSIFY THE OPEN QUESTIONS BY WHAT WOULD SETTLE THEM, and do not present them as a flat list.
+     A flat list makes the reviewer do triage the author is better placed to do, and lets a proposal
+     look thorough while quietly offloading work. Three kinds:
+
+       * settled by MEASUREMENT  — you can resolve it, so resolve it. It does not belong in the
+                                   questions section at all; record it under "Settled here".
+       * settled by PRECEDENT    — resolvable by pointing at what the project already does. State
+                                   your recommendation, cite the precedent, and let it stand unless
+                                   vetoed. Also "Settled here".
+       * settled by PREFERENCE   — a judgement between two goods, with no measurement that decides
+                                   it. This is the only kind that genuinely blocks. Ask it, give
+                                   your recommendation, and state the strongest argument AGAINST
+                                   your own position, because that is what the decision turns on.
+
+     Weighting or scoring the questions is the wrong shape: a number assigned by the author is false
+     precision, it cannot be compared across proposals, and aggregating it would launder a judgement
+     into arithmetic. Classification says what kind of thing each question is; a weight only says how
+     loudly the author feels about it.
+
+     This is the same discipline the directory already asks for — separate what you measured from
+     what you argue — applied to the questions: separate what you settled from what you are asking.
+     In practice most proposals collapse to one real question. -->
 
 ## Open questions
 
