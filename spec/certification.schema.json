@@ -36,11 +36,11 @@
         "properties": {
           "check": {
             "type": "string",
-            "description": "The check performed, e.g. `typecheck`, `effects`, `refinement:<label>`, `termination`, `complexity`, `cost.time`, `cost.output_size`."
+            "description": "The check performed, e.g. `schema`, `typecheck`, `effects`, `refinement:<label>`, `termination`, `complexity`, `cost.time`, `cost.output_size`."
           },
           "verdict": {
             "type": "string",
-            "enum": ["WELL-TYPED", "ILL-TYPED", "SOUND", "VERIFIED", "UNVERIFIABLE", "UNDER-DECLARED", "VIOLATED", "N/A", "NO-SOLVER"]
+            "enum": ["VALID", "SCHEMA-INVALID", "WELL-TYPED", "ILL-TYPED", "SOUND", "VERIFIED", "UNVERIFIABLE", "UNDER-DECLARED", "VIOLATED", "N/A", "NO-SOLVER"]
           },
           "detail": {
             "type": "string"
