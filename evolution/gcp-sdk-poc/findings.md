@@ -603,6 +603,12 @@ Recorded before regenerating anything: this module's corpus should not be republ
 delete surface is settled, because a corpus that cannot express teardown is worse than the one it
 would replace.
 
+**Resolved** via [proposal 02](proposals/02-idempotent-delete-observation.md), accepted and
+applied in `b0271de`: the opt-in `--observe-absent-delete` runs the absent-name DELETE through
+the ordinary observation gate behind a probe-checked absence precondition and records what the
+service answered, trace-attached. The delete surface is settled; the held corpus regeneration
+can proceed.
+
 ## Reproducing
 
 Findings 1–3 need no credentials and no network.
