@@ -4388,6 +4388,105 @@ def combinatorial_specs(exclude_names=()):
                 {"args": [" 7"], "result": 0}],
                read_example=3))
 
+    # 55. WORLD-STATE / LIFECYCLE SHAPES — the cloud-experiment pull (evolution/gcp-sdk-poc +
+    # aws-sdk-poc, spec/world-state.md): the PURE idioms the plan/probe machinery runs on. Two
+    # genuinely new surfaces. (a) THREE-outcome classification: an int status routed through
+    # chained range/equality guards into a 3-tag NULLARY sum `[Exists Absent Unknown]` — no
+    # family emits a 3-nullary-tag sum (Maybe is payload+nullary, Result is two payloads), and
+    # the three-way split IS the probe decision (2xx = exists, 404 = absent, anything else
+    # inconclusive — an access fact never becomes a world verdict). String-label twins keep the
+    # same guard chain over a different result surface. (b) lifecycle-run summarization:
+    # short-circuit tail-descent walks over a list of statuses (all-clean conjunction, first
+    # failure as Maybe, leading-success count) — the run-the-plan shapes. Parameterized over
+    # the success band and the absent code so no two golds coincide; the effectful machinery
+    # (check-plan, probes, http itself) stays in the validator and spec/examples — only the
+    # pure shapes are corpus material (the #47 rationale). Tail-only descent -> the
+    # termination checker proves these walks, so they honestly declare always.
+    STATE_T = {"kind": "sum",
+               "variants": [{"tag": "Exists"}, {"tag": "Absent"}, {"tag": "Unknown"}]}
+    _S55 = [200, 201, 204, 299, 300, 403, 404, 410, 500, 100]
+    _L55 = [[], [200, 201, 204], [200, 404, 200], [500], [201, 204, 403, 200], [404]]
+    s55 = var("s")
+    xs55 = var("xs")
+
+    def _band_guard(v, lo, hi):
+        return bapp("and", bapp("ge", v, int_lit(lo)), bapp("lt", v, int_lit(hi)))
+
+    # 55a. the three-way probe decision, over (success band, absent code).
+    for lo, hi, ab in ((200, 300, 404), (200, 300, 410), (200, 400, 404), (200, 400, 410)):
+        add(_cspec(f"state_of_{hi}_{ab}",
+                   f"Classify a status: {lo}-{hi - 1} means the resource exists, {ab} means it "
+                   "is absent, anything else is unknown.",
+                   f"Exists for [{lo},{hi}); Absent for {ab}; Unknown otherwise.",
+                   ["http", "world-state", "variant", "case"], fn([INT], STATE_T),
+                   lam(["s"], case_bool(_band_guard(s55, lo, hi), variant_expr("Exists"),
+                                        case_bool(bapp("eq", s55, int_lit(ab)),
+                                                  variant_expr("Absent"),
+                                                  variant_expr("Unknown")))),
+                   [{"args": [v], "result": (V("Exists") if lo <= v < hi
+                                             else V("Absent") if v == ab else V("Unknown"))}
+                    for v in _S55],
+                   terminates="always"))
+    # String-label twins: the same 3-branch guard chain, a different result surface.
+    for lo, hi, ab, labels in ((200, 300, 404, ("exists", "absent", "unknown")),
+                               (200, 300, 410, ("present", "missing", "unclear"))):
+        ex_l, ab_l, un_l = labels
+        add(_cspec(f"state_label_{ex_l}",
+                   f'Describe a status as "{ex_l}" ({lo}-{hi - 1}), "{ab_l}" ({ab}), or '
+                   f'"{un_l}".',
+                   f'"{ex_l}" for [{lo},{hi}); "{ab_l}" for {ab}; "{un_l}" otherwise.',
+                   ["http", "world-state", "string", "case"], fn([INT], STRING),
+                   lam(["s"], case_bool(_band_guard(s55, lo, hi), str_lit(ex_l),
+                                        case_bool(bapp("eq", s55, int_lit(ab)),
+                                                  str_lit(ab_l), str_lit(un_l)))),
+                   [{"args": [v], "result": (ex_l if lo <= v < hi
+                                             else ab_l if v == ab else un_l)}
+                    for v in _S55],
+                   terminates="always"))
+
+    # 55b. lifecycle-run summarization: short-circuit tail-descent walks over statuses.
+    for lo, hi in ((200, 300), (200, 400)):
+        def _ok55(v, _lo=lo, _hi=hi):
+            return _lo <= v < _hi
+
+        head_ok = _band_guard(bapp("head", xs55), lo, hi)
+        add(_cspec(f"run_clean_{hi}",
+                   f"Whether every status of a run is a success ({lo}-{hi - 1}).",
+                   "true on nil; else head in band and self (tail xs), short-circuit.",
+                   ["http", "world-state", "list", "recursion", "predicate"],
+                   fn([list_of(INT)], BOOL),
+                   lam(["xs"], case_bool(bapp("null", xs55), bool_lit(True),
+                                         case_bool(head_ok, bself(bapp("tail", xs55)),
+                                                   bool_lit(False)))),
+                   [{"args": [l], "result": all(_ok55(v) for v in l)} for l in _L55],
+                   terminates="always"))
+        add(_cspec(f"first_failure_{hi}",
+                   f"The first status of a run outside {lo}-{hi - 1}, if any.",
+                   "None on nil; skip in-band heads via self (tail xs); else Just head.",
+                   ["http", "world-state", "list", "recursion", "maybe"],
+                   fn([list_of(INT)], maybe_t(INT)),
+                   lam(["xs"], case_bool(bapp("null", xs55), variant_expr("None"),
+                                         case_bool(head_ok, bself(bapp("tail", xs55)),
+                                                   variant_expr("Just", bapp("head", xs55))))),
+                   [{"args": [l],
+                     "result": next((V("Just", v) for v in l if not _ok55(v)), V("None"))}
+                    for l in _L55],
+                   terminates="always"))
+        add(_cspec(f"clean_steps_{hi}",
+                   f"How many leading statuses of a run are successes ({lo}-{hi - 1}).",
+                   "0 on nil or out-of-band head; else 1 + self (tail xs).",
+                   ["http", "world-state", "list", "recursion", "counter"],
+                   fn([list_of(INT)], INT),
+                   lam(["xs"], case_bool(bapp("null", xs55), int_lit(0),
+                                         case_bool(head_ok,
+                                                   bapp("add", int_lit(1),
+                                                        bself(bapp("tail", xs55))),
+                                                   int_lit(0)))),
+                   [{"args": [l],
+                     "result": next((i for i, v in enumerate(l) if not _ok55(v)), len(l))}
+                    for l in _L55],
+                   terminates="always"))
+
     return out
 
 
