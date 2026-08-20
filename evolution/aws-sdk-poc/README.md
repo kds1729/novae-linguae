@@ -129,6 +129,32 @@ the operator's side of the boundary). En route the gate surfaced
 the real service's explicit-`null` serialization of absent members refuses every
 whole-document projection whose schema says the member is a typed optional.
 
+## The world-state close (2026-08-20, same day)
+
+[`spec/world-state.md`](../../spec/world-state.md)'s machinery — built and demonstrated against
+the fake service's note-on-item dependency — met a real dependency surface: **Lambda's
+`PutFunctionConcurrency` answers 404 unless the function exists** (measured live at an absent
+name before anything was declared). Four records were re-issued with world contracts (the
+cost_sweep pattern — bodies and examples unchanged, superseding addresses): the create *ensures*
+`function(base, body.FunctionName)` exists — **the finding-9 `body-field` key's first real-cloud
+discharge**, grounding the resource from the literal create body exactly as the 131/131
+measurement said it must — the delete ensures it absent, and both concurrency operations require
+the function and ensure the concurrency resource. `GetFunction` deliberately carries no contract
+(a total probe is meaningful on both states).
+
+Three plans, three verdicts, and the live runs agree with all of them:
+
+| plan | `check-plan` | run live against real AWS |
+|---|---|---|
+| concurrency with no create | **UNVERIFIABLE** — "nothing establishes it" | not run — that is the point |
+| create → put-concurrency → delete-concurrency → delete | **PLAN-SOUND** (the body-field ensures discharges both requires) | **201 → 200 → 204 → 204** |
+| create → delete → put-concurrency | **REJECTED** at step 3: "it is absent (step 2 (deletefunction))" | run anyway: **201 → 204 → 404** — the predicted status, step, and cause |
+
+The check preceded the effect on a real cloud: the symbolic verdict, computed from declarations
+alone, predicted the live outcome exactly. The re-issued records, plans, and step traces stay
+outside the repository — create bodies and plan data embed ARNs, which are the operator's
+(the same boundary the slice close drew).
+
 ## Reproducing
 
 Finding 3 is fully hermetic (see [`findings.md`](findings.md) § Reproducing). The pipeline lives
