@@ -5,8 +5,10 @@
   [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) was fixed in
   `ff1c258` (verified against its own fixture: all three projections now refuse, and the legitimate
   path is unaffected). [Finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
-  and [finding 12](findings.md#12-certify-admits-records-the-commons-cannot-accept) are open, so the
-  module does not yet qualify as absorbed.
+  and 12 are fixed in `25fe525`;
+  [finding 13](findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable) —
+  what finding 11's refusal costs the delete surface — is open, so the module does not yet qualify
+  as absorbed.
 - **Author:** Keith Sprochi <ksprochi@elementalmachines.com>
 - **Dates:** first published 2026-07-30, last updated 2026-08-01
 - **Scope:** `tooling/nl-ingest-openapi`; touches on `tooling/commons-node` retrieval and on
@@ -48,9 +50,10 @@ Two defects surfaced along the way, one of them silent for days.
 
 | file | what |
 |---|---|
-| [`findings.md`](findings.md) | The twelve findings, each with the measurement behind it, and how they generalise across four APIs |
+| [`findings.md`](findings.md) | The thirteen findings, each with the measurement behind it, and how they generalise across four APIs |
 | [`repro/`](repro/) | Hermetic fixtures — no cloud account, no credentials, no vendor input |
 | [`proposals/01-request-content-type.md`](proposals/01-request-content-type.md) | Emit the declared request `Content-Type` — **accepted**, applied, and its three questions answered |
+| [`proposals/02-idempotent-delete-observation.md`](proposals/02-idempotent-delete-observation.md) | Observe the idempotent DELETE at the absent name, recovering the 109 unreachable deletes — **proposed** |
 
 ## Defects reported
 
@@ -144,6 +147,13 @@ each against the corpus then showed — the answers work, and each surfaced the 
   `UNVERIFIABLE` is now **`PLAN-SOUND`**, and discharged by *step 1's own `ensures`* rather than by a
   stated assumption — which was the whole point, since the assumption that made it pass before was
   false at plan start.
+- **[Findings 11 and 12](findings.md#12-certify-admits-records-the-commons-cannot-accept)** — both
+  fixed in `25fe525`. Finding 12 took both halves: `certify` now schema-validates (a 200-character
+  `name_hint` gives `=> NOT CERTIFIED`) *and* the cap moved 64 → 128, so real operations are no
+  longer excluded — the seven IAM records the node had refused now load, `failed=0`. Finding 11 is
+  fixed by refusing the operation rather than minting a false example; see
+  [finding 13](findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable) for
+  what that costs.
 - **[Finding 10](findings.md#10-assemble-cannot-admit-any-record-from-this-corpus)** — fixed in
   `b689ce5` by exactly the suggested resolution. `assemble` now answers the same goal:
 
@@ -158,14 +168,16 @@ each against the corpus then showed — the answers work, and each surfaced the 
 
 ### Still open
 
-- **The [finding 12](findings.md#12-certify-admits-records-the-commons-cannot-accept) defect** —
-  `certify` does not schema-validate, so a record can be generated, certified and written while the
-  commons refuses it. 12 of 1,208 records across four APIs are unpublishable because a `name_hint`
-  exceeds the schema's 64-character cap (IAM reaches 100).
-- **The [finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
-  defect** — a path-parameterised GET's synthesized example asserts a documented success at a
-  deliberately-absent name, which no description omitting its error cases can satisfy (0 of 81 here
-  document a 404).
+- **The [finding 13](findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable)
+  consequence** — finding 11's refusal is correct, and for GET the fix is strictly better than what
+  it replaced (the leaf example now carries observed arguments and a trace). But
+  `--observe-arg` is read-only by rule, so **109 path-parameterised DELETEs across four APIs are
+  unreachable by any route**, `storage.buckets.delete` among them. The create → verify → delete
+  lifecycle this module demonstrated can no longer be assembled from a description.
+  [Proposal 02](proposals/02-idempotent-delete-observation.md) offers a route: the absent-name DELETE
+  is the verb's *idempotent* case and provably changes nothing (measured live: 404 → DELETE 404 →
+  404), so the blocking rule — enforced on the verb — over-refuses a call that has no effect.
+
 
 ## Reproducing
 
