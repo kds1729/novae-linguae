@@ -24,6 +24,9 @@ enum CliKind {
     /// Type expression published as a commons artifact (top-level `type_<hex>` hash, strips
     /// `hash`). Never auto-detected — type-node kinds collide with body-expression kinds.
     Type,
+    /// Plan published as a commons artifact (top-level `plan_<hex>` hash, strips `hash`;
+    /// unsigned — a plan's soundness is recomputable, never testimony).
+    Plan,
 }
 
 impl From<CliKind> for nl_validator::ArtifactKind {
@@ -35,6 +38,7 @@ impl From<CliKind> for nl_validator::ArtifactKind {
             CliKind::Weights => Self::Weights,
             CliKind::EvalAttestation => Self::EvalAttestation,
             CliKind::Type => Self::Type,
+            CliKind::Plan => Self::Plan,
         }
     }
 }
@@ -304,9 +308,12 @@ enum Commands {
     /// symbolic state contradicts — e.g. use-after-delete; exit 1). Verifies the plan against
     /// the DECLARATIONS — a declaration is the record author's testimony, priced like any other.
     CheckPlan {
-        /// Path to the plan JSON: { "assume": [ {resource, state}… ], "steps": [ {target, args}… ] }.
+        /// Path to the plan JSON ({ "assume": […], "steps": […] }, bare or as a `kind: "plan"`
+        /// artifact) — or, with `--node`, a `plan_…` content-address: the plan itself is fetched
+        /// from the node and hash-verified locally (plans are commons artifacts,
+        /// spec/world-state.md).
         #[arg(long)]
-        plan: PathBuf,
+        plan: String,
         /// Directory of records + bodies (the local commons view). Exactly one of `--records`/`--node`.
         #[arg(long)]
         records: Option<PathBuf>,
@@ -314,6 +321,22 @@ enum Commands {
         /// hash-verified locally (the store stays untrusted).
         #[arg(long)]
         node: Option<String>,
+        /// Bind an observation PROBE for a resource class (`class=fn_…`, repeatable): a read-only
+        /// commons record whose parameters are the class's key parts in order. Each of the plan's
+        /// ASSUMPTIONS about that class is then spot-verified by one live call — 2xx = exists,
+        /// 404 = absent, anything else inconclusive. A refuted assumption fails the check: the
+        /// plan rests on false testimony and must not run. Unprobed assumptions stay testimony,
+        /// stated as such.
+        #[arg(long)]
+        probe: Vec<String>,
+        /// Grant an effect for probe execution (e.g. `net.read@127.0.0.1`). Probes are
+        /// observations — read-only by rule; grant only read effects.
+        #[arg(long = "grant")]
+        grants: Vec<String>,
+        /// Supply a named secret (`NAME=VALUE`) for `{{secret:NAME}}` placeholders in a probe's
+        /// header values — effect-boundary configuration, never in any artifact.
+        #[arg(long = "secret")]
+        secrets: Vec<String>,
     },
     /// Verify a record's declared `signature.terminates: always` by **structural** analysis (no solver):
     /// a non-recursive first-order body, or one whose every `self`-call descends `tail^k` of a fixed
@@ -985,7 +1008,9 @@ fn main() -> ExitCode {
         }
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
         Commands::CheckRefinement { record, body, solver } => (cmd_check_refinement(&record, &body, &solver), false),
-        Commands::CheckPlan { plan, records, node } => (cmd_check_plan(&plan, records.as_deref(), node.as_deref()), false),
+        Commands::CheckPlan { plan, records, node, probe, grants, secrets } => {
+            (cmd_check_plan(&plan, records.as_deref(), node.as_deref(), &probe, &grants, &secrets), false)
+        }
         Commands::CheckTermination { record, body } => (cmd_check_termination(&record, &body), false),
         Commands::CheckComplexity { record, body } => (cmd_check_complexity(&record, &body), false),
         Commands::Certify { record, body, records, solver, json, sign, timestamp } => {
@@ -1171,6 +1196,10 @@ fn cmd_verify(record: &PathBuf, kind_override: Option<nl_validator::ArtifactKind
             println!("signature N/A   type artifacts have no signature (pure content)");
             true
         }
+        nl_validator::ArtifactKind::Plan => {
+            println!("signature N/A   plans have no signature (soundness is recomputable, never testimony)");
+            true
+        }
         nl_validator::ArtifactKind::Message
         | nl_validator::ArtifactKind::Certification
         | nl_validator::ArtifactKind::EvalAttestation => match nl_validator::verify_signature(&value) {
@@ -1260,19 +1289,52 @@ fn cmd_typecheck(record: &PathBuf, body: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn cmd_check_plan(plan_path: &Path, records_dir: Option<&Path>, node: Option<&str>) -> Result<()> {
-    let plan = nl_validator::read_json(&plan_path.to_path_buf())?;
+fn cmd_check_plan(
+    plan_ref: &str,
+    records_dir: Option<&Path>,
+    node: Option<&str>,
+    probe_flags: &[String],
+    grants: &[String],
+    secrets: &[String],
+) -> Result<()> {
+    // The plan itself: a local file, or — plans are commons artifacts (spec/world-state.md) —
+    // a `plan_…` content-address fetched from the node and hash-verified locally.
+    let plan = if plan_ref.starts_with("plan_") {
+        let url = node.ok_or_else(|| {
+            anyhow::anyhow!("--plan {plan_ref} is a content-address; fetching it needs --node")
+        })?;
+        let fetched = nl_validator::commons_client::fetch_artifact(url, plan_ref)?;
+        if fetched.get("kind").and_then(|k| k.as_str()) != Some("plan") {
+            return Err(anyhow::anyhow!("{plan_ref} is not a plan artifact"));
+        }
+        fetched
+    } else {
+        nl_validator::read_json(&PathBuf::from(plan_ref))?
+    };
+    // Probe bindings: `class=fn_…` — the probe records ride the same commons view.
+    let mut probes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for p in probe_flags {
+        let (class, target) = p
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("--probe expects class=fn_…, got `{p}`"))?;
+        probes.insert(class.to_string(), target.to_string());
+    }
     let (records, bodies) = match (records_dir, node) {
         (Some(dir), None) => (nl_validator::build_record_map(dir)?, nl_validator::build_link_map(dir)?),
         (None, Some(url)) => {
-            // Seed the hash-verified closure walk with the plan's own step targets — the
-            // records and their bodies are all the checker needs.
+            // Seed the hash-verified closure walk with the plan's own step targets plus any
+            // probe targets — the records and their bodies are all the checker needs.
             let mut targets: Vec<String> = Vec::new();
             for s in plan.get("steps").and_then(|s| s.as_array()).cloned().unwrap_or_default() {
                 if let Some(t) = s.get("target").and_then(|t| t.as_str()) {
                     if !targets.iter().any(|x| x == t) {
                         targets.push(t.to_string());
                     }
+                }
+            }
+            for t in probes.values() {
+                if !targets.iter().any(|x| x == t) {
+                    targets.push(t.clone());
                 }
             }
             if targets.is_empty() {
@@ -1286,9 +1348,44 @@ fn cmd_check_plan(plan_path: &Path, records_dir: Option<&Path>, node: Option<&st
     for l in &report.lines {
         println!("{l}");
     }
+    // Observation probes: spot-verify the plan's ASSUMPTIONS — the exact place testimony
+    // enters — by one read-only call each. Skipped for a symbolically rejected plan (it must
+    // not run regardless of what the world says).
+    let mut probe_refuted = Vec::new();
+    let mut probe_confirmed_all = false;
+    if !probes.is_empty() && !matches!(report.outcome, nl_validator::PlanOutcome::Rejected(_)) {
+        let parsed = parse_secrets(secrets)?;
+        let mut exec = |body: &serde_json::Value, args: &[serde_json::Value]| -> Result<i64> {
+            nl_validator::set_effect_grants(grants.iter().cloned());
+            nl_validator::set_effect_secrets(parsed.clone());
+            let result = nl_validator::eval_body(body, args);
+            nl_validator::clear_effects();
+            let result = result?;
+            result
+                .get("value")
+                .and_then(|v| v.as_i64())
+                .ok_or_else(|| anyhow::anyhow!("probe did not return an int status: {result}"))
+        };
+        let pr = nl_validator::probe_assumptions(&plan, &records, &bodies, &probes, &mut exec)?;
+        for l in &pr.lines {
+            println!("{l}");
+        }
+        probe_confirmed_all = pr.refuted.is_empty() && pr.unconfirmed.is_empty() && !pr.lines.is_empty();
+        probe_refuted = pr.refuted;
+    }
+    if !probe_refuted.is_empty() {
+        return Err(anyhow::anyhow!(
+            "PROBE-REFUTED  {} assumption(s) contradicted by observation — the plan rests on false testimony, so it must not run: {}",
+            probe_refuted.len(),
+            probe_refuted.join("; ")
+        ));
+    }
     match report.outcome {
         nl_validator::PlanOutcome::Sound => {
-            println!("PLAN-SOUND   every requirement discharged from assumptions and prior ensures — checked before any effect");
+            println!(
+                "PLAN-SOUND   every requirement discharged from assumptions and prior ensures — checked before any effect{}",
+                if probe_confirmed_all { " (every assumption confirmed by observation)" } else { "" }
+            );
             Ok(())
         }
         nl_validator::PlanOutcome::Unverifiable(msgs) => {
@@ -2792,6 +2889,11 @@ fn cmd_sign(record: &PathBuf, seed: &str, in_place: bool) -> Result<()> {
         nl_validator::ArtifactKind::Type => {
             return Err(anyhow::anyhow!(
                 "a type artifact is unsigned pure content (and is never auto-detected — this arm is unreachable)"
+            ));
+        }
+        nl_validator::ArtifactKind::Plan => {
+            return Err(anyhow::anyhow!(
+                "a plan is unsigned — its soundness is recomputable by `check-plan`, never testimony"
             ));
         }
     }

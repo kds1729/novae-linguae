@@ -61,9 +61,9 @@ about the initial world:
 }
 ```
 
-`check-plan --plan <file> (--records <dir> | --node <url>)` resolves each step's record (and body,
-for the parameter names), instantiates its world refinements at the step's arguments, and
-**symbolically executes** the sequence over a ground-resource state map:
+`check-plan --plan <file-or-plan_address> (--records <dir> | --node <url>)` resolves each step's
+record (and body, for the parameter names), instantiates its world refinements at the step's
+arguments, and **symbolically executes** the sequence over a ground-resource state map:
 
 - a step's `requires` must be satisfied by the current symbolic state — established by an earlier
   step's `ensures`, or by a stated assumption. A requirement the state **contradicts** rejects the
@@ -90,16 +90,41 @@ create → verify → delete exit gates are precisely such contracts holding liv
 world refinements as declarations outside the SMT checker's scope (`check-refinement` reports
 them as checked-elsewhere, the `inv` precedent); they never silently pass as proved.
 
+## Plans as commons artifacts (`plan_…`)
+
+A plan wrapped as `{ "kind": "plan", "schema_version": "0.1.0", "hash": "plan_…", assume, steps }`
+is an ordinary commons artifact ([`plan.schema.json`](plan.schema.json)): content-addressed
+(BLAKE3 over the JCS-canonical form with `hash` stripped), admitted through the node's
+verify-then-store gate, fetchable by address, and **re-decidable by anyone** —
+`check-plan --plan plan_… --node <url>` fetches the plan itself hash-verified, resolves its step
+targets from the same node, and re-runs the symbolic check. Plans are deliberately **unsigned**:
+a plan's soundness is recomputable from the referenced records' declared contracts, never
+testimony — what would be signed is an *endorsement* of running it, which stays with the ordinary
+speech acts. `check-plan` also still accepts a local file, bare (`{assume, steps}`) or wrapped.
+(The earlier sketch of a plan riding *inside* a `propose`/`commit` body is subsumed: a message
+can now cite a checked plan by its `plan_…` address.)
+
+## Observation probes (`check-plan --probe`)
+
+An **assumption is the exact place testimony enters** a plan check — and it is spot-verifiable.
+`check-plan --probe <class>=<fn_…>` (repeatable, with `--grant`/`--secret` for the effect
+boundary) binds a resource class to a **probe**: an ordinary read-only commons record whose
+parameters are the class's key parts, in order. Each assumption about a probed class is then
+verified by one live call, decided by the absent-name convention's own status split — **2xx =
+`exists`, 404 = `absent`, anything else inconclusive** (an auth failure or a throttle is an
+access fact, not a world observation). A confirmed assumption is reported as OBSERVED; a
+**refuted** one fails the check (`PROBE-REFUTED`, exit 1 — the plan rests on false testimony and
+must not run, whatever the symbolic verdict was); inconclusive and unprobed assumptions stay
+testimony, stated as such. Probes never rescue an UNVERIFIABLE plan (they check what the plan
+*states*, not what it forgot to state) and are skipped for a symbolically REJECTED one (it must
+not run regardless of what the world says).
+
 ## Deliberately out of v0.1
 
-- **Observation probes** — mapping a resource state to the read-only call that would confirm it
-  live (`item(x) exists` ⇝ `GET /items/{x}` → 200). This is what would let a checked plan be
-  *spot-verified* against the real world before running; it needs a probe vocabulary and belongs
-  to a future increment with a driver.
-- **Plans as commons artifacts** — a plan riding in a Nova Locutio `propose`/`commit` body so the
-  *checked plan itself* is content-addressed and signed. v0.1 keeps the plan a local input file.
 - **Ingestion** — API descriptions carry no pre/postconditions (the gcp-sdk-poc measurement:
   81 of 81 records with empty refinements), so the OpenAPI adapter honestly derives none. World
   refinements are authored, or come from richer future description formats.
 - **Richer state** than `exists`/`absent`, conditional contracts (a `DELETE`'s 404-vs-204 split),
   and quantified resources ("some bucket") — future vocabulary, driver-gated.
+- **Mid-plan probing** — probes verify the *initial* world (the assumptions); observing
+  intermediate states would interleave reads with the plan's own effects, a different discipline.

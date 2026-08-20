@@ -2155,6 +2155,63 @@ class WorldRefinementGateTests(TestCase):
         self.assertEqual(resp.status_code, 201, resp.content)
 
 
+@unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")
+class PlanArtifactTests(TestCase):
+    """`plan_…` artifacts through the verify-then-store gate (spec/world-state.md: a checked
+    plan is a commons artifact — fetchable, re-decidable, citable by address; unsigned, since
+    its soundness is recomputable, never testimony)."""
+
+    def setUp(self):
+        self.client = Client()
+
+    @staticmethod
+    def _plan():
+        return {
+            "kind": "plan", "schema_version": "0.1.0",
+            "assume": [{"resource": {"class": "item",
+                                     "key": [{"kind": "string", "value": "w"}]},
+                        "state": "exists"}],
+            "steps": [{"target": "fn_" + "a" * 64,
+                       "args": [{"kind": "string", "value": "w"}]}],
+        }
+
+    def _addressed(self, plan):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(plan, f)
+        out = subprocess.run([str(VALIDATOR), "hash", f.name], capture_output=True, text=True)
+        assert out.returncode == 0, out.stderr
+        rec = dict(plan)
+        rec["hash"] = out.stdout.strip()
+        return rec
+
+    def _publish(self, record):
+        return self.client.post("/v0/records", data=json.dumps(record),
+                                content_type="application/json")
+
+    def test_plan_through_the_gate(self):
+        rec = self._addressed(self._plan())
+        self.assertTrue(rec["hash"].startswith("plan_"), rec["hash"])
+        resp = self._publish(rec)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        got = self.client.get(f"/v0/records/{rec['hash']}")
+        self.assertEqual(got.json(), rec)
+        # Idempotent; tampered content under the same address refuses (the store is untrusted).
+        self.assertEqual(self._publish(rec).status_code, 200)
+        bad = dict(rec)
+        bad["steps"] = [{"target": "fn_" + "b" * 64, "args": []}]
+        self.assertEqual(self._publish(bad).status_code, 422)
+
+    def test_malformed_plan_refused(self):
+        # Schema-strict: no steps, a non-address target, and a stray field each refuse.
+        for mutate in (lambda p: p.pop("steps"),
+                       lambda p: p["steps"].__setitem__(0, {"target": "not-an-address", "args": []}),
+                       lambda p: p.__setitem__("extra", True)):
+            plan = self._plan()
+            mutate(plan)
+            rec = self._addressed(plan)
+            self.assertEqual(self._publish(rec).status_code, 422, json.dumps(plan)[:120])
+
+
 # --- body storage tiering (commons.md open question 4) ---------------------------------------------
 
 @unittest.skipUnless(VALIDATOR.exists(), "nl-validator release binary not built")

@@ -107,7 +107,7 @@ pub use orchestrate::{
 pub mod assemble;
 pub use assemble::{assemble, record_solves_goal, Assembled, GoalMatch, Stage};
 pub mod plan;
-pub use plan::{check_plan, PlanOutcome, PlanReport};
+pub use plan::{check_plan, probe_assumptions, PlanOutcome, PlanReport, ProbeReport};
 
 /// Read and parse a UTF-8 JSON file from disk.
 pub fn read_json(path: &Path) -> Result<Value> {
@@ -277,6 +277,12 @@ pub enum ArtifactKind {
     /// type artifact is always hashed/verified with an EXPLICIT `--kind type` (the node's gate keys
     /// on the `type_` address prefix instead).
     Type,
+    /// A **plan** published as a commons artifact (spec/world-state.md, `plan_…`): the
+    /// `{kind: "plan", assume, steps}` a `check-plan` decides, made content-addressed so a
+    /// checked plan is fetchable, re-decidable, and citable by address — anyone can re-run the
+    /// symbolic check against the same declarations and reach the same verdict. Unsigned and
+    /// hash-carrying (strips `hash`): a plan's soundness is recomputable, never testimony.
+    Plan,
 }
 
 impl ArtifactKind {
@@ -285,7 +291,10 @@ impl ArtifactKind {
     /// `hash` field — the whole expression IS what gets hashed.
     fn strip_fields(self) -> &'static [&'static str] {
         match self {
-            ArtifactKind::FunctionRecord | ArtifactKind::Weights | ArtifactKind::Type => &["hash"],
+            ArtifactKind::FunctionRecord
+            | ArtifactKind::Weights
+            | ArtifactKind::Type
+            | ArtifactKind::Plan => &["hash"],
             ArtifactKind::Message | ArtifactKind::Certification | ArtifactKind::EvalAttestation => {
                 &["hash", "signature"]
             }
@@ -304,6 +313,7 @@ impl ArtifactKind {
             ArtifactKind::EvalAttestation => "evl",
             ArtifactKind::Trace => "trc",
             ArtifactKind::Type => "type",
+            ArtifactKind::Plan => "plan",
         }
     }
 
@@ -346,6 +356,9 @@ impl ArtifactKind {
             }
             if kind_str == "trace" {
                 return Ok(ArtifactKind::Trace);
+            }
+            if kind_str == "plan" {
+                return Ok(ArtifactKind::Plan);
             }
             // The nine body-expression kinds (spec/body-expression.schema.json) — incl. the
             // construction forms `variant`/`tuple` a bare 0-argument body can top out at.
