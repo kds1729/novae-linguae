@@ -133,7 +133,7 @@
     },
     "content_address": {
       "type": "string",
-      "pattern": "^(fn|expr|type|proof|msg)_[0-9a-f]{64}$",
+      "pattern": "^(fn|expr|type|cert|wgt|evl|trc|plan|msg)_[0-9a-f]{64}$",
       "description": "Content-address: prefix + '_' + 64 lowercase hex chars (BLAKE3-256). Shared with function-record.schema.json — the two schemas must keep this definition in sync."
     },
     "message_address": {

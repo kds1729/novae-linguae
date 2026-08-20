@@ -80,7 +80,7 @@
   "$defs": {
     "content_address": {
       "type": "string",
-      "pattern": "^(fn|expr|type|proof|msg)_[0-9a-f]{64}$",
+      "pattern": "^(fn|expr|type|cert|wgt|evl|trc|plan|msg)_[0-9a-f]{64}$",
       "description": "Content-address: prefix + '_' + 64 lowercase hex chars (BLAKE3-256 digest). Prefix discriminates the kind of object. v0.1 fixes the algorithm; v0.2+ may introduce multihash."
     },
     "name_hint": {

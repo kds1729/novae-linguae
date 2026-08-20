@@ -132,7 +132,7 @@
     },
     "content_address": {
       "type": "string",
-      "pattern": "^(fn|expr|type|proof|msg)_[0-9a-f]{64}$"
+      "pattern": "^(fn|expr|type|cert|wgt|evl|trc|plan|msg)_[0-9a-f]{64}$"
     },
     "message_address": {
       "type": "string",
