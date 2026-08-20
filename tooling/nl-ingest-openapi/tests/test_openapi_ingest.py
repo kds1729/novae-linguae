@@ -997,6 +997,133 @@ class ObserveArgTest(unittest.TestCase):
                          {"storage.buckets.get": {"bucket": "b1"}})
 
 
+class ObserveAbsentDeleteTest(unittest.TestCase):
+    """--observe-absent-delete (evolution/gcp-sdk-poc proposal 02, accepted): a
+    path-parameterised DELETE documenting no 404 — finding 11's refusal removed the whole
+    verb — is observed at the absent name instead, with absence as a CHECKED precondition
+    (probe GET must answer non-2xx), and the example records what this service answered."""
+
+    PORT = 18881
+
+    @classmethod
+    def setUpClass(cls):
+        import time
+        import urllib.request
+        cls.base = f"http://127.0.0.1:{cls.PORT}"
+        cls.svc = subprocess.Popen(
+            [sys.executable, str(REPO_ROOT / "tooling" / "fake-service" / "fake_service.py"),
+             "--port", str(cls.PORT)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(f"{cls.base}/health", timeout=0.2)
+                break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("fake service did not come up")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.svc.terminate()
+        cls.svc.wait()
+
+    @staticmethod
+    def _delete_op(responses=None):
+        return {"operationId": "deleteItem",
+                "parameters": [{"name": "name", "in": "path", "required": True,
+                                "schema": {"type": "string"}}],
+                "responses": responses or {"204": {"description": "deleted"}}}
+
+    @classmethod
+    def _spec(cls, base, ops):
+        return {"openapi": "3.0.0", "info": {"title": "t", "version": "1"},
+                "servers": [{"url": base}],
+                "components": {"securitySchemes": {
+                    "api_token": {"type": "http", "scheme": "bearer"}}},
+                "security": [{"api_token": []}],
+                "paths": {"/items/{name}": ops}}
+
+    def _main(self, spec, extra):
+        tmp = tempfile.mkdtemp(prefix="nl-openapi-absdel-")
+        sp = Path(tmp) / "spec.json"
+        json.dump(spec, open(sp, "w"))
+        code = 0
+        try:
+            oi.main([str(sp), "--out", tmp, *extra])
+        except SystemExit as e:
+            code = e.code
+        return tmp, code
+
+    def test_absent_delete_observes_and_replays(self):
+        # The headline: DELETE /items/{name} documents only 204 (the Discovery shape — no
+        # 404 anywhere), so without the flag the verb is unreachable. Under the flag the
+        # probe verifies absence, the DELETE runs once, and the example carries the status
+        # THIS service actually answered (the fake service says 404 at an absent name),
+        # trace-attached and offline-replayable.
+        tmp, code = self._main(self._spec(self.base, {"delete": self._delete_op()}),
+                               ["--verify-against", self.base, "--observe-absent-delete"])
+        self.assertEqual(code, 0)
+        rec = json.load(open(Path(tmp) / "deleteitem.v0.2.json"))
+        ex = rec["examples"][0]
+        self.assertEqual(ex["args"][1], {"kind": "string", "value": "gw7-absent-x"})
+        self.assertEqual(ex["result"], {"kind": "int", "value": 404})
+        self.assertTrue(ex["trace"].startswith("trc_"))
+        r = subprocess.run([str(VALIDATOR), "run", str(Path(tmp) / "deleteitem.v0.2.json"),
+                            "--records", tmp], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_probe_finding_something_refuses(self):
+        # `gw7-absent-x` is a convention, not a guarantee: if something IS there, the
+        # observation would destroy it — the probe refuses before any DELETE is issued,
+        # and the thing survives.
+        import urllib.request
+        req = urllib.request.Request(f"{self.base}/items/gw7-absent-x",
+                                     data=b'{"kind": "trap"}', method="PUT",
+                                     headers={"Authorization": "Bearer test-token"})
+        urllib.request.urlopen(req, timeout=5)
+        try:
+            tmp, code = self._main(self._spec(self.base, {"delete": self._delete_op()}),
+                                   ["--verify-against", self.base, "--observe-absent-delete"])
+            self.assertNotEqual(code, 0)
+            self.assertFalse((Path(tmp) / "deleteitem.v0.2.json").exists(),
+                             "no record may exist off a refused probe")
+            check = urllib.request.Request(f"{self.base}/items/gw7-absent-x",
+                                           headers={"Authorization": "Bearer test-token"})
+            with urllib.request.urlopen(check, timeout=5) as r:
+                self.assertEqual(r.status, 200)  # the thing was NOT deleted
+        finally:
+            req = urllib.request.Request(f"{self.base}/items/gw7-absent-x", method="DELETE",
+                                         headers={"Authorization": "Bearer test-token"})
+            urllib.request.urlopen(req, timeout=5)
+
+    def test_without_flag_still_refuses(self):
+        # Finding 11's refusal is unchanged by default — the observation is opt-in.
+        spec = self._spec("http://127.0.0.1:1", {"delete": self._delete_op()})
+        built, skipped, pending, _report = oi.walk(spec, None)
+        self.assertEqual((built, pending), ([], []))
+        self.assertIn("documents no 404", skipped[0][1])
+
+    def test_flag_without_verify_refuses(self):
+        tmp, code = self._main(self._spec("http://127.0.0.1:1", {"delete": self._delete_op()}),
+                               ["--observe-absent-delete"])
+        self.assertIn("requires --verify-against", str(code))
+
+    def test_documented_404_delete_unchanged(self):
+        # A DELETE that documents its 404 never needed the observation: the ordinary
+        # spec-derived absent-name example stands (asserting the DOCUMENTED 404), gated
+        # live as before — the flag must not hijack it.
+        op = self._delete_op(responses={"204": {"description": "deleted"},
+                                        "404": {"description": "absent"}})
+        tmp, code = self._main(self._spec(self.base, {"delete": op}),
+                               ["--verify-against", self.base, "--observe-absent-delete"])
+        self.assertEqual(code, 0)
+        rec = json.load(open(Path(tmp) / "deleteitem.v0.2.json"))
+        ex = rec["examples"][0]
+        self.assertEqual(ex["result"], {"kind": "int", "value": 404})
+        self.assertTrue(ex["trace"].startswith("trc_"))
+
+
 class TokenBindingTests(unittest.TestCase):
     """parse_tokens / bound_secrets — the per-scheme credential grammar (offline)."""
 

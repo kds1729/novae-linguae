@@ -51,7 +51,12 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
                     success, 0 of 1,164 ops across four APIs carry any non-2xx). An
                     `--observe-arg` binding dissolves the refusal for GET: the leaf example
                     takes the operator's arguments and asserts the documented success, which is
-                    now reachable and live-checkable. A 2xx response that
+                    now reachable and live-checkable. For DELETE the opt-in
+                    `--observe-absent-delete` (proposal 02, evolution/gcp-sdk-poc) observes the
+                    verb's EFFECT-FREE case instead: a probe GET at the absent name must answer
+                    non-2xx (absence as a checked precondition — something there refuses), then
+                    the DELETE runs once and the example records what THIS service answered,
+                    trace-attached. A 2xx response that
                     documents an application/json EXAMPLE additionally yields a body-projection
                     record `<opId>Body : … -> Maybe Json` (`parse_json` over the response body —
                     field access then composes in-language via the certified json_get/json_path
@@ -702,6 +707,7 @@ def _observed_call_args(base_url, by_kind, int_params, observe):
 
 
 def build_operation(spec, base_url, path, verb, op, shared_params, global_security, secret_name,
+                    observe_absent_delete=False,
                     observe=None):
     """Compile one operation. Returns ("ok", records, notes, pending, observe_status) or
     ("skip", op_id, reason). `pending` holds SCHEMA-DERIVED projections that cannot become
@@ -925,16 +931,41 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
     #     arguments and asserts the documented success, which is now reachable and live-checkable;
     #   - otherwise the operation is REFUSED with the reason: no spec-derivable example exists.
     resp_codes = sorted(int(c) for c in op.get("responses", {}) if c.isdigit())
+    intent = ["io", "io/network/http"] + (["query/lookup"] if verb in _READ_VERBS else [])
     if obs_args is not None:
         success = next((c for c in resp_codes if 200 <= c < 300), 200)
         example = {"args": obs_args, "result": {"kind": "int", "value": success}}
     elif path_param_names and verb in ("GET", "DELETE") and 404 not in resp_codes:
+        if verb == "DELETE" and observe_absent_delete:
+            # PROPOSAL 02 (evolution/gcp-sdk-poc, accepted): the finding-11 refusal enforced
+            # "an observation must not create or destroy state" on the VERB, and that proxy
+            # removed every such DELETE (109 across four Discovery APIs — teardown became
+            # inexpressible). The absent-name DELETE is the verb's EFFECT-FREE case: applied
+            # where nothing is present it changes nothing and reports absence. So under the
+            # opt-in flag the operation compiles, and its worked example materialises through
+            # the observation gate with absence as a CHECKED PRECONDITION (probe GET must
+            # answer non-2xx — `gw7-absent-x` is a convention, not a guarantee), recording
+            # what THIS service answered (404/204/200 differ by service, and the record says
+            # so). Nothing is asserted the description did not say: the description licenses
+            # the shape, the observation supplies the value — the schema-projection split.
+            probe_path = path
+            for pp in by_kind["path"]:
+                probe_path = probe_path.replace("{" + pp["name"] + "}", "gw7-absent-x")
+            lead0 = "query/lookup" if verb in _READ_VERBS else "io/network/http"
+            return ("ok", [], notes, [{
+                "kind": "absent-delete", "name": op_id, "type_ast": type_ast,
+                "body_ast": body_ast, "args": example["args"], "effect": effect,
+                "intent": intent + _intent_ext(lead0, op_id), "hint": _param_name(op_id),
+                "probe_path": probe_path,
+                "probe_header": auth[1] if auth[0] == "header" else None,
+                "notes": notes,
+            }], observe_status)
         return ("skip", op_id,
                 f"path-parameterised {verb} documents no 404 — the absent-name convention "
                 "cannot reach any documented outcome, so no spec-derivable worked example "
                 "exists (for GET, `--observe-arg` names a real resource and makes the "
-                "documented success reachable)")
-    intent = ["io", "io/network/http"] + (["query/lookup"] if verb in _READ_VERBS else [])
+                "documented success reachable; for DELETE, `--observe-absent-delete` "
+                "observes the effect-free absent-name case)")
     # Discovery precision (the GitHub-scale finding: 10 same-sort effectful fits the rank could
     # not split, because every generated record carried the SAME four tags): each record gets ONE
     # extending tag — `<lead>/<its-own-hyphenated-name>` — so a caller can query precisely (the
@@ -1147,7 +1178,7 @@ def _example_for(base_url, verb, path_param_names, has_body, op,
     return {"args": args, "result": {"kind": "int", "value": want}}
 
 
-def walk(spec, secret_name, observe_map=None):
+def walk(spec, secret_name, observe_map=None, observe_absent_delete=False):
     """-> (built, skipped, pending, observe_report): built = [(record, body_ast, notes)],
     skipped = [(op_id, reason)], pending = schema-derived projections awaiting a live
     observation gate, observe_report = {op_id: "consumed" | refusal reason} for every
@@ -1170,6 +1201,7 @@ def walk(spec, secret_name, observe_map=None):
                 or _param_name(f"{verb.upper()}_{path}")
             got = build_operation(spec, base_url, path, verb, op, shared_params,
                                   global_security, secret_name,
+                                  observe_absent_delete=observe_absent_delete,
                                   observe=observe_map.get(op_id))
             if got[0] == "ok":
                 # One operation may compile to several records (status + body projection);
@@ -1396,6 +1428,79 @@ def materialize_schema_projection(p, out_dir, secrets, oauth_ids=(),
     return True, record
 
 
+def materialize_absent_delete(p, out_dir, secrets, oauth_ids=(),
+                              blob_threshold=BLOB_THRESHOLD_DEFAULT):
+    """The live OBSERVATION gate for a path-parameterised DELETE documenting no 404
+    (evolution/gcp-sdk-poc proposal 02, accepted). The absent-name DELETE is the verb's
+    effect-free case, but `gw7-absent-x` is a convention, not a guarantee, so absence is a
+    CHECKED PRECONDITION, not an assumption: (1) GET the path at the absent name and require
+    a non-2xx — a 2xx means something is there, and an observation must not destroy state,
+    so the gate refuses and says so; (2) only then run the DELETE once (`eval --trace-out`,
+    grants + secrets) and record what this service actually answered as the worked example,
+    trace-attached, offline-replayable. Returns (ok, record_or_message, observed_status)."""
+    import urllib.error
+    import urllib.request
+    probe_url = p["args"][0]["value"] + p["probe_path"]
+    headers = {}
+    if p.get("probe_header"):
+        hname, hvalue = p["probe_header"]
+        for n, v in secrets:
+            hvalue = hvalue.replace("{{secret:%s}}" % n, v)
+        headers[hname] = hvalue
+    req = urllib.request.Request(probe_url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            probe_status = resp.status
+    except urllib.error.HTTPError as e:
+        probe_status = e.code
+    except OSError as e:
+        return False, f"absence probe could not reach the service: {e}", None
+    if 200 <= probe_status < 300:
+        return False, (f"absence probe answered {probe_status} — something exists at the "
+                       "absent name, and an observation must not destroy state; refusing "
+                       "(the probe turns the absent-name convention into a checked "
+                       "precondition)"), None
+    fbase = sanitize_hint(p["name"])
+    bp = os.path.join(out_dir, f"body-{fbase}.json")
+    json.dump(p["body_ast"], open(bp, "w"), indent=2)
+    argfiles = []
+    for j, a in enumerate(p["args"]):
+        ap = os.path.join(out_dir, f".arg-{fbase}-{j}.json")
+        json.dump(a, open(ap, "w"))
+        argfiles.append(ap)
+    trace_path = os.path.join(out_dir, f"trace-{fbase}-0.json")
+    cmd = [_VALIDATOR, "eval", bp]
+    for ap in argfiles:
+        cmd += ["--arg", ap]
+    cmd += ["--grant", p["effect"]]
+    for n, v in secrets:
+        cmd += ["--secret", f"{n}={v}"]
+    for oname, cfg in oauth_ids:
+        cmd += ["--oauth", f"{oname}={cfg}"]
+    cmd += ["--trace-out", trace_path]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    for ap in argfiles:
+        os.unlink(ap)
+    if r.returncode != 0:
+        return False, f"live observation failed: {(r.stderr or '').strip()}", None
+    got = json.loads(r.stdout)
+    trc = subprocess.run([_VALIDATOR, "hash", trace_path],
+                         capture_output=True, text=True).stdout.strip()
+    if not trc.startswith("trc_"):
+        return False, f"trace did not hash to a trc_… address: {trc!r}", None
+    example = {"args": p["args"], "result": got, "trace": trc}
+    blobify_example(example, out_dir, blob_threshold)
+    record = build_v2_record(
+        name=p["name"], type_ast=p["type_ast"], examples=[example],
+        body_text=p["body_ast"], module_name=None, extra_hints=[p["hint"]],
+        effects=[p["effect"]], terminates="always", intent_tags=p["intent"],
+        complexity="O(n)",
+    )
+    rp = os.path.join(out_dir, f"{fbase}.v0.2.json")
+    json.dump(record, open(rp, "w"), indent=2)
+    return True, record, got.get("value")
+
+
 def _traced_call(trace_path):
     """The (status, body) the recorded observation actually holds — the evidence a projection's
     verdict must rest on. A projection body collapses a failed call and an absent field into the
@@ -1458,6 +1563,16 @@ def main(argv=None):
                          "`=` splits opId from param. Read-only by rule — a mutating verb, an "
                          "unbound path parameter, or a binding that touches nothing refuses "
                          "with the reason. Requires --verify-against.")
+    ap.add_argument("--observe-absent-delete", action="store_true",
+                    help="opt-in (evolution/gcp-sdk-poc proposal 02): a path-parameterised "
+                         "DELETE documenting no 404 — otherwise refused, since no "
+                         "spec-derivable worked example exists — is OBSERVED instead: the "
+                         "gate GETs the path at the absent name and requires a non-2xx "
+                         "(absence as a checked precondition), then runs the DELETE once and "
+                         "records what the service answered as the worked example, "
+                         "trace-attached. Even an effect-free DELETE is a write-shaped "
+                         "request against a live service, so this is a flag, not a default. "
+                         "Requires --verify-against.")
     args = ap.parse_args(argv)
 
     spec = load_spec(args.spec)
@@ -1489,8 +1604,12 @@ def main(argv=None):
     if observe_map and not args.verify_against:
         sys.exit("--observe-arg supplies arguments for the live observation gate; "
                  "it requires --verify-against (an observation needs a live service)")
+    if args.observe_absent_delete and not args.verify_against:
+        sys.exit("--observe-absent-delete records a live observation; it requires "
+                 "--verify-against (an observation needs a live service)")
 
-    ops, skipped, pending, observe_report = walk(spec, secret_name, observe_map)
+    ops, skipped, pending, observe_report = walk(spec, secret_name, observe_map,
+                                                 observe_absent_delete=args.observe_absent_delete)
     for op_id, reason in skipped:
         print(f"{op_id:16} SKIPPED: {reason}")
     # An operator asked for an observation: every binding must have shaped one. A refused or
@@ -1506,7 +1625,7 @@ def main(argv=None):
             unheeded.append(f"--observe-arg for `{op_id}` refused — {status}")
     if unheeded:
         sys.exit("\n".join(unheeded))
-    if not ops:
+    if not ops and not pending:
         sys.exit("no supported operations found in the spec")
 
     # Write records + bodies first (so certify can resolve body_hash via --records), then gate.
@@ -1531,25 +1650,41 @@ def main(argv=None):
     ok = True
     # Schema-derived projections: a schema promises shape, not a value — without a live gate
     # there is nothing honest to put in the record's example, so they are not emitted at all.
-    observed = set()
+    observed = {}  # name -> the live= label its gate earned
     if pending and not args.verify_against:
         for p in pending:
             print(f"{p['name']:16} note: schema-derived projection not materialized — a schema "
                   "promises shape, not a value; --verify-against observes one")
     elif pending:
         for p in pending:
-            m_ok, got = materialize_schema_projection(p, args.out, secrets,
-                                                      oauth_ids=oauth_ids,
-                                                      blob_threshold=args.blob_threshold)
-            if not m_ok:
-                ok = False
-                print(f"{p['name']:16} observation-gate=FAIL: {got}")
-                continue
+            if p.get("kind") == "absent-delete":
+                for note in p.get("notes", []):
+                    print(f"{p['name']:16} note: {note}")
+                m_ok, got, obs_status = materialize_absent_delete(
+                    p, args.out, secrets, oauth_ids=oauth_ids,
+                    blob_threshold=args.blob_threshold)
+                if not m_ok:
+                    ok = False
+                    print(f"{p['name']:16} observation-gate=FAIL: {got}")
+                    continue
+                print(f"{p['name']:16} note: absent-name DELETE observed — this service "
+                      f"answered {obs_status} (the description documents no 404; the "
+                      "observation supplies the value)")
+                label = "OBSERVED+probe-checked"
+            else:
+                m_ok, got = materialize_schema_projection(p, args.out, secrets,
+                                                          oauth_ids=oauth_ids,
+                                                          blob_threshold=args.blob_threshold)
+                if not m_ok:
+                    ok = False
+                    print(f"{p['name']:16} observation-gate=FAIL: {got}")
+                    continue
+                label = "OBSERVED+schema-checked"
             name = got["name_hints"][0]
             rp = os.path.join(args.out, f"{name}.v0.2.json")
             bp = os.path.join(args.out, f"body-{name}.json")
             written.append((name, rp, bp, got))
-            observed.add(name)
+            observed[name] = label
 
     for name, rp, bp, record in written:
         line = f"{name:16} body={record['body_hash'][:20]}…"
@@ -1557,7 +1692,7 @@ def main(argv=None):
         if name in observed:
             # Already ran live exactly once (the observation IS the example, trace attached);
             # certify + the offline replay below are the remaining checks.
-            line += "  live=OBSERVED+schema-checked"
+            line += f"  live={observed[name]}"
         elif args.verify_against and effectful:
             # GW12: the live gate for an effectful record IS the trace capture — each example runs
             # exactly once (grants + secrets), must reproduce its documented result, and its
