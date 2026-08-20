@@ -1,9 +1,12 @@
 # A second cloud, a second description format, the same adapter
 
-- **Status:** published. Both defects it reports are fixed (`e27b281` — [finding 1](findings.md#1-certifys-schema-check-emits-verdicts-the-certification-schema-forbids);
-  `2099326` — [finding 3](findings.md#3-a-bodied-operations-synthesized-worked-example-violates-the-descriptions-own-schema)).
-  **The live confirmation against real AWS ran 2026-08-20 and the loop closed 201 → 200 → 204
-  → 404** — see [Live confirmation](#live-confirmation-2026-08-20); everything below it is
+- **Status:** absorbed (2026-08-20). Both defects it reports are fixed in-tree (`e27b281` —
+  [finding 1](findings.md#1-certifys-schema-check-emits-verdicts-the-certification-schema-forbids);
+  `2099326` — [finding 3](findings.md#3-a-bodied-operations-synthesized-worked-example-violates-the-descriptions-own-schema)),
+  findings 2, 4, 5, 6 and 7 are recorded measurements, and
+  **the live confirmation against real AWS ran 2026-08-20: the loop closed 201 → 200 → 204 →
+  404 and the slice close published the first real-cloud AWS artifacts to the commons** — see
+  [Live confirmation](#live-confirmation-2026-08-20); everything below it is
   emulator-rehearsed and hermetically reproducible.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
 - **Dates:** first published 2026-08-20, last updated 2026-08-20
@@ -62,7 +65,7 @@ disagreement it was built to close, reintroduced one layer up. Fixed in `e27b281
 
 | file | what |
 |---|---|
-| [`findings.md`](findings.md) | The six findings, measurements separated from conclusions |
+| [`findings.md`](findings.md) | The seven findings, measurements separated from conclusions |
 | [`repro/`](repro/) | Hermetic fixture for finding 3 — no vendor, no converter, no service, no credentials |
 
 ## What worked well
@@ -103,6 +106,28 @@ at the proxy, now exercised against the real signer rather than a rehearsal one 
 split, confirmed). And finding 4's caveat resolves in the right direction: moto answered this
 same loop 201/200/204/404 and the real service agrees — an agreement that was only knowable by
 running it.
+
+**The slice close (same day): the first real-cloud AWS artifacts in the commons.** The
+adapter at head live-gated `ListFunctions` + `GetAccountSettings` against the real service,
+run against the *deliberately empty* account so no observed value or trace can carry an ARN
+— **7 records (2 base + 5 observed projections), 2 deduped traces, and 7 signed
+certifications, all through Arca's verify-then-store gate** (which also exercises the
+finding-1 fix in production: freshly signed certifications store again). The verified loop
+closed from the node: precise-tag query `parse/get-account-settings-accountusage` → **1
+match**, fetched hash-verified, certified, applied under `net.read@127.0.0.1` → `Just
+{FunctionCount: 0, TotalCodeSize: 0}` → CONFIRMED, observed assert `msg_faff8b84…`
+published — and the loop's live trace hashed to `trc_486dcba7…`, **the very address the
+ingestion observation published** (byte-identical document, deduped across events).
+Grantless, secretless, proxy-dead third-party `verify-claim` by address: CONFIRMED. The
+constructive half ran too, locally: `--observe-arg` bindings at an operator-created
+`nl-live-2` materialised **43 records** (`getfunctionconfigurationruntime` → `Just
+"python3.12"`, trace-attached, replaying offline) — deliberately **not** published: observed
+Lambda documents embed ARNs, and the account identity is the operator's to publish, so it is
+withheld (the same division as finding 5 — what binds a record to an environment stays on
+the operator's side of the boundary). En route the gate surfaced
+[finding 7](findings.md#7-the-live-service-serializes-absent-members-as-explicit-null--and-the-description-does-not-admit-it):
+the real service's explicit-`null` serialization of absent members refuses every
+whole-document projection whose schema says the member is a typed optional.
 
 ## Reproducing
 
