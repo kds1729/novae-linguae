@@ -7,8 +7,10 @@
   path is unaffected). [Finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
   and 12 are fixed in `25fe525`;
   [finding 13](findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable) —
-  what finding 11's refusal costs the delete surface — is open, so the module does not yet qualify
-  as absorbed.
+  what finding 11's refusal costs the delete surface — is resolved:
+  [proposal 02](proposals/02-idempotent-delete-observation.md) was **accepted** and applied in
+  `b0271de` (`--observe-absent-delete`). Nothing this module reported remains open; whether it
+  now qualifies as absorbed is the author's to declare.
 - **Author:** Keith Sprochi <ksprochi@elementalmachines.com>
 - **Dates:** first published 2026-07-30, last updated 2026-08-01
 - **Scope:** `tooling/nl-ingest-openapi`; touches on `tooling/commons-node` retrieval and on
@@ -53,7 +55,7 @@ Two defects surfaced along the way, one of them silent for days.
 | [`findings.md`](findings.md) | The thirteen findings, each with the measurement behind it, and how they generalise across four APIs |
 | [`repro/`](repro/) | Hermetic fixtures — no cloud account, no credentials, no vendor input |
 | [`proposals/01-request-content-type.md`](proposals/01-request-content-type.md) | Emit the declared request `Content-Type` — **accepted**, applied, and its three questions answered |
-| [`proposals/02-idempotent-delete-observation.md`](proposals/02-idempotent-delete-observation.md) | Observe the idempotent DELETE at the absent name, recovering the 109 unreachable deletes — **proposed** |
+| [`proposals/02-idempotent-delete-observation.md`](proposals/02-idempotent-delete-observation.md) | Observe the idempotent DELETE at the absent name, recovering the 109 unreachable deletes — **accepted**, applied in `b0271de` |
 
 ## Defects reported
 
@@ -168,15 +170,14 @@ each against the corpus then showed — the answers work, and each surfaced the 
 
 ### Still open
 
-- **The [finding 13](findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable)
-  consequence** — finding 11's refusal is correct, and for GET the fix is strictly better than what
-  it replaced (the leaf example now carries observed arguments and a trace). But
-  `--observe-arg` is read-only by rule, so **109 path-parameterised DELETEs across four APIs are
-  unreachable by any route**, `storage.buckets.delete` among them. The create → verify → delete
-  lifecycle this module demonstrated can no longer be assembled from a description.
-  [Proposal 02](proposals/02-idempotent-delete-observation.md) offers a route: the absent-name DELETE
-  is the verb's *idempotent* case and provably changes nothing (measured live: 404 → DELETE 404 →
-  404), so the blocking rule — enforced on the verb — over-refuses a call that has no effect.
+Nothing. The last entry — the
+[finding 13](findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable)
+consequence, 109 path-parameterised DELETEs unreachable by any route — closed when
+[proposal 02](proposals/02-idempotent-delete-observation.md) was accepted and applied in
+`b0271de`: the opt-in `--observe-absent-delete` observes the verb's effect-free absent-name
+case behind a probe-checked precondition, so the create → verify → delete lifecycle is again
+assemblable from a description. The corpus regeneration that was held on this decision can
+proceed.
 
 
 ## Reproducing

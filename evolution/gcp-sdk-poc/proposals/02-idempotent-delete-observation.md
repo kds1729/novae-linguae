@@ -1,8 +1,17 @@
 # Proposal 02 — observe the effect-free DELETE, and narrow the read-only rule to match its intent
 
-- **Status:** proposed
+- **Status:** accepted — applied as proposed (maintainer decision 2026-08-20).
 - **Module:** [`gcp-sdk-poc`](../README.md)
 - **Addresses:** [finding 13](../findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable)
+- **Resolution:** applied in `b0271de` as the opt-in `--observe-absent-delete` (requires
+  `--verify-against`): the probe-then-delete mechanism exactly as specified below — probe GET at
+  the absent name must answer non-2xx (a 2xx refuses loudly before any DELETE is issued), then
+  the DELETE runs once and the example records what this service answered, trace-attached,
+  offline-replayable. A DELETE documenting its 404 keeps its ordinary spec-derived example.
+  Adapter tests 66 → 71, including the probe-finds-something refusal with the survivor verified
+  undeleted. The caveats stand as stated: it is a flag, not a default; the gate prints each
+  observed status (the write-shaped requests are visible, not silent); and the record carries
+  the service's own answer rather than an assumed 404.
 - **Blast radius:** recovers **109** path-parameterised DELETEs across four APIs, currently
   ungeneratable by any route. No existing record changes.
 - **Measured:** live against Cloud Storage, and the mechanism demonstrates itself (below).
