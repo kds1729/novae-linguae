@@ -50,7 +50,7 @@
     },
     "certified": {
       "type": "boolean",
-      "description": "True unless a check actively FAILED its declaration (an ILL-TYPED body, an UNDER-DECLARED effect, or a VIOLATED refinement). Conservative UNVERIFIABLE verdicts do not revoke certification."
+      "description": "True unless a check actively FAILED its declaration (a SCHEMA-INVALID record, an ILL-TYPED body, an UNDER-DECLARED effect, or a VIOLATED refinement). Conservative UNVERIFIABLE verdicts do not revoke certification."
     },
     "timestamp": {
       "type": "string",

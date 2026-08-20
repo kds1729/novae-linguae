@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://novae-linguae.org/spec/v0.1/commitment-expression.schema.json",
   "title": "Nova Locutio Commitment Expression",
-  "description": "Structured AST for the commitment made by the `commit` speech act. The v0.1 message schema's `commit.commitment` is a string in surface syntax; this schema defines the structured form that v0.2+ of the message schema will require. Three kinds in v0.1: `apply` (commit to applying a specific function), `provide` (commit to providing a specific artifact), `refrain` (commit NOT to do something — useful for narrowing capabilities). All three accept an optional ISO 8601 deadline (`by` for apply/provide, `until` for refrain). Higher-level reasoning over commitments (e.g. conditional commitments, retraction protocols, breach detection) is the verifier's job and not part of this schema.",
+  "description": "Structured AST for the commitment made by the `commit` speech act. The v0.1 message schema's `commit.commitment` is a string in surface syntax; message.v0.2.schema.json requires this structured form. Three kinds in v0.1: `apply` (commit to applying a specific function), `provide` (commit to providing a specific artifact), `refrain` (commit NOT to do something — useful for narrowing capabilities). All three accept an optional ISO 8601 deadline (`by` for apply/provide, `until` for refrain). Higher-level reasoning over commitments (e.g. conditional commitments, retraction protocols, breach detection) is the verifier's job and not part of this schema.",
   "$ref": "#/$defs/commitment",
   "$defs": {
     "commitment": {
@@ -43,7 +43,7 @@
         "kind": { "const": "provide" },
         "target": {
           "type": "string",
-          "pattern": "^(fn|expr|type|proof|msg)_[0-9a-f]{64}$",
+          "pattern": "^(fn|expr|type|cert|wgt|evl|trc|plan|msg)_[0-9a-f]{64}$",
           "description": "Content-address of the artifact the sender commits to providing — making available, transmitting, or contributing to the commons."
         },
         "by": {
