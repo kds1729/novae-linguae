@@ -266,6 +266,109 @@ pub fn check_plan(
     Ok(PlanReport { lines, outcome })
 }
 
+/// What probing the plan's assumptions found.
+pub struct ProbeReport {
+    /// One line per assumption, in plan order.
+    pub lines: Vec<String>,
+    /// Assumptions a probe CONTRADICTED — the plan rests on false testimony and must not run.
+    pub refuted: Vec<String>,
+    /// Assumptions no probe could decide (no probe bound for the class, or an inconclusive
+    /// status) — they stay testimony, stated as such.
+    pub unconfirmed: Vec<String>,
+}
+
+/// Spot-verify the plan's ASSUMPTIONS by observation (spec/world-state.md — the "observation
+/// probes" rung). An assumption is the exact place testimony enters a plan check: `check_plan`
+/// prices it like any other declaration, and this upgrades it — or refutes it — by a read-only
+/// call. A **probe** is an ordinary commons record bound per resource CLASS by the operator
+/// (`class -> fn_…`): its parameters are the class's key parts in order, and its observed
+/// status decides the state by the absent-name convention — 2xx = exists, 404 = absent,
+/// anything else inconclusive (an auth failure or a throttle is not a world observation).
+/// `exec` performs one read-only application (body, args) -> observed status; injecting it
+/// keeps the decision logic testable without a live service.
+pub fn probe_assumptions(
+    plan: &J,
+    records: &HashMap<String, J>,
+    bodies: &HashMap<String, J>,
+    probes: &HashMap<String, String>,
+    exec: &mut dyn FnMut(&J, &[J]) -> Result<i64>,
+) -> Result<ProbeReport> {
+    let mut lines = Vec::new();
+    let mut refuted = Vec::new();
+    let mut unconfirmed = Vec::new();
+    for (i, a) in
+        plan.get("assume").and_then(|a| a.as_array()).cloned().unwrap_or_default().iter().enumerate()
+    {
+        let resource = a.get("resource").ok_or_else(|| anyhow!("assumption {i} has no resource"))?;
+        let g = ground(resource, &[], &[])
+            .map_err(|e| anyhow!("assumption {i}: {e} (assumption keys must be literals)"))?;
+        let want = a
+            .get("state")
+            .and_then(|s| s.as_str())
+            .ok_or_else(|| anyhow!("assumption {i} has no state"))?;
+        let Some(target) = probes.get(&g.class) else {
+            lines.push(format!(
+                "probe        {} = {want}  — no probe bound for class `{}`; the assumption stays testimony",
+                g.render(),
+                g.class
+            ));
+            unconfirmed.push(format!("{} = {want} (unprobed)", g.render()));
+            continue;
+        };
+        let record = records
+            .get(target)
+            .ok_or_else(|| anyhow!("probe for class `{}`: record {target} not in the commons view", g.class))?;
+        let name = record.pointer("/name_hints/0").and_then(|s| s.as_str()).unwrap_or(target);
+        let body = record
+            .pointer("/body_hash")
+            .and_then(|b| b.as_str())
+            .and_then(|bh| bodies.get(bh))
+            .ok_or_else(|| anyhow!("probe for class `{}`: body of {name} not in the commons view", g.class))?;
+        let params = lambda_params(body)
+            .ok_or_else(|| anyhow!("probe for class `{}`: body of {name} is not a lambda", g.class))?;
+        if params.len() != g.key.len() {
+            return Err(anyhow!(
+                "probe for class `{}`: {name} takes {} argument(s) but the class's key has {} part(s) — a probe's parameters must be the key, in order",
+                g.class,
+                params.len(),
+                g.key.len()
+            ));
+        }
+        let status = exec(body, &g.key)?;
+        let observed = match status {
+            200..=299 => Some("exists"),
+            404 => Some("absent"),
+            _ => None,
+        };
+        match observed {
+            Some(o) if o == want => {
+                lines.push(format!(
+                    "probe        {} = {want}  ✓ OBSERVED ({name} answered {status}) — the assumption is confirmed",
+                    g.render()
+                ));
+            }
+            Some(o) => {
+                lines.push(format!(
+                    "probe        {} = {want}  ✗ REFUTED ({name} answered {status} = {o}) — the assumption is false",
+                    g.render()
+                ));
+                refuted.push(format!(
+                    "{} was assumed {want} but the probe observed {o} ({name} answered {status})",
+                    g.render()
+                ));
+            }
+            None => {
+                lines.push(format!(
+                    "probe        {} = {want}  ? INCONCLUSIVE ({name} answered {status} — not a world observation); the assumption stays testimony",
+                    g.render()
+                ));
+                unconfirmed.push(format!("{} = {want} (probe inconclusive: {status})", g.render()));
+            }
+        }
+    }
+    Ok(ProbeReport { lines, refuted, unconfirmed })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,5 +580,74 @@ mod tests {
         assert!(check_plan(&p, &r, &b).is_err());
         let p = json!({ "steps": [{ "target": ins, "args": [s("proj"), s("{\"other\": 1}")] }] });
         assert!(check_plan(&p, &r, &b).is_err());
+    }
+
+    fn probes_for(class: &str, target: &str) -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert(class.to_string(), target.to_string());
+        m
+    }
+
+    #[test]
+    fn probe_confirms_a_true_assumption() {
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        let (_put, get, _del) = trio(&mut r, &mut b);
+        let p = plan(vec![json!({ "resource": item(lit("w")), "state": "exists" })], vec![]);
+        let rep = probe_assumptions(&p, &r, &b, &probes_for("item", &get), &mut |_, args| {
+            assert_eq!(args.len(), 1, "probe args are the resource key, in order");
+            Ok(200)
+        })
+        .unwrap();
+        assert!(rep.refuted.is_empty() && rep.unconfirmed.is_empty(), "{:?}", rep.lines);
+        assert!(rep.lines[0].contains("OBSERVED"), "{:?}", rep.lines);
+    }
+
+    #[test]
+    fn probe_refutes_a_false_assumption() {
+        // The whole point: an assumption is testimony, and a 404 at the assumed-existing
+        // resource proves it false BEFORE any effect runs on top of it.
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        let (_put, get, _del) = trio(&mut r, &mut b);
+        let p = plan(vec![json!({ "resource": item(lit("w")), "state": "exists" })], vec![]);
+        let rep =
+            probe_assumptions(&p, &r, &b, &probes_for("item", &get), &mut |_, _| Ok(404)).unwrap();
+        assert_eq!(rep.refuted.len(), 1, "{:?}", rep.lines);
+        assert!(rep.refuted[0].contains("assumed exists") && rep.refuted[0].contains("absent"));
+    }
+
+    #[test]
+    fn inconclusive_and_unprobed_assumptions_stay_testimony() {
+        // A 403 is an auth fact, not a world observation — and a class with no probe bound
+        // was never observed at all. Neither refutes; both are STATED as testimony.
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        let (_put, get, _del) = trio(&mut r, &mut b);
+        let p = plan(
+            vec![
+                json!({ "resource": item(lit("w")), "state": "exists" }),
+                json!({ "resource": { "class": "unprobed", "key": [lit("k")] }, "state": "absent" }),
+            ],
+            vec![],
+        );
+        let rep =
+            probe_assumptions(&p, &r, &b, &probes_for("item", &get), &mut |_, _| Ok(403)).unwrap();
+        assert!(rep.refuted.is_empty());
+        assert_eq!(rep.unconfirmed.len(), 2, "{:?}", rep.lines);
+        assert!(rep.lines[0].contains("INCONCLUSIVE"));
+        assert!(rep.lines[1].contains("no probe bound"));
+    }
+
+    #[test]
+    fn probe_arity_mismatch_is_an_error_not_a_verdict() {
+        // A probe's parameters must BE the class's key, in order — a mismatch is a malformed
+        // binding, never a world question.
+        let (mut r, mut b) = (HashMap::new(), HashMap::new());
+        let (_put, get, _del) = trio(&mut r, &mut b);
+        let p = plan(
+            vec![json!({ "resource": { "class": "pair", "key": [lit("a"), lit("b")] },
+                         "state": "exists" })],
+            vec![],
+        );
+        assert!(probe_assumptions(&p, &r, &b, &probes_for("pair", &get), &mut |_, _| Ok(200))
+            .is_err());
     }
 }

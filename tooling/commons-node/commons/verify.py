@@ -22,7 +22,7 @@ from django.conf import settings
 _PREFIX_KIND = {
     "fn": "function-record", "msg": "message", "expr": "body", "type": "type",
     "cert": "certification", "wgt": "weights", "evl": "eval-attestation",
-    "trc": "trace",
+    "trc": "trace", "plan": "plan",
 }
 
 # (kind, schema_version) -> schema filename in COMMONS_SPEC_DIR.
@@ -37,6 +37,7 @@ _SCHEMA = {
     ("weights", "0.1.0"): "weights.schema.json",
     ("eval-attestation", "0.1.0"): "eval-attestation.schema.json",
     ("trace", "0.1.0"): "trace.schema.json",
+    ("plan", "0.1.0"): "plan.schema.json",
 }
 
 

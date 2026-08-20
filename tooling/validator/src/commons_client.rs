@@ -31,6 +31,7 @@ fn kind_for_address(addr: &str) -> Result<ArtifactKind> {
         "msg" => ArtifactKind::Message,
         "cert" => ArtifactKind::Certification,
         "trc" => ArtifactKind::Trace,
+        "plan" => ArtifactKind::Plan,
         other => bail!("unknown content-address prefix `{other}` in {addr}"),
     })
 }

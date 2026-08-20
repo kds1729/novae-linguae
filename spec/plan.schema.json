@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/spec/v0.1/plan.schema.json",
+  "title": "Nova Lingua plan artifact",
+  "description": "A PLAN as a commons artifact (spec/world-state.md): the {assume, steps} that `nl-validator check-plan` decides, made content-addressed (plan_…) so a checked plan is fetchable, re-decidable, and citable by address. Unsigned — a plan's soundness is recomputable from the referenced records' declared world contracts, never testimony. Step arguments are value expressions; the checker validates them semantically (arity against the target's body, groundability of world keys), so they are constrained only structurally here.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "plan" },
+    "schema_version": { "const": "0.1.0" },
+    "hash": {
+      "type": "string",
+      "pattern": "^plan_[0-9a-f]{64}$",
+      "description": "BLAKE3-256 content address over the JCS-canonical artifact with `hash` stripped."
+    },
+    "assume": {
+      "type": "array",
+      "description": "What the planner is willing to assume about the initial world — testimony, priced as such (and spot-verifiable by observation probes: `check-plan --probe`).",
+      "items": {
+        "type": "object",
+        "required": ["resource", "state"],
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "type": "object",
+            "required": ["class", "key"],
+            "additionalProperties": false,
+            "properties": {
+              "class": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+              "key": {
+                "type": "array",
+                "description": "Ground literal key parts only — an assumption names a concrete resource; a `var` names nothing here.",
+                "items": {
+                  "type": "object",
+                  "required": ["kind"],
+                  "properties": { "kind": { "type": "string" } }
+                }
+              }
+            }
+          },
+          "state": { "enum": ["exists", "absent"] }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["target", "args"],
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "type": "string",
+            "pattern": "^fn_[0-9a-f]{64}$",
+            "description": "The function record this step applies, by content address."
+          },
+          "args": {
+            "type": "array",
+            "description": "Concrete value expressions, positional — the checker holds arity to the target's body.",
+            "items": {
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
