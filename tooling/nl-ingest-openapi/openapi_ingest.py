@@ -24,7 +24,12 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
                     REQUIRED string part (incl. format: binary) becomes a caller parameter —
                     framing is literal, only part values are caller data (the url_encode split).
                     Optional parts are omitted with a note. Refused honestly: a multipart body
-                    with no declared part properties, no required parts, or a non-string part
+                    with no declared part properties, no required parts, or a non-string part.
+                    A body whose every declared media type REQUIRES fields is REFUSED (finding 3,
+                    evolution/aws-sdk-poc — finding 11's family, one verb class over): the
+                    synthesized `{}` example would contradict the description's own `required`
+                    list, so no spec-derivable worked example exists; an operator-supplied body
+                    could be satisfiable but never observed (the gate is read-only by rule)
     security     -> `http`/`bearer` -> an `Authorization: Bearer {{secret:NAME}}` header;
                     `apiKey` in `header` -> a `<name>: {{secret:NAME}}` header. apiKey in
                     query/cookie is REFUSED: a secret placeholder substitutes only inside a
@@ -757,6 +762,31 @@ def build_operation(spec, base_url, path, verb, op, shared_params, global_securi
             offered = ", ".join(f"`{c}`" for c in declared_cts)
             notes.append(f"request `Content-Type` omitted — the body declares {offered} and the "
                          f"description does not say which one to send")
+        # FINDING 3 (evolution/aws-sdk-poc): the worked example synthesizes `{}` as the body
+        # argument, but a body schema with a non-empty `required` list states in the
+        # description's own words that `{}` satisfies it for no field — the example would
+        # contradict the description it was generated from, and certify cannot see it (certify
+        # checks the record, not the description). Finding 11's family, one verb class over,
+        # and the same resolution: no spec-derivable worked example exists, so the operation
+        # refuses with the reason. No constructive half — the observation gate is read-only by
+        # rule and these verbs mutate, so an operator-supplied body could make the example
+        # satisfiable but never observed (gcp finding 4, still standing). The refusal fires
+        # only when EVERY declared media type requires fields: a description also offering a
+        # type that admits the empty body leaves the minimal documented call satisfiable.
+        if declared_cts:
+            required_by_ct = []
+            for ct in declared_cts:
+                bschema = deref(spec, (content.get(ct) or {}).get("schema") or {})
+                req = bschema.get("required") if isinstance(bschema, dict) else None
+                required_by_ct.append(
+                    [r for r in req if isinstance(r, str)] if isinstance(req, list) else [])
+            if all(required_by_ct):
+                fields = ", ".join(f"`{r}`" for r in required_by_ct[0])
+                return ("skip", op_id,
+                        f"request body requires fields ({fields}) the synthesized `{{}}` "
+                        "example cannot supply — the example would contradict the "
+                        "description's own `required` list, so no spec-derivable worked "
+                        "example exists")
         if content and len(mp_types) == len(content):
             # MULTIPART-ONLY body: compiled, not refused. The old refusal ("no deterministic
             # boundary construction") dissolves the same way url_encode's did — the boundary is a

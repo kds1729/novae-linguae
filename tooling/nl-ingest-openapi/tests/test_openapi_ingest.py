@@ -399,6 +399,50 @@ class RefusalBoundaryTest(unittest.TestCase):
         self.assertEqual(built, [])
         self.assertIn("not a string", skipped[0][1])
 
+    def test_required_body_fields_refused(self):
+        # Finding 3 (evolution/aws-sdk-poc): the synthesized `{}` body cannot supply a field
+        # the description's own `required` list demands — the worked example would contradict
+        # the description it was generated from, so the operation refuses with the reason
+        # (finding 11's family, one verb class over). The repro fixture's shape, inline.
+        built, skipped = self._walk({
+            "paths": {"/widgets": {"post": {"operationId": "createWidget",
+                "requestBody": {"required": True, "content": {"application/json": {
+                    "schema": {"type": "object", "required": ["name", "kind"],
+                               "properties": {"name": {"type": "string"},
+                                              "kind": {"type": "string"}}}}}},
+                "responses": {"201": {"description": "created"}}}}}})
+        self.assertEqual(built, [])
+        self.assertIn("`required` list", skipped[0][1])
+        self.assertIn("`name`", skipped[0][1])
+        self.assertIn("`kind`", skipped[0][1])
+
+    def test_required_body_schema_ref_refused(self):
+        # Real corpora (Smithy/Discovery projections) declare body schemas by $ref into
+        # components — the `required` list must be read through the reference.
+        built, skipped = self._walk({
+            "components": {"schemas": {"W": {"type": "object", "required": ["name"],
+                                             "properties": {"name": {"type": "string"}}}}},
+            "paths": {"/widgets": {"post": {"operationId": "createWidgetRef",
+                "requestBody": {"content": {"application/json": {
+                    "schema": {"$ref": "#/components/schemas/W"}}}},
+                "responses": {"201": {"description": "created"}}}}}})
+        self.assertEqual(built, [])
+        self.assertIn("`required` list", skipped[0][1])
+
+    def test_alternative_media_type_admitting_empty_body_compiles(self):
+        # The refusal fires only when EVERY declared media type requires fields: offered an
+        # alternative type that admits the empty body, the minimal documented call survives
+        # (the Content-Type ambiguity is already noted, unchanged).
+        built, skipped = self._walk({
+            "paths": {"/widgets": {"post": {"operationId": "createWidgetAlt",
+                "requestBody": {"content": {
+                    "application/json": {"schema": {"type": "object", "required": ["name"],
+                                                    "properties": {"name": {"type": "string"}}}},
+                    "text/plain": {"schema": {"type": "string"}}}},
+                "responses": {"201": {"description": "created"}}}}}})
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(built), 1)
+
     def test_cookie_param_refused(self):
         built, skipped = self._walk({
             "paths": {"/x": {"get": {"operationId": "opD",
