@@ -191,6 +191,33 @@ resolution) actually exists here. Whether multi-stage composition over such reco
 attempting remains the open question that module recorded; this corpus is the first one derived
 from a real cloud API on which it could even be tried.
 
+## 7. The live service serializes absent members as explicit `null` — and the description does not admit it
+
+Found during the live confirmation's slice ingestion (2026-08-20), by the observation gate
+itself.
+
+**Measured.** `ListFunctions` on an empty account answers `{"Functions":[],"NextMarker":null}`.
+The Smithy-projected schema declares `NextMarker` an *optional string* — present-as-`null` is
+not a value that schema admits, so the whole-document projection `ListFunctionsBody` was
+REFUSED by the observation gate (`property NextMarker is not the declared string`) while the
+field projection legitimately observed `None` and `Functions` observed `Just []`. The pattern
+generalises: `GetFunction` and `GetFunctionConfiguration` documents at a real function carry
+~20 explicit-`null` members (`VpcConfig`, `Layers`, `KMSKeyArn`, …), so **both their
+whole-document projections refused while all 43 field projections materialised**;
+`GetAccountSettingsBody` materialised — its document happens to carry no `null`s.
+
+**Concluded.** The real service (restJson1 as Lambda serves it) emits explicit `null` for
+absent structure members; the Smithy→OpenAPI projection encodes absence as *omission*. Between
+those two conventions sits every whole-document projection: held to the declared shape, it
+refuses on the first nulled member, exactly as the finding-8 discipline demands — and the
+per-field verdicts stay honest (`None` for a nulled member is a true observation of the
+document obtained). This is finding 2's lesson from the other side: what a worked example may
+assert is decided by format facts, and here two format layers of the *same vendor chain*
+disagree about what absence looks like. A resolution would have to decide which layer speaks
+for the description — admit `null` for optional members at conformance time, or keep the
+refusal as the honest reading of the schema's own words. Recorded as a measurement; the
+refusal is not obviously wrong.
+
 ## Reproducing
 
 Finding 3 is hermetic; the commands are inline above and need only this repository.
