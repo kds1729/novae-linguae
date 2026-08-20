@@ -218,6 +218,17 @@ for the description — admit `null` for optional members at conformance time, o
 refusal as the honest reading of the schema's own words. Recorded as a measurement; the
 refusal is not obviously wrong.
 
+**Resolved** (maintainer decision, applied same day): **admit** — present-as-`null` on a
+declared *optional* member is this wire format's spelling of absence, and the document
+conforms. The decisive argument was consistency, not leniency: the field projections already
+read `null → None` as a legitimate observation of an obtained document, so refusing the same
+fact at document grain was an inconsistency between grains — and the `+json` precedent
+applies (the serialization fact *is* the promise). The same reading sharpens the other edge:
+a **required** member spelled `null` is spelled *absent*, and a required member may not be
+absent — that now refuses, where previously an untyped required member could carry `null`
+silently. Only `null` is absence; a present non-`null` value of the wrong type stays a
+violation. Adapter tests 71 → 75.
+
 ## Reproducing
 
 Finding 3 is hermetic; the commands are inline above and need only this repository.

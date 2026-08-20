@@ -3,7 +3,9 @@
 - **Status:** absorbed (2026-08-20). Both defects it reports are fixed in-tree (`e27b281` —
   [finding 1](findings.md#1-certifys-schema-check-emits-verdicts-the-certification-schema-forbids);
   `2099326` — [finding 3](findings.md#3-a-bodied-operations-synthesized-worked-example-violates-the-descriptions-own-schema)),
-  findings 2, 4, 5, 6 and 7 are recorded measurements, and
+  findings 2, 4, 5 and 6 are recorded measurements,
+  [finding 7](findings.md#7-the-live-service-serializes-absent-members-as-explicit-null--and-the-description-does-not-admit-it)
+  is resolved (null-as-absence admitted for optional members, refused for required ones), and
   **the live confirmation against real AWS ran 2026-08-20: the loop closed 201 → 200 → 204 →
   404 and the slice close published the first real-cloud AWS artifacts to the commons** — see
   [Live confirmation](#live-confirmation-2026-08-20); everything below it is
