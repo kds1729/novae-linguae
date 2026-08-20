@@ -45,13 +45,15 @@ The commons **is not** a ledger, a database of record, or an authority:
 
 ## Data model — what is stored
 
-Every object is identified by its content-address `(fn|expr|type|proof|msg)_<64-hex>` (see
+Every object is identified by its content-address
+`(fn|expr|type|cert|wgt|evl|trc|plan|msg)_<64-hex>` (see
 [`canonical-serialization.md`](canonical-serialization.md)). Two broad classes, with different
 durability expectations:
 
-- **Nova Lingua artifacts** — `fn_` function records, `expr_` bodies, `type_` types, `proof_`
-  certificates. These are the **durable** commons: small, immutable, kept forever (the corpus only
-  grows).
+- **Nova Lingua artifacts** — `fn_` function records, `expr_` bodies, `type_` types, `cert_`
+  certifications, `wgt_` weights pointers, `evl_` eval attestations, `trc_` effect traces, and
+  `plan_` plans. These are the **durable** commons: small, immutable, kept forever (the corpus
+  only grows).
 - **Nova Locutio messages** — `msg_` speech acts. Mostly **ephemeral** coordination traffic. A node
   MAY keep them only transiently (e.g. for delivery, with a TTL) and persist a message durably only
   when a conversation needs durable history. They are content-addressed and verifiable the same way;
@@ -90,6 +92,10 @@ verification is formatting-independent.
 | **sync** | Replication feed: hashes added since a cursor, for mirroring. |
 | **info** | Node metadata: protocol version, accepted schema versions, embedding model, peers. |
 
+A node MAY additionally offer node-local best-effort services outside the replication contract —
+the reference node serves `POST /v0/prove` and `POST /v0/equiv` (solver-backed property/equivalence
+checks; see the node README). They carry no authority: a client re-proves locally.
+
 ## HTTP API (reference binding)
 
 A node SHOULD expose the protocol over HTTP as below. Paths are under a version prefix (`/v0/`). All
@@ -98,24 +104,31 @@ themselves) MAY exist; the operations are what is normative.
 
 ### `POST /v0/records` — publish
 
-Body: a single record (function record, body, type, proof, or message) as JSON.
+Body: a single artifact as JSON — any of the nine kinds (function record, message, body, type,
+certification, weights pointer, eval attestation, trace, plan).
 
 The node verifies (§"Verification on ingest"). On success it stores the record under its hash and
 returns the hash. Publishing the same content again is a no-op (idempotent).
 
-**Bare body expressions are self-addressing.** A body expression carries no embedded `hash` field —
-the whole expression *is* the hashed content (spec/canonical-serialization.md) — so a node MUST accept
-a hashless artifact whose top-level `kind` is a body-expression kind (`var`/`lit`/`app`/`let`/
-`lambda`/`case`/`field`), compute its `expr_…` content address itself after schema validation, store
-it under that address, and return the computed address. This is what lets a record's `body_hash`
-resolve on the same node that serves the record — the precondition for a *remote* agent loop.
+**Bare body expressions and traces are self-addressing.** A body expression carries no embedded
+`hash` field — the whole expression *is* the hashed content (spec/canonical-serialization.md) — so
+a node MUST accept a hashless artifact whose top-level `kind` is a body-expression kind
+(`var`/`lit`/`app`/`let`/`lambda`/`case`/`field`/`variant`/`tuple` — the construction forms a
+0-argument body can top out at included), compute its `expr_…` content address itself after schema
+validation, store it under that address, and return the computed address. A hashless
+`kind: "trace"` artifact is admitted the same way (its `trc_…` address is the hash of the whole
+artifact). This is what lets a record's `body_hash` resolve on the same node that serves the
+record — the precondition for a *remote* agent loop.
 
 ```
 201 Created   { "hash": "fn_3a9b…", "stored": true }      # newly stored
 200 OK        { "hash": "fn_3a9b…", "stored": false }     # already present
-422 Unprocessable Entity  { "error": "hash_mismatch" | "schema_invalid" | "signature_invalid",
+422 Unprocessable Entity  { "error": "hash_mismatch" | "schema_invalid" | "signature_invalid"
+                                     | "unsupported_kind",
                             "detail": "…" }
 400 Bad Request           { "error": "malformed_json", "detail": "…" }
+413 Payload Too Large     { "error": "too_large" }        # over the node's record cap
+503 Service Unavailable   { "error": "verifier_unavailable" }  # the node's validator is missing
 ```
 
 A node MUST NOT reject a verifying record on the basis of who published it or what it says
@@ -459,11 +472,14 @@ by every witness that countersigned the original.
 
 Where `sync` federates node-to-node over HTTP, a **seed bundle** federates over *anything* — an HTTP
 mirror, IPFS, BitTorrent, a git repo, email, physical media — for cold-start, disaster recovery, and
-publishing. A `.nlb` ("Nova Lingua Bundle", format id `nlb/1`) is a **gzipped tar** containing exactly:
+publishing. A `.nlb` ("Nova Lingua Bundle", format id `nlb/1`) is a **gzipped tar** containing:
 
 ```
-manifest.json    { format_version, count, schema_versions[], bundle_digest, source?, producer?, signature? }
+manifest.json    { format_version, count, schema_versions[], bundle_digest, blobs?, source?, producer?, signature? }
 records.jsonl    one content-addressed record per line, sorted by hash
+blobs/<sha256>   optional referenced blobs (example values, weights files) — self-verifying by
+                 name in both directions; a bundle without them is byte-identical to the
+                 blob-free format (exportbundle carries referenced blobs by default)
 ```
 
 The manifest is specified by [`bundle.schema.json`](bundle.schema.json). A bundle is **deterministic**
@@ -494,26 +510,35 @@ pluggable censorship-resistant bootstrap — is in [`resilience.md`](resilience.
 {
   "protocol": "v0",
   "schema_versions": ["0.1.0", "0.2.0"],
-  "kinds": ["function-record", "body", "type", "proof", "message"],
+  "kinds": ["function-record", "message", "body", "type", "certification", "weights",
+            "eval-attestation", "trace", "plan"],
   "embedding_model": "<id or null>",
   "record_count": 1234567,
   "peers": ["https://commons.example.org", "…"],
-  "retains_messages": "ttl:86400"
+  "retains_messages": "durable",
+  "prove": { "solver": "z3", "available": true },
+  "egress": { "window": 3600, "used_bytes": 0, "budget_bytes": 1073741824 }
 }
 ```
 
-`peers` is a hint list for replication/bootstrap; it carries no authority.
+`peers` is a hint list for replication/bootstrap; it carries no authority. `retains_messages`
+states the node's message-retention policy (the reference node keeps everything: `"durable"`;
+a TTL tier would state e.g. `"ttl:86400"`). `prove`/`egress` describe the node-local prove
+service and the egress budget.
 
 ## Verification on ingest (the only gate)
 
 On `publish`, a node MUST, and on `resolve` a client MUST:
 
-1. **Hash check** — recompute `(fn|expr|type|proof|msg)_<hash>` per `canonical-serialization.md`
-   (strip `hash`; for messages also strip `signature`); it MUST equal the address.
+1. **Hash check** — recompute `(fn|expr|type|cert|wgt|evl|trc|plan|msg)_<hash>` per
+   `canonical-serialization.md` (strip `hash`; for the signed kinds — messages, certifications,
+   eval attestations — also strip `signature`); it MUST equal the address.
 2. **Schema check** — the record MUST validate against the schema named by its `schema_version`.
    `additionalProperties: false` means an invalid record cannot produce a meaningful hash, so an
    invalid record is rejected, not stored.
-3. **Signature check (messages)** — the Ed25519 signature MUST verify against the `from` DID's key.
+3. **Signature check (signed kinds)** — for messages, certifications, and eval attestations the
+   Ed25519 signature MUST verify against the signer DID's key. Plans are deliberately unsigned —
+   a plan's soundness is recomputable (`world-state.md`), never testimony.
 
 The reference validator [`tooling/validator/`](../tooling/validator/) performs exactly these checks
 (`nl-validator verify`); a node SHOULD reuse it (or an equivalent that agrees byte-for-byte).
@@ -592,9 +617,11 @@ https://nl.1105software.com; see [`../tooling/commons-node/`](../tooling/commons
 - **Postgres** as the durable system of record — JSONB for the raw record plus extracted, indexed
   columns (effects, capabilities, intent_tags, terminates, complexity, normalized signature) for
   `query`, and **pgvector** for `search`. Disk-first, so it scales past RAM as the corpus grows.
-- **Redis** as the hot/ephemeral tier — read-through cache of hot records, in-flight `msg_` delivery
-  with TTL, a fast "exists?" set, a job broker for async embedding/verification/replication, and
-  pub/sub for `sync` notifications.
+- **Redis** as the hot/ephemeral tier. Today it carries the Celery job broker (async
+  embedding/replication/anchoring beats) and the Django cache (the egress budget counter, the
+  replication cursor). The rest of the tier as originally sketched — a read-through record
+  cache, TTL'd `msg_` delivery, an exists-set, pub/sub `sync` notifications — is unbuilt; the
+  reference node reads records straight from Postgres and retains messages durably.
 
 None of that is normative. A node backed entirely by Redis, by flat files, or by IPFS is equally
 conformant if it speaks the protocol above. The engine choice MUST NOT leak into the wire contract.

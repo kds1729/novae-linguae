@@ -54,12 +54,12 @@ mirrors are listed but not required. No third-party registry API enters the loop
 | `files[]` | the blob manifest: `{name, sha256, bytes}` per file. **`sha256`**, not BLAKE3 — blobs are not JCS-canonicalizable JSON, so any collision-resistant hash serves; sha256 is the ML-ecosystem convention (safetensors, HF) and matches the pins already recorded in `REFERENCE_CHECKPOINT.md` |
 | `recipe` | the deterministic derivation: training-corpus content identity (the corpus jsonl sha + the generator provenance), train-split sha, trainer + version, seed, epochs, hyperparameters. This is the **reproducibility claim**: same base + recipe ⇒ bit-identical `files[].sha256` |
 | `measured` | *optional, self-reported* eval summary (harness settings + scores). Normatively **untrusted** — consumers rely on signed attestations (below), never on this field |
-| `urls[]` | advisory fetch locations, primary first (convention: `<node-origin>/blobs/<sha256>`); any mirror may serve, the hash decides |
+| `urls[]` | advisory fetch locations, primary first (convention: `<node-origin>/v0/blobs/<sha256>`); any mirror may serve, the hash decides |
 | `derived_from` / `supersedes` | lineage, as in function records — versioning is a supersedes chain, not mutable tags |
 
 ## Serving blobs
 
-Static file serving keyed by content hash: `GET /blobs/<sha256>` — no gate, no schema, no judgment; the
+Static file serving keyed by content hash: `GET /v0/blobs/<sha256>` — no gate, no schema, no judgment; the
 node's edge (or any mirror, including a plain web server or an object store) can serve it. Ingest of the
 *pointer record* goes through the normal verify-then-store gate (schema + `wgt_` hash check); the node
 does not fetch or verify the blobs it points at. Blob egress is metered like everything else on a public

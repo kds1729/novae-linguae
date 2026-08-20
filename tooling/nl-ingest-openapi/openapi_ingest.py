@@ -18,7 +18,9 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
                     OPTIONAL query/header params are omitted with a printed note — the record is
                     the minimal documented call, never a silent truncation
     header params -> required ones become string parameters, `map_put` into the header map
-    requestBody  -> a `body` string parameter (omitted for bodyless verbs); a MULTIPART-only
+    requestBody  -> a `body` string parameter (omitted for bodyless verbs); the single declared
+                    non-multipart media type is emitted as a literal Content-Type header (gcp
+                    proposal 01 — several declared types are noted and none sent); a MULTIPART-only
                     body compiles to a deterministic form: the boundary is a spec-time constant
                     riding in the Content-Type literal, part names are description data, and each
                     REQUIRED string part (incl. format: binary) becomes a caller parameter —
@@ -61,8 +63,8 @@ record over the general `http` builtin (spec/expressiveness.md GW6), with no han
                     record `<opId>Body : … -> Maybe Json` (`parse_json` over the response body —
                     field access then composes in-language via the certified json_get/json_path
                     commons records, principle 4). Emitted only when a deterministic success
-                    example is constructible from the spec alone (a GET with no path parameters);
-                    anything else gets a printed note, never a silent guess.
+                    example is constructible from the spec alone (a bodyless GET with no path
+                    parameters); anything else gets a printed note, never a silent guess.
                     A 2xx response that declares only a SCHEMA (no example — how real-world
                     descriptions overwhelmingly document responses) yields SCHEMA-DERIVED
                     projections: `<opId>Body : … -> Maybe Json` plus one typed field projection
@@ -107,6 +109,7 @@ record is verified-by-default exactly like a hand-authored one.
                               [--token VALUE | --token SCHEME=VALUE ...]
                               [--oauth-client id:secret] [--blob-threshold 65536]
                               [--observe-arg OPID.PARAM=VALUE ...]
+                              [--observe-absent-delete]
 
 An example's expected value larger than --blob-threshold JCS-canonical bytes (observed OR
 documented) rides BY ADDRESS: a `result_blob` {sha256, bytes} pointer in the record + the value's

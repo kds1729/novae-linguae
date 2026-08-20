@@ -108,8 +108,8 @@ of *shape*, the eval pool and the showcase. `--combinatorial` ALSO emits **param
 comparisons — unary / two-step / three-step arithmetic, `map`/`filter`/`count`/predicate over a comparison,
 `filter`→`map` pipelines, guarded optionals, range tests, compound (`and`/`or`) predicates, and
 **structural recursion** (recursive `map`/`filter`/`count`/`all`/`any`/reduce — the write-hardest shapes,
-parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,252 generated
-function specs (3,506 examples total with the curated set)** across fifty-four template families
+parameterized) — for the *volume* a fine-tuning dataset needs. It currently yields **3,264 generated
+function specs (3,518 examples total with the curated set)** across fifty-five template families
 (through #38, index recursion — the total `nth` idiom, whose exact gold is leakage-dropped so the family
 teaches the shape; a 14B run confirmed it flips `nth` from fail to pass — #39, **strings as data**
 (`spec/expressiveness.md` phase 1): split/join/concat/`to_string`/`parse_int` idioms multiplied over
@@ -170,7 +170,12 @@ it in the examples, TRUSTS it in the body (div/mod into and after constants, non
 None-guard — trust when told, guard when asked) — and #54, **folds where a section tempts** (the
 round-22 Haskell-bleed cluster: product-like tasks drew operator sections `foldl (*) 1 xs`; #54
 teaches the explicit-lambda fold on product-adjacent shapes plus canonical-`parse_int`-refusal
-read anchors — `"007"`/`" 7"` are `None`, held out in read position via `read_example`), every
+read anchors — `"007"`/`" 7"` are `None`, held out in read position via `read_example`) — and
+#55, **world-state / lifecycle shapes** (the cloud-experiment pull, spec/world-state.md: the
+three-way probe decision as a 3-nullary-tag sum `[Exists Absent Unknown]` — a sum shape no other
+family emits — with string-label twins, and short-circuit tail-descent walks over status runs:
+all-clean conjunction, first failure as Maybe, leading-success count; parameterized over the
+success band and absent code, tail-only descent honestly declaring `terminates: always`), every
 one through the same validate → typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,
@@ -204,9 +209,9 @@ to be rejected*, for the stated reason. Today's 14 span eight distinct verifier 
 
 ## Scope and where it grows
 
-241 examples today (227 positive, 14 negative), in four `category`s:
+254 examples today (240 positive, 14 negative), in four `category`s:
 
-- **function** (204) — Nova Lingua function records across **thirty-three families**: unary integer (8, incl.
+- **function** (217) — Nova Lingua function records across **thirty-six families**: unary integer (8, incl.
   `double` / `quadruple` / `decrement` / `abs_val`), binary integer (6, incl. `maximum` / `minimum` /
   `abs_diff`), boolean/predicate (8, incl. `logical_and` / `logical_or` / `logical_xor` / `is_zero` /
   `is_even`), list builtins (3: `sum` / `reverse` / `length`), list-transform (6: `map`/`filter`/`append`

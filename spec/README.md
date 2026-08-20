@@ -103,7 +103,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 - Closed speech-act vocabulary (nine acts: request, assert, query, propose, commit, retract, delegate, ack, reject)
 - Closed effect vocabulary (ten effects, deliberately minimal)
 - Closed reject-code vocabulary (six codes)
-- Closed type-builtin vocabulary (eight atoms, five constructors)
+- Closed type-builtin vocabulary (fourteen: eight atoms, five constructors, and the nominal nullary `Json`)
 - Open capability token format (`cap:path/segment`)
 - Content-address format (`<kind>_<64-hex-blake3>`)
 - Canonical form (JCS) and hash (BLAKE3-256) defined in [`canonical-serialization.md`](canonical-serialization.md)
@@ -112,7 +112,7 @@ This directory holds the machine-readable specifications for *Novae Linguae*. Sc
 - Strict `additionalProperties: false` everywhere — unknown fields fail validation
 - Conditional `store`-payload validation in `message.schema.json`: a `payload_kind` discriminator selects the artifact schema that `payload` must satisfy, applied by cross-file `$ref` (resolved by the reference validator against sibling files in `spec/`)
 
-**Well-formedness vs structural validation.** JSON Schema can only check shape. Several semantic constraints are real but live outside the schema; they are enforced by the reference validator at [`tooling/validator/`](../tooling/validator/). Today this covers type-expression well-formedness (variable scoping, rank-1 forall, uniqueness within sums and records, ctor-kind compatibility in `apply`). Predicate- and value-expression well-formedness will follow once the verifier engine engages with them.
+**Well-formedness vs structural validation.** JSON Schema can only check shape. Several semantic constraints are real but live outside the schema; they are enforced by the reference validator at [`tooling/validator/`](../tooling/validator/). Today this covers type-expression well-formedness (variable scoping, rank-1 forall, uniqueness within sums and records, ctor-kind compatibility in `apply`) plus predicate-, value-, and body-expression well-formedness (`check-predicate` / `check-value` / `check-body`).
 
 ## What v0.1 deliberately defers
 
@@ -124,8 +124,8 @@ These are real specifications that will arrive in their own schemas. v0.1 string
 4. **Value representation in examples.** v0.1 allows any JSON value for `args` and `result`, with a bare-string-for-function-references convention. **RESOLVED** in [`value-expression.schema.json`](value-expression.schema.json) (thirteen kinds: `bool`, `int`, `nat`, `float`, `string`, `bytes`, `unit`, `list`, `tuple`, `record`, `variant`, `fn_ref`, `map`); made mandatory by `function-record.v0.2.schema.json`. Values too large to inline ride by address (`examples[].result_blob`, sha256 into the gate-free blob store).
 5. **Body representation.** v0.1 references the body by hash (`body_hash`) but does not specify the body's structure. **RESOLVED** end-to-end in [`body-expression.schema.json`](body-expression.schema.json): structured AST with nine expression kinds (`var`, `lit`, `app`, `let`, `lambda`, `case`, `field`, `variant`, `tuple`) and five pattern kinds (`wildcard`, `bind`, `variant`, `lit`, `tuple`). Embedded types and values are accepted as opaque objects at this layer and must validate independently against `type-expression.schema.json` and `value-expression.schema.json`. The reference validator `nl-validator hash` auto-detects body expressions from the top-level `kind` field; `--kind body` is available as an override. Example function records (`double.v0.2.json`) now point at the real `expr_<…>` content-address of their body (`body-double.json`), and `verify` confirms the chain end-to-end. Deferred to a later body-expression schema version: optional type annotations on `let`, multi-binding `let`, multi-arm lambda equivalence sugar, do-notation, effect rows.
 6. **Canonical serialization for hashing.** ~~v0.1 mentions canonical serialization but does not define it.~~ **RESOLVED in [`canonical-serialization.md`](canonical-serialization.md)**: JCS (RFC 8785) over UTF-8 JSON, BLAKE3-256 as the hash. The reference validator/hasher at [`tooling/validator/`](../tooling/validator/) implements the procedure end-to-end; example records now carry real, reproducible hashes that `nl-validator verify` passes.
-7. **Controlled intent-tag vocabulary.** **RESOLVED** in [`intent-tag-vocabulary.md`](intent-tag-vocabulary.md): sixteen top-level categories and a set of property-modifier tags, with an extension policy. The schema continues to accept any tag matching the path pattern; the vocabulary is the convention for cross-agent agreement.
-8. **Claim and commitment expression sub-languages.** **FULLY RESOLVED.** Structured ASTs defined in [`claim-expression.schema.json`](claim-expression.schema.json) (five kinds: `predicate`, `observed`, `satisfies`, `verified`, `attestation`) and [`commitment-expression.schema.json`](commitment-expression.schema.json) (three kinds: `apply`, `provide`, `refrain`). **Made mandatory** in [`message.v0.2.schema.json`](message.v0.2.schema.json): `assert_body.claim` and `commit_body.commitment` are now required structured AST objects validated by cross-file `$ref`. The v0.1 message schema retains the string form unchanged; v0.2 messages must use the structured form. Worked examples: [`examples/assert.v0.2.json`](examples/assert.v0.2.json) (`satisfies` claim) and [`examples/commit.v0.2.json`](examples/commit.v0.2.json) (`apply` commitment). Both carry real hashes and Ed25519 signatures that `nl-validator verify` passes.
+7. **Controlled intent-tag vocabulary.** **RESOLVED** in [`intent-tag-vocabulary.md`](intent-tag-vocabulary.md): eighteen top-level categories (incl. `dispatch` and the derived-never-authored `composite` axis) and a set of property-modifier tags, with an extension policy. The schema continues to accept any tag matching the path pattern; the vocabulary is the convention for cross-agent agreement.
+8. **Claim and commitment expression sub-languages.** **FULLY RESOLVED.** Structured ASTs defined in [`claim-expression.schema.json`](claim-expression.schema.json) (six kinds: `predicate`, `observed`, `satisfies`, `verified`, `attestation`, `equivalent`) and [`commitment-expression.schema.json`](commitment-expression.schema.json) (three kinds: `apply`, `provide`, `refrain`). **Made mandatory** in [`message.v0.2.schema.json`](message.v0.2.schema.json): `assert_body.claim` and `commit_body.commitment` are now required structured AST objects validated by cross-file `$ref`. The v0.1 message schema retains the string form unchanged; v0.2 messages must use the structured form. Worked examples: [`examples/assert.v0.2.json`](examples/assert.v0.2.json) (`satisfies` claim) and [`examples/commit.v0.2.json`](examples/commit.v0.2.json) (`apply` commitment). Both carry real hashes and Ed25519 signatures that `nl-validator verify` passes.
 9. **Multicast addressing.** **RESOLVED** additively in `message.schema.json`: the `to` field now accepts a single DID, an array of DIDs (multicast), or null (broadcast). Existing single-DID messages remain valid.
 10. **Multi-algorithm signatures.** **RESOLVED** additively in `message.schema.json`: the `signature` pattern broadened to `<algo>:<base64>` with `algo` matching lowercase kebab-case. v0.1 implementations MUST produce and verify `ed25519:<base64>` and MAY accept other algorithm tags. Existing ed25519 signatures still match.
 11. **Absolute deadlines.** **RESOLVED** additively in `message.schema.json`: `constraints` gains an optional `deadline_at` field carrying an ISO 8601 wall-clock instant, alongside the existing relative `deadline_ms`. May be combined; receiver honors whichever expires first.
@@ -136,7 +136,7 @@ These are real specifications that will arrive in their own schemas. v0.1 string
 ```
 <kind>_<digest>
 
-kind   ::= "fn" | "expr" | "type" | "proof" | "msg"
+kind   ::= "fn" | "expr" | "type" | "cert" | "wgt" | "evl" | "trc" | "plan" | "msg"
 digest ::= 64 lowercase hex characters = 32 bytes = 256 bits, BLAKE3-256
 ```
 
@@ -144,7 +144,11 @@ Examples:
 - `fn_3a9b…` — a function
 - `expr_8f2c…` — an expression body
 - `type_…` — a type
-- `proof_…` — a verification certificate
+- `cert_…` — a signed certification
+- `wgt_…` — a weights pointer
+- `evl_…` — a signed eval attestation
+- `trc_…` — a recorded effect trace
+- `plan_…` — a plan
 - `msg_…` — a *Nova Locutio* message
 
 The fixed algorithm (BLAKE3-256) and fixed encoding (lowercase hex) are deliberate. Multihash-style algorithm tagging is rejected for v0.1 because it adds variability before we need it. If we ever migrate algorithms, that is a major version bump and the prefix vocabulary expands.

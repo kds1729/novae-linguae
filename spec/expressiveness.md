@@ -1,6 +1,7 @@
 # Expressiveness v0.4 — from proof of concept to practical functionality
 
-**Status: adopted plan (2026-07-04).** The build-out arcs — verification, prover, trust,
+**Status: phases 1–3 DONE (plan adopted 2026-07-04; the "Missing" inventory below is that
+date's snapshot).** The build-out arcs — verification, prover, trust,
 commons, agent loop, and the model arc — are complete or at documented frontiers. The wall
 between *demonstration* and *tool* is now the expressible fragment itself: the languages can
 verify, certify, discover, and apply functions end to end, but the functions a practical agent
@@ -610,6 +611,9 @@ residual finding: `glossaryBody`/`glossaryGlossary` embed the observed multi-MB 
 document in their worked examples and drew the store gate's **413** (the node caps request
 size) — **observed-value size is a real boundary**; the principled rung is value-by-address
 (the gate-free blob store already exists for weights), a named future pull, not a workaround.
+(Closed the same day: `examples[].result_blob` + the claim-layer `lit_blob` — both glossary
+records live on Arca by address, and the exact loop that 413'd published; see the v0.2 record
+and predicate-expression schemas.)
 Loop closed in production with the precise generated tag AND a GW17 path-scoped grant
 composing: `orchestrate --node … --intent query/lookup/glossary --expect 200 --verify
 --require-certified --grant net.read@api.weather.gov/glossary --secret userAgent=…` → **1

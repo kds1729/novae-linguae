@@ -23,7 +23,7 @@ description, not the generated client plumbing.
 | path parameters | `string` parameters, in template order |
 | **required query parameters** (GW10) | record parameters: a string value rides through the **`url_encode`** builtin (RFC 3986 strict — raw concatenation of caller data into a URL is unsound); an `integer` schema becomes an `int` parameter through `to_string`; parameter *names* are spec-time literals, percent-encoded at generation time |
 | **required header parameters** (GW10) | `string` parameters, `map_put` into the header map by literal name |
-| `requestBody` | a `body` `string` parameter (omitted for bodyless verbs) |
+| `requestBody` | a `body` `string` parameter (omitted for bodyless verbs); the single declared non-multipart media type is emitted as a literal `Content-Type` header (gcp proposal 01 — a body without its declared type does not execute against real services; several declared types are noted and none sent). An operation whose **every** declared media type `require`s fields is **refused** (aws-sdk-poc finding 3 — the synthesized `{}` example would contradict the description it was generated from) |
 | **multipart-only `requestBody`** | a deterministic form: the boundary is a **spec-time constant** riding in the `Content-Type` literal, part names are description data, and each *required* `string` part (incl. `format: binary`) becomes a caller parameter — framing is literal, only part values are caller data (the `url_encode` split, applied to RFC 2046). Optional parts are omitted with a note |
 | **relative-file `$ref`s** (`schemas.json#/…`) | resolved against the spec's own directory; the referenced document's refs resolve against *that* document and the imported subtree comes back fully inlined — pure factoring, byte-identical to the inlined description |
 | `security` (Bearer) | an `Authorization: Bearer {{secret:NAME}}` header; operation-level `security: []` = no auth |
@@ -68,10 +68,16 @@ ordinary observation gate at the supplied arguments: same single execution, same
 offline-replayable example, same held-to-the-declared-shape check — and the operator's values are
 visible in the record's example, so the artifact says exactly where its knowledge came from
 (schema = shape, observation = value, operator = arguments). The gate stays **read-only by rule**:
-a mutating verb refuses (an observation must not create state during ingestion), a `HEAD` refuses
-(no body to project), an unbound path parameter refuses naming what is missing, and a binding that
-touches nothing — unknown operationId, unknown parameter, an operation whose example is already
-documented — refuses loudly *before* any artifact is written or any live call is made. The
+a mutating verb refuses (an observation must not create state during ingestion), a verb declaring a
+request body refuses (caller data an observation must not invent), a `HEAD` refuses (no body to
+project), an unbound path parameter refuses naming what is missing, and a binding that touches
+nothing — an unknown operationId or unknown parameter — refuses loudly *before* any artifact is
+written or any live call is made. (A binding on a GET whose example *was* spec-derivable is simply
+consumed: the leaf example takes the operator's arguments and asserts the now-reachable documented
+success.) For DELETE the opt-in **`--observe-absent-delete`** (gcp proposal 02) observes the verb's
+*effect-free* case instead: a probe GET at the absent name must answer non-2xx — absence as a
+checked precondition, something there refuses before any DELETE is issued — then the DELETE runs
+once and the example records what *this* service answered, trace-attached. The
 rightmost dot before `=` splits opId from param, so Google-Discovery-style dotted operationIds
 (`storage.buckets.get.bucket=b1`) bind naturally. Without this, a corpus of path-parameter
 operations projects only `.status` — nodes without edges, no value flowing between calls; this is
@@ -88,7 +94,10 @@ parts / with a non-string part** (no spec-time part names, no minimal documented
 the form cannot carry), **apiKey in query/cookie** (a secret placeholder substitutes only inside a
 *header* value at the effect boundary — in a query string the credential would enter the URL, hence
 the record and the trace), **HTTP basic** (no base64 builtin), **oauth2/openIdConnect** interactive
-flows, and **cookie parameters**. An *optional* query/header parameter — and an *optional*
+flows, **cookie parameters**, a **request body whose every declared media type requires fields**
+(aws-sdk-poc finding 3 — no spec-derivable worked example exists; a description also offering an
+empty-body-admitting type keeps compiling), a **path-parameterised GET/DELETE documenting no 404**
+(finding 11 — see below), and a **parameter name collision**. An *optional* query/header parameter — and an *optional*
 multipart part — is omitted with a note: the record is the minimal documented call, never a silent
 truncation. A compiled multipart form carries one honest caveat, printed as a note: the boundary is
 a spec-time constant, and a part value containing the boundary delimiter line would break framing
@@ -143,8 +152,10 @@ the reference fake service), the generated `getItemStatus` and `deleteItem` bodi
 **byte-identical** (same `expr_` content-address) to the hand-authored GW6 records
 [`item-status`](../../spec/examples/item-status.v0.2.json) /
 [`delete-item`](../../spec/examples/delete-item.v0.2.json) — the description contains their full
-semantic content. (`putItem` differs only in the request-body parameter name; `healthCheck` — an
-unauthenticated liveness probe — is net-new, certified, and published to the commons.)
+semantic content. (`putItem` differed only in the request-body parameter name when this was measured; since the
+gcp proposal-01 fix its generated body additionally carries the declared `Content-Type` header
+the hand-authored record predates. `healthCheck` — an unauthenticated liveness probe — is
+net-new, certified, and published to the commons.)
 
 Reuses [`ingest-common`](../ingest-common/) (the shared BLAKE3+JCS core and body-AST builders), so
 its records agree byte-for-byte with every other adapter on canonical form and content-hash.
@@ -153,19 +164,24 @@ Requires only `python3` (3.10+) and the built `nl-validator` on the sibling `tar
 ## At production scale
 
 [`evolution/gcp-sdk-poc`](../../evolution/gcp-sdk-poc/) reports this adapter run against a whole
-cloud API — Google Cloud Storage v1, all **81 operations**, **0 refused**, every record certified,
-with no modifications to this repository — and a bucket then provisioned create → verify → delete by
-executing the generated records. It quantifies where the description layer runs out: the run
+cloud API — Google Cloud Storage v1, all **81 operations**, **0 refused** *as the adapter then
+stood* (the finding-11 fix below now refuses the path-parameterised GET/DELETEs Discovery
+documents no 404 for — the module's finding 13 measures that cost, and proposal 02 recovers the
+DELETEs), every record certified, with no modifications to this repository — and a bucket then
+provisioned create → verify → delete by executing the generated records. It quantifies where the description layer runs out: the run
 licensed **zero** body projections (every GCS response is declared `*/*`, which fails the
 parses-as-JSON media-type check before anything else is reached), the constructibility rule *would*
 admit **1 of 81** operations even once that is compensated for (so every leaf record projects
 `.status` and discards `.body`), the live observation gate cannot be used for mutating verbs without
 creating real resources during ingestion, and every record comes out with empty `refinements`
 because descriptions carry no pre/postconditions. It also documents the two defects that run
-surfaced. Two of those boundaries are since answered in-tree: `--observe-arg` (operator-supplied
+surfaced. Three of those boundaries are since answered in-tree: `--observe-arg` (operator-supplied
 observation arguments, read-only by rule — above) takes the constructibility and read-only-gate
 limits, so a `GET` with path parameters projects its declared response body wherever the operator
-can name the state; the empty-`refinements` boundary is answered at the language layer by
+can name the state; **`--observe-absent-delete`** (gcp proposal 02, accepted) takes the
+mutating-verb half of the read-only limit for the one call that is provably effect-free — the
+DELETE at a probe-verified-absent name — recovering the verb finding 11's refusal removed; and
+the empty-`refinements` boundary is answered at the language layer by
 world-state refinements + `check-plan` ([`spec/world-state.md`](../../spec/world-state.md)) —
 authored, since descriptions cannot supply them. The `*/*` media-type gate is the boundary that
 remains the description's own to fix: a media range promises any type, so it licenses no

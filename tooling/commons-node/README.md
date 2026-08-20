@@ -14,8 +14,9 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 
 | Endpoint | Status |
 |----------|--------|
-| `POST /v0/records` — publish (verify-then-store, idempotent) — records, messages, signed certifications, **weights pointers + eval attestations** | ✅ |
+| `POST /v0/records` — publish (verify-then-store, idempotent) — all nine artifact kinds: function records, messages, bare bodies (self-addressing), types, signed certifications, **weights pointers + eval attestations**, traces, and **plans** | ✅ |
 | `GET /v0/records/{hash}` — resolve · `HEAD` — exists | ✅ |
+| `GET /v0/records/{hash}/derivations` — the records whose `derived_from` names this address (provenance walked forward — how a composite is found by its parts) | ✅ |
 | `GET /v0/records/{hash}/certifications` — the signed certifications about a function | ✅ |
 | `GET /v0/records/{hash}/attestations` — the signed eval attestations about a weights record | ✅ |
 | `GET /v0/records/{hash}/equivalences` — the signed `equivalent` claims naming a function (each re-provable by `verify-claim`) | ✅ |
@@ -157,7 +158,8 @@ before asking. Work is bounded by `COMMONS_PROVE_TIMEOUT` (default 60 s) and `CO
 Decides whether two functions are **semantically equivalent** — `∀x. f(x) = g(x)` over the unbounded
 domain — via the validator's `equiv` (reusing the prove engine). The operable form of "semantic
 equivalence vs hash equivalence": two records can be hash-different yet behaviorally identical. Takes two
-**inline** body-expression ASTs (bodies aren't stored, so there's no by-hash form); returns
+**inline** body-expression ASTs (the inline-only form predates body storage and stays — a
+caller comparing unpublished candidates has no addresses to offer); returns
 `{verdict: equivalent|distinct|unknown|unsupported, detail, solver}`. Scope follows the validator's
 `equiv`: any arity ≥ 1 with one side non-recursive, plus both-recursive pairs of arity ≤ 2 (induction over
 the leading list parameter, drawing on the list-algebra lemma catalog when a step needs it).
@@ -200,7 +202,8 @@ gates *admission*: a function is stored on its own merits, and a `certified: fal
 
 ### Seeding a node with certifications
 
-A certifier runs where the **bodies are** (the commons doesn't store them), certifies each record+body pair,
+A certifier runs where the **bodies are** (locally, or against a node that serves them — bare
+bodies are first-class stored artifacts), certifies each record+body pair,
 and publishes the signed certifications to the node. [`seed_certifications.py`](seed_certifications.py) does
 exactly this over the public API — for every record in a directory whose `body-*.json` is present, it
 `certify --sign`s and `POST`s the certification (and, with `--publish-records`, the record too), then reads

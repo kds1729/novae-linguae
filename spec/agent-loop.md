@@ -119,7 +119,9 @@ composes `double` twice, confirming `double(double(21)) = 84` (ten messages).
 
 ### Verified orchestration (`--verify`)
 
-`nl-validator orchestrate --verify [--policy <p> --attestation <a>…]` folds verification into the loop —
+`nl-validator orchestrate --verify [--policy <p> --attestation <a>…]` folds verification into the
+loop (single `--intent` only — the multi-stage pipeline is the plain loop's; a verified multi-stage
+composition is `assemble`'s job) —
 the project's thesis in one autonomous run: **discover** functions by intent (a query returns a *set*;
 against a live `--node`, the application's argument and result sorts additionally travel *in* the
 query as a structured `type_pattern` — commons.md — so the node's capped page is already
@@ -264,12 +266,17 @@ composite type `(int, int) → int` — the auxiliary is threaded into `add`'s s
 emitted composite body `\x0 x1 → add(double(x0), x1)` runs 2/2.
 
 **Over a live node (`--node`).** The same search runs against a **remote commons**: `assemble --node
-https://<node> --goal <examples> [--intent <tag>…]` enumerates the node's candidate functions via
-`POST /v0/query` (a `terminates`-field filter matches every function record; `--intent` scopes it),
-fetches each candidate's record *and* body by content-address, and **re-hashes every artifact
+https://<node> --goal <examples> [--intent <tag>…] [--limit N] [--publish]`. A **reuse pre-pass runs
+first**: the goal's argument/output sorts go to the node as a `type_pattern` query, and a candidate
+that reproduces every goal example — dry-run for a pure record, or by **offline trace replay** for
+an effectful one (the `Replayed` evidence tier: goal examples must coincide with trace-carrying
+recorded examples; no effect is performed) — is printed as `REUSED` with its existing address as
+the deliverable, nothing minted. On a miss, the search enumerates candidates via `POST /v0/query`
+(summaries first, pruned by arity before any per-record fetch; `--intent` scopes it), fetches the
+surviving candidates' records *and* bodies by content-address, and **re-hashes every artifact
 locally** — the store stays untrusted (principle 7). The fetch is *lenient*: a function whose body
 the node doesn't serve is skipped, not fatal (a partial store is legitimate), so the search proceeds
-over whatever is runnable. Worked against **production** (`nl.1105software.com`): with `double`/`add`
+over whatever is runnable. `--publish` pushes the assembled composite back through the node's gate. Worked against **production** (`nl.1105software.com`): with `double`/`add`
 functions live on Arca, `assemble --node … --goal {[3,10]→16,[5,1]→11} --require-certified`
 discovered 200 candidates, fetched and hash-verified them, assembled **`double → add`**, verified 2/2
 through the composite, and confirmed both stages certify — a task solved by composing verified parts
@@ -381,10 +388,11 @@ the goal over a commons containing a prior `double_then_add` composite (whose bo
   `eq(<computation>, lit_blob)` by recomputing the computation (replaying the trace when the claim
   is `observed`) and comparing the sha256 of its canonical bytes to the claimed address — the hash
   pins the claim, and re-execution reconstructs the value itself for any consumer who wants it.
-- **`predicate` and `observed` claims.** The responder emits — and `verify-claim` re-runs — a
-  `predicate` claim for a pure fulfilment and an `observed` claim (replayed against its recorded
-  trace) for an effectful one. The `satisfies` / `verified` claim kinds are descriptive and not
-  re-run here.
+- **`predicate`, `observed`, and `equivalent` claims.** The responder emits — and `verify-claim`
+  re-runs — a `predicate` claim for a pure fulfilment and an `observed` claim (replayed against its
+  recorded trace) for an effectful one; `verify-claim` also re-**proves** an `equivalent` claim
+  from the two named bodies (normal form, else the prover — including the domain-qualified form).
+  The `satisfies` / `verified` claim kinds are descriptive and not re-run here.
 - **Example-exact, not proven.** A CONFIRMED verdict means the claim's equation evaluated true on the
   concrete values asserted. It is a re-execution of *that* computation, not a proof over all inputs
   (that is the generative property-testing engine, still the next rung — see the project README).
