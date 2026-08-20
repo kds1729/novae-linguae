@@ -1,0 +1,33 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "finding 3 — a bodied operation's synthesized example violates its own schema",
+    "version": "1.0"
+  },
+  "paths": {
+    "/widgets": {
+      "post": {
+        "operationId": "CreateWidget",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "kind"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "kind": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "created" },
+          "400": { "description": "missing required fields" }
+        }
+      }
+    }
+  }
+}
