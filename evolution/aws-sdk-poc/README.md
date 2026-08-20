@@ -155,6 +155,19 @@ alone, predicted the live outcome exactly. The re-issued records, plans, and ste
 outside the repository — create bodies and plan data embed ARNs, which are the operator's
 (the same boundary the slice close drew).
 
+This surface then drove two rungs [`spec/world-state.md`](../../spec/world-state.md) had held
+as deliberately-out. **Plans became commons artifacts** (`plan_…`, `2e2507a`): the OQ4 worked
+lifecycle plan published through Arca's gate as `plan_e4cf79e5…` and re-decided PLAN-SOUND
+from the live node by address. And **observation probes** closed the testimony gap this
+module's dependency made concrete: a fourth plan — put-concurrency resting on the stated
+*assumption* that `function(base, nl-ws-1)` exists — is symbolically sound on that testimony,
+and `check-plan --probe function=fn_…` decided it against the real world three ways in one
+afternoon: **404 → PROBE-REFUTED** (the plan rests on false testimony and must not run — before
+its write could fail), a deactivated credential's **403 → INCONCLUSIVE** (an access fact never
+mints a world verdict; the assumption stays testimony), and after a real create, **200 →
+OBSERVED** ("every assumption confirmed by observation") — whereupon the licensed plan ran and
+its one step answered exactly its ensured 200.
+
 ## Reproducing
 
 Finding 3 is fully hermetic (see [`findings.md`](findings.md) § Reproducing). The pipeline lives
