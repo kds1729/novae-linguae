@@ -1,7 +1,7 @@
 # A second cloud, a second description format, the same adapter
 
-- **Status:** published. One defect it reports is already fixed (`e27b281` — [finding 1](findings.md#1-certifys-schema-check-emits-verdicts-the-certification-schema-forbids));
-  one is open ([finding 3](findings.md#3-a-bodied-operations-synthesized-worked-example-violates-the-descriptions-own-schema)).
+- **Status:** published. Both defects it reports are fixed (`e27b281` — [finding 1](findings.md#1-certifys-schema-check-emits-verdicts-the-certification-schema-forbids);
+  `2099326` — [finding 3](findings.md#3-a-bodied-operations-synthesized-worked-example-violates-the-descriptions-own-schema)).
   The live confirmation against real AWS is the module's named next step; everything below it is
   emulator-rehearsed and hermetically reproducible.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
@@ -16,8 +16,9 @@
   -smoke-test-traits / -aws-smoke-test-model / -aws-apigateway-openapi 1.73.0); **moto 5.2.2**
   (`moto[server]`, pip) as the rehearsal service; run date 2026-08-19.
 - **Resolution:** module committed to `main` directly (solo-maintainer repo). Finding 1's fix is
-  `e27b281`. Findings 2, 4, 5 and 6 are measurements, not requests. Finding 3 awaits a maintainer
-  decision; its fix would travel as an ordinary PR.
+  `e27b281`. Findings 2, 4, 5 and 6 are measurements, not requests. Finding 3's suggested
+  resolution was accepted by the maintainer and fixed in `2099326` — the hermetic repro below now
+  refuses with the reason.
 
 ## Summary
 

@@ -119,6 +119,13 @@ rule and these verbs mutate — supplying an operator body would make the exampl
 could not make it *observed*, which is gcp finding 4 still standing, correctly. Asserting the
 documented 400 at `{}` instead would be the vacuous-example trap of gcp finding 8 in new clothes.
 
+**Resolved** in `2099326`, by the suggested resolution: an operation whose every declared request
+media type requires fields the synthesized example cannot supply refuses with the reason — the
+repro above now answers `CreateWidget SKIPPED: request body requires fields (`name`, `kind`) …`
+and writes nothing (the transcript above records the defect as measured at `5aaffda`). A
+description also offering a media type that admits the empty body keeps compiling. Adapter tests
+63 → 66.
+
 ## 4. The corpus doubles as an emulator conformance probe
 
 **Measured.** The 41 live-gate failures, by shape:
