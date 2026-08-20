@@ -635,18 +635,38 @@ def _value_conforms(doc, check):
     projections were compiled from — and nothing more: object-ness, every required property
     present, every declared-type property that IS present carries its declared type. Deeper
     constraints (enum, minProperties, nested shapes) are deliberately unchecked: the gate
-    checks exactly the shape the records promise. Returns (ok, why)."""
+    checks exactly the shape the records promise.
+
+    FINDING 7 (evolution/aws-sdk-poc, maintainer decision): the real service (restJson1 as
+    Lambda serves it) spells an ABSENT member as an explicit `null`, while the projected
+    schema spells absence as omission. Present-as-null on a declared OPTIONAL member is
+    therefore read as this wire format's spelling of absence — it conforms, exactly as the
+    field projections already treat it (null -> None is a legitimate observation of an
+    obtained document; refusing the same fact at document grain was an inconsistency, not
+    rigor — the `+json` precedent: the serialization fact IS the promise). The other edge
+    sharpens the same reading: a REQUIRED member spelled null is spelled ABSENT, and a
+    required member may not be absent — that refuses, where before an untyped required
+    member could carry null silently. Returns (ok, why)."""
     if not (isinstance(doc, dict) and doc.get("tag") == "JObj"):
         return False, "observed document is not a JSON object"
     entries = {e["key"]: e["value"] for e in (doc.get("payload") or {}).get("entries", [])}
+
+    def is_null(v):
+        return isinstance(v, dict) and v.get("tag") == "JNull"
+
     for req in check["required"]:
         if req not in entries:
             return False, f"required property `{req}` absent from the observed document"
+        if is_null(entries[req]):
+            return False, (f"required property `{req}` is null — this wire format spells "
+                           "absence as explicit null, and a required member may not be absent")
     tags = {"string": "JStr", "boolean": "JBool", "integer": "JNum", "number": "JNum",
             "object": "JObj", "array": "JList"}
     for prop, t in check["types"].items():
         if prop in entries and t in tags:
             v = entries[prop]
+            if is_null(v) and prop not in check["required"]:
+                continue  # optional spelled absent-as-null: conforms (finding 7)
             if not (isinstance(v, dict) and v.get("tag") == tags[t]):
                 return False, f"property `{prop}` is not the declared `{t}`"
             if t == "integer" and (v.get("payload") or {}).get("kind") != "int":

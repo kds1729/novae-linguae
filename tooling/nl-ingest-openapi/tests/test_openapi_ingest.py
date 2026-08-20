@@ -997,6 +997,52 @@ class ObserveArgTest(unittest.TestCase):
                          {"storage.buckets.get": {"bucket": "b1"}})
 
 
+class ValueConformanceTest(unittest.TestCase):
+    """_value_conforms — incl. the finding-7 decision (evolution/aws-sdk-poc): explicit
+    `null` is the wire format's spelling of absence, so a null OPTIONAL member conforms
+    (as the field projections already read it) and a null REQUIRED member is an absent
+    required member — refused."""
+
+    @staticmethod
+    def _obj(**fields):
+        return {"kind": "variant", "tag": "JObj",
+                "payload": {"kind": "map",
+                            "entries": [{"key": k, "value": v} for k, v in fields.items()]}}
+
+    NULL = {"kind": "variant", "tag": "JNull"}
+    STR = {"kind": "variant", "tag": "JStr", "payload": {"kind": "string", "value": "x"}}
+
+    def test_null_optional_member_conforms(self):
+        # The Lambda measurement: {"Functions":[],"NextMarker":null} against
+        # {NextMarker: optional string} — present-as-null IS absence; the document conforms.
+        ok, why = oi._value_conforms(
+            self._obj(NextMarker=self.NULL),
+            {"required": [], "types": {"NextMarker": "string"}})
+        self.assertTrue(ok, why)
+
+    def test_null_required_member_refuses(self):
+        # The sharpened other edge: null spells absent, and a required member may not be
+        # absent — even an UNTYPED required member, which previously carried null silently.
+        ok, why = oi._value_conforms(
+            self._obj(Name=self.NULL),
+            {"required": ["Name"], "types": {}})
+        self.assertFalse(ok)
+        self.assertIn("is null", why)
+
+    def test_absent_required_member_still_refuses(self):
+        ok, why = oi._value_conforms(self._obj(), {"required": ["Name"], "types": {}})
+        self.assertFalse(ok)
+        self.assertIn("absent", why)
+
+    def test_wrong_typed_optional_still_refuses(self):
+        # Only null is absence — a present non-null value of the wrong type stays a violation.
+        ok, why = oi._value_conforms(
+            self._obj(Count=self.STR),
+            {"required": [], "types": {"Count": "boolean"}})
+        self.assertFalse(ok)
+        self.assertIn("not the declared", why)
+
+
 class ObserveAbsentDeleteTest(unittest.TestCase):
     """--observe-absent-delete (evolution/gcp-sdk-poc proposal 02, accepted): a
     path-parameterised DELETE documenting no 404 — finding 11's refusal removed the whole
