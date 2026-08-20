@@ -4,7 +4,17 @@ Reference command-line validator, canonicalizer, and hasher for *Novae Linguae* 
 
 ## Status
 
-**v0.1, in progress.** Implemented checkboxes are live; unchecked are scoped for follow-up commits.
+**v0.1 foundation list — long since outgrown.** The checkboxes below are the crate's original
+identity layer (canonical form, hashing, signing, well-formedness, surface syntax) and remain
+accurate, but the binary is now also the language's **semantic core**: `typecheck`, `eval`/`run`
+(with the effect sandbox, traces, and replay), `check-properties`, `check-effects`,
+`check-refinement`, `check-termination`, `check-complexity`, `certify` (+ `--sign`), the provers
+(`prove`, `equiv`, `assert-equivalent`, `normalize`, `cluster`), composition (`compose`,
+`assemble`), the agent loop (`respond`, `orchestrate`, `verify-claim`), world-state planning
+(`check-plan`, incl. `--probe` observation probes), trust (`verify-delegation`,
+`evaluate-trust`, `authorize`, `certified`, `attest-weights`), and `canonical-types` — some
+forty subcommands in all. The root [README](../../README.md) is the current map; this Status
+list is kept as the foundation inventory, not the feature inventory.
 
 - [x] Validate a JSON instance against a JSON Schema (draft 2020-12).
 - [x] JCS-canonicalize a record per [`spec/canonical-serialization.md`](../../spec/canonical-serialization.md).
@@ -14,7 +24,7 @@ Reference command-line validator, canonicalizer, and hasher for *Novae Linguae* 
 - [x] Well-formedness checks for type expressions beyond JSON Schema (`check-type` subcommand): type-variable scoping, rank-1 polymorphism, uniqueness within sums and records, ctor-kind compatibility in `apply`.
 - [x] Well-formedness checks for predicate, value, and body expressions (`check-predicate`, `check-value`, `check-body` subcommands): predicate op arity, value record field uniqueness, body lambda param uniqueness, and literal value soundness.
 - [x] Surface-syntax parsers and pretty-printers for all four sub-languages (`parse-type`/`unparse-type`, `parse-predicate`/`unparse-predicate`, `parse-value`/`unparse-value`, `parse-body`/`unparse-body`): bidirectional surface-string ↔ JSON-AST mapping satisfying the round-trip contract in [`spec/surface-syntax.md`](../../spec/surface-syntax.md), exposed as CLI subcommands (on by default via the `surface` feature).
-- [x] In-crate test suite (`cargo test`, 164 tests) covering canonicalization, hashing, kind detection, signing/verification, type well-formedness, predicate/value/body well-formedness, surface-syntax round-trips, schema validation, and cross-file `$ref` resolution.
+- [x] In-crate test suite (`cargo test`, ~600 tests today and growing) covering canonicalization, hashing, kind detection, signing/verification, type well-formedness, predicate/value/body well-formedness, surface-syntax round-trips, schema validation, and cross-file `$ref` resolution.
 - [x] Cross-file `$ref` resolution: schemas may reference sibling schemas by their `https://novae-linguae.org/spec/...` identifier; `validate` resolves these against the local `spec/` tree (`validate_with_refs`). Used by the message schema for conditional `store`-payload validation.
 - [x] Language-neutral conformance **vectors** (record → canonical bytes → hash, plus signing, signature, type well-formedness, schema cases, and surface-syntax round-trips for all four sub-languages) exported as portable fixtures under [`spec/conformance/`](../../spec/conformance/) for cross-implementation byte-equality testing. The reference implementation replays them via `cargo test --test conformance`.
 - [x] Ingestion tool (`nl-ingest`): parses public Rust functions via `syn` and emits Nova Lingua function records as JSONL — v0.1 by default, or v0.2 with `--v2` (structured type AST + examples from `///` doc-tests); all emitted records pass `nl-validator validate`.
@@ -273,7 +283,7 @@ For a reference implementation:
 - Mature, well-maintained crates for everything we need: `jsonschema`, `serde_jcs`, `blake3`, `ed25519-dalek`.
 - Aligned with the eventual ingestion-from-Rust path (the first ingestion adapter target is Rust crates).
 
-Other implementations are welcome (Deno/TypeScript, Python, Go). All implementations MUST agree byte-for-byte on canonical form and hash. The conformance vectors at [`spec/conformance/`](../../spec/conformance/) pin this contract. A second, independent implementation of the canonical-form + hash pipeline already exists in Python and backs three ingestion adapters — [`nl-ingest-py`](../ingest-python/README.md) (Python source), [`nl-ingest-hs`](../ingest-haskell/README.md) (Haskell source), and [`nl-ingest-ts`](../ingest-npm/README.md) (npm/TypeScript source) — built on a shared stdlib-only JCS + BLAKE3 core ([`ingest-common`](../ingest-common/README.md)). Each agrees with this validator byte-for-byte; their test suites cross-check against `nl-validator`.
+Other implementations are welcome (Deno/TypeScript, Python, Go). All implementations MUST agree byte-for-byte on canonical form and hash. The conformance vectors at [`spec/conformance/`](../../spec/conformance/) pin this contract. A second, independent implementation of the canonical-form + hash pipeline already exists in Python and backs four ingestion adapters — [`nl-ingest-py`](../ingest-python/README.md) (Python source), [`nl-ingest-hs`](../ingest-haskell/README.md) (Haskell source), [`nl-ingest-ts`](../ingest-npm/README.md) (npm/TypeScript source), and [`nl-ingest-openapi`](../nl-ingest-openapi/README.md) (the description layer) — built on a shared stdlib-only JCS + BLAKE3 core ([`ingest-common`](../ingest-common/README.md)). Each agrees with this validator byte-for-byte; their test suites cross-check against `nl-validator`.
 
 ## Crate version notes
 
