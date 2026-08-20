@@ -2,7 +2,8 @@
 
 - **Status:** published. Both defects it reports are fixed (`e27b281` — [finding 1](findings.md#1-certifys-schema-check-emits-verdicts-the-certification-schema-forbids);
   `2099326` — [finding 3](findings.md#3-a-bodied-operations-synthesized-worked-example-violates-the-descriptions-own-schema)).
-  The live confirmation against real AWS is the module's named next step; everything below it is
+  **The live confirmation against real AWS ran 2026-08-20 and the loop closed 201 → 200 → 204
+  → 404** — see [Live confirmation](#live-confirmation-2026-08-20); everything below it is
   emulator-rehearsed and hermetically reproducible.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
 - **Dates:** first published 2026-08-20, last updated 2026-08-20
@@ -27,8 +28,9 @@ from a pipeline with *no Google-shaped step in it*: AWS publishes Smithy JSON AS
 chain is `Smithy model → smithy-cli openapi projection → normalize → nl-ingest-openapi`.
 **The adapter needed zero modification** for the second vendor and second format family, and a
 function was provisioned create → verify → delete → verify-gone by executing the generated records
-(by `fn_ref`, under host-scoped grants, traces captured and replaying grantless offline) — against
-a local emulator through a real SigV4-signing boundary, pending the same loop against real AWS.
+(by `fn_ref`, under host-scoped grants, traces captured and replaying grantless offline) — first
+against a local emulator through a real SigV4-signing boundary, and since 2026-08-20
+[against real AWS](#live-confirmation-2026-08-20), where the same loop closed 201 → 200 → 204 → 404.
 
 Where `gcp-sdk-poc` was mostly negative space, this description format inverts the two
 constraints that most bound it:
@@ -75,9 +77,37 @@ disagreement it was built to close, reintroduced one layer up. Fixed in `e27b281
   SigV4 identity lives entirely at the operator's signing boundary, records and traces carry
   nothing, and every captured trace replays with no grants, no proxy, no service.
 
+## Live confirmation (2026-08-20)
+
+The named next step ran, and the provenance table proved its worth: the pipeline was reproduced
+from it on a second machine — the Smithy model fetched at `bedddbec` (sha256 verified,
+`f70ac72f4f028bac…`), smithy-cli 1.73.0 reinstalled from its release archive, the two
+description transforms applied, and the corpus regenerated with the adapter at `5aaffda`:
+**84 of 85 operations compiled, with the same single refusal**
+(`GetDurableExecutionState`, documents no 404). The loop then ran against **real AWS Lambda**
+(us-east-1), through a local SigV4 signing proxy holding an IAM user scoped to read-wide /
+write-`nl-*`-only:
+
+| step | record | answered | trace |
+|---|---|---|---|
+| create `nl-live-1` | `createfunction` | **201** | `trc_eeba484d…` |
+| verify | `getfunction` | **200** | `trc_c4e642f8…` |
+| delete | `deletefunction` | **204** | `trc_f6422bd2…` |
+| verify-gone | `getfunction` | **404** | `trc_537e218b…` |
+
+Each step is a generated record applied by `fn_ref` under host-scoped grants
+(`net.write@127.0.0.1` / `net.read@127.0.0.1`). The create trace replays to its 201 with the
+proxy killed — no grants, no credential, no service — and `ListFunctions` answers 0 after
+teardown. Record-side there is still no credential anywhere: the SigV4 identity lived entirely
+at the proxy, now exercised against the real signer rather than a rehearsal one (finding 5's
+split, confirmed). And finding 4's caveat resolves in the right direction: moto answered this
+same loop 201/200/204/404 and the real service agrees — an agreement that was only knowable by
+running it.
+
 ## Reproducing
 
 Finding 3 is fully hermetic (see [`findings.md`](findings.md) § Reproducing). The pipeline lives
 outside this repository (it needs `smithy-cli` and, for the rehearsal, `moto`); the provenance
-table above pins every input. The live provisioning step needs an AWS account; no finding depends
-on it.
+table above pins every input, and the live confirmation above is its measured reproduction. The
+live step needs an AWS account with a Lambda execution role and a SigV4 signing boundary; no
+finding depends on it.
