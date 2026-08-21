@@ -262,7 +262,19 @@ made on **shared tasks**, never raw totals:
 > is published; adapters+evals in `/home/claude/sandbox/round24/` (names `c24-*`).
 > **Named follow-up: curated #55 eval rows** (world-state/lifecycle read+write tasks,
 > oracle-gated) so the family becomes measurable — re-eval the retained c24 adapters
-> alongside the next round. Ops firsts: transformers MUST be pinned `==5.13.0` (a bare
+> alongside the next round. **FOLLOW-UP RAN same day (ef8fac5 + this note): 8 curated
+> world-state rows** (parameter/structure-fresh vs the #55 grid — branch order swapped,
+> or-guards, eq-chains, a collect-failures walk; verified to share NO gold body with any
+> ftdata24 training completion, so the re-eval measures transfer), corpus 254→262, oracle
+> 432/432; all ten c23+c24 Coder adapters re-evaluated on the 16 new tasks (H100 NVL,
+> ~26 min ≈ $1.40). **Verdict: the idioms were already largely compositional** — untrained
+> c23 writes the new rows at/near ceiling (c23-14b-s1 16/16; 3-tag-sum construction posed
+> no difficulty) — **and #55's measurable transfer is real but narrow: +3/80 aggregate
+> (71→74), all of it on `failures_of`, the hardest task** (read-position walk-tracing:
+> c23 1/5 tiers → c24 3/5 — both 7B seeds gained; write/failures_of 7B-s0 gained).
+> c24-7b-s0 is 16/16. New seed-consistent watch: BOTH rounds' 7B-s1 miss the same three
+> writes (`probe_verdict`/`state_of_either`/`state_word` — the absent-first/or-guard
+> variants). No pin implications; the eval is 432 tasks from here on. Ops firsts: transformers MUST be pinned `==5.13.0` (a bare
 > install now pulls 5.15.x, whose `TrainingArguments` dropped `warmup_ratio` — 5 cycles
 > failed in minutes before the pin); this was the **first agent-driven pod round** (RunPod
 > REST API deploy/terminate, parallel 14B leg on the H100, kill-switch handoff between
