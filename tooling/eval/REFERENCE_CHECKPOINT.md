@@ -248,6 +248,26 @@ made on **shared tasks**, never raw totals:
 > `read/min_string`/`read/implies` (14B-only). Adapters+evals in
 > `/home/claude/sandbox/round23/` (names `c23-*`).
 
+> **Round 24 (2026-08-21, corpus24/ftdata24 — family #55 world-state/lifecycle shapes, the
+> cloud-experiment pull — A100 SXM + H100 NVL split across two pods, 5 cycles ≈ 3.5h wall
+> ≈ $8.5): eval-neutral by construction; ALL ROUND-23 PINS STAND.** Family #55 added
+> combinatorial training mass but **no curated eval rows** (the eval is unchanged at 414
+> unique tasks), so the new shapes have no measurement surface — and the results confirm it:
+> every tier's delta vs its c23 same-seed baseline sits inside the known churn set (3B
+> 377/375 vs 382/377; 7B 380/386 vs 390/388; gained/lost sets symmetric, dominated by the
+> reverse-tier/`concat_lists`/`foldr_with`/`count_between`/`split_words` churn tasks, no
+> systematic cluster either direction). 14B-s1: total 397/414 (95.9%) vs the pin's 400 —
+> but **write 199/206, +2 over the pin** (`write/insert_sorted` + the reverse tier landed)
+> against read −5 (186/196); the 14B pin is the *read* crown, so it stands. No c24 adapter
+> is published; adapters+evals in `/home/claude/sandbox/round24/` (names `c24-*`).
+> **Named follow-up: curated #55 eval rows** (world-state/lifecycle read+write tasks,
+> oracle-gated) so the family becomes measurable — re-eval the retained c24 adapters
+> alongside the next round. Ops firsts: transformers MUST be pinned `==5.13.0` (a bare
+> install now pulls 5.15.x, whose `TrainingArguments` dropped `warmup_ratio` — 5 cycles
+> failed in minutes before the pin); this was the **first agent-driven pod round** (RunPod
+> REST API deploy/terminate, parallel 14B leg on the H100, kill-switch handoff between
+> pods, both pods terminated by the agent the moment artifacts were pulled).
+
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
 `adapter-coder7b-c14-s1`, sha256 `91d8940345630806…`, seed 1; the 14B total/read-champion weights
