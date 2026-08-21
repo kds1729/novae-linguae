@@ -2056,6 +2056,156 @@ def dispatch_funcs():
     ]
 
 
+def world_state_funcs():
+    # WORLD-STATE / LIFECYCLE rows (the family-#55 curated counterpart, added AFTER round 24
+    # measured that #55 had no eval surface): the probe-decision and run-summarization idioms in
+    # EVAL position. Deliberately parameter- and structure-FRESH vs the #55 combinatorial grid the
+    # c24 adapters trained on — branch order swapped (absent-first), or-guards where #55 used a
+    # band, eq-chains where it used ranges, a collect-failures walk where it counted — so no gold
+    # body coincides with a round-24 training completion and the c24 re-eval measures TRANSFER,
+    # not memorization (verified against ftdata24 at authoring time). The 3-nullary-tag sum
+    # [Exists Absent Unknown] appears here in BOTH positions: constructed from a status and
+    # consumed by variant case (the consuming side no combinatorial family emits). Sum types are
+    # opaque to the prover; verify by validate + typecheck + run.
+    state_t = {"kind": "sum",
+               "variants": [{"tag": "Exists"}, {"tag": "Absent"}, {"tag": "Unknown"}]}
+    s, xs, st = var("s"), var("xs"), var("st")
+
+    def band(lo, hi):
+        return bapp("and", bapp("ge", s, int_lit(lo)), bapp("lt", s, int_lit(hi)))
+
+    return [
+        # Absent-FIRST branch order (every #55 spec guards the success band first). The read
+        # example pins the doctrine edge: 410 is NOT this function's absent code — Unknown.
+        {"name": "probe_verdict",
+         "intent": "Classify a probe status: 404 means the resource is absent, 200-299 that it "
+                   "exists, anything else is unknown.",
+         "summary": "Absent for 404 (checked first); Exists for [200,300); Unknown otherwise.",
+         "tags": ["http", "world-state", "variant", "case"],
+         "type_ast": fn([INT], state_t),
+         "body_ast": lam(["s"], case_bool(bapp("eq", s, int_lit(404)), variant_expr("Absent"),
+                                          case_bool(band(200, 300), variant_expr("Exists"),
+                                                    variant_expr("Unknown")))),
+         "examples": [{"args": [200], "result": V("Exists")}, {"args": [404], "result": V("Absent")},
+                      {"args": [503], "result": V("Unknown")}, {"args": [204], "result": V("Exists")},
+                      {"args": [410], "result": V("Unknown")}],
+         "read_example": 4,
+         "properties": [], "prove": False, "terminates": "always"},
+        # Or-guard in the ABSENT arm — #55 only ever tested one absent code per spec.
+        {"name": "state_of_either",
+         "intent": "Classify a status where both 404 and 410 mean the resource is absent, "
+                   "200-299 that it exists, and anything else is unknown.",
+         "summary": "Exists for [200,300); Absent for 404 or 410; Unknown otherwise.",
+         "tags": ["http", "world-state", "variant", "case"],
+         "type_ast": fn([INT], state_t),
+         "body_ast": lam(["s"], case_bool(band(200, 300), variant_expr("Exists"),
+                                          case_bool(bapp("or", bapp("eq", s, int_lit(404)),
+                                                         bapp("eq", s, int_lit(410))),
+                                                    variant_expr("Absent"),
+                                                    variant_expr("Unknown")))),
+         "examples": [{"args": [201], "result": V("Exists")}, {"args": [404], "result": V("Absent")},
+                      {"args": [500], "result": V("Unknown")}, {"args": [410], "result": V("Absent")}],
+         "read_example": 3,
+         "properties": [], "prove": False, "terminates": "always"},
+        # Eq-chain success — exactly two codes count as existing; the band intuition (299 is a
+        # 2xx) is wrong here, which is what the read example exposes.
+        {"name": "state_exact",
+         "intent": "Classify a status where only exactly 200 or 204 mean the resource exists, "
+                   "404 that it is absent, and anything else is unknown.",
+         "summary": "Exists for 200 or 204 exactly; Absent for 404; Unknown otherwise.",
+         "tags": ["http", "world-state", "variant", "case"],
+         "type_ast": fn([INT], state_t),
+         "body_ast": lam(["s"], case_bool(bapp("or", bapp("eq", s, int_lit(200)),
+                                               bapp("eq", s, int_lit(204))),
+                                          variant_expr("Exists"),
+                                          case_bool(bapp("eq", s, int_lit(404)),
+                                                    variant_expr("Absent"),
+                                                    variant_expr("Unknown")))),
+         "examples": [{"args": [200], "result": V("Exists")}, {"args": [404], "result": V("Absent")},
+                      {"args": [204], "result": V("Exists")}, {"args": [299], "result": V("Unknown")}],
+         "read_example": 3,
+         "properties": [], "prove": False, "terminates": "always"},
+        # String twin with a fresh label triple AND the absent-first order.
+        {"name": "state_word",
+         "intent": 'Describe a status as "gone" for 404, "ok" for 200-299, or "unclear" '
+                   "for anything else.",
+         "summary": '"gone" for 404 (checked first); "ok" for [200,300); "unclear" otherwise.',
+         "tags": ["http", "world-state", "string", "case"],
+         "type_ast": fn([INT], STRING),
+         "body_ast": lam(["s"], case_bool(bapp("eq", s, int_lit(404)), str_lit("gone"),
+                                          case_bool(band(200, 300), str_lit("ok"),
+                                                    str_lit("unclear")))),
+         "examples": [{"args": [204], "result": "ok"}, {"args": [404], "result": "gone"},
+                      {"args": [302], "result": "unclear"}, {"args": [100], "result": "unclear"}],
+         "read_example": 3,
+         "properties": [], "prove": False, "terminates": "always"},
+        # CONSUME the 3-tag sum: a verdict is settled when the world is decided either way —
+        # Absent is settled (the read example: intuition reads absent as failure).
+        {"name": "is_settled",
+         "intent": "Whether a world-state verdict is decided either way, rather than unknown.",
+         "summary": "true for Exists and for Absent; false for Unknown.",
+         "tags": ["world-state", "variant", "case", "predicate"],
+         "type_ast": fn([state_t], BOOL),
+         "body_ast": lam(["st"], _case_of(st, (_vpat("Exists"), bool_lit(True)),
+                                          (_vpat("Absent"), bool_lit(True)),
+                                          (_vpat("Unknown"), bool_lit(False)))),
+         "examples": [{"args": [V("Exists")], "result": True},
+                      {"args": [V("Unknown")], "result": False},
+                      {"args": [V("Absent")], "result": True}],
+         "read_example": 2,
+         "properties": [], "prove": False, "terminates": "always"},
+        # Sum -> string: the consuming twin of the label producers.
+        {"name": "state_name",
+         "intent": "The lowercase name of a world-state verdict.",
+         "summary": '"exists" / "absent" / "unknown" by variant.',
+         "tags": ["world-state", "variant", "case", "string"],
+         "type_ast": fn([state_t], STRING),
+         "body_ast": lam(["st"], _case_of(st, (_vpat("Exists"), str_lit("exists")),
+                                          (_vpat("Absent"), str_lit("absent")),
+                                          (_vpat("Unknown"), str_lit("unknown")))),
+         "examples": [{"args": [V("Absent")], "result": "absent"},
+                      {"args": [V("Exists")], "result": "exists"},
+                      {"args": [V("Unknown")], "result": "unknown"}],
+         "properties": [], "prove": False, "terminates": "always"},
+        # Eq-guard walk — #55's walks all guarded on a band; the empty run is vacuously ok.
+        {"name": "run_ok_strict",
+         "intent": "Whether every status of a run is exactly 200.",
+         "summary": "true on nil; else head = 200 and self (tail xs), short-circuit.",
+         "tags": ["http", "world-state", "list", "recursion", "predicate"],
+         "type_ast": fn([list_of(INT)], BOOL),
+         "body_ast": lam(["xs"], case_bool(bapp("null", xs), bool_lit(True),
+                                           case_bool(bapp("eq", bapp("head", xs), int_lit(200)),
+                                                     bself(bapp("tail", xs)),
+                                                     bool_lit(False)))),
+         "examples": [{"args": [[200, 200, 200]], "result": True},
+                      {"args": [[200, 204]], "result": False},
+                      {"args": [[]], "result": True}],
+         "read_example": 2,
+         "properties": [], "prove": False, "terminates": "always"},
+        # Collect-failures walk — #55 summarized (conjunction / first / count) but never
+        # COLLECTED; the list-returning skip/keep recursion is the #42 shape on a fresh guard.
+        {"name": "failures_of",
+         "intent": "The statuses of a run that are not successes (200-299), in order.",
+         "summary": "nil on nil; skip in-band heads via self (tail xs); else cons head onto "
+                    "self (tail xs).",
+         "tags": ["http", "world-state", "list", "recursion"],
+         "type_ast": fn([list_of(INT)], list_of(INT)),
+         "body_ast": lam(["xs"], case_bool(bapp("null", xs), var("nil"),
+                                           case_bool(bapp("and",
+                                                          bapp("ge", bapp("head", xs), int_lit(200)),
+                                                          bapp("lt", bapp("head", xs), int_lit(300))),
+                                                     bself(bapp("tail", xs)),
+                                                     bapp("cons", bapp("head", xs),
+                                                          bself(bapp("tail", xs)))))),
+         "examples": [{"args": [[200, 500, 204, 404]], "result": [500, 404]},
+                      {"args": [[201, 204]], "result": []},
+                      {"args": [[404]], "result": [404]},
+                      {"args": [[204, 301, 404]], "result": [301, 404]}],
+         "read_example": 3,
+         "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
 def map_json_funcs():
     # MAP + JSON functions (spec/expressiveness.md phases 2-3): dynamic key-value data and the
     # language's own canonical form as a manipulable value. map_get/parse_json are total via Maybe,
@@ -4498,7 +4648,8 @@ def all_specs():
             + more_arith() + more_laws() + bool_more() + recursive_more()
             + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion()
             + variant_consuming_funcs() + nested_hof_funcs() + string_funcs() + url_funcs()
-            + header_funcs() + link_funcs() + dispatch_funcs() + map_json_funcs())
+            + header_funcs() + link_funcs() + dispatch_funcs() + world_state_funcs()
+            + map_json_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -5401,6 +5552,7 @@ def main():
                 "header_funcs": len(header_funcs()),
                 "link_funcs": len(link_funcs()),
                 "dispatch_funcs": len(dispatch_funcs()),
+                "world_state_funcs": len(world_state_funcs()),
                 "map_json_funcs": len(map_json_funcs()),
                 "higher_order_funcs": len(higher_order_funcs()),
                 "higher_order_more": len(higher_order_more()),
