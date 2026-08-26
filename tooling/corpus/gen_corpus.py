@@ -4754,6 +4754,166 @@ def combinatorial_specs(exclude_names=()):
                     for l in _L55],
                    terminates="always"))
 
+    # 56. COMMAND INTERPRETERS — the `run_command` composition (the round-25 follow-up diagnosis,
+    # 2026-08-26): the last durable WRITE residue (0/17 across three rounds, every tier/seed) is
+    # not a hallucinated-syntax failure — every tier gets the dispatch right and fails a DIFFERENT
+    # missing totality piece: 3B/7B use `parse_int`'s Maybe as a bare int (ill-typed), 14B cases
+    # the Maybe but skips the token-count guard (`"double"` -> head of nil), an older 14B invents
+    # a bind. The task needs THREE idioms composed — arity guard on the split, parse_int cased to
+    # Just/None, string-literal dispatch — and ftdata25 carried ZERO write bodies composing even
+    # two of them (#46 dispatches over an int already supplied; #39 parses; nothing chains
+    # split -> guard -> parse -> dispatch). Word/op vocabularies are disjoint from the curated
+    # gold's (double/negate/square) so the shapes teach without the gold ever appearing; the
+    # export's leakage guard covers exact matches regardless.
+    def _spat56(w):
+        return {"kind": "lit", "value": {"kind": "string", "value": w}}
+
+    def _ipat56(k):
+        return {"kind": "lit", "value": {"kind": "int", "value": k}}
+
+    s56, n56, parts56 = var("s"), var("n"), var("parts")
+    _OPS56 = {"triple": (lambda: bapp("mul", n56, int_lit(3)), lambda v: v * 3),
+              "incr": (lambda: bapp("add", n56, int_lit(1)), lambda v: v + 1),
+              "dec": (lambda: bapp("sub", n56, int_lit(1)), lambda v: v - 1),
+              "plus5": (lambda: bapp("add", n56, int_lit(5)), lambda v: v + 5),
+              "minus5": (lambda: bapp("sub", n56, int_lit(5)), lambda v: v - 5),
+              "tenfold": (lambda: bapp("mul", n56, int_lit(10)), lambda v: v * 10),
+              "twice": (lambda: bapp("add", n56, n56), lambda v: v + v),
+              "flip": (lambda: bapp("neg", n56), lambda v: -v),
+              "cube": (lambda: bapp("mul", n56, bapp("mul", n56, n56)), lambda v: v ** 3)}
+    _SETS56 = [("triple", "incr", "dec"), ("plus5", "minus5", "tenfold"), ("twice", "flip", "cube")]
+
+    def _split56(sep):
+        return bapp("str_split", str_lit(sep), s56)
+
+    def _second56():
+        return bapp("head", bapp("tail", parts56))
+
+    def _len_guard56(sep, k, hit):
+        """let parts = str_split sep s in case length parts of { int(k) => hit; _ => None }."""
+        return blet("parts", _split56(sep),
+                    _case_of(bapp("length", parts56), (_ipat56(k), hit),
+                             (WILDCARD_PAT, variant_expr("None"))))
+
+    # 56a. parse-then-apply: the Maybe from parse_int is CASED, never used as an int.
+    for w in ("triple", "plus5", "flip"):
+        e, f = _OPS56[w]
+        add(_cspec(f"parse_{w}", f'Parse a number from a string and {w} it; a non-number is None.',
+                   f"case parse_int s of Just(n) => Just({w} n); None => None.",
+                   ["string", "parse", "maybe", "case", "arithmetic"], fn([STRING], maybe_t(INT)),
+                   lam(["s"], _case_of(bapp("parse_int", s56),
+                                       (_vpat("Just", "n"), variant_expr("Just", e())),
+                                       (_vpat("None"), variant_expr("None")))),
+                   [{"args": [t], "result": (V("Just", f(int(t))) if t.lstrip("-").isdigit()
+                                             else V("None"))}
+                    for t in ("4", "-3", "0", "x", "", "12")],
+                   terminates="always"))
+
+    # 56b. arity-guarded token access — the guard is what makes head-of-tail total.
+    for sep, sname in ((":", "colon"), ("=", "eq"), (",", "comma")):
+        add(_cspec(f"second_{sname}",
+                   f'The second "{sep}"-separated field of a string with exactly two fields, if any.',
+                   f'let parts = str_split "{sep}" s in case length parts of 2 => Just (second); '
+                   "_ => None.",
+                   ["string", "split", "maybe", "case"], fn([STRING], maybe_t(STRING)),
+                   lam(["s"], _len_guard56(sep, 2, variant_expr("Just", _second56()))),
+                   [{"args": [f"a{sep}b"], "result": V("Just", "b")},
+                    {"args": ["a"], "result": V("None")},
+                    {"args": [f"a{sep}b{sep}c"], "result": V("None")},
+                    {"args": [f"k{sep}"], "result": V("Just", "")}],
+                   terminates="always"))
+    for sep, sname in ((":", "colon"), ("=", "eq")):
+        add(_cspec(f"int_after_{sname}",
+                   f'The integer after the "{sep}" of a two-field string, if any; a malformed '
+                   "number or field count is None.",
+                   f'let parts = str_split "{sep}" s in case length parts of 2 => parse_int '
+                   "(second); _ => None.",
+                   ["string", "split", "parse", "maybe", "case"], fn([STRING], maybe_t(INT)),
+                   lam(["s"], _len_guard56(sep, 2, bapp("parse_int", _second56()))),
+                   [{"args": [f"n{sep}42"], "result": V("Just", 42)},
+                    {"args": [f"n{sep}x"], "result": V("None")},
+                    {"args": ["n"], "result": V("None")},
+                    {"args": [f"n{sep}-7"], "result": V("Just", -7)}],
+                   terminates="always"))
+    add(_cspec("third_tok",
+               "The third space-separated token of a string with exactly three tokens, if any.",
+               'let parts = str_split " " s in case length parts of 3 => Just (head (tail (tail '
+               "parts))); _ => None.",
+               ["string", "split", "maybe", "case"], fn([STRING], maybe_t(STRING)),
+               lam(["s"], _len_guard56(" ", 3, variant_expr(
+                   "Just", bapp("head", bapp("tail", bapp("tail", parts56)))))),
+               [{"args": ["a b c"], "result": V("Just", "c")}, {"args": ["a b"], "result": V("None")},
+                {"args": ["a b c d"], "result": V("None")}, {"args": [""], "result": V("None")}],
+               terminates="always"))
+
+    # 56c. the full interpreter, PARSE-OUTER (the gold's order): guard -> parse -> dispatch.
+    def _interp_examples(words, sep=" "):
+        out = []
+        for i, w in enumerate(words):
+            v = (4, 7, -3)[i % 3]
+            out.append({"args": [f"{w}{sep}{v}"], "result": V("Just", _OPS56[w][1](v))})
+        out += [{"args": [f"launch{sep}2"], "result": V("None")},
+                {"args": [words[0]], "result": V("None")},
+                {"args": [f"{words[0]}{sep}x"], "result": V("None")},
+                {"args": [f"{words[0]}{sep}1{sep}2"], "result": V("None")}]
+        return out
+
+    def _dispatch56(words):
+        arms = [(_spat56(w), variant_expr("Just", _OPS56[w][0]())) for w in words]
+        return _case_of(bapp("head", parts56), *arms, (WILDCARD_PAT, variant_expr("None")))
+
+    for words in _SETS56 + [ws[:2] for ws in _SETS56]:
+        tag = "_".join(words)
+        add(_cspec(f"run_{tag}",
+                   f'Run a one-argument command like "{words[0]} 4" — the commands are '
+                   + ", ".join(f'"{w}"' for w in words)
+                   + "; an unknown command, a missing, extra, or non-integer argument is None.",
+                   'split "cmd n"; guard exactly two tokens; case parse_int of the argument to '
+                   "Just(n); case the command word over string-literal patterns; else None.",
+                   ["dispatch", "string", "split", "parse", "maybe", "case", "arithmetic"],
+                   fn([STRING], maybe_t(INT)),
+                   lam(["s"], _len_guard56(" ", 2, _case_of(
+                       bapp("parse_int", _second56()),
+                       (_vpat("Just", "n"), _dispatch56(words)),
+                       (_vpat("None"), variant_expr("None"))))),
+                   _interp_examples(words), terminates="always"))
+
+    # 56d. the same interpreter DISPATCH-OUTER — the shape the 14B reaches for, made total by
+    # the guard it omitted: guard -> dispatch -> parse inside each arm.
+    for words in _SETS56:
+        tag = "_".join(words)
+        arms = [(_spat56(w), _case_of(bapp("parse_int", _second56()),
+                                      (_vpat("Just", "n"), variant_expr("Just", _OPS56[w][0]())),
+                                      (_vpat("None"), variant_expr("None"))))
+                for w in words]
+        add(_cspec(f"run_{tag}_byword",
+                   f'Run a one-argument command like "{words[0]} 4" — the commands are '
+                   + ", ".join(f'"{w}"' for w in words)
+                   + "; an unknown command, a missing, extra, or non-integer argument is None.",
+                   'split "cmd n"; guard exactly two tokens; case the command word first, then '
+                   "parse_int the argument inside each arm; else None.",
+                   ["dispatch", "string", "split", "parse", "maybe", "case", "arithmetic"],
+                   fn([STRING], maybe_t(INT)),
+                   lam(["s"], _len_guard56(" ", 2, _case_of(
+                       bapp("head", parts56), *arms, (WILDCARD_PAT, variant_expr("None"))))),
+                   _interp_examples(words), terminates="always"))
+
+    # 56e. a different separator — the shape is not about the space.
+    for words in _SETS56[:2]:
+        tag = "_".join(words)
+        add(_cspec(f"run_{tag}_colon",
+                   f'Run a "cmd:n" command — the commands are '
+                   + ", ".join(f'"{w}"' for w in words)
+                   + "; an unknown command, a missing, extra, or non-integer argument is None.",
+                   'split on ":"; guard exactly two fields; parse_int the argument to Just(n); '
+                   "case the command word; else None.",
+                   ["dispatch", "string", "split", "parse", "maybe", "case", "arithmetic"],
+                   fn([STRING], maybe_t(INT)),
+                   lam(["s"], _len_guard56(":", 2, _case_of(
+                       bapp("parse_int", _second56()),
+                       (_vpat("Just", "n"), _dispatch56(words)),
+                       (_vpat("None"), variant_expr("None"))))),
+                   _interp_examples(words, sep=":"), terminates="always"))
     return out
 
 
