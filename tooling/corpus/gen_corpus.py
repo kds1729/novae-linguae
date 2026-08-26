@@ -4914,6 +4914,148 @@ def combinatorial_specs(exclude_names=()):
                        (_vpat("Just", "n"), _dispatch56(words)),
                        (_vpat("None"), variant_expr("None"))))),
                    _interp_examples(words, sep=":"), terminates="always"))
+    # 57. CODE-POINT ORDER IN READ POSITION — the round-26 follow-up diagnosis (2026-08-26) of the
+    # last model-side residue, `read/min_string` + `read/insert_sorted` (every tier/seed since
+    # corpus13). Each read task is ONE example per spec (`read_example`), and both eval reads are
+    # the mixed-case trap in TWO-argument / list form: min_string "a" "Z" -> "Z", insert_sorted "Z"
+    # ["a"] -> ["Z","a"]. Family #43's read fix exposed only UNARY-vs-constant comparisons, all on
+    # the single input "Zeb" (17 read pairs carry str_lt at all; the two-argument selection and the
+    # string insert walk have ~one each). Every tier answers alphabetically. So: two-argument
+    # selections/predicates and list walks over str_lt, each spec's read example a DISTINCT
+    # uppercase-vs-lowercase trap (different words, different positions), plus case-insensitive
+    # CONTRAST twins where the same inputs give the alphabetical answer — the read pair then
+    # teaches that the body's comparison decides, not intuition. The curated golds (min_string /
+    # sorts_before / insert_sorted) are not emitted; variants carry different bodies.
+    a57, b57, c57, x57, ys57, xs57, w57, d57 = (var("a"), var("b"), var("c"), var("x"), var("ys"),
+                                                var("xs"), var("w"), var("d"))
+    def _lt57(p, q):
+        return bapp("str_lt", p, q)
+    def _pair57(p, q):
+        return bapp("cons", p, bapp("cons", q, var("nil")))
+    SS = fn([STRING, STRING], STRING)
+    SB = fn([STRING, STRING], BOOL)
+    add(_cspec("later_of", "The later of two strings in code-point order.",
+               "case str_lt a b of true => b; false => a", ["string", "order", "case"], SS,
+               lam(["a", "b"], case_bool(_lt57(a57, b57), b57, a57)),
+               [{"args": ["pear", "fig"], "result": "pear"}, {"args": ["kiwi", "kiwi"], "result": "kiwi"},
+                {"args": ["apple", "Zoo"], "result": "apple"}, {"args": ["a", "b"], "result": "b"}],
+               read_example=2, terminates="always"))
+    add(_cspec("earlier_rev", "The earlier of two strings in code-point order (comparing b against a).",
+               "case str_lt b a of true => b; false => a", ["string", "order", "case"], SS,
+               lam(["a", "b"], case_bool(_lt57(b57, a57), b57, a57)),
+               [{"args": ["fig", "pear"], "result": "fig"}, {"args": ["m", "m"], "result": "m"},
+                {"args": ["b", "A"], "result": "A"}, {"args": ["x", "y"], "result": "x"}],
+               read_example=2, terminates="always"))
+    add(_cspec("sorts_after", "Whether the first string sorts after the second in code-point order.",
+               "str_lt b a", ["string", "predicate", "order"], SB,
+               lam(["a", "b"], _lt57(b57, a57)),
+               [{"args": ["b", "a"], "result": True}, {"args": ["a", "a"], "result": False},
+                {"args": ["x", "X"], "result": True}, {"args": ["a", "b"], "result": False}],
+               read_example=2, terminates="always"))
+    add(_cspec("not_before", "Whether the first string does not sort before the second (code-point order).",
+               "not (str_lt a b)", ["string", "predicate", "order"], SB,
+               lam(["a", "b"], bapp("not", _lt57(a57, b57))),
+               [{"args": ["a", "b"], "result": False}, {"args": ["b", "a"], "result": True},
+                {"args": ["M", "m"], "result": False}, {"args": ["q", "q"], "result": True}],
+               read_example=2, terminates="always"))
+    add(_cspec("cmp_sign", "Compare two strings in code-point order: -1 if the first is earlier, 0 if equal, 1 if later.",
+               "case str_lt a b of true => -1; false => case eq a b of true => 0; false => 1",
+               ["string", "order", "case"], fn([STRING, STRING], INT),
+               lam(["a", "b"], case_bool(_lt57(a57, b57), int_lit(-1),
+                                         case_bool(bapp("eq", a57, b57), int_lit(0), int_lit(1)))),
+               [{"args": ["a", "b"], "result": -1}, {"args": ["c", "c"], "result": 0},
+                {"args": ["Q", "q"], "result": -1}, {"args": ["z", "y"], "result": 1}],
+               read_example=2, terminates="always"))
+    add(_cspec("sorted_pair", "The two strings as a list in ascending code-point order.",
+               "case str_lt a b of true => [a, b]; false => [b, a]", ["string", "order", "list", "case"],
+               fn([STRING, STRING], list_of(STRING)),
+               lam(["a", "b"], case_bool(_lt57(a57, b57), _pair57(a57, b57), _pair57(b57, a57))),
+               [{"args": ["b", "a"], "result": ["a", "b"]}, {"args": ["k", "k"], "result": ["k", "k"]},
+                {"args": ["zed", "Apple"], "result": ["Apple", "zed"]}, {"args": ["a", "c"], "result": ["a", "c"]}],
+               read_example=2, terminates="always"))
+    add(_cspec("is_sorted_pair", "Whether two strings are already in ascending code-point order (equal counts).",
+               "not (str_lt b a)", ["string", "predicate", "order"], SB,
+               lam(["a", "b"], bapp("not", _lt57(b57, a57))),
+               [{"args": ["a", "b"], "result": True}, {"args": ["b", "a"], "result": False},
+                {"args": ["apple", "Zoo"], "result": False}, {"args": ["n", "n"], "result": True}],
+               read_example=2, terminates="always"))
+    add(_cspec("earliest_of_three", "The earliest of three strings in code-point order.",
+               "nested str_lt case-selects", ["string", "order", "case"], fn([STRING, STRING, STRING], STRING),
+               lam(["a", "b", "c"], case_bool(_lt57(a57, b57),
+                                              case_bool(_lt57(a57, c57), a57, c57),
+                                              case_bool(_lt57(b57, c57), b57, c57))),
+               [{"args": ["b", "a", "c"], "result": "a"}, {"args": ["z", "y", "x"], "result": "x"},
+                {"args": ["m", "Y", "n"], "result": "Y"}, {"args": ["d", "d", "e"], "result": "d"}],
+               read_example=2, terminates="always"))
+    add(_cspec("earlier_ci", "The earlier of two strings ignoring case (compare lowercased; ties keep the first).",
+               "case str_lt (str_lower a) (str_lower b) of true => a; false => b",
+               ["string", "order", "case"], SS,
+               lam(["a", "b"], case_bool(_lt57(bapp("str_lower", a57), bapp("str_lower", b57)), a57, b57)),
+               [{"args": ["Beta", "alpha"], "result": "alpha"}, {"args": ["b", "A"], "result": "A"},
+                {"args": ["apple", "Zoo"], "result": "apple"}, {"args": ["x", "X"], "result": "X"}],
+               read_example=2, terminates="always"))
+    add(_cspec("later_ci", "The later of two strings ignoring case (compare lowercased; ties keep the second).",
+               "case str_lt (str_lower a) (str_lower b) of true => b; false => a",
+               ["string", "order", "case"], SS,
+               lam(["a", "b"], case_bool(_lt57(bapp("str_lower", a57), bapp("str_lower", b57)), b57, a57)),
+               [{"args": ["alpha", "Beta"], "result": "Beta"}, {"args": ["b", "A"], "result": "b"},
+                {"args": ["zed", "Apple"], "result": "zed"}, {"args": ["q", "Q"], "result": "q"}],
+               read_example=2, terminates="always"))
+    # list shapes
+    add(_cspec("earliest_or", "The earliest string of a list in code-point order, or a default when empty.",
+               "case null xs of true => d; false => case str_lt (head xs) (self d (tail xs)) of true => head xs; false => self d (tail xs)",
+               ["string", "order", "list", "recursion"], fn([STRING, list_of(STRING)], STRING),
+               lam(["d", "xs"], case_null("xs", d57,
+                                          case_bool(_lt57(bapp("head", xs57), bself(d57, bapp("tail", xs57))),
+                                                    bapp("head", xs57), bself(d57, bapp("tail", xs57))))),
+               [{"args": ["~", ["pear", "fig", "kiwi"]], "result": "fig"}, {"args": ["~", []], "result": "~"},
+                {"args": ["~", ["pear", "Fig", "apple"]], "result": "Fig"}, {"args": ["~", ["m"]], "result": "m"}],
+               read_example=2, terminates="always"))
+    add(_cspec("latest_or", "The latest string of a list in code-point order, or a default when empty.",
+               "case null xs of true => d; false => case str_lt (self d (tail xs)) (head xs) of true => head xs; false => self d (tail xs)",
+               ["string", "order", "list", "recursion"], fn([STRING, list_of(STRING)], STRING),
+               lam(["d", "xs"], case_null("xs", d57,
+                                          case_bool(_lt57(bself(d57, bapp("tail", xs57)), bapp("head", xs57)),
+                                                    bapp("head", xs57), bself(d57, bapp("tail", xs57))))),
+               [{"args": ["", ["a", "c", "b"]], "result": "c"}, {"args": ["", []], "result": ""},
+                {"args": ["", ["Zoo", "apple", "kiwi"]], "result": "kiwi"}, {"args": ["", ["q"]], "result": "q"}],
+               read_example=2, terminates="always"))
+    add(_cspec("is_sorted_strs", "Whether a list of strings is in ascending code-point order.",
+               "true on nil/singleton; false if head (tail xs) sorts before head xs; else self (tail xs)",
+               ["string", "order", "list", "recursion", "predicate"], fn([list_of(STRING)], BOOL),
+               lam(["xs"], case_null("xs", bool_lit(True),
+                                     case_bool(bapp("null", bapp("tail", xs57)), bool_lit(True),
+                                               case_bool(_lt57(bapp("head", bapp("tail", xs57)), bapp("head", xs57)),
+                                                         bool_lit(False), bself(bapp("tail", xs57)))))),
+               [{"args": [["a", "b", "c"]], "result": True}, {"args": [["b", "a"]], "result": False},
+                {"args": [["Zoo", "apple"]], "result": True}, {"args": [[]], "result": True}],
+               read_example=2, terminates="always"))
+    add(_cspec("count_before_str", "How many strings of a list sort before a given string (code-point order).",
+               "length (filter (\\s -> str_lt s w) xs)", ["string", "order", "list", "filter"],
+               fn([STRING, list_of(STRING)], INT),
+               lam(["w", "xs"], bapp("length", bapp("filter", lam(["s"], _lt57(var("s"), w57)), xs57))),
+               [{"args": ["m", ["a", "z", "k"]], "result": 2}, {"args": ["a", []], "result": 0},
+                {"args": ["apple", ["Zoo", "banana", "Apple"]], "result": 2}, {"args": ["b", ["b"]], "result": 0}],
+               read_example=2, terminates="always"))
+    add(_cspec("insert_pos_str", "The index at which a string would be inserted into an ascending sorted list.",
+               "case null ys of true => 0; false => case str_lt x (head ys) of true => 0; false => 1 + self x (tail ys)",
+               ["string", "order", "list", "recursion", "counter"], fn([STRING, list_of(STRING)], INT),
+               lam(["x", "ys"], case_null("ys", int_lit(0),
+                                          case_bool(_lt57(x57, bapp("head", ys57)), int_lit(0),
+                                                    bapp("add", int_lit(1), bself(x57, bapp("tail", ys57)))))),
+               [{"args": ["c", ["a", "b", "d"]], "result": 2}, {"args": ["a", []], "result": 0},
+                {"args": ["Z", ["a", "b"]], "result": 0}, {"args": ["e", ["a", "b", "d"]], "result": 3}],
+               read_example=2, terminates="always"))
+    add(_cspec("insert_asc_str_le", "Insert a string into an ascending sorted list, before any equal element.",
+               "case null ys of true => cons x nil; false => case str_lt (head ys) x of true => cons (head ys) (self x (tail ys)); false => cons x ys",
+               ["string", "recursion", "list", "sort"], fn([STRING, list_of(STRING)], list_of(STRING)),
+               lam(["x", "ys"], case_null("ys", bapp("cons", x57, var("nil")),
+                                          case_bool(_lt57(bapp("head", ys57), x57),
+                                                    bapp("cons", bapp("head", ys57), bself(x57, bapp("tail", ys57))),
+                                                    bapp("cons", x57, ys57)))),
+               [{"args": ["b", ["a", "c"]], "result": ["a", "b", "c"]}, {"args": ["a", []], "result": ["a"]},
+                {"args": ["B", ["a", "c"]], "result": ["B", "a", "c"]}, {"args": ["d", ["a", "c"]], "result": ["a", "c", "d"]}],
+               read_example=2, terminates="always"))
     return out
 
 
