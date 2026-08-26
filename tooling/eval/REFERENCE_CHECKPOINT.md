@@ -280,6 +280,31 @@ made on **shared tasks**, never raw totals:
 > REST API deploy/terminate, parallel 14B leg on the H100, kill-switch handoff between
 > pods, both pods terminated by the agent the moment artifacts were pulled).
 
+> **Round 25 (2026-08-26, corpus25/ftdata25 — family #55c branch-order/or-guard/dispatch
+> variants, 7b28502 — a TARGETED single cycle: 7B seed 1 only, RTX PRO 6000 Blackwell
+> ~21 min ≈ $0.75): the 7B-s1 watch CLOSED.** The diagnosis first (this session, $0): both
+> rounds' three misses are PARSE failures — the seed answers the absent-first rows with
+> Haskell-style pattern guards (`n if n >= int(200) ... =>`, c23) / (`int(x) if ... =>`,
+> c24), syntax the grammar does not have. The alignment is exact: the three failing rows
+> are precisely the rows whose intent names the absent code FIRST, every #55a training
+> gold guards the success band first, and only ~5 write pairs carried the probe-decision
+> shape at all. The seed that re-orders to the taught shape (s0) passes; s1 follows the
+> intent's order, opens with the 404 equality, reaches literal-pattern dispatch, needs a
+> range arm no pattern can express, and backfills with a pretrained guard. **Family #55c
+> (13 specs)** teaches the three legal exits: absent-first equality-then-band chains (+
+> string twins), or-guard absent arms both orders, and literal-pattern dispatch with a
+> wildcard fallthrough into the band case (verified legal end-to-end before staging);
+> grids exclude the eval rows' exact parameter combos (zero gold-body collisions, zero
+> eval-gold leakage into ftdata25 — checked). **Result: c25-7b-s1 passes all three watch
+> writes in the taught absent-first form** (state_of_either even takes the or-guard
+> spelling), **16/16 world-state rows, total 407/432 (94.2%) vs c24-7b-s1's 401/432** —
+> the movement outside the watch trio (+12/−9) sits in the known churn set (arg_of, fib,
+> implies, min_max_absorb, count_between …), with `read/parse_int_maybe` (a durable
+> residue) among the gains. **No pin implications** (single-seed confirm round, not a
+> re-pin sweep; the 7B pin's seed is s0). Adapter+eval in `/home/claude/sandbox/round25/`
+> (`adapter-c25-7b-s1`, unpublished). Durable residue unchanged: `run_command`,
+> `read/min_string`, `read/insert_sorted`.
+
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
 `adapter-coder7b-c14-s1`, sha256 `91d8940345630806…`, seed 1; the 14B total/read-champion weights
