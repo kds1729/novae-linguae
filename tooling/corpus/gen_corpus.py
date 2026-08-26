@@ -4594,6 +4594,123 @@ def combinatorial_specs(exclude_names=()):
                     for v in _S55],
                    terminates="always"))
 
+    # 55c. BRANCH-ORDER + OR-GUARD variants (the round-24 7B-s1 diagnosis, 2026-08-26): every
+    # 55a gold guards the success band FIRST, so an absent-first intent (the curated eval rows'
+    # deliberately fresh surface) had no taught write shape — c23-7b-s1 AND c24-7b-s1 answered
+    # the three absent-first/or-guard rows with pattern guards (`n if n >= int(200) ... =>`),
+    # syntax the grammar does not have (parse fail, both rounds, same three rows). Three
+    # antidotes, each a legal taught form: (i) the equality-FIRST chain — absent checked before
+    # the band; (ii) or-guard absent arms — two absent codes where 55a only ever taught one;
+    # (iii) literal-pattern dispatch with a wildcard fallthrough into the band case — the legal
+    # continuation of exactly the `case s of { int(404) => ...` opening the failing seed reaches
+    # for. Chain-shaped grids EXCLUDE the curated eval rows' exact parameter combos
+    # (probe_verdict / state_of_either / state_word) so no gold body coincides with an eval gold
+    # in either train position (the export holdout guard drops write-side exact matches, but
+    # read-side freshness needs the grids disjoint); the dispatch shape shares no body form with
+    # any eval gold, so it runs the full grid.
+    def _lpat(n):
+        return {"kind": "lit", "value": {"kind": "int", "value": n}}
+
+    # (i) absent-first chains — (200,300,404) omitted: it is probe_verdict's gold exactly.
+    for lo, hi, ab in ((200, 300, 410), (200, 400, 404), (200, 400, 410)):
+        add(_cspec(f"state_absentfirst_{hi}_{ab}",
+                   f"Classify a status: {ab} means the resource is absent, {lo}-{hi - 1} that "
+                   "it exists, anything else is unknown.",
+                   f"Absent for {ab} (checked first); Exists for [{lo},{hi}); Unknown otherwise.",
+                   ["http", "world-state", "variant", "case"], fn([INT], STATE_T),
+                   lam(["s"], case_bool(bapp("eq", s55, int_lit(ab)), variant_expr("Absent"),
+                                        case_bool(_band_guard(s55, lo, hi),
+                                                  variant_expr("Exists"),
+                                                  variant_expr("Unknown")))),
+                   [{"args": [v], "result": (V("Absent") if v == ab
+                                             else V("Exists") if lo <= v < hi
+                                             else V("Unknown"))}
+                    for v in _S55],
+                   terminates="always"))
+    # Absent-first string twins — label trios disjoint from state_word's ("gone","ok","unclear").
+    for lo, hi, ab, (ab_l, ex_l, un_l) in ((200, 300, 410, ("missing", "live", "other")),
+                                           (200, 400, 404, ("dead", "fine", "vague"))):
+        add(_cspec(f"state_word_{ab_l}",
+                   f'Describe a status as "{ab_l}" for {ab}, "{ex_l}" for {lo}-{hi - 1}, or '
+                   f'"{un_l}" for anything else.',
+                   f'"{ab_l}" for {ab} (checked first); "{ex_l}" for [{lo},{hi}); "{un_l}" '
+                   "otherwise.",
+                   ["http", "world-state", "string", "case"], fn([INT], STRING),
+                   lam(["s"], case_bool(bapp("eq", s55, int_lit(ab)), str_lit(ab_l),
+                                        case_bool(_band_guard(s55, lo, hi), str_lit(ex_l),
+                                                  str_lit(un_l)))),
+                   [{"args": [v], "result": (ab_l if v == ab
+                                             else ex_l if lo <= v < hi else un_l)}
+                    for v in _S55],
+                   terminates="always"))
+
+    # (ii) or-guard absent arms (404 or 410), both orders — exists-first at (200,300) omitted:
+    # it is state_of_either's gold exactly.
+    _two_absent = bapp("or", bapp("eq", s55, int_lit(404)), bapp("eq", s55, int_lit(410)))
+    for lo, hi in ((200, 300), (200, 400)):
+        add(_cspec(f"state_either_first_{hi}",
+                   f"Classify a status where both 404 and 410 mean the resource is absent, "
+                   f"{lo}-{hi - 1} that it exists, and anything else is unknown.",
+                   f"Absent for 404 or 410 (checked first); Exists for [{lo},{hi}); Unknown "
+                   "otherwise.",
+                   ["http", "world-state", "variant", "case"], fn([INT], STATE_T),
+                   lam(["s"], case_bool(_two_absent, variant_expr("Absent"),
+                                        case_bool(_band_guard(s55, lo, hi),
+                                                  variant_expr("Exists"),
+                                                  variant_expr("Unknown")))),
+                   [{"args": [v], "result": (V("Absent") if v in (404, 410)
+                                             else V("Exists") if lo <= v < hi
+                                             else V("Unknown"))}
+                    for v in _S55],
+                   terminates="always"))
+    add(_cspec("state_either_400",
+               "Classify a status where 200-399 means the resource exists, both 404 and 410 "
+               "that it is absent, and anything else is unknown.",
+               "Exists for [200,400); Absent for 404 or 410; Unknown otherwise.",
+               ["http", "world-state", "variant", "case"], fn([INT], STATE_T),
+               lam(["s"], case_bool(_band_guard(s55, 200, 400), variant_expr("Exists"),
+                                    case_bool(_two_absent, variant_expr("Absent"),
+                                              variant_expr("Unknown")))),
+               [{"args": [v], "result": (V("Exists") if 200 <= v < 400
+                                         else V("Absent") if v in (404, 410)
+                                         else V("Unknown"))}
+                for v in _S55],
+               terminates="always"))
+
+    # (iii) literal-pattern dispatch + wildcard fallthrough — the shape no eval gold uses.
+    for lo, hi, ab in ((200, 300, 404), (200, 300, 410), (200, 400, 404), (200, 400, 410)):
+        add(_cspec(f"state_dispatch_{hi}_{ab}",
+                   f"Classify a status: {ab} means the resource is absent, {lo}-{hi - 1} that "
+                   "it exists, anything else is unknown.",
+                   f"case s of int({ab}) => Absent; _ => the [{lo},{hi}) band check.",
+                   ["http", "world-state", "variant", "case", "dispatch"], fn([INT], STATE_T),
+                   lam(["s"], _case_of(s55,
+                                       (_lpat(ab), variant_expr("Absent")),
+                                       (WILDCARD_PAT,
+                                        case_bool(_band_guard(s55, lo, hi),
+                                                  variant_expr("Exists"),
+                                                  variant_expr("Unknown"))))),
+                   [{"args": [v], "result": (V("Absent") if v == ab
+                                             else V("Exists") if lo <= v < hi
+                                             else V("Unknown"))}
+                    for v in _S55],
+                   terminates="always"))
+    # One dispatch string twin — same shape, a string result surface.
+    add(_cspec("state_dispatch_word",
+               'Describe a status as "stale" for 410, "good" for 200-299, or "murky" for '
+               "anything else.",
+               'case s of int(410) => "stale"; _ => the [200,300) band check.',
+               ["http", "world-state", "string", "case", "dispatch"], fn([INT], STRING),
+               lam(["s"], _case_of(s55,
+                                   (_lpat(410), str_lit("stale")),
+                                   (WILDCARD_PAT,
+                                    case_bool(_band_guard(s55, 200, 300), str_lit("good"),
+                                              str_lit("murky"))))),
+               [{"args": [v], "result": ("stale" if v == 410
+                                         else "good" if 200 <= v < 300 else "murky")}
+                for v in _S55],
+               terminates="always"))
+
     # 55b. lifecycle-run summarization: short-circuit tail-descent walks over statuses.
     for lo, hi in ((200, 300), (200, 400)):
         def _ok55(v, _lo=lo, _hi=hi):
