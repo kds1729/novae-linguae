@@ -8,7 +8,7 @@ made on **shared tasks**, never raw totals:
 
 | tier | base | pin | notes |
 |---|---|---|---|
-| **best write** | **Coder-7B** (corpus14, s1) | **176 / 185 of 189 (97.9% best, 95.5% mean)** on the 380-task eval | best ever by a wide margin; seed-1 passes **every historical residual** — its only misses are 4 long-known churn tasks. **c23-7B-s0 exactly TIES it on the 188 shared write tasks (184 = 184)** — the first post-c14 cycle to reach the pin's level — and adds the contract/fold capabilities, but a tie does not move a pin (the round-17 convention) |
+| **best write** | **Coder-7B (corpus26, s0)** | **write 208/214 (97.2%), total semantic 410/432 = 94.9%** on the 432-task eval | **re-pinned in round 26 (2026-08-26)**: the first adapter to *beat* the c14-s1 pin on shared tasks — 378 shared: write **185/188 vs 184**, read 165 vs 161, total 362 vs 357 (c23-7B-s0 had only tied it, 184 = 184); +6 vs same-seed c23 (write +3, read +3). Carries families #53–#56 — `run_command`, the last durable write residue, passes for the first time. Hosted on Arca: `wgt_64517486a30d…` + signed eval attestation `evl_e85d90a4c8cd…`, superseding `wgt_83ad513dab1e…` (resolvable, append-only); consumer `certified` → CERTIFIED. Prior pin: c14-s1, 176/185 of 189 (97.9%) on the 380-task eval |
 | **best total / read** | **Coder-14B (corpus23, s1)** | **total semantic 400/414 = 96.6%, read 191/196 = 97.4%, write 197/206** | **re-pinned in round 23 (2026-07-15)**: beats the c21-s1 pin **+3 shared-write / +6 full-set** on the same 416-task eval, and carries family #53 (precondition trust — `divide`/`modulo` pass every c23 cycle). Hosted on Arca: `wgt_80f97246a182…` + signed eval attestation `evl_21f590f38342…`, superseding `wgt_2d1dcd3d78e6…` (resolvable, append-only); consumer `certified` → CERTIFIED |
 | **efficient** | Coder-3B (corpus14, s0) | 181 / 173 of 189 (95.8% best, 93.7% mean) on the 380-task eval | best 3B ever; c23 3B seeds are −2/−6 on shared write (best post-c14 yet, up from c22's −9) — the pin stands |
 
@@ -305,9 +305,42 @@ made on **shared tasks**, never raw totals:
 > (`adapter-c25-7b-s1`, unpublished). Durable residue unchanged: `run_command`,
 > `read/min_string`, `read/insert_sorted`.
 
+> **Round 26 (2026-08-26, corpus26/ftdata26 — family #56 command interpreters, c056513 —
+> the `run_command` diagnosis + a two-cycle confirm, 7B-s0 + 14B-s1 on one RTX PRO 6000
+> Blackwell, ~45 min ≈ $1.57): THE LAST DURABLE WRITE RESIDUE CLOSED AT BOTH TIERS, AND THE
+> 7B RE-PINS.** Diagnosis ($0): `run_command` (0/17 across three rounds) was never a syntax
+> hallucination — every tier gets the string-literal dispatch right and fails a DIFFERENT
+> missing totality piece: 3B/7B use `parse_int`'s Maybe as a bare int inside the arithmetic
+> (ill-typed), 14B cases the Maybe correctly but omits the token-count guard (`"double"` →
+> head of nil), an older 14B invents a Haskell bind. The task composes three idioms — arity
+> guard on the split, `parse_int` cased to Just/None, dispatch — and ftdata25 carried ZERO
+> write bodies composing even two (parse_int in 14 of 3,231 write bodies; #46 dispatches
+> over an int already supplied). **Family #56 (20 specs)**: parse-then-apply, arity-guarded
+> token access (3 separators + a 3-token variant), the full interpreter parse-outer (the
+> gold's order) over three disjoint word/op vocabularies, the same interpreter
+> dispatch-outer (the 14B's shape made total by the guard it omitted), a colon variant;
+> zero gold collisions, zero eval-gold leakage; the composition now appears in 11 write
+> bodies. **Result: `write/run_command` PASSES at 7B-s0 AND 14B-s1 — its first passes ever
+> — and both emit the gold's exact composition** (guard → parse → dispatch, total).
+> **c26-7b-s0: 410/432 (94.9%); vs the c14 7B pin on the 378 shared tasks 362 vs 357 —
+> write 185/188 vs 184 (the FIRST adapter to beat the c14 pin on shared write; c23-7b-s0
+> only tied it), read 165 vs 161; vs same-seed c23-7b-s0 +6 (write +3, read +3) →
+> RE-PINNED** (hosted `wgt_64517486a30d5b74…` + `evl_e85d90a4c8cd2533…`, superseding
+> `wgt_83ad513dab1e98c4…`; blobs round-trip, consumer `certified` → CERTIFIED). Gains vs
+> the pin are a cluster, not churn (`run_command`, `arg_of`, `failures_of`, `split_words`
+> …); losses are the known churn tasks. **c26-14b-s1: 417/432 (96.5%), write 206/214 — the
+> best 14B write yet — but read 197 vs the c23 pin's 199 and total 415 vs 416 on shared:
+> the 14B pin is the read crown and STANDS** (a tie is not a move). 3B not re-run (no 3B
+> failure mode was diagnosed; the 3B pin stands untested this round — a named gap).
+> Adapters+evals in `/home/claude/sandbox/round26/`. Durable residue after this round:
+> `read/min_string`, `read/insert_sorted` (read-side, every tier/seed) — the write side's
+> durable list is EMPTY.
+
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
-`adapter-coder7b-c14-s1`, sha256 `91d8940345630806…`, seed 1; the 14B total/read-champion weights
+`adapter-c26-7b-s0` — round 26's re-pin, sha256 `add1a97aa8fdb0b3…`, seed 0, **hosted** as
+`wgt_64517486a30d5b74…` + eval attestation `evl_e85d90a4c8cd2533…`, superseding the c14 record
+`wgt_83ad513dab1e98c4…`; the 14B total/read-champion weights
 are now `adapter-c23-14b-s1` — round 23's re-pin, **hosted on the commons** as
 `wgt_80f97246a182a2c1…` (safetensors sha256 `2a8bf37c5f77ca75…`, signed eval attestation
 `evl_21f590f38342c557…`, superseding the c21 record `wgt_2d1dcd3d78e6be98…`, which stays
@@ -319,7 +352,7 @@ on the same base + corpus. The weights themselves are gitignored (regenerable) a
 commons** per [`spec/weights.md`](../../spec/weights.md): all three pinned tiers are published to Arca
 as `wgt_` pointer records with signed eval attestations of the measured scores, blobs fetchable (and
 hash-verifiable) from `https://nl.1105software.com/v0/blobs/<sha256>` —
-3B `wgt_0782121ed631d02f…`, **7B `wgt_83ad513dab1e98c4…`**, 14B `wgt_95885e217035dc18…`
+3B `wgt_0782121ed631d02f…`, 7B `wgt_83ad513dab1e98c4…` (since superseded by the c26 re-pin), 14B `wgt_95885e217035dc18…`
 (records + attestations committed under [`spec/examples/`](../../spec/examples/); each c14 record
 carries a `supersedes` link to its prior pin (c13's 3B/7B, c10's 14B), and the whole chain stays
 resolvable — the commons is append-only, so a re-pin is a new record, not an overwrite).
@@ -351,7 +384,7 @@ and the GW5 float rows):
 | **total** | **354 / 380 (93.2%)** | 354 / 380 (93.2%) | 380 |
 
 Seed 1 of the same run scored write 173/189 (the 2-seed mean is **93.7%** — the best 2-seed 3B mean yet).
-The 7B tier (same recipe, `--base Qwen/Qwen2.5-Coder-7B-Instruct`, weights `adapter-coder7b-c14-s1`) is
+The 7B tier (same recipe, `--base Qwen/Qwen2.5-Coder-7B-Instruct`, weights `adapter-c26-7b-s0` since round 26; `adapter-coder7b-c14-s1` before) is
 **185/176 of 189 (97.9% best)** — the number to quote for the project's best write. base `write` is 0% —
 the adapter is the whole signal.
 
