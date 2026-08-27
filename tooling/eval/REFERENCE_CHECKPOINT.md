@@ -9,8 +9,8 @@ made on **shared tasks**, never raw totals:
 | tier | base | pin | notes |
 |---|---|---|---|
 | **best write** | **Coder-7B (corpus26, s0)** | **write 208/214 (97.2%), total semantic 410/432 = 94.9%** on the 432-task eval | **re-pinned in round 26 (2026-08-26)**: the first adapter to *beat* the c14-s1 pin on shared tasks — 378 shared: write **185/188 vs 184**, read 165 vs 161, total 362 vs 357 (c23-7B-s0 had only tied it, 184 = 184); +6 vs same-seed c23 (write +3, read +3). Carries families #53–#56 — `run_command`, the last durable write residue, passes for the first time. Hosted on Arca: `wgt_64517486a30d…` + signed eval attestation `evl_e85d90a4c8cd…`, superseding `wgt_83ad513dab1e…` (resolvable, append-only); consumer `certified` → CERTIFIED. Prior pin: c14-s1, 176/185 of 189 (97.9%) on the 380-task eval |
-| **best total / read** | **Coder-14B (corpus23, s1)** | **total semantic 400/414 = 96.6%, read 191/196 = 97.4%, write 197/206** | **re-pinned in round 23 (2026-07-15)**: beats the c21-s1 pin **+3 shared-write / +6 full-set** on the same 416-task eval, and carries family #53 (precondition trust — `divide`/`modulo` pass every c23 cycle). Hosted on Arca: `wgt_80f97246a182…` + signed eval attestation `evl_21f590f38342…`, superseding `wgt_2d1dcd3d78e6…` (resolvable, append-only); consumer `certified` → CERTIFIED |
-| **efficient** | Coder-3B (corpus14, s0) | 181 / 173 of 189 (95.8% best, 93.7% mean) on the 380-task eval | best 3B ever; c23 3B seeds are −2/−6 on shared write (best post-c14 yet, up from c22's −9) — the pin stands |
+| **best total / read** | **Coder-14B (corpus28, s1)** | **total semantic 431/448 = 96.2%, read 206/213 = 96.7%, write 211/223** on the 448-task eval | **re-pinned in round 28 (2026-08-27)**: beats the c23-s1 pin on 446 shared tasks **429 vs 423 — write 211 vs 206, read 206 vs 205** — and carries family #58 (the GraphQL idiom: 14/16 of the curated rows, up from 7). Hosted on Arca: `wgt_5698f82b0f13…` + signed eval attestation `evl_fd903de530e3…`, superseding `wgt_80f97246a182…` (safetensors sha256 `7990ee8933ecb5e6…`), consumer `certified` CERTIFIED |
+| **efficient** | **Coder-3B (corpus28, s0)** | **total semantic 407/448 = 90.8%, write 203/223, read 192/213** on the 448-task eval | **re-pinned in round 28 (2026-08-27)**: the first 3B to beat the c14-s0 pin on shared tasks — 394 shared: **361 vs 355** (read 169 vs 162, write 180 vs 181), GraphQL rows 13/16 up from 3. Hosted on Arca: `wgt_1fef913b9a21…` + `evl_6acb4f5aa470…`, superseding `wgt_0782121ed631…` (safetensors sha256 `7630bbcd9ece63e2…`), consumer `certified` CERTIFIED |
 
 > **The capacity boundary (2026-07-03, Coder-14B 2-seed).** 14B moved the total to **96.2%** but taught the sharpest lesson: **capacity fixes *reading*, not *writing*.** `read` climbed 91→98.6% (the off-by-one / sign / absorption-law arithmetic errors are capacity-bound and mostly gone), and the two genuine reasoning-*write* residuals `foldr_with`/`member` cracked on both seeds — yet the `write` count is **dead-stable at 147/157 across both seeds AND across 7B↔14B**. The remaining write misses are not capacity-bound: they are the dialect's **totality by design** (no `^`, no `!!`, no `error`). Two of them were a missing-*idiom* gap, closed at $0/local: adding **`last`/`init`** list builtins made the model's already-correct `reverse` valid, and **corpus family #38** (index recursion) flipped `nth` `.`→`P` at 14B (`min_of_list` too, via #37). Genuinely stuck: `pow2` (its exact gold is the already-covered `rec_pow` shape → leakage-dropped → a generalization limit, not a coverage gap) and a small arithmetic core (`fib`, sign). Adapters (275 MB each) pulled to `/var/tmp/claude/adapter-coder14b-c{7,8}-s*`.
 
@@ -361,6 +361,51 @@ made on **shared tasks**, never raw totals:
 > `read/min_string` at 3B/7B and `read/insert_sorted` at 14B — the complementary read pair,
 > boundary-documented. Ops: the H100 NVL ran 3B ~30 min / 7B ~25 / 14B ~40 (train) — ~1.5×
 > the Blackwell; take it only when the Blackwell is out of stock.
+
+> **Round 28 (2026-08-27, corpus28/ftdata28 — family #58 the GraphQL idiom, 89b9289 — the
+> third evolution/ module's failure cluster, measured then taught: an eval-only Blackwell pod
+> (6 adapters × 16 tasks, ~7 min ≈ $0.25), three legs 3B-s0 / 7B-s0 / 14B-s1 on a Blackwell
+> (~1h05m ≈ $2.40), a 7B-s1 confirm on an H100 NVL (Blackwell out mid-day, ~32 min ≈ $1.70);
+> round ≈ $4.35): the cluster is REAL and it CLOSES at 3B and 14B; both re-pin; the 7B pin
+> stands on its write criterion.** Diagnosis ($0.25): the 8 curated graphql_funcs rows
+> (`evolution/graphql-poc`, 9ed59f7; eval 432 → **448**) scored coder3b-c14-s0 3/16, c27-3b-s0
+> 2/16, c26-7b-s0 7/16, c27-7b-s0 3/16, c23-14b-s1 7/16, c27-14b-s1 8/16 — write 1–3/8 on
+> EVERY tier. Four clusters, all vocabulary the corpus never carried in write position:
+> (A) JSON spliced by `str_concat "{\"code\":\"" s "\"}"` instead of built as a Json VALUE and
+> `render_json`ed (every tier — the exact unsoundness the adapter exists to avoid); (B) the
+> `data` envelope level dropped; (C) invented constructors `JArr`/`JObject` (`JList` appears
+> in no write gold); (D) HOFs over `List Json` instead of the variant-headed skip/keep walk;
+> read side: `render_json` not applied, narrowing skipped, `Just(None)` for `JNull`. The rows
+> also surfaced a validator defect: `unparse-body` printed a payload variant in argument
+> position (`render_json JObj(…)`) that `parse-body` refused, so the oracle failed its own
+> golds (446/448) — fixed in 2ce354e (a tag now starts an atom; 281-body round-trip sweep
+> clean; oracle 448/448). **Family #58 (41 specs)**: literal-key variables encoders (one/two
+> keys, string/int/bool, disjoint from the curated `code`/`page`), envelope walks with literal
+> fields (absence = `Just(JNull)`), typed leaves through `JStr`/`JBool`/`JList`, the errors
+> signal through `JList` (non-empty / count), skip/keep walks over `List Json` on literal keys
+> (never `name`), request-target builders; zero gold collisions; corpus28 = 3,624 / ftdata28 =
+> 6,621 (train 6,290, guard excluded 499). **Results (shared tasks, the mandated method):**
+> 3B-s0 **405 vs c27's 393** (+12; GraphQL 2 → 13) and **361 vs the c14 pin's 355** on the 394
+> they share (read 169 vs 162, write 180 vs 181) — **3B re-pinned to c28-3b-s0** (the first
+> 3B to beat c14 on shared tasks, after c23's −2/−6 and c27's exact tie); 7B-s0 **420 vs the
+> c26 pin's 415** (read 200 vs 193, GraphQL 7 → 13) **but write 208 vs 210** — the 7B pin's
+> criterion is write, and the seed-1 confirm (413, write 204) does not beat it either →
+> **c26-7b-s0 stays the 7B pin**, with the tier's three remaining GraphQL write misses
+> (`gql_get_url`, `gql_leaf_string`, `gql_leaf_bool` — the first two passed at the OLD pin, so
+> this is churn inside the cluster, not a wall) the named watch; 14B-s1 **429 vs the c23 pin's
+> 423 — write 211 vs 206, read 206 vs 205** (GraphQL 7 → 14; the two misses are
+> `write/gql_leaf_string` + `write/gql_leaf_bool`, the deepest narrowing chains) — **14B
+> re-pinned to c28-14b-s1**, the read crown kept. Both new pins hosted on Arca with signed
+> eval attestations (`wgt_5698f82b…`/`evl_fd903de5…`, `wgt_1fef913b…`/`evl_6acb4f5a…`),
+> blobs round-trip, consumer `certified` CERTIFIED; the superseded records stay resolvable.
+> Adapters + evals + the subset run in `/home/claude/sandbox/round28/`. Model-side residue
+> after this round: the 7B tier's GraphQL write trio (watch), `write/gql_leaf_string` +
+> `write/gql_leaf_bool` at 14B (the deepest chains — a depth cluster, one round old), and the
+> complementary read pair from round 27. **The eval is 448 tasks from here on.** Ops: the
+> Blackwell's cycle times held (3B ~20 / 7B ~16 / 14B ~29 min incl. eval); it went out of
+> stock mid-afternoon and the NVL took the confirm at ~1.4×; one live call per document in
+> the GraphQL adapter is what made the eval-only pod possible at all (16 tasks/adapter).
+
 
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
