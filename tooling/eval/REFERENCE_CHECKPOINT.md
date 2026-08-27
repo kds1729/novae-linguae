@@ -336,6 +336,32 @@ made on **shared tasks**, never raw totals:
 > `read/min_string`, `read/insert_sorted` (read-side, every tier/seed) — the write side's
 > durable list is EMPTY.
 
+> **Round 27 (2026-08-26/27, corpus27/ftdata27 — family #57 code-point order in read
+> position, 082762e — three legs 3B-s0 / 7B-s0 / 14B-s1 on one H100 NVL, ~1h53m ≈ $6.00):
+> the read residue SPLIT, not closed; every pin stands; the 3B gap is measured.** Diagnosis
+> ($0): `read/min_string` and `read/insert_sorted` are the mixed-case code-point trap in
+> TWO-argument / list form (`"a"` vs `"Z"` → `"Z"`; `"Z"` into `["a"]` → `["Z","a"]`); every
+> tier answers alphabetically; family #43's read fix had exposed only unary-vs-constant
+> comparisons, all on the one input `"Zeb"` (17 read pairs carried `str_lt` at all; the two
+> shapes that matter had ~1 each). **Family #57 (16 specs)**: two-argument selections /
+> predicates and list walks over `str_lt`, each spec's read example a DISTINCT
+> uppercase-vs-lowercase trap, plus case-insensitive contrast twins on the same inputs;
+> multi-string trap read pairs 2 → 17; zero leakage. **Result: `read/insert_sorted` flips
+> F→P at 3B AND 7B** (`["Z","a"]`, the first passes below 14B) **but not at 14B; `read/
+> min_string` moves nowhere** (14B had it, 3B/7B still answer `"a"`). No tier now misses
+> both and no tier gets both — the read-side code-point prior is only partly overridden by
+> taught trap reads, and the split is the documented boundary, not an open item. Totals:
+> 3B-s0 391 = 391 (exactly neutral, symmetric 20/20 churn — **the 3B pin stands, now
+> measured against the c25–27 corpora**; `write/run_command` transferred down to 3B); 7B-s0
+> 394 vs c26's 408 — write 195 vs 208 on a list-recursion cluster, which sits inside the
+> seed-0 write history (198 → 188 → 200 → 187 across corpora 23/24/26/27; c24 hit the same
+> level) — **c26-7b-s0 stays the 7B pin**; 14B-s1 415 = 415 (7/7 churn), write 206 vs the
+> pin's 205, read 197 vs 199 — **the 14B pin stands**. Adapters+evals in
+> `/home/claude/sandbox/round27/`, none published. Model-side residue after this round:
+> `read/min_string` at 3B/7B and `read/insert_sorted` at 14B — the complementary read pair,
+> boundary-documented. Ops: the H100 NVL ran 3B ~30 min / 7B ~25 / 14B ~40 (train) — ~1.5×
+> the Blackwell; take it only when the Blackwell is out of stock.
+
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
 detailed recipe below is the **3B efficient default**; the 7B differs only in `--base` (weights
 `adapter-c26-7b-s0` — round 26's re-pin, sha256 `add1a97aa8fdb0b3…`, seed 0, **hosted** as
