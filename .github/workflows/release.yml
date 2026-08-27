@@ -29,9 +29,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - name: musl toolchain
+      - name: musl toolchain + z3 (the prover tests need a solver)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools z3
+      - name: z3 (the prover tests need a solver)
+        if: runner.os == 'macOS'
+        run: brew install z3
       - name: build
         working-directory: tooling/validator
         run: cargo build --release --locked --target ${{ matrix.target }} --bin nl-validator
