@@ -9,6 +9,10 @@
 
 The two languages share a single substrate — a content-addressed commons of self-describing records — and are designed as one system because separating them would force a worse design on each.
 
+> **Ten minutes, no toolchain:** [`QUICKSTART.md`](QUICKSTART.md) — `bash quickstart.sh` compiles a real
+> public GraphQL API into certified, offline-replayable function records, runs the verified agent loop
+> against the live commons, and re-verifies the resulting claim as a third party. Needs `python3` and `curl`.
+
 ---
 
 ## Why now

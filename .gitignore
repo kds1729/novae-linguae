@@ -35,3 +35,6 @@
 
 # AI tool configuration (local-only)
 .qwen/
+
+# quickstart.sh work dir
+.quickstart/
