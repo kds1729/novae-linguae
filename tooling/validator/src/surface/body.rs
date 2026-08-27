@@ -380,11 +380,16 @@ impl Parser {
     fn starts_atom(&self) -> bool {
         match self.kind() {
             TokKind::Ident => !is_keyword(&self.peek().text),
+            // A variant construction is an atom in ARGUMENT position too — `map_put "k" JStr(v) m`,
+            // `render_json JObj(m)`, `cons x None` — exactly the form the printer emits (a variant
+            // renders at ATOM_PREC, unparenthesised). Before 2026-08-27 the loop stopped at a tag,
+            // so the printer's own output for the GraphQL variables idiom did not parse back.
             TokKind::Int
             | TokKind::Float
             | TokKind::Str
             | TokKind::Bytes
             | TokKind::ContentAddr
+            | TokKind::Tag
             | TokKind::Lparen => true,
             _ => false,
         }
@@ -797,6 +802,36 @@ mod tests {
                 {"kind": "var", "name": "n"},
                 {"kind": "lit", "value": {"kind": "int", "value": 1}},
             ]}),
+        );
+    }
+
+    #[test]
+    fn variant_construction_is_an_application_argument() {
+        // The GraphQL variables idiom (tooling/nl-ingest-graphql): a payload-carrying variant in
+        // ARGUMENT position, exactly as the printer emits it — `render_json JObj(map_put "code"
+        // JStr(code) map_empty)`. Before 2026-08-27 `starts_atom` stopped at a tag, so the printer's
+        // own output did not parse back (the corpus oracle failed its own golds).
+        let src = r#"render_json JObj(map_put "code" JStr(code) map_empty)"#;
+        let ast = parse_body(src).unwrap();
+        assert_eq!(
+            ast,
+            json!({"kind": "app", "fn": {"kind": "var", "name": "render_json"}, "args": [
+                {"kind": "variant", "tag": "JObj", "payload":
+                    {"kind": "app", "fn": {"kind": "app", "fn": {"kind": "app",
+                        "fn": {"kind": "var", "name": "map_put"},
+                        "args": [{"kind": "lit", "value": {"kind": "string", "value": "code"}}]},
+                        "args": [{"kind": "variant", "tag": "JStr", "payload": {"kind": "var", "name": "code"}}]},
+                        "args": [{"kind": "var", "name": "map_empty"}]}}
+            ]})
+        );
+        // and the round trip is exact
+        assert_eq!(unparse_body(&ast).unwrap(), src);
+        // a nullary tag as an argument, too
+        parses_to(
+            "cons x None",
+            json!({"kind": "app", "fn": {"kind": "app", "fn": {"kind": "var", "name": "cons"},
+                   "args": [{"kind": "var", "name": "x"}]},
+                   "args": [{"kind": "variant", "tag": "None"}]}),
         );
     }
 
