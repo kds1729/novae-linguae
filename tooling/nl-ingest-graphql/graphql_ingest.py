@@ -72,7 +72,9 @@ MAYBE_JSON = {"kind": "sum", "variants": [{"tag": "Just", "type": JSON_T}, {"tag
 MAYBE_STRING = {"kind": "sum", "variants": [{"tag": "Just", "type": STRING}, {"tag": "None"}]}
 MAYBE_BOOL = {"kind": "sum", "variants": [{"tag": "Just", "type": BOOL}, {"tag": "None"}]}
 NONE_V = {"kind": "variant", "tag": "None"}
-_VALIDATOR = os.path.normpath(os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator"))
+# The validator binary: `NL_VALIDATOR` if set (a prebuilt release, quickstart.sh), else the sibling build.
+_VALIDATOR = os.environ.get("NL_VALIDATOR") or os.path.normpath(
+    os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator"))
 _UNRESERVED = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 BLOB_THRESHOLD_DEFAULT = 65536
 SELECT_DEPTH_DEFAULT = 1
