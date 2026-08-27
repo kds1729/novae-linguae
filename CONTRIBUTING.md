@@ -8,7 +8,7 @@ If you find anything here unclear, opening an issue or contacting the maintainer
 
 ## Project status
 
-The project is public and well past the design phase: alongside the schemas, specifications, and manifesto there is a working reference implementation — the `nl-validator` toolchain (canonical form, signing, encryption, a tree-walking evaluator + Hindley-Milner type checker, an SMT + structural-induction prover with lemma discovery, equivalence proving and clustering, effect enforcement, the trust model, and the Nova Locutio agent loop), four ingestion adapters, and a reference commons node deployed live as **Arca** (https://nl.1105software.com). See the README's Status section for the full inventory.
+The project is public and well past the design phase: alongside the schemas, specifications, and manifesto there is a working reference implementation — the `nl-validator` toolchain (canonical form, signing, encryption, a tree-walking evaluator + Hindley-Milner type checker, an SMT + structural-induction prover with lemma discovery, equivalence proving and clustering, effect enforcement, the trust model, and the Nova Locutio agent loop), six ingestion adapters (four source-code, two description-layer: OpenAPI and GraphQL), and a reference commons node deployed live as **Arca** (https://nl.1105software.com). See the README's Status section for the full inventory.
 
 Contributions go through the standard GitHub flow (see *How to propose a change* below).
 
@@ -17,7 +17,7 @@ The most useful contributions right now are:
 - Reviews of the existing v0.1 schemas and the canonical-serialization spec.
 - Resolutions of the items in [`spec/README.md`](spec/README.md) marked as deferred.
 - A reference validator/hasher in any host language (Rust or TypeScript preferred).
-- Ingestion adapters that lift existing ecosystems (Rust crates, Python packages, Haskell hackage, npm) into *Nova Lingua* records.
+- Ingestion adapters that lift existing ecosystems (Rust crates, Python packages, Haskell hackage, npm) into *Nova Lingua* records, and description-layer adapters that compile service descriptions (OpenAPI 3, GraphQL introspection) into verified client records.
 - Critique of the load-bearing principles in the project [`README.md`](README.md) where you think we've gotten something wrong.
 
 ---
