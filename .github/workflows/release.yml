@@ -1,0 +1,64 @@
+name: release
+
+# Prebuilt `nl-validator` binaries, so a stranger does not need a Rust toolchain to follow
+# QUICKSTART.md. Triggered by a `v*` tag (or by hand); attaches the binaries to a GitHub Release.
+#   linux/x86_64  — fully static (musl), runs on any distro
+#   macOS/arm64   — the Apple-silicon default
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            asset: nl-validator-x86_64-linux
+          - os: macos-14
+            target: aarch64-apple-darwin
+            asset: nl-validator-aarch64-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: musl toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - name: build
+        working-directory: tooling/validator
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin nl-validator
+      - name: test
+        working-directory: tooling/validator
+        run: cargo test --release --locked --target ${{ matrix.target }} --lib
+      - name: package
+        run: |
+          cp tooling/validator/target/${{ matrix.target }}/release/nl-validator ${{ matrix.asset }}
+          shasum -a 256 ${{ matrix.asset }} > ${{ matrix.asset }}.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
