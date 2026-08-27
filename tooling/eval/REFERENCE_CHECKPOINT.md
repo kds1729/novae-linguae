@@ -8,8 +8,8 @@ made on **shared tasks**, never raw totals:
 
 | tier | base | pin | notes |
 |---|---|---|---|
-| **best write** | **Coder-7B (corpus26, s0)** | **write 208/214 (97.2%), total semantic 410/432 = 94.9%** on the 432-task eval | **re-pinned in round 26 (2026-08-26)**: the first adapter to *beat* the c14-s1 pin on shared tasks — 378 shared: write **185/188 vs 184**, read 165 vs 161, total 362 vs 357 (c23-7B-s0 had only tied it, 184 = 184); +6 vs same-seed c23 (write +3, read +3). Carries families #53–#56 — `run_command`, the last durable write residue, passes for the first time. Hosted on Arca: `wgt_64517486a30d…` + signed eval attestation `evl_e85d90a4c8cd…`, superseding `wgt_83ad513dab1e…` (resolvable, append-only); consumer `certified` → CERTIFIED. Prior pin: c14-s1, 176/185 of 189 (97.9%) on the 380-task eval |
-| **best total / read** | **Coder-14B (corpus28, s1)** | **total semantic 431/448 = 96.2%, read 206/213 = 96.7%, write 211/223** on the 448-task eval | **re-pinned in round 28 (2026-08-27)**: beats the c23-s1 pin on 446 shared tasks **429 vs 423 — write 211 vs 206, read 206 vs 205** — and carries family #58 (the GraphQL idiom: 14/16 of the curated rows, up from 7). Hosted on Arca: `wgt_5698f82b0f13…` + signed eval attestation `evl_fd903de530e3…`, superseding `wgt_80f97246a182…` (safetensors sha256 `7990ee8933ecb5e6…`), consumer `certified` CERTIFIED |
+| **best write** | **Coder-7B (corpus29, s0)** | **write 213/223 (95.5%), total semantic 424/448 = 94.6%, read 199/213** on the 448-task eval | **re-pinned in round 29 (2026-08-27)**: beats the c26-s0 pin on 446 shared tasks **422 vs 415 — write 212 vs 210, read 198 vs 193** — carrying family #58/#58b (the GraphQL idiom: 15/16 of the curated rows, up from 7). Hosted on Arca: `wgt_7513126ca163…` + signed eval attestation `evl_d74ec72a80a2…`, superseding `wgt_64517486a30d…` (safetensors sha256 `5aec976628104a5c…`), consumer `certified` CERTIFIED |
+| **best total / read** | **Coder-14B (corpus29, s1)** | **total semantic 435/448 = 97.1% (best ever), read 208/213, write 215/223** on the 448-task eval | **re-pinned in round 29 (2026-08-27)**: beats the same-day c28-s1 pin on 446 shared **433 vs 429 — write 214 vs 211, read 207 vs 206** (GraphQL 15/16). Hosted on Arca: `wgt_846d4e3e3245…` + `evl_ef258d046b65…`, superseding `wgt_5698f82b0f13…` (safetensors sha256 `c80fdef0a3e73835…`), consumer `certified` CERTIFIED |
 | **efficient** | **Coder-3B (corpus28, s0)** | **total semantic 407/448 = 90.8%, write 203/223, read 192/213** on the 448-task eval | **re-pinned in round 28 (2026-08-27)**: the first 3B to beat the c14-s0 pin on shared tasks — 394 shared: **361 vs 355** (read 169 vs 162, write 180 vs 181), GraphQL rows 13/16 up from 3. Hosted on Arca: `wgt_1fef913b9a21…` + `evl_6acb4f5aa470…`, superseding `wgt_0782121ed631…` (safetensors sha256 `7630bbcd9ece63e2…`), consumer `certified` CERTIFIED |
 
 > **The capacity boundary (2026-07-03, Coder-14B 2-seed).** 14B moved the total to **96.2%** but taught the sharpest lesson: **capacity fixes *reading*, not *writing*.** `read` climbed 91→98.6% (the off-by-one / sign / absorption-law arithmetic errors are capacity-bound and mostly gone), and the two genuine reasoning-*write* residuals `foldr_with`/`member` cracked on both seeds — yet the `write` count is **dead-stable at 147/157 across both seeds AND across 7B↔14B**. The remaining write misses are not capacity-bound: they are the dialect's **totality by design** (no `^`, no `!!`, no `error`). Two of them were a missing-*idiom* gap, closed at $0/local: adding **`last`/`init`** list builtins made the model's already-correct `reverse` valid, and **corpus family #38** (index recursion) flipped `nth` `.`→`P` at 14B (`min_of_list` too, via #37). Genuinely stuck: `pow2` (its exact gold is the already-covered `rec_pow` shape → leakage-dropped → a generalization limit, not a coverage gap) and a small arithmetic core (`fib`, sign). Adapters (275 MB each) pulled to `/var/tmp/claude/adapter-coder14b-c{7,8}-s*`.
@@ -405,6 +405,32 @@ made on **shared tasks**, never raw totals:
 > Blackwell's cycle times held (3B ~20 / 7B ~16 / 14B ~29 min incl. eval); it went out of
 > stock mid-afternoon and the NVL took the confirm at ~1.4×; one live call per document in
 > the GraphQL adapter is what made the eval-only pod possible at all (16 tasks/adapter).
+
+
+> **Round 29 (2026-08-27, corpus29/ftdata29 — family #58b parameterized levels, f056c95 — a
+> two-leg targeted confirm 7B-s0 / 14B-s1 on one Blackwell, ~42 min ≈ $1.80): the round-28
+> residue closes; 7B AND 14B re-pin; THE LOOP IS PARKED INDEFINITELY.** Diagnosis ($0): every
+> GraphQL write miss left after round 28 was the walk where the field and the leaf both arrive
+> as PARAMETERS — the model collapses a level (drops `data`, or returns the object where the
+> leaf narrowing was due); #58 had taught literal fields only (the one `gql_get_url` miss at
+> 7B-s0 was a single unbalanced paren). **Family #58b (13 specs)**: parameterized field +
+> literal leaf, literal field + parameterized leaf, a parameterized field behind a literal
+> errors gate, two all-literal depth-3 chains; zero collisions; corpus29 = 3,637 / ftdata29 =
+> 6,647. **Results (shared tasks):** 7B-s0 **422 vs the c26 pin's 415 — write 212 vs 210,
+> read 198 vs 193**, GraphQL 7 → 15 (`write/gql_get_url` the one miss: the paren slip, not
+> the idiom) → **7B re-pinned to c29-7b-s0**; 14B-s1 **433 vs c28's 429 — write 214 vs 211,
+> read 207 vs 206**, GraphQL 15/16 (`write/gql_leaf_bool` the one miss) → **14B re-pinned to
+> c29-14b-s1**, 435/448 = 97.1% the best total ever. Both hosted on Arca with signed eval
+> attestations, blobs round-trip, consumer `certified` CERTIFIED, superseded records
+> resolvable. Adapters + evals in `/home/claude/sandbox/round28/`. Model-side residue: one
+> GraphQL write per tier (a paren slip at 7B, the deepest narrowing at 14B) and the round-27
+> read pair — noise-level, not a cluster. **PARKED (user decision, 2026-08-27): the loop has
+> established what it can — small open models learn the language from the synthetic corpus,
+> and each new idiom needs a teaching family before the adapters write it; further rounds move
+> a self-authored eval by a few tasks for ~$3 apiece. The pins are hosted and the recipe is
+> documented, which is all a future consumer needs. The loop does NOT resume on a new
+> evolution/ module or a new base by default; it resumes only if an external consumer of the
+> adapters needs something they cannot do.** The eval is 448 tasks.
 
 
 Pick 7B when accuracy matters, 3B when size/latency does; 14B only when *read* accuracy is the point. The
