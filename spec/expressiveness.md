@@ -884,6 +884,44 @@ compose precisely because neither substitutes for the other (spec/agent-loop.md 
 language surface, no schema change, no corpus material (grants are operator configuration, not
 bodies).
 
+**GW18 — a description format that is not OpenAPI-shaped (2026-08-27): GraphQL, the second
+description-layer adapter, and the zero-pull that closed its one builtin question.** Every
+description-layer result so far went through `nl-ingest-openapi` — Discovery→Swagger→OpenAPI
+(gcp) and Smithy→OpenAPI (aws) both landed there unchanged, so "format-plural" had only been
+tested on formats that *are* OpenAPI after a projection. A GraphQL introspection schema describes
+**types**, not operations (no verbs, paths, statuses or documented values), and the client
+composes the request as a *document*. [`tooling/nl-ingest-graphql`](../tooling/nl-ingest-graphql/)
+compiles one **observation-gated projection** per root `Query` field (`data.<field>`, `Maybe Json`)
+plus one typed projection per scalar leaf of an object result (`String`/`ID`/enum → `Maybe string`,
+`Boolean` → `Maybe bool`; numerics noted, never projected — the `JNum` rule), the selection set
+derived deterministically (argument-free scalar leaves, objects to `--select-depth`). The one
+place a new builtin looked necessary — encoding caller data into the document/JSON variables,
+the exact unsoundness GW10 pulled `url_encode` for — is closed by **composition**: the document
+is a spec-time literal (percent-encoded at generation time, as a query-parameter *name* is) and
+the variables are a `Json` **value** (`JObj (map_put "code" (JStr code) map_empty)`) serialized
+by `render_json`, so caller data never meets a `str_concat` (a zero-pull, GW15's kind). Three
+things the format changes are carried honestly: the **transport is undeclared** (`--transport
+get|post`, the operator's fact; `GET` → `net.read`, `POST` → `net.write` by the method rule —
+examined and *kept*: the effect is what the evaluator performs, "query" is testimony), **nothing
+is spec-derivable** (200 for success, absent name and validation failure alike; no leaf status
+record exists, the whole corpus is an observation — `--observe-arg` is the only value channel
+for a parameterised field, and an *optional* argument bound by the operator is *included*,
+since a schema whose arguments are all nullable may still require one — AniList's 400
+"requires at least 1 argument", inexpressible in the description), and **absence is a value**
+(`Just JNull` at an absent name where the server spells it so; AniList answers 404 instead, and
+the gate records what *this* server does). The gate learned one thing an emulator can never
+teach — a public service counts requests: 142 projections were 142 calls and AniList answered
+429 — so **one live call per distinct document serves every sibling projection by
+`eval --replay`** of its trace (same observation, same `trc_` address), failures shared, `--pace`
+between calls. Measured 2026-08-27 ([`evolution/graphql-poc`](../evolution/graphql-poc/)):
+Countries 6 root fields → 21 records from 6 calls, all certified + offline-replayed, the
+249-country list by address (338 KB); Rick & Morty 9 → 27 from 9 calls at depth 2 (depth 1
+refuses 3 — a paginated API's data sits one object down); AniList (POST-only) 27 query roots +
+29 mutations → 23 compiled, 142 licensed, 37 materialized from 20 paced calls, every remaining
+failure description-level. Unions refuse (inline fragments = the next rung); mutations refuse
+by rule (the world-state site for GraphQL, unmeasured). The doctrine transferred intact; the
+code did not — the unit of reuse is the doctrine and `ingest-common`, not the OpenAPI adapter.
+
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.
 - **Ingestion**: map source-language string/dict idioms onto the new builtins in

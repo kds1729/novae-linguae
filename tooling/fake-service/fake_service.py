@@ -64,13 +64,98 @@ The GW15 surface (pagination — a zero-pull: no new builtin, the Link header is
 
 A client that cannot read the Link header sees one page and no way to the rest.
 
+The GraphQL surface (tooling/nl-ingest-graphql — the second description-layer adapter) is ONE
+endpoint serving a fixed schema, on both transports GraphQL-over-HTTP allows:
+
+    GET  /graphql?query=…&variables=…   the document in the request target (percent-encoded)
+    POST /graphql                       {"query": …, "variables": …} as a JSON body
+
+    An introspection document (`__schema`) answers the fixed schema; anything else resolves
+    against fixed data: `health { status }`, `item(name: ID!)` (null when absent — GraphQL
+    spells absence as a value, the transport status stays 200), `items(limit: Int)` (a list),
+    `secret { value }` (401 unless `Authorization: Bearer <token>` — the ONE field that needs
+    the secret-placeholder path; introspection declares no auth), and a `Mutation` root
+    (`putItem`) an ingestion adapter must refuse. An unknown root field answers 200 with
+    `errors` and no `data` — the GraphQL validation-failure shape.
+
     python3 fake_service.py [--port 8878] [--token test-token] [--oauth-client id:secret]
 """
 
 import argparse
 import hashlib
+import json
+import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
+
+
+# ---- GraphQL: the fixed schema, as an introspection result, and its resolvers ----------------
+
+def _gt(kind, name=None, of=None):
+    return {"kind": kind, "name": name, "ofType": of}
+
+
+def _nn(t):
+    return _gt("NON_NULL", None, t)
+
+
+def _lst(t):
+    return _gt("LIST", None, t)
+
+
+def _gfield(name, typ, args=()):
+    return {"name": name, "description": None,
+            "args": [{"name": a, "description": None, "type": t, "defaultValue": None} for a, t in args],
+            "type": typ, "isDeprecated": False, "deprecationReason": None}
+
+
+def _gtype(kind, name, fields=None, enum_values=None):
+    return {"kind": kind, "name": name, "description": None, "fields": fields, "inputFields": None,
+            "interfaces": [] if kind == "OBJECT" else None,
+            "enumValues": ([{"name": v, "description": None, "isDeprecated": False, "deprecationReason": None}
+                            for v in enum_values] if enum_values is not None else None),
+            "possibleTypes": None}
+
+
+def gql_introspection():
+    """The fixed schema in the shape the standard introspection query returns (`__schema`)."""
+    S = lambda n: _gt("SCALAR", n)  # noqa: E731
+    O = lambda n: _gt("OBJECT", n)  # noqa: E731
+    return {
+        "queryType": {"name": "Query"}, "mutationType": {"name": "Mutation"}, "subscriptionType": None,
+        "types": [
+            _gtype("OBJECT", "Query", [
+                _gfield("health", _nn(O("Health"))),
+                _gfield("item", O("Item"), [("name", _nn(S("ID")))]),
+                _gfield("items", _nn(_lst(_nn(O("Item")))), [("limit", S("Int"))]),
+                _gfield("secret", O("Secret")),
+            ]),
+            _gtype("OBJECT", "Mutation", [
+                _gfield("putItem", _nn(O("Item")), [("name", _nn(S("ID"))), ("size", _nn(S("Int")))]),
+            ]),
+            _gtype("OBJECT", "Health", [_gfield("status", _nn(S("String")))]),
+            _gtype("OBJECT", "Item", [
+                _gfield("name", _nn(S("ID"))), _gfield("size", _nn(S("Int"))),
+                _gfield("tags", _nn(_lst(_nn(S("String"))))), _gfield("note", S("String")),
+                _gfield("kind", _nn(_gt("ENUM", "Kind"))), _gfield("fresh", _nn(S("Boolean"))),
+                _gfield("owner", O("Owner")),
+            ]),
+            _gtype("OBJECT", "Owner", [_gfield("id", _nn(S("ID")))]),
+            _gtype("OBJECT", "Secret", [_gfield("value", _nn(S("String")))]),
+            _gtype("ENUM", "Kind", enum_values=["WIDGET", "GADGET"]),
+            _gtype("SCALAR", "String"), _gtype("SCALAR", "ID"), _gtype("SCALAR", "Int"),
+            _gtype("SCALAR", "Boolean"), _gtype("SCALAR", "Float"),
+        ],
+        "directives": [],
+    }
+
+
+_GQL_ITEMS = {
+    "gw18-widget": {"name": "gw18-widget", "size": 3, "tags": ["blue", "small"], "note": None,
+                    "kind": "WIDGET", "fresh": True, "owner": {"id": "u1"}},
+    "gw18-gadget": {"name": "gw18-gadget", "size": 7, "tags": [], "note": "spare",
+                    "kind": "GADGET", "fresh": False, "owner": None},
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -107,6 +192,15 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def do_POST(self):
+        if self.path == "/graphql":
+            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                doc = json.loads(self.rfile.read(length) or b"{}")
+            except ValueError:
+                self._reply(400, b'{"errors":[{"message":"body is not JSON"}]}')
+                return
+            self._graphql(str(doc.get("query") or ""), doc.get("variables") or {})
+            return
         # GW14: server-assigned identity. The id is DERIVED from the body (sha256 prefix), so
         # it is genuinely server-chosen (the client cannot name it) yet deterministic — a rerun
         # replays byte-identically. Always 201 + Location (idempotent create-or-replace).
@@ -206,7 +300,42 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(401, b'{"error":"unauthorized"}')
         return False
 
+    def _graphql(self, query, variables):
+        """Resolve a document against the fixed schema. No parser: the root field is the first
+        name after the first `{` (the adapter's documents are `query Q(...) { field(...) {...} }`),
+        which is all the fixed resolvers need."""
+        if "__schema" in query:
+            self._reply(200, json.dumps({"data": {"__schema": gql_introspection()}}).encode())
+            return
+        m = re.search(r"\{\s*(\w+)", query)
+        root = m.group(1) if m else ""
+        if root == "health":
+            data = {"health": {"status": "ok"}}
+        elif root == "item":
+            data = {"item": _GQL_ITEMS.get(str((variables or {}).get("name")))}
+        elif root == "items":
+            data = {"items": [_GQL_ITEMS[k] for k in sorted(_GQL_ITEMS)]}
+        elif root == "secret":
+            if not self._authed():
+                return
+            data = {"secret": {"value": "gw18-secret-value"}}
+        else:
+            self._reply(200, json.dumps({"errors": [{"message": f"Cannot query field \"{root}\" on type "
+                                                                f"\"Query\"."}]}).encode())
+            return
+        self._reply(200, json.dumps({"data": data}).encode())
+
     def do_GET(self):
+        if self.path.startswith("/graphql"):
+            qs = parse_qs(urlparse(self.path).query)
+            variables = qs.get("variables", ["{}"])[0]
+            try:
+                variables = json.loads(variables)
+            except ValueError:
+                self._reply(400, b'{"errors":[{"message":"variables is not JSON"}]}')
+                return
+            self._graphql(qs.get("query", [""])[0], variables)
+            return
         # /health is an UNAUTHENTICATED liveness probe (no Bearer token, no params) — the
         # smallest operation, and the one an API-description generator emits with no auth header.
         if self.path == "/health":
