@@ -12,10 +12,10 @@ That script does four things, each printing what it did. Here is what you are lo
 
 ## 1. `nl-validator`
 
-The reference implementation is one static binary (Linux x86_64 from
-[Releases](https://github.com/kds1729/novae-linguae/releases), checksum-verified by the script; on
-macOS or anything else, `cd tooling/validator; cargo build --release` with stable Rust — the script
-finds that build). It canonicalizes, hashes, signs, type-checks, proves, certifies, runs,
+The reference implementation is one binary (Linux x86_64, fully static, and Apple-silicon macOS,
+from [Releases](https://github.com/kds1729/novae-linguae/releases) — CI-built, full test suite run
+against each, checksum-verified by the script; anything else: `cd tooling/validator; cargo build
+--release` with stable Rust — the script finds that build). It canonicalizes, hashes, signs, type-checks, proves, certifies, runs,
 and replays every artifact the project defines. Everything below is that one binary plus a
 stdlib-only Python script.
 
