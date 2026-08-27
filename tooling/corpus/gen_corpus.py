@@ -5315,6 +5315,125 @@ def combinatorial_specs(exclude_names=()):
                  "result": "http://h?query=%7B%20a%20%7D&operationName=Get%20Thing"},
                 {"args": ["http://h", "{ a }", ""], "result": "http://h?query=%7B%20a%20%7D&operationName="}],
                read_example=1, terminates="always"))
+    # 58b. PARAMETERIZED LEVELS — the round-28 diagnosis of the residue (2026-08-27, same day): every
+    # remaining GraphQL write miss (7B: leaf_string/leaf_bool; 14B: the same pair; 7B-s1 both) is the
+    # walk where the FIELD and the LEAF arrive as PARAMETERS — the model then collapses a level
+    # (drops `data`, or returns the object where the leaf narrowing was due). 58a-f taught literal
+    # fields only. So: walks with a parameterized field and a literal leaf, a literal field and a
+    # parameterized leaf, and a parameterized field at document grain with a literal envelope
+    # check — never the curated all-parameter bodies (which the holdout guard also drops) — plus
+    # two all-literal depth-3 chains so the third level exists in a write gold at all.
+    def _walk58(field_expr, prop_expr, ctor, bind):
+        return _env58(_case_of(
+            bapp("map_get", field_expr, var("d")),
+            (_vpat("Just", "v"), _case_of(
+                var("v"),
+                (_vpat("JObj", "o"), _case_of(
+                    bapp("map_get", prop_expr, var("o")),
+                    (_vpat("Just", "w"), _case_of(
+                        var("w"),
+                        (_vpat(ctor, bind), variant_expr("Just", var(bind))),
+                        (WILDCARD_PAT, variant_expr("None")))),
+                    (WILDCARD_PAT, variant_expr("None")))),
+                (WILDCARD_PAT, variant_expr("None")))),
+            (WILDCARD_PAT, variant_expr("None"))))
+
+    # (i) parameterized field, literal leaf.
+    for prop, ctor in (("id", "JStr"), ("title", "JStr"), ("slug", "JStr"), ("admin", "JBool"), ("draft", "JBool")):
+        bind = "s" if ctor == "JStr" else "b"
+        rty = maybe_t(STRING) if ctor == "JStr" else maybe_t(BOOL)
+        good, gv = ('"k7"', V("Just", "k7")) if ctor == "JStr" else ("true", V("Just", True))
+        wrong = "3" if ctor == "JStr" else '"true"'
+        add(_cspec(f"gql_field_{prop}",
+                   f"From a GraphQL response text, the {'string' if ctor == 'JStr' else 'boolean'}-valued "
+                   f"{prop} of the named data field's object, if present with that type.",
+                   f'the data walk, then map_get field d -> JObj(o) -> map_get "{prop}" o -> {ctor}({bind}) => '
+                   f"Just({bind}); the field is the caller's, the leaf name is literal; anything else None.",
+                   ["graphql", "parse", "query", "json", "map", "variant", "case"], fn([STRING, STRING], rty),
+                   lam(["field", "body"], _walk58(var("field"), str_lit(prop), ctor, bind)),
+                   [{"args": ["user", f'{{"data":{{"user":{{"{prop}":{good}}}}}}}'], "result": gv},
+                    {"args": ["node", f'{{"data":{{"node":{{"{prop}":{wrong}}}}}}}'], "result": V("None")},
+                    {"args": ["user", f'{{"data":{{"user":null}}}}'], "result": V("None")},
+                    {"args": ["post", f'{{"data":{{"user":{{"{prop}":{good}}}}}}}'], "result": V("None")}],
+                   read_example=3, terminates="always"))
+    # (ii) literal field, parameterized leaf.
+    for field, ctor in (("user", "JStr"), ("item", "JStr"), ("viewer", "JStr"), ("post", "JBool"), ("node", "JBool")):
+        bind = "s" if ctor == "JStr" else "b"
+        rty = maybe_t(STRING) if ctor == "JStr" else maybe_t(BOOL)
+        good, gv = ('"v9"', V("Just", "v9")) if ctor == "JStr" else ("false", V("Just", False))
+        wrong = "[]" if ctor == "JStr" else "0"
+        add(_cspec(f"gql_{field}_leaf",
+                   f"From a GraphQL response text, the {'string' if ctor == 'JStr' else 'boolean'}-valued "
+                   f"property named by the caller, of the {field} object in its data, if present with that type.",
+                   f'the data walk, then map_get "{field}" d -> JObj(o) -> map_get prop o -> {ctor}({bind}) => '
+                   f"Just({bind}); the field is literal, the leaf name is the caller's; anything else None.",
+                   ["graphql", "parse", "query", "json", "map", "variant", "case"], fn([STRING, STRING], rty),
+                   lam(["prop", "body"], _walk58(str_lit(field), var("prop"), ctor, bind)),
+                   [{"args": ["kind", f'{{"data":{{"{field}":{{"kind":{good}}}}}}}'], "result": gv},
+                    {"args": ["kind", f'{{"data":{{"{field}":{{"kind":{wrong}}}}}}}'], "result": V("None")},
+                    {"args": ["other", f'{{"data":{{"{field}":{{"kind":{good}}}}}}}'], "result": V("None")},
+                    {"args": ["kind", f'{{"data":{{"{field}":{{"kind":null}}}}}}'], "result": V("None")}],
+                   read_example=2, terminates="always"))
+    # (iii) parameterized field at document grain, with an errors gate: the envelope check is literal.
+    add(_cspec("gql_field_data",
+               "From a GraphQL response text, the named field of its data object as JSON — but None if "
+               "the response also reports errors.",
+               'parse_json -> JObj(m) -> case map_get "errors" m of Just(e) => None; None => map_get "data" m '
+               "-> JObj(d) -> map_get field d.",
+               ["graphql", "parse", "query", "json", "map", "variant", "case"], fn([STRING, STRING], maybe_t(J58)),
+               lam(["field", "body"], _case_of(
+                   bapp("parse_json", body58),
+                   (_vpat("Just", "j"), _case_of(
+                       var("j"),
+                       (_vpat("JObj", "m"), _case_of(
+                           bapp("map_get", str_lit("errors"), var("m")),
+                           (_vpat("Just", "e"), variant_expr("None")),
+                           (_vpat("None"), _case_of(
+                               bapp("map_get", str_lit("data"), var("m")),
+                               (_vpat("Just", "x"), _case_of(
+                                   var("x"),
+                                   (_vpat("JObj", "d"), bapp("map_get", var("field"), var("d"))),
+                                   (WILDCARD_PAT, variant_expr("None")))),
+                               (WILDCARD_PAT, variant_expr("None")))))),
+                       (WILDCARD_PAT, variant_expr("None")))),
+                   (WILDCARD_PAT, variant_expr("None")))),
+               [{"args": ["user", '{"data":{"user":{"id":"1"}}}'], "result": V("Just", V("JObj", {"id": V("JStr", "1")}))},
+                {"args": ["user", '{"errors":[{"message":"x"}],"data":{"user":null}}'], "result": V("None")},
+                {"args": ["user", '{"data":{"user":null}}'], "result": V("Just", V("JNull"))},
+                {"args": ["post", '{"data":{"user":{"id":"1"}}}'], "result": V("None")}],
+               read_example=1, terminates="always"))
+    # (iv) all-literal depth-3 chains: data.user.profile.name / data.post.author.handle.
+    for f1, f2, leaf in (("user", "profile", "name"), ("post", "author", "handle")):
+        add(_cspec(f"gql_{f1}_{f2}_{leaf}",
+                   f"From a GraphQL response text, the string {leaf} of the {f2} object inside the {f1} "
+                   "object in its data, if present with that type.",
+                   f'the data walk, then map_get "{f1}" d -> JObj(o) -> map_get "{f2}" o -> JObj(p) -> '
+                   f'map_get "{leaf}" p -> JStr(s) => Just(s); anything else None.',
+                   ["graphql", "parse", "query", "json", "map", "variant", "case"], fn([STRING], maybe_t(STRING)),
+                   lam(["body"], _env58(_case_of(
+                       bapp("map_get", str_lit(f1), var("d")),
+                       (_vpat("Just", "v"), _case_of(
+                           var("v"),
+                           (_vpat("JObj", "o"), _case_of(
+                               bapp("map_get", str_lit(f2), var("o")),
+                               (_vpat("Just", "u"), _case_of(
+                                   var("u"),
+                                   (_vpat("JObj", "p"), _case_of(
+                                       bapp("map_get", str_lit(leaf), var("p")),
+                                       (_vpat("Just", "w"), _case_of(
+                                           var("w"),
+                                           (_vpat("JStr", "s"), variant_expr("Just", var("s"))),
+                                           (WILDCARD_PAT, variant_expr("None")))),
+                                       (WILDCARD_PAT, variant_expr("None")))),
+                                   (WILDCARD_PAT, variant_expr("None")))),
+                               (WILDCARD_PAT, variant_expr("None")))),
+                           (WILDCARD_PAT, variant_expr("None")))),
+                       (WILDCARD_PAT, variant_expr("None"))))),
+                   [{"args": [f'{{"data":{{"{f1}":{{"{f2}":{{"{leaf}":"Ada"}}}}}}}}'], "result": V("Just", "Ada")},
+                    {"args": [f'{{"data":{{"{f1}":{{"{f2}":null}}}}}}'], "result": V("None")},
+                    {"args": [f'{{"data":{{"{f1}":{{"{f2}":{{"{leaf}":7}}}}}}}}'], "result": V("None")},
+                    {"args": [f'{{"data":{{"{f1}":{{"{leaf}":"Ada"}}}}}}'], "result": V("None")}],
+                   read_example=3, terminates="always"))
     return out
 
 
