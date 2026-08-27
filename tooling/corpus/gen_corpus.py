@@ -5059,6 +5059,233 @@ def combinatorial_specs(exclude_names=()):
     return out
 
 
+def graphql_funcs():
+    # GRAPHQL-IDIOM rows (the evolution/graphql-poc curated counterpart, 2026-08-27): the PURE
+    # consumption + encoding layer of the records tooling/nl-ingest-graphql generates — the #47 rule:
+    # the effectful `http` call stays in the validator/spec examples, the corpus teaches the halves
+    # around it. Two idioms the corpus never carried: (1) caller data as a Json VALUE serialized by
+    # render_json (the zero-pull variables encoder: JObj(map_put k JStr(v) map_empty)) riding through
+    # url_encode into a GET request target, and (2) the GraphQL envelope walk — parse_json, JObj,
+    # map_get "data", JObj, map_get <field>, then a typed leaf narrowed by constructor — where the
+    # transport status carries no verdict and ABSENCE IS A VALUE (data.field = null -> Just(JNull) at
+    # document grain, None at leaf grain; `errors` beside `data` is the failure signal). Golds use the
+    # SPLIT scrutinee form the adapter emits (case j of { JObj(m) => ... }) rather than json_port's
+    # nested Just(JObj(m)) pattern, so the eval measures the emitted idiom; the read examples pin the
+    # doctrine edges (escaping, absence-as-value, constructor mismatch, a skipped element). Sum types
+    # are opaque to the prover; verify by validate + typecheck + run. No combinatorial family teaches
+    # any of this yet — a first re-eval of the pins measures TRANSFER from json_port/url_funcs alone.
+    JSON_T = {"kind": "builtin", "name": "Json"}
+    body, name, field, prop, items = var("body"), var("name"), var("field"), var("prop"), var("items")
+
+    def jobj(entries):
+        return V("JObj", entries)
+
+    def jstr(s):
+        return V("JStr", s)
+
+    def envelope_walk(inner):
+        """parse_json body -> Just(j) -> case j of JObj(m) -> map_get "data" m -> Just(x) -> case x of
+        JObj(d) -> <inner over d>; every other arm None."""
+        return _case_of(
+            bapp("parse_json", body),
+            (_vpat("Just", "j"), _case_of(
+                var("j"),
+                (_vpat("JObj", "m"), _case_of(
+                    bapp("map_get", str_lit("data"), var("m")),
+                    (_vpat("Just", "x"), _case_of(
+                        var("x"),
+                        (_vpat("JObj", "d"), inner),
+                        (WILDCARD_PAT, variant_expr("None")))),
+                    (WILDCARD_PAT, variant_expr("None")))),
+                (WILDCARD_PAT, variant_expr("None")))),
+            (WILDCARD_PAT, variant_expr("None")))
+
+    def leaf_walk(ctor, bind):
+        """map_get field d -> Just(v) -> case v of JObj(o) -> map_get prop o -> Just(w) -> case w of
+        <ctor>(bind) => Just(bind); else None."""
+        return envelope_walk(_case_of(
+            bapp("map_get", field, var("d")),
+            (_vpat("Just", "v"), _case_of(
+                var("v"),
+                (_vpat("JObj", "o"), _case_of(
+                    bapp("map_get", prop, var("o")),
+                    (_vpat("Just", "w"), _case_of(
+                        var("w"),
+                        (_vpat(ctor, bind), variant_expr("Just", var(bind))),
+                        (WILDCARD_PAT, variant_expr("None")))),
+                    (WILDCARD_PAT, variant_expr("None")))),
+                (WILDCARD_PAT, variant_expr("None")))),
+            (WILDCARD_PAT, variant_expr("None"))))
+
+    de_doc = '{"data":{"country":{"code":"DE","capital":"Berlin","phone":"49"}}}'
+    absent_doc = '{"data":{"country":null}}'
+    errors_doc = '{"errors":[{"message":"Cannot query field \\"nope\\" on type \\"Query\\"."}]}'
+    partial_doc = '{"errors":[{"message":"boom"}],"data":{"country":null}}'
+    return [
+        # (1) the variables encoder: caller data as a Json VALUE, never spliced into a string.
+        {"name": "gql_variables",
+         "intent": "Encode one GraphQL variable named code, with the given string value, as the "
+                   "JSON variables object.",
+         "summary": "render_json of JObj(map_put \"code\" JStr(code) map_empty) — the value carries the "
+                    "quoting; the record never concatenates caller data into JSON.",
+         "tags": ["graphql", "serialize", "json", "map", "variant", "string"],
+         "type_ast": fn([STRING], STRING),
+         "body_ast": lam(["code"], bapp("render_json", variant_expr(
+             "JObj", bapp("map_put", str_lit("code"), variant_expr("JStr", var("code")), var("map_empty"))))),
+         "examples": [{"args": ["DE"], "result": '{"code":"DE"}'},
+                      {"args": ['a"b'], "result": '{"code":"a\\"b"}'},
+                      {"args": [""], "result": '{"code":""}'},
+                      {"args": ["x&y=z"], "result": '{"code":"x&y=z"}'}],
+         "read_example": 1,
+         "properties": [], "prove": False, "terminates": "always"},
+        # (2) two variables of different sorts; canonical rendering orders the keys.
+        {"name": "gql_variables_paged",
+         "intent": "Encode two GraphQL variables — a string code and an integer page — as the JSON "
+                   "variables object.",
+         "summary": "render_json of JObj over map_put \"code\" JStr(code) then map_put \"page\" JNum(page): "
+                    "keys come out sorted (canonical form), the int rides as JNum.",
+         "tags": ["graphql", "serialize", "json", "map", "variant", "string"],
+         "type_ast": fn([STRING, INT], STRING),
+         "body_ast": lam(["code", "page"], bapp("render_json", variant_expr(
+             "JObj", bapp("map_put", str_lit("code"), variant_expr("JStr", var("code")),
+                          bapp("map_put", str_lit("page"), variant_expr("JNum", var("page")),
+                               var("map_empty")))))),
+         "examples": [{"args": ["DE", 2], "result": '{"code":"DE","page":2}'},
+                      {"args": ["", 0], "result": '{"code":"","page":0}'},
+                      {"args": ["x", -1], "result": '{"code":"x","page":-1}'}],
+         "read_example": 2,
+         "properties": [], "prove": False, "terminates": "always"},
+        # (3) the GET request target: document and variables both percent-encoded, names literal.
+        {"name": "gql_get_url",
+         "intent": "Build a GraphQL GET request URL from an endpoint, a query document and a JSON "
+                   "variables text: ?query=<document>&variables=<variables>, both values "
+                   "percent-encoded.",
+         "summary": "str_concat base (\"?query=\" ++ url_encode doc ++ \"&variables=\" ++ url_encode vars) — "
+                    "parameter NAMES are literal text; both VALUES ride through url_encode.",
+         "tags": ["graphql", "url", "string", "http"],
+         "type_ast": fn([STRING, STRING, STRING], STRING),
+         "body_ast": lam(["base", "doc", "vars"], bapp(
+             "str_concat", var("base"),
+             bapp("str_concat", str_lit("?query="),
+                  bapp("str_concat", bapp("url_encode", var("doc")),
+                       bapp("str_concat", str_lit("&variables="), bapp("url_encode", var("vars"))))))),
+         "examples": [{"args": ["http://h/graphql", "{ a }", "{}"],
+                       "result": "http://h/graphql?query=%7B%20a%20%7D&variables=%7B%7D"},
+                      {"args": ["https://x.dev/g", "query Q { b }", '{"c":"d"}'],
+                       "result": "https://x.dev/g?query=query%20Q%20%7B%20b%20%7D&variables=%7B%22c%22%3A%22d%22%7D"},
+                      {"args": ["http://h", "{ a }", '{"q":"x&y=z"}'],
+                       "result": "http://h?query=%7B%20a%20%7D&variables=%7B%22q%22%3A%22x%26y%3Dz%22%7D"}],
+         "read_example": 2,
+         "properties": [], "prove": False, "terminates": "always"},
+        # (4) the envelope walk at document grain: data.<name> as data, absence as a VALUE.
+        {"name": "gql_data_field",
+         "intent": "From a GraphQL response text, the named field of its data object as JSON, if the "
+                   "response carries a data object holding it.",
+         "summary": "parse_json, then JObj(m), then map_get \"data\", then JObj(d), then map_get name d "
+                    "— a null field is Just(JNull) (absence is a value); no data object, or an "
+                    "unparseable text, is None.",
+         "tags": ["graphql", "parse", "query", "json", "map", "variant", "case"],
+         "type_ast": fn([STRING, STRING], maybe_t(JSON_T)),
+         "body_ast": lam(["name", "body"], envelope_walk(bapp("map_get", name, var("d")))),
+         "examples": [{"args": ["country", de_doc],
+                       "result": V("Just", jobj({"capital": jstr("Berlin"), "code": jstr("DE"),
+                                                 "phone": jstr("49")}))},
+                      {"args": ["country", absent_doc], "result": V("Just", V("JNull"))},
+                      {"args": ["country", errors_doc], "result": V("None")},
+                      {"args": ["country", "nope"], "result": V("None")},
+                      {"args": ["continents", '{"data":null}'], "result": V("None")}],
+         "read_example": 1,
+         "properties": [], "prove": False, "terminates": "always"},
+        # (5) a typed string leaf: one more object level, narrowed by constructor.
+        {"name": "gql_leaf_string",
+         "intent": "From a GraphQL response text, the string-valued property of the named data "
+                   "field's object, if present with that type.",
+         "summary": "the data walk, then map_get field d -> JObj(o) -> map_get prop o -> JStr(s) => "
+                    "Just(s); a null field, a null or missing leaf, or a non-string leaf is None.",
+         "tags": ["graphql", "parse", "query", "json", "map", "variant", "case"],
+         "type_ast": fn([STRING, STRING, STRING], maybe_t(STRING)),
+         "body_ast": lam(["field", "prop", "body"], leaf_walk("JStr", "s")),
+         "examples": [{"args": ["country", "capital", de_doc], "result": V("Just", "Berlin")},
+                      {"args": ["country", "capital", absent_doc], "result": V("None")},
+                      {"args": ["country", "native", de_doc], "result": V("None")},
+                      {"args": ["item", "size", '{"data":{"item":{"size":3}}}'], "result": V("None")},
+                      {"args": ["country", "capital", errors_doc], "result": V("None")}],
+         "read_example": 3,
+         "properties": [], "prove": False, "terminates": "always"},
+        # (6) a typed boolean leaf: the same walk, a different constructor.
+        {"name": "gql_leaf_bool",
+         "intent": "From a GraphQL response text, the boolean-valued property of the named data "
+                   "field's object, if present with that type.",
+         "summary": "the data walk, then map_get field d -> JObj(o) -> map_get prop o -> JBool(b) => "
+                    "Just(b); anything else None.",
+         "tags": ["graphql", "parse", "query", "json", "map", "variant", "case"],
+         "type_ast": fn([STRING, STRING, STRING], maybe_t(BOOL)),
+         "body_ast": lam(["field", "prop", "body"], leaf_walk("JBool", "b")),
+         "examples": [{"args": ["language", "rtl", '{"data":{"language":{"code":"ar","rtl":true}}}'],
+                       "result": V("Just", True)},
+                      {"args": ["language", "rtl", '{"data":{"language":{"code":"de","rtl":false}}}'],
+                       "result": V("Just", False)},
+                      {"args": ["language", "rtl", '{"data":{"language":{"rtl":"yes"}}}'],
+                       "result": V("None")},
+                      {"args": ["language", "rtl", '{"data":{"language":null}}'], "result": V("None")}],
+         "read_example": 2,
+         "properties": [], "prove": False, "terminates": "always"},
+        # (7) the failure signal lives in the body, not the status.
+        {"name": "gql_has_errors",
+         "intent": "Whether a GraphQL response text reports errors.",
+         "summary": "parse_json, JObj(m), then map_get \"errors\" m: Just(e) => true; every other path "
+                    "false — errors beside data still count.",
+         "tags": ["graphql", "parse", "predicate", "json", "map", "variant", "case"],
+         "type_ast": fn([STRING], BOOL),
+         "body_ast": lam(["body"], _case_of(
+             bapp("parse_json", body),
+             (_vpat("Just", "j"), _case_of(
+                 var("j"),
+                 (_vpat("JObj", "m"), _case_of(
+                     bapp("map_get", str_lit("errors"), var("m")),
+                     (_vpat("Just", "e"), bool_lit(True)),
+                     (_vpat("None"), bool_lit(False)))),
+                 (WILDCARD_PAT, bool_lit(False)))),
+             (_vpat("None"), bool_lit(False)))),
+         "examples": [{"args": [errors_doc], "result": True},
+                      {"args": [partial_doc], "result": True},
+                      {"args": [de_doc], "result": False},
+                      {"args": ["[1, 2]"], "result": False},
+                      {"args": ["{nope"], "result": False}],
+         "read_example": 1,
+         "properties": [], "prove": False, "terminates": "always"},
+        # (8) a walk over a JSON list of objects, collecting one string leaf — skip what doesn't fit.
+        {"name": "gql_names_of",
+         "intent": "The name strings of the objects in a JSON list, in order, skipping elements that "
+                   "are not objects or whose name is missing or not a string.",
+         "summary": "nil on nil; JObj(o) with map_get \"name\" o = Just(JStr(s)) conses s onto self (tail); "
+                    "every other head is skipped via self (tail).",
+         "tags": ["graphql", "json", "list", "recursion", "variant", "case"],
+         "type_ast": fn([list_of(JSON_T)], list_of(STRING)),
+         "body_ast": lam(["items"], case_null(
+             "items", var("nil"),
+             _case_of(bapp("head", items),
+                      (_vpat("JObj", "o"), _case_of(
+                          bapp("map_get", str_lit("name"), var("o")),
+                          (_vpat("Just", "w"), _case_of(
+                              var("w"),
+                              (_vpat("JStr", "s"), bapp("cons", var("s"), bself(bapp("tail", items)))),
+                              (WILDCARD_PAT, bself(bapp("tail", items))))),
+                          (WILDCARD_PAT, bself(bapp("tail", items))))),
+                      (WILDCARD_PAT, bself(bapp("tail", items)))))),
+         "examples": [{"args": [[jobj({"code": jstr("AF"), "name": jstr("Africa")}),
+                                 jobj({"code": jstr("AS"), "name": jstr("Asia")})]],
+                       "result": ["Africa", "Asia"]},
+                      {"args": [[]], "result": []},
+                      {"args": [[jobj({"code": jstr("x")}), jstr("y"), jobj({"name": V("JNum", 1)}),
+                                 jobj({"name": jstr("z")})]],
+                       "result": ["z"]},
+                      {"args": [[jobj({"name": jstr("Europe")}), V("JNull")]], "result": ["Europe"]}],
+         "read_example": 2,
+         "properties": [], "prove": False, "terminates": "always"},
+    ]
+
+
 def all_specs():
     return (unary_arith() + binary_arith() + boolean_funcs() + list_funcs()
             + list_transform_funcs() + composition_funcs() + list_fold_funcs() + refined_funcs() + costed_funcs() + float_funcs()
@@ -5068,7 +5295,7 @@ def all_specs():
             + recursive_shapes() + compositional_bodies() + more_compositional() + more_recursion()
             + variant_consuming_funcs() + nested_hof_funcs() + string_funcs() + url_funcs()
             + header_funcs() + link_funcs() + dispatch_funcs() + world_state_funcs()
-            + map_json_funcs())
+            + map_json_funcs() + graphql_funcs())
 
 
 # --- verification + emission ---------------------------------------------------------------------
@@ -5973,6 +6200,7 @@ def main():
                 "dispatch_funcs": len(dispatch_funcs()),
                 "world_state_funcs": len(world_state_funcs()),
                 "map_json_funcs": len(map_json_funcs()),
+                "graphql_funcs": len(graphql_funcs()),
                 "higher_order_funcs": len(higher_order_funcs()),
                 "higher_order_more": len(higher_order_more()),
                 "provenance_funcs": len(provenance_funcs())}

@@ -1,16 +1,16 @@
 {
   "corpus": "corpus.jsonl",
-  "examples": 262,
+  "examples": 270,
   "by_modality": {
-    "nova_lingua": 240,
+    "nova_lingua": 248,
     "nova_locutio": 22
   },
   "by_polarity": {
-    "positive": 248,
+    "positive": 256,
     "negative": 14
   },
   "by_category": {
-    "function": 225,
+    "function": 233,
     "exchange": 20,
     "transcript": 2,
     "composition": 15
@@ -50,6 +50,7 @@
     "dispatch_funcs": 5,
     "world_state_funcs": 8,
     "map_json_funcs": 9,
+    "graphql_funcs": 8,
     "higher_order_funcs": 4,
     "higher_order_more": 6,
     "provenance_funcs": 2
