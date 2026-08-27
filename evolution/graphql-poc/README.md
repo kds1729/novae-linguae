@@ -20,9 +20,15 @@
   `/home/claude/sandbox/graphql-poc/` (not committed — regenerate with the query; a live schema
   drifts, so a re-run may differ in counts).
 - **Resolution:** the adapter, its tests (25), the fake-service surface and this module landed
-  together on `main`; the Countries production close (21 records + 6 traces + 21 signed
-  certifications to Arca) is the named next step below — its artifacts are generated and
-  gate-verified locally, publication awaits the operator.
+  together on `main` (`fe3c2ff`). **Production close on Arca, 2026-08-27:** the 21 Countries
+  records + their 21 signed certifications + 6 traces published (`countries` by address, blob
+  `20aa71e6…` in the node's store) — e.g. `countryCapital` = `fn_b4ce9f7133e465d6…`, cert
+  `cert_7461b34dce5e7b1…`; then the **verified loop from the live node**: `orchestrate --node
+  --verify --require-certified --intent parse/country-capital` (args base + `"DE"`, `--expect
+  Just "Berlin"`, `--grant net.read@countries.trevorblades.com`) → 1 match, certified, applied,
+  `Just "Berlin"`, CONFIRMED; the live apply's trace hashed to the SAME address as the ingestion
+  observation (`trc_ed6e87c8f80d48b8…`); observed assert `msg_389bcc1aadf693de…` published; a
+  third-party `verify-claim --node` by address, no grants, no secrets → **CONFIRMED**.
 
 ## Summary
 
