@@ -711,7 +711,13 @@ def parse_observe_args(items):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(
+        description=__doc__.split("\n\n")[0],
+        epilog="Needs the nl-validator binary: set NL_VALIDATOR=/path/to/nl-validator (a release build) or build "
+               "the sibling tooling/validator (cargo build --release). Output: <name>.v0.2.json records, "
+               "body-<name>.json bodies, trace-<name>-<i>.json traces; certify one by hand with "
+               "`nl-validator certify <record> --body <body> --records <out>`; publish with "
+               "tooling/commons-node/publish_records.py <out>.")
     ap.add_argument("schema", help="a saved introspection result (JSON)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--transport", choices=("get", "post"), default="get",

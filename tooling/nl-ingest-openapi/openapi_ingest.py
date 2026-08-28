@@ -1558,7 +1558,14 @@ def verify_examples(record_path, out_dir, base_url, secret_names, token):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Generate verified Nova Lingua records from OpenAPI 3.")
+    ap = argparse.ArgumentParser(
+        description="Generate verified Nova Lingua records from OpenAPI 3.",
+        epilog="Needs the nl-validator binary: set NL_VALIDATOR=/path/to/nl-validator (a release build) or build "
+               "the sibling tooling/validator (cargo build --release). Output: <name>.v0.2.json records, "
+               "body-<name>.json bodies, trace-<name>-<i>.json traces (an operation without an operationId is "
+               "named <verb>_<path>, sanitized); certify one by hand with "
+               "`nl-validator certify <record> --body <body> --records <out>`; publish with "
+               "tooling/commons-node/publish_records.py <out>.")
     ap.add_argument("spec", help="path to an OpenAPI 3 JSON description")
     ap.add_argument("--out", required=True, help="output directory for records + bodies")
     ap.add_argument("--secret-name", default=None,

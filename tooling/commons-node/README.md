@@ -14,7 +14,7 @@ and can run their own node and mirror. The storage engine here (SQLite) is a pri
 
 | Endpoint | Status |
 |----------|--------|
-| `POST /v0/records` — publish (verify-then-store, idempotent) — all nine artifact kinds: function records, messages, bare bodies (self-addressing), types, signed certifications, **weights pointers + eval attestations**, traces, and **plans** | ✅ |
+| `POST /v0/records` — publish (verify-then-store, idempotent: `201 {hash, stored:true}` for a new artifact, `200 {hash, stored:false}` for one already held, `4xx {error}` for a rejection; `publish_records.py <dir>` posts an adapter's output directory in dependency order) — all nine artifact kinds: function records, messages, bare bodies (self-addressing), types, signed certifications, **weights pointers + eval attestations**, traces, and **plans** | ✅ |
 | `GET /v0/records/{hash}` — resolve · `HEAD` — exists | ✅ |
 | `GET /v0/records/{hash}/derivations` — the records whose `derived_from` names this address (provenance walked forward — how a composite is found by its parts) | ✅ |
 | `GET /v0/records/{hash}/certifications` — the signed certifications about a function | ✅ |

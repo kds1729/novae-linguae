@@ -16,7 +16,7 @@ description, not the generated client plumbing.
 
 | OpenAPI | Nova Lingua |
 |---|---|
-| `operationId` | record `name_hints` |
+| `operationId` | record `name_hints` (absent — common in generated specs, e.g. Frankfurter's — the operation is named `<verb>_<path>`, sanitized: `get_latest`, `get_start_date_end_date`) |
 | HTTP verb | the `http` method literal, and the effect (`net.read` for GET/HEAD, `net.write` otherwise) |
 | `servers[0].url` | the `base` parameter (records stay host-portable; the server url is the example base) |
 | path template `/items/{name}` | a `str_concat` URL builder over `base` and the path-parameter variables |
