@@ -40,6 +40,7 @@ does and does not say — three things that change the mapping's shape:
 | its object-valued result's scalar leaves | one **typed projection** per leaf, `f<Leaf> : … → Maybe string` (`String`, `ID`, any enum) / `Maybe bool` (`Boolean`) / `Maybe Json` (custom scalar); `Int`/`Float` leaves are **noted, never projected** (`JNum` carries an int *or* a float — a typed numeric promise cannot be narrowed soundly by pattern; the OpenAPI adapter's rule) |
 | the field's return type | the **selection set**: every argument-free `SCALAR`/`ENUM` field of the result type; object-valued fields recurse to `--select-depth` (default 1 — scalars of the result only); a field with a required argument is never selected; a list result selects its element type's leaves (and mints no typed projections — the value is the list) |
 | required argument (`NON_NULL`, no default) | a record parameter, in declared order after `base`: `String`/`ID` → `string`, `Int` → `int`, `Float` → `float`, `Boolean` → `bool`, an enum → `string` (a value outside the set is the service's to refuse), anything else (input object, list, custom scalar) → `Json` — placed in the variables as-is |
+| a list / input-object / custom-scalar argument at observation time | bound as JSON text: `--observe-arg 'charactersByIds.ids=["1","2"]'` — parsed into the `Json` value the record's variables carry |
 | optional argument | **omitted with a note** (the record is the minimal documented call) — unless the operator binds it with `--observe-arg`, in which case it is *included* as a parameter: the minimal call widened by exactly what the operator named |
 | the endpoint URL | the `base` parameter (records stay host-portable; the introspection result carries no URL) |
 | `--transport get` (default) | `http "GET" (str_concat base "?query=<pct(document)>&variables=" ++ url_encode (render_json <variables>)) headers ""` — the document percent-encoded at generation time (spec-time literal), the variables through `url_encode` at run time; effect `net.read` |
@@ -47,7 +48,9 @@ does and does not say — three things that change the mapping's shape:
 | auth | introspection declares none. `--auth-bearer NAME` adds `Authorization: Bearer {{secret:NAME}}` — the operator's fact, substituted only at the effect boundary |
 | `Mutation` / `Subscription` root fields | **refused** — read-only by rule |
 
-Each record's `intent_tags` are `io`, `io/network/http`, `query/lookup`, `parse`, plus one
+Files are named by the record's first name hint — the field name lowercased (`countryCapital` →
+`countrycapital.v0.2.json`, `body-countrycapital.json`); the run report prints the file next to
+each materialized record. Each record's `intent_tags` are `io`, `io/network/http`, `query/lookup`, `parse`, plus one
 extending tag (`query/lookup/<field>` for a whole-value projection, `parse/<field-leaf>` for a
 typed one; omitted, never truncated, past 64 characters).
 

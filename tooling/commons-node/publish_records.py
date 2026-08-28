@@ -26,8 +26,17 @@ import urllib.error
 import urllib.request
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_VALIDATOR = os.environ.get("NL_VALIDATOR") or os.path.normpath(
-    os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator"))
+def _find_validator():
+    """`NL_VALIDATOR` if set; else the sibling cargo build; else the binary quickstart.sh fetched
+    into the repo's `.quickstart/` — so a stranger who ran the quickstart needs no env var."""
+    if os.environ.get("NL_VALIDATOR"):
+        return os.environ["NL_VALIDATOR"]
+    build = os.path.normpath(os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator"))
+    fetched = os.path.normpath(os.path.join(_HERE, "..", "..", ".quickstart", "nl-validator"))
+    return build if os.path.exists(build) or not os.path.exists(fetched) else fetched
+
+
+_VALIDATOR = _find_validator()
 
 
 def post(node, obj):

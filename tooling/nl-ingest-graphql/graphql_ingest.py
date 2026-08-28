@@ -73,8 +73,17 @@ MAYBE_STRING = {"kind": "sum", "variants": [{"tag": "Just", "type": STRING}, {"t
 MAYBE_BOOL = {"kind": "sum", "variants": [{"tag": "Just", "type": BOOL}, {"tag": "None"}]}
 NONE_V = {"kind": "variant", "tag": "None"}
 # The validator binary: `NL_VALIDATOR` if set (a prebuilt release, quickstart.sh), else the sibling build.
-_VALIDATOR = os.environ.get("NL_VALIDATOR") or os.path.normpath(
-    os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator"))
+def _find_validator():
+    """`NL_VALIDATOR` if set; else the sibling cargo build; else the binary quickstart.sh fetched
+    into the repo's `.quickstart/` — so a stranger who ran the quickstart needs no env var."""
+    if os.environ.get("NL_VALIDATOR"):
+        return os.environ["NL_VALIDATOR"]
+    build = os.path.normpath(os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator"))
+    fetched = os.path.normpath(os.path.join(_HERE, "..", "..", ".quickstart", "nl-validator"))
+    return build if os.path.exists(build) or not os.path.exists(fetched) else fetched
+
+
+_VALIDATOR = _find_validator()
 _UNRESERVED = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 BLOB_THRESHOLD_DEFAULT = 65536
 SELECT_DEPTH_DEFAULT = 1
@@ -713,9 +722,11 @@ def parse_observe_args(items):
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0],
-        epilog="Needs the nl-validator binary: set NL_VALIDATOR=/path/to/nl-validator (a release build) or build "
-               "the sibling tooling/validator (cargo build --release). Output: <name>.v0.2.json records, "
-               "body-<name>.json bodies, trace-<name>-<i>.json traces; certify one by hand with "
+        epilog="Needs the nl-validator binary: the sibling tooling/validator build, else the one quickstart.sh "
+               "fetched into .quickstart/, else set NL_VALIDATOR=/path/to/nl-validator. Output: <name>.v0.2.json records, "
+               "body-<name>.json bodies, trace-<name>-<i>.json traces, where <name> is the field name LOWERCASED "
+               "(countryCapital -> countrycapital.v0.2.json); a list-valued argument binds as JSON text: "
+               "--observe-arg 'charactersByIds.ids=[\"1\",\"2\"]'; certify one by hand with "
                "`nl-validator certify <record> --body <body> --records <out>`; publish with "
                "tooling/commons-node/publish_records.py <out>.")
     ap.add_argument("schema", help="a saved introspection result (JSON)")
@@ -796,7 +807,7 @@ def main(argv=None):
         by_addr = f"BY-ADDRESS({ex['result_blob']['bytes']} bytes)" if "result_blob" in ex else "inline"
         print(f"{p['name']}: observation-gate=OK({'replayed' if replay_from else 'live'}) "
               f"certify={'OK' if c_ok else 'FAIL'} replay={'OK' if v_ok else 'FAIL'} example={by_addr} "
-              f"trace={ex['trace'][:16]}… {res['hash'][:16]}…")
+              f"trace={ex['trace'][:16]}… {res['hash'][:16]}… -> {sanitize_hint(p['name'])}.v0.2.json")
         if not (c_ok and v_ok):
             print(f"  {c_msg if not c_ok else v_msg}")
             ok_all = False
