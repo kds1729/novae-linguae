@@ -144,8 +144,17 @@ MAYBE_STRING = {"kind": "sum", "variants": [{"tag": "Just", "type": STRING}, {"t
 MAYBE_BOOL = {"kind": "sum", "variants": [{"tag": "Just", "type": BOOL}, {"tag": "None"}]}
 NONE_V = {"kind": "variant", "tag": "None"}
 # The validator binary: `NL_VALIDATOR` if set (a prebuilt release, quickstart.sh), else the sibling build.
-_VALIDATOR = os.environ.get("NL_VALIDATOR") or os.path.normpath(
-    os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator"))
+def _find_validator():
+    """`NL_VALIDATOR` if set; else the sibling cargo build; else the binary quickstart.sh fetched
+    into the repo's `.quickstart/` — so a stranger who ran the quickstart needs no env var."""
+    if os.environ.get("NL_VALIDATOR"):
+        return os.environ["NL_VALIDATOR"]
+    build = os.path.normpath(os.path.join(_HERE, "..", "validator", "target", "release", "nl-validator"))
+    fetched = os.path.normpath(os.path.join(_HERE, "..", "..", ".quickstart", "nl-validator"))
+    return build if os.path.exists(build) or not os.path.exists(fetched) else fetched
+
+
+_VALIDATOR = _find_validator()
 _READ_VERBS = {"GET", "HEAD"}
 
 
@@ -1560,10 +1569,11 @@ def verify_examples(record_path, out_dir, base_url, secret_names, token):
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Generate verified Nova Lingua records from OpenAPI 3.",
-        epilog="Needs the nl-validator binary: set NL_VALIDATOR=/path/to/nl-validator (a release build) or build "
-               "the sibling tooling/validator (cargo build --release). Output: <name>.v0.2.json records, "
-               "body-<name>.json bodies, trace-<name>-<i>.json traces (an operation without an operationId is "
-               "named <verb>_<path>, sanitized); certify one by hand with "
+        epilog="Needs the nl-validator binary: the sibling tooling/validator build, else the one quickstart.sh "
+               "fetched into .quickstart/, else set NL_VALIDATOR=/path/to/nl-validator. Output: <name>.v0.2.json records, "
+               "body-<name>.json bodies, trace-<name>-<i>.json traces, <name> being the operationId LOWERCASED (getItemStatus -> "
+               "getitemstatus.v0.2.json; an operation without an operationId is named <verb>_<path>, sanitized); "
+               "certify one by hand with "
                "`nl-validator certify <record> --body <body> --records <out>`; publish with "
                "tooling/commons-node/publish_records.py <out>.")
     ap.add_argument("spec", help="path to an OpenAPI 3 JSON description")
