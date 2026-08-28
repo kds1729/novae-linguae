@@ -12,6 +12,7 @@ The two languages share a single substrate — a content-addressed commons of se
 > **Ten minutes, no toolchain:** [`QUICKSTART.md`](QUICKSTART.md) — `bash quickstart.sh` compiles a real
 > public GraphQL API into certified, offline-replayable function records, runs the verified agent loop
 > against the live commons, and re-verifies the resulting claim as a third party. Needs `python3` and `curl`.
+> **If you are an agent:** start at [`AGENTS.md`](AGENTS.md) — what to do, in what order, and what not to; this README is long and comes last.
 
 ---
 

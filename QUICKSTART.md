@@ -34,7 +34,8 @@ serialized by `render_json`, never spliced into a string — and narrows the res
 
 Then the gate ran: each record was **certified** (`nl-validator certify` — schema, types, effects,
 termination, complexity) and its worked example was **observed** once against the live API. The
-observation is a content-addressed trace (`trc_…`), attached to the example. Which is why the last
+observation is a content-addressed trace (`trc_…`), attached to the example. To do that by hand on any record: `nl-validator certify records/<name>.v0.2.json
+--body records/body-<name>.json --records records`. Which is why the last
 line of step 2 works: `nl-validator run` re-checks the example **offline** — no network, no
 credentials — by replaying the trace. A record's evidence travels with it.
 
@@ -75,9 +76,12 @@ testimony; the trace is theirs — that is the honest scope, and it is stated).
   is the query) and run the adapter against it; or an OpenAPI 3 description through
   `tooling/nl-ingest-openapi/openapi_ingest.py`. The adapter tells you, loudly, what it refuses
   and why — that list is the interesting part.
-- **Publish and be verified.** `POST` your records, bodies and traces to a node's `/v0/records`
-  (Arca's gate accepts any well-formed artifact; `evolution/graphql-poc` shows a publish script),
-  then `verify-claim` your own assert from another machine. Or run your own node:
+- **Publish and be verified.** `python3 tooling/commons-node/publish_records.py records/` posts
+  your bodies, traces and records to a node's `/v0/records` in the right order (Arca's gate
+  accepts any well-formed artifact; `201 stored` is new, `200 stored:false` means it already had
+  it — publishing is idempotent). Add `--sign <seed>` to certify and publish certifications too.
+  Then `orchestrate --node … --intent <your record's tag>` and `verify-claim` the resulting
+  assert from another machine — the stranger's check. Or run your own node:
   `tooling/commons-node/` is a `docker compose up`.
 - **Read the design.** [README.md](README.md) is the manifesto and status; `spec/` is normative;
   `evolution/` is evidence — three real APIs, with the numbers and the parts that did not work.
