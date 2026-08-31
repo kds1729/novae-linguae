@@ -110,7 +110,7 @@ python3 graphql_ingest.py examples/item-store.graphql.json --out /tmp/recs \
 result of the in-repo [fake service](../fake-service/)'s `/graphql` (a nullable `item(name:
 ID!)` with an enum, a boolean, a nullable leaf and a nested object; a non-null list `items`; an
 auth-only `secret`; a `Mutation` to refuse), served on both transports. `tests/` gates against
-it: 25 tests, `/home/claude/sandbox/ft-venv/bin/python -m unittest discover -s tests` (any
+it: 25 tests, `python3 -m unittest discover -s tests` (any
 python3 ≥ 3.10 works for this adapter).
 
 ## At production scale
