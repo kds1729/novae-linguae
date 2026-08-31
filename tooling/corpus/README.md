@@ -175,7 +175,19 @@ read anchors — `"007"`/`" 7"` are `None`, held out in read position via `read_
 three-way probe decision as a 3-nullary-tag sum `[Exists Absent Unknown]` — a sum shape no other
 family emits — with string-label twins, and short-circuit tail-descent walks over status runs:
 all-clean conjunction, first failure as Maybe, leading-success count; parameterized over the
-success band and absent code, tail-only descent honestly declaring `terminates: always`), every
+success band and absent code, tail-only descent honestly declaring `terminates: always`;
+**#55c** later added the absent-first / or-guard / literal-dispatch branch orders the round-25
+diagnosis named) — and #56, **command interpreters** (the `run_command` composition: arity guard →
+`parse_int` case → literal dispatch, taught parse-outer and dispatch-outer, plus separator
+variants) — and #57, **code-point order in read position** (two-argument `str_lt`
+selections/predicates and list walks whose read examples are distinct uppercase-vs-lowercase
+traps, with case-insensitive contrast twins) — and #58, **the GraphQL idiom**
+(evolution/graphql-poc: variables encoders that build a `Json` value and `render_json` it — never
+`str_concat` into JSON — envelope walks where absence is `Just(JNull)`, typed leaves through
+`JStr`/`JBool`/`JList`, the `errors` signal, skip/keep walks over `List Json`, request-target
+builders; **#58b** adds the parameterized-level walks the round-28 residue named — parameterized
+field with literal leaf and the converse, an errors-gated document walk, all-literal depth-3
+chains), every
 one through the same validate → typecheck → run gate, and is byte-reproducible. The gate is run on a thread pool (it is subprocess-bound), so a full scaled run takes
 ~1 minute; output order is preserved, so it stays reproducible and the default curated run is byte-identical
 to the serial one. The large combinatorial file is regenerable from the generator, so it is **gitignored,
