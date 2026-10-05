@@ -223,7 +223,7 @@ And an assertion carrying proof:
   "body": {
     "subject":  "fn_3a9b…",
     "claim":    "satisfies: property('identity')",
-    "evidence": "proof_7d4f…"
+    "evidence": "cert_7d4f…"
   },
   "signature": "ed25519:…"
 }

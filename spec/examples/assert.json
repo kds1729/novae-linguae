@@ -1,16 +1,16 @@
 {
   "body": {
     "claim": "satisfies: property('identity')",
-    "evidence": "proof_4d8e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9012345",
+    "evidence": "cert_4d8e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9012345",
     "subject": "fn_fd20f137d331c42953ad164bd22cd1e6141cf310999818682832da4eb5fa8b66"
   },
   "constraints": null,
   "from": "did:nova:896a2e2c0578ec83132584d629abaef1a6eefdbec326c803a9a62c1f1fc1e054",
-  "hash": "msg_9293dcd42306e2f176d39346385035a85c9530d8217888ea41973852c84a53ca",
+  "hash": "msg_316eb6d91462a1334eb5fcb8a0a5a99b12b112271951118f9762d38cbd97230a",
   "in_reply_to": null,
   "kind": "assert",
   "schema_version": "0.1.0",
-  "signature": "ed25519:rlOqe5ADH/8twB3CEdlve3k39XBqDB+MXyKw8a7+F3Puvdv1SbBTm+IQNG7g+KaDa/76A9pvh/R6bIwI5iHUBQ==",
+  "signature": "ed25519:g7EyzOu9VsEd+jBNJeFiVFpa11TXS1vLxkJdSPaV5jcH8xea1+7bq0+9i+ZfFxGaV2QBGeB92wKxMsEnq/6BAw==",
   "timestamp": "2026-06-04T18:05:12Z",
   "to": null
 }
