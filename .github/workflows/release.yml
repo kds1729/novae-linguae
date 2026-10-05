@@ -43,7 +43,7 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }} --bin nl-validator
       - name: test
         working-directory: tooling/validator
-        run: cargo test --release --locked --target ${{ matrix.target }} --lib
+        run: cargo test --release --locked --target ${{ matrix.target }}
       - name: package
         run: |
           cp tooling/validator/target/${{ matrix.target }}/release/nl-validator ${{ matrix.asset }}

@@ -66,8 +66,8 @@
         },
         "evidence": {
           "type": "string",
-          "pattern": "^proof_[0-9a-f]{64}$",
-          "description": "Optional content-address of a proof certificate."
+          "pattern": "^(fn|expr|type|cert|wgt|evl|trc|plan|msg)_[0-9a-f]{64}$",
+          "description": "Optional content-address of the supporting artifact — typically a certification record (`cert_…`), or a trace or other artifact the claim rests on."
         }
       },
       "description": "Most common assert shape: 'subject satisfies its declared property `name`.' Sugar over a `predicate` claim of `app('satisfies', subject, property)`."
@@ -90,8 +90,8 @@
         },
         "proof": {
           "type": "string",
-          "pattern": "^proof_[0-9a-f]{64}$",
-          "description": "Optional content-address of the proof certificate produced."
+          "pattern": "^(fn|expr|type|cert|wgt|evl|trc|plan|msg)_[0-9a-f]{64}$",
+          "description": "Optional content-address of the artifact the verification produced — typically a certification record (`cert_…`)."
         }
       },
       "description": "A meta-claim: 'this artifact has been verified by this agent (optionally with proof X).' Lets agents build attestation chains where one verifier vouches for the work of another."

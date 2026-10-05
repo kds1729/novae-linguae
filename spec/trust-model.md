@@ -89,7 +89,7 @@ An attestation is a signed *assertion* (in the *Nova Locutio* speech-act sense) 
 
 Examples:
 
-- `did:nova:verifier` asserts that function record `fn_3a9b...` satisfies its declared `identity` property, with proof certificate `proof_4d8e...`.
+- `did:nova:verifier` asserts that function record `fn_3a9b...` satisfies its declared `identity` property, with certification record `cert_4d8e...` as evidence.
 - `did:nova:alice` asserts that `did:nova:bob` produces reliable Rust-ingestion contributions.
 - `did:nova:carol` retracts a prior assertion she made about `did:nova:dave` (sent as a `retract` speech act referring to the original attestation's hash).
 
