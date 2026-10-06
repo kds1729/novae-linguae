@@ -671,8 +671,10 @@ pub(crate) fn http_roundtrip_full(
     };
 
     let tcp = TcpStream::connect((host, port)).map_err(|e| anyhow!("connect {host}:{port}: {e}"))?;
-    let _ = tcp.set_read_timeout(Some(Duration::from_secs(15)));
-    let _ = tcp.set_write_timeout(Some(Duration::from_secs(15)));
+    // 60 s: a control-plane call (Cloud Control listing a resource type) can legitimately take
+    // longer than a data-plane one — measured: 15 s cut a live provisioning step short.
+    let _ = tcp.set_read_timeout(Some(Duration::from_secs(60)));
+    let _ = tcp.set_write_timeout(Some(Duration::from_secs(60)));
     let payload = body.unwrap_or("");
     let mut extras = String::new();
     for (name, value) in extra_headers {
