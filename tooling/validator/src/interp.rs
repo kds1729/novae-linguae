@@ -1541,7 +1541,12 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
                     // the live effect — the trace keeps the symbolic form for both.
                     real.push((k.clone(), substitute_oauth(&substitute_secrets(v)?)?));
                 }
-                let (status, resp_headers, resp_body) = http_roundtrip_full(&method, &url, &real, Some(&body))?;
+                // The BODY too (2026-10-06): an API that takes a credential in its payload (RDS's
+                // MasterUserPassword, any "set password" call) is otherwise inexpressible without
+                // the secret entering the record. Same discipline — the detail above recorded
+                // the symbolic body; only the wire sees the value.
+                let real_body = substitute_secrets(&body)?;
+                let (status, resp_headers, resp_body) = http_roundtrip_full(&method, &url, &real, Some(&real_body))?;
                 let mut rec = BTreeMap::new();
                 rec.insert("status".to_string(), Val::Int(status));
                 if want_headers {
@@ -2822,18 +2827,21 @@ mod tests {
         set_effect_grants(vec!["net.write".to_string()]);
         super::set_effect_secrets(vec![("tok".to_string(), "s3cr3t".to_string())]);
         let url = format!("http://127.0.0.1:{}/x", addr.port());
-        let out = eval_body(&http_body, &[s("POST"), s(&url), headers, s("payload")]).unwrap();
+        // The BODY carries a placeholder too (a "set password" payload): same discipline.
+        let out = eval_body(&http_body, &[s("POST"), s(&url), headers, s("{\"password\":\"{{secret:tok}}\"}")]).unwrap();
         assert_eq!(out.pointer("/fields/1/value/value").and_then(|v| v.as_i64()), Some(204));
 
         let trace = take_effect_trace();
         clear_effects();
         let trace_text = trace[0].to_string();
         assert!(trace_text.contains("{{secret:tok}}"), "trace keeps the placeholder: {trace_text}");
+        assert!(trace_text.contains("\\\"password\\\":\\\"{{secret:tok}}"), "trace keeps the SYMBOLIC body: {trace_text}");
         assert!(!trace_text.contains("s3cr3t"), "the secret value must NOT enter the trace");
 
-        // The wire saw the real value (the substitution happened inside the live effect).
+        // The wire saw the real value in the header AND the body (substituted inside the live effect).
         let wire = server.join().unwrap();
         assert!(wire.contains("Authorization: Bearer s3cr3t"), "wire request: {wire}");
+        assert!(wire.contains("{\"password\":\"s3cr3t\"}"), "wire body: {wire}");
         assert!(wire.contains("POST /x"), "wire request: {wire}");
     }
 
