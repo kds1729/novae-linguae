@@ -2,8 +2,9 @@
 
 `nl_core.py` is the language-neutral half of a *Novae Linguae* ingestion adapter, shared by the
 Haskell ([`ingest-haskell`](../ingest-haskell/)) and npm/TypeScript ([`ingest-npm`](../ingest-npm/))
-source-code adapters and by both **description-layer** adapters —
-[`nl-ingest-openapi`](../nl-ingest-openapi/) and [`nl-ingest-graphql`](../nl-ingest-graphql/) use
+source-code adapters and by the three **description-layer** adapters —
+[`nl-ingest-openapi`](../nl-ingest-openapi/), [`nl-ingest-graphql`](../nl-ingest-graphql/) and
+[`nl-ingest-smithy`](../nl-ingest-smithy/) use
 `build_v2_record`/`canonicalize`/`content_hash`/`sanitize_hint` here and `nl_body.py`'s neutral
 AST constructors (`b_app`, `b_let`, `b_variant`, …), which is what makes a generated client
 record hash byte-for-byte like a hand-authored one. It is **stdlib-only** (zero third-party dependencies) and provides:
