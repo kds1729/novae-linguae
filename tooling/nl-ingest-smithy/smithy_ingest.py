@@ -102,6 +102,19 @@ UNIT = "smithy.api#Unit"
 PROTOCOLS = {"aws.protocols#awsJson1_0": "application/x-amz-json-1.0",
              "aws.protocols#awsJson1_1": "application/x-amz-json-1.1"}
 BLOB_THRESHOLD_DEFAULT = 65536
+# Error `__type`s that refuse the REQUEST, not the input: identity, signature, throttling, the
+# target itself. A rejection carrying one of these says nothing about the model's `required`
+# contract (the service never looked at the input), so it cannot be the observed rejection.
+# Measured live: an out-of-boundary ECS ListClusters answers 400 AccessDeniedException — the
+# same status a validation rejection carries.
+_NOT_AN_INPUT_REJECTION = {
+    "AccessDeniedException", "AccessDenied", "UnauthorizedException", "UnrecognizedClientException",
+    "InvalidSignatureException", "IncompleteSignatureException", "IncompleteSignature",
+    "MissingAuthenticationTokenException", "MissingAuthenticationToken", "ExpiredTokenException",
+    "InvalidClientTokenId", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded",
+    "UnknownOperationException", "SerializationException", "InvalidAction", "ServiceUnavailableException",
+    "InternalFailure", "InternalServerException", "ProxyRouteError",
+}
 
 # Output members: what a typed projection can narrow soundly by pattern, by Smithy shape type.
 _NARROW = {"string": "string", "enum": "string", "blob": "string", "boolean": "bool"}
@@ -644,7 +657,12 @@ def observe_plan(model, plan, out_dir, base_url, blob_threshold=BLOB_THRESHOLD_D
         if not isinstance(doc, dict) or "__type" not in doc:
             return [(leaf["name"], False, f"the service answered {status} without an awsJson error document "
                      "(`__type`) — a transport refusal, not the protocol's rejection; nothing was observed", None)], f"{status}"
-        live = f"{status} {doc['__type'].split('#')[-1]}"
+        etype = str(doc["__type"]).split("#")[-1].split(":")[0]
+        if etype in _NOT_AN_INPUT_REJECTION or status >= 500:
+            return [(leaf["name"], False, f"the service answered {status} {etype} — the REQUEST was refused "
+                     "(identity, signature, throttling, target, or a server fault), so the input was never "
+                     "validated; that is not the rejection the model promises and nothing was observed", None)], f"{status} {etype}"
+        live = f"{status} {etype}"
         m_ok, rec = _mint(leaf, plan, got, trace_path, out_dir, base_url, blob_threshold)
         return [(leaf["name"], m_ok, live if m_ok else rec, rec if m_ok else None)], live
     # expect 2xx

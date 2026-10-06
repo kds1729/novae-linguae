@@ -100,7 +100,11 @@ different flag on purpose); an `--observe-effect` on a readonly one; a bound inp
 required member (the service would reject it); a binding naming an operation the service does not
 declare — refused **before any artifact is written or any call is made**. At the gate: a 2xx to
 `{}` where the model requires members (the description does not hold); a non-2xx without an error
-document (a transport refusal is not the protocol's rejection); a non-200 where 200 was expected;
+document (a transport refusal is not the protocol's rejection); an error document whose `__type`
+refuses the *request* rather than the input — `AccessDeniedException`, signature and token errors,
+throttling, an unknown target, a server fault (measured live: an out-of-boundary AWS call answers
+`400 AccessDeniedException`, the very status a validation rejection carries, with the input never
+looked at); a non-200 where 200 was expected;
 a document violating its declared shape — each fails that operation with the reason, mints
 nothing, and the run exits 1.
 
@@ -116,7 +120,7 @@ python3 smithy_ingest.py examples/item-rpc.smithy.json --out /tmp/recs \
 [fake service](../fake-service/)'s `/rpc`: four operations covering every row of the decision
 table (`ListItems` readonly/no-required, `GetItem` readonly/required with a 404 error shape,
 `PutItem` mutating/required, `ResetAll` mutating/no-required). `tests/` gates against it and against
-two lying services: 26 tests, `python3 -m unittest discover -s tests`.
+two lying services: 27 tests, `python3 -m unittest discover -s tests`.
 
 ## Measured on the real models (offline licensing, 2026-10-06)
 
