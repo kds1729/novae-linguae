@@ -320,6 +320,7 @@ fn builtin_scheme(name: &str, inf: &mut Infer) -> Option<Ty> {
             let a = inf.fresh();
             Ty::Fun(vec![a], Box::new(con("int")))
         }
+        "sleep" => Ty::Fun(vec![con("int")], Box::new(con("unit"))),
         "panic" => {
             let (a, b) = (inf.fresh(), inf.fresh());
             Ty::Fun(vec![a], Box::new(b)) // diverges: a -> b
