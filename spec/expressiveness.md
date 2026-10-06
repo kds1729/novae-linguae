@@ -922,6 +922,44 @@ failure description-level. Unions refuse (inline fragments = the next rung); mut
 by rule (the world-state site for GraphQL, unmeasured). The doctrine transferred intact; the
 code did not — the unit of reuse is the doctrine and `ingest-common`, not the OpenAPI adapter.
 
+**GW19 — the protocol most of AWS speaks (2026-10-06): Smithy models with the `awsJson` protocols,
+the third description-layer adapter, and the rejected call as a mutating verb's effect-free
+case.** The `aws-sdk-poc` route (Smithy → `smithy-cli` OpenAPI projection → `nl-ingest-openapi`)
+exists only for `restJson1` services; ECS, ECR, Cloud Map, Global Accelerator and Cloud Control
+speak **awsJson1_0/1_1** — one endpoint, every operation a `POST`, the operation in the
+`X-Amz-Target` header, JSON in and out — and the projection fails on them outright. [`tooling/
+nl-ingest-smithy`](../tooling/nl-ingest-smithy/) reads the JSON AST directly (operations reached
+through the service and its resource tree) and compiles one record per operation as
+`(base, input: Json) → int` plus, for a read observed at a success, the output document and its
+typed top-level members (the GraphQL leaf rules). Three facts shape it. (1) **The input is one
+`Json` parameter**: a provisioning call's members are mostly optional, so the "minimal documented
+call" would be useless; `render_json input` is the body (the GW18 zero-pull reused), and the
+model's `required` members become a *contract* rather than a parameter list. (2) **The effect is
+`net.write`, measured, not assumed**: the method rule classes every awsJson call as a write, and
+the `readonly` trait that could refine it is unreliable in the models themselves — ECS marks 29 of
+77 operations, the other four services mark **none** — so a trait the description may omit
+licenses nothing about the effect; it (or an operator's `--readonly <glob>` declaration) licenses
+only *observing* an operation and the `query/lookup` tag. (3) **Nothing is spec-derivable**
+(success is always 200; the validation error is not modeled), so every record is an observation —
+and the model decides *which call* is observed: readonly + no required member → `{}` is valid,
+expect 200; **any operation with a required member → `{}` violates the description's own
+contract, so the service must reject it before acting** — expect a non-2xx with an error
+`__type`, record that status. That second row is the constructive half aws-sdk-poc finding 3
+lacked: `CreateService {}` costs nothing, changes nothing, and proves the record speaks the
+protocol — the proposal-02 move (`DELETE` at the absent name) carried to creates. A 2xx to `{}`
+fails loudly as a lying description (for a mutating verb: an effect may have occurred). What
+remains refused is honest: a mutating operation with **no** required member (`CreateCluster`,
+whose empty input really does create a cluster) has no effect-free call; `--observe-effect
+<Op>.input=<json>` is the explicit opt-in that performs it once as the example, and
+`--observe-arg` observes a readonly operation at real server state. Measured offline on the five
+models (`aws/api-models-aws` 7eb6ab98): ECS 72/77 plan (106 records licensed), Global
+Accelerator 51/56, Cloud Control 7/8, ECR 46/58, Cloud Map 27/30 — every refusal an unmarked read
+or a valid-empty-input mutator. Live against the in-repo fake service's `/rpc`: all four rows of
+the table observed, a required-violating `PutItem {}` verified to change nothing, two lying
+services failing the gate with the stated reasons. The live half against AWS (a SigV4 signing
+proxy, Cloud Control's asynchronous request tokens, world-state contracts over the resource
+tree) is the next module's business.
+
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.
 - **Ingestion**: map source-language string/dict idioms onto the new builtins in

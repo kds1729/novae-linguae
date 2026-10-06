@@ -9,9 +9,11 @@ list of what slowed it down — read it once and you will go faster than it did.
 ## In three sentences
 
 Run `bash quickstart.sh` first — it alone yields a verified answer: two independent `CONFIRMED`
-lines (the agent loop, then a third-party re-verification by address). For a second API, either
-adapter works — `tooling/nl-ingest-graphql/graphql_ingest.py` for a saved introspection result,
-`tooling/nl-ingest-openapi/openapi_ingest.py` for an OpenAPI 3 JSON description — and both find
+lines (the agent loop, then a third-party re-verification by address). For a second API, any
+description-layer adapter works — `tooling/nl-ingest-graphql/graphql_ingest.py` for a saved
+introspection result, `tooling/nl-ingest-openapi/openapi_ingest.py` for an OpenAPI 3 JSON
+description, `tooling/nl-ingest-smithy/smithy_ingest.py` for an AWS Smithy model (JSON-RPC
+services; needs a signing proxy as its endpoint) — and all find
 the binary the quickstart fetched (`.quickstart/nl-validator`) on their own, or a sibling `cargo
 build`, or `NL_VALIDATOR`. To publish, `python3 tooling/commons-node/publish_records.py <out-dir>`
 posts bodies, traces and records in dependency order; then `nl-validator orchestrate --node
@@ -34,8 +36,9 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
 ## What to read, in order, if you need more
 
 1. `QUICKSTART.md` — the four steps and why each is there (5 minutes).
-2. The adapter README you are about to use: `tooling/nl-ingest-graphql/README.md` or
-   `tooling/nl-ingest-openapi/README.md` — the mapping table and, more useful, **Honest
+2. The adapter README you are about to use: `tooling/nl-ingest-graphql/README.md`,
+   `tooling/nl-ingest-openapi/README.md` or `tooling/nl-ingest-smithy/README.md` — the mapping
+   table and, more useful, **Honest
    refusals**: what the adapter declines to compile and why. The refusal list is the design.
 3. `tooling/commons-node/README.md` — the node API (`/v0/records`, `/v0/query`, `/v0/blobs`).
 4. `spec/agent-loop.md` — the query → propose → commit → assert → verify protocol you drove

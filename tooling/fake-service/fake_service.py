@@ -78,6 +78,22 @@ endpoint serving a fixed schema, on both transports GraphQL-over-HTTP allows:
     (`putItem`) an ingestion adapter must refuse. An unknown root field answers 200 with
     `errors` and no `data` — the GraphQL validation-failure shape.
 
+The JSON-RPC surface (tooling/nl-ingest-smithy — the third description-layer adapter) is the
+AWS `awsJson1_x` wire shape: ONE endpoint, every operation a POST, the operation named by a
+header, and the HTTP status carrying no verb semantics at all:
+
+    POST /rpc               `X-Amz-Target: ItemRpc.<Operation>` + `Content-Type:
+                            application/x-amz-json-1.1` + a JSON body (the operation's input)
+
+    Operations (the fixed Smithy model `rpc_model()`): `ListItems` (readonly, no required
+    member) -> 200 {items, count, region, empty}; `GetItem` (readonly, `name` required) -> 200
+    the item, or an `ItemNotFoundException` (404 by @httpError); `PutItem` (mutating, `name`
+    + `body` required) -> 200; `ResetAll` (mutating, NO required member — the operation with
+    no effect-free call) -> 200 {cleared}. A body violating the model's `required` members is
+    REJECTED with `ValidationException` (400) BEFORE any effect — the awsJson validation
+    contract the adapter's observation gate relies on. An unknown target answers
+    `UnknownOperationException`; a non-JSON body `SerializationException`.
+
     python3 fake_service.py [--port 8878] [--token test-token] [--oauth-client id:secret]
 """
 
@@ -158,10 +174,81 @@ _GQL_ITEMS = {
 }
 
 
+# ---- JSON-RPC (awsJson1_1): the fixed Smithy model and its dispatcher --------------------------
+
+_RPC_NS = "fake"
+RPC_SERVICE = "ItemRpc"
+
+
+def _sm_struct(members, required=()):
+    return {"type": "structure",
+            "members": {m: ({"target": t, "traits": {"smithy.api#required": {}}} if m in required
+                            else {"target": t}) for m, t in members.items()}}
+
+
+def _sm_error(status=None):
+    traits = {"smithy.api#error": "client"}
+    if status is not None:
+        traits["smithy.api#httpError"] = status
+    return {"type": "structure", "members": {"message": {"target": "smithy.api#String"}}, "traits": traits}
+
+
+def rpc_model():
+    """The fixed service as a Smithy JSON AST (the file format the AWS service models ship in):
+    four operations, two of them `readonly`, one mutating operation with NO required member."""
+    ns = _RPC_NS
+    op = lambda inp, out, errors=(), readonly=False: {  # noqa: E731
+        "type": "operation", "input": {"target": f"{ns}#{inp}"}, "output": {"target": f"{ns}#{out}"},
+        "errors": [{"target": f"{ns}#{e}"} for e in ("ValidationException",) + tuple(errors)],
+        **({"traits": {"smithy.api#readonly": {}}} if readonly else {}),
+    }
+    return {
+        "smithy": "2.0",
+        "shapes": {
+            f"{ns}#{RPC_SERVICE}": {
+                "type": "service", "version": "2026-10-06",
+                "operations": [{"target": f"{ns}#{o}"} for o in ("ListItems", "GetItem", "PutItem", "ResetAll")],
+                "traits": {"aws.protocols#awsJson1_1": {}},
+            },
+            f"{ns}#ListItems": op("ListItemsRequest", "ListItemsResponse", readonly=True),
+            f"{ns}#GetItem": op("GetItemRequest", "GetItemResponse", ("ItemNotFoundException",), readonly=True),
+            f"{ns}#PutItem": op("PutItemRequest", "PutItemResponse"),
+            f"{ns}#ResetAll": op("ResetAllRequest", "ResetAllResponse"),
+            f"{ns}#ListItemsRequest": _sm_struct({"prefix": "smithy.api#String"}),
+            f"{ns}#ListItemsResponse": _sm_struct({"items": f"{ns}#StringList", "count": "smithy.api#Long",
+                                                   "region": "smithy.api#String", "empty": "smithy.api#Boolean",
+                                                   "updatedAt": "smithy.api#Timestamp"}),
+            f"{ns}#GetItemRequest": _sm_struct({"name": "smithy.api#String"}, required=("name",)),
+            f"{ns}#GetItemResponse": _sm_struct({"name": "smithy.api#String", "body": "smithy.api#String",
+                                                 "version": "smithy.api#Integer", "kind": f"{ns}#Kind",
+                                                 "owner": f"{ns}#Owner"}),
+            f"{ns}#PutItemRequest": _sm_struct({"name": "smithy.api#String", "body": "smithy.api#String"},
+                                               required=("name", "body")),
+            f"{ns}#PutItemResponse": _sm_struct({"name": "smithy.api#String"}),
+            f"{ns}#ResetAllRequest": _sm_struct({}),
+            f"{ns}#ResetAllResponse": _sm_struct({"cleared": "smithy.api#Integer"}),
+            f"{ns}#StringList": {"type": "list", "member": {"target": "smithy.api#String"}},
+            f"{ns}#Kind": {"type": "enum", "members": {"WIDGET": {"target": "smithy.api#Unit",
+                                                                   "traits": {"smithy.api#enumValue": "WIDGET"}},
+                                                        "GADGET": {"target": "smithy.api#Unit",
+                                                                   "traits": {"smithy.api#enumValue": "GADGET"}}}},
+            f"{ns}#Owner": _sm_struct({"id": "smithy.api#String"}),
+            f"{ns}#ValidationException": _sm_error(),
+            f"{ns}#ItemNotFoundException": _sm_error(404),
+        },
+    }
+
+
+_RPC_REQUIRED = {"ListItems": (), "GetItem": ("name",), "PutItem": ("name", "body"), "ResetAll": ()}
+_RPC_FIXED_ITEMS = {"rpc-widget": {"name": "rpc-widget", "body": "blue", "version": 1, "kind": "WIDGET",
+                                   "owner": {"id": "u1"}}}
+
+
 class Handler(BaseHTTPRequestHandler):
     store = {}
     things = {}
     notes = {}
+    rpc_items = {k: dict(v) for k, v in _RPC_FIXED_ITEMS.items()}
     token = "test-token"
     api_key = "test-token"  # the X-Api-Key credential; main() defaults it to --token
     oauth_client = ("gw13-client", "gw13-secret")
@@ -191,7 +278,57 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(404, b'{"error":"not found"}')
         return None
 
+    def _rpc_error(self, status, typ, message):
+        self._reply(status, json.dumps({"__type": typ, "message": message}).encode(),
+                    headers=[("x-amzn-ErrorType", typ)])
+
+    def _rpc(self):
+        """awsJson1_1: the operation is the `X-Amz-Target` header's suffix, the body its input.
+        Validation (required members) happens BEFORE any effect — a rejected call changes
+        nothing, which is what lets an ingestion adapter observe a mutating operation safely."""
+        target = self.headers.get("X-Amz-Target") or ""
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length)
+        try:
+            inp = json.loads(raw or b"{}")
+        except ValueError:
+            self._rpc_error(400, "SerializationException", "body is not JSON")
+            return
+        prefix, _, op = target.rpartition(".")
+        if prefix != RPC_SERVICE or op not in _RPC_REQUIRED:
+            self._rpc_error(400, "UnknownOperationException", f"unknown target {target!r}")
+            return
+        if not isinstance(inp, dict):
+            self._rpc_error(400, "SerializationException", "input is not an object")
+            return
+        missing = [m for m in _RPC_REQUIRED[op] if m not in inp]
+        if missing:
+            self._rpc_error(400, "ValidationException", f"missing required member(s): {', '.join(missing)}")
+            return
+        items = self.rpc_items
+        if op == "ListItems":
+            names = sorted(n for n in items if n.startswith(inp.get("prefix") or ""))
+            self._reply(200, json.dumps({"items": names, "count": len(names), "region": "fake-1",
+                                         "empty": not names, "updatedAt": 1759708800}).encode())
+        elif op == "GetItem":
+            it = items.get(inp["name"])
+            if it is None:
+                self._rpc_error(404, "ItemNotFoundException", f"no item {inp['name']!r}")
+            else:
+                self._reply(200, json.dumps(it).encode())
+        elif op == "PutItem":
+            items[inp["name"]] = {"name": inp["name"], "body": inp["body"], "version": 1}
+            self._reply(200, json.dumps({"name": inp["name"]}).encode())
+        else:  # ResetAll: the effect no input can make effect-free
+            n = len(items)
+            items.clear()
+            items.update({k: dict(v) for k, v in _RPC_FIXED_ITEMS.items()})
+            self._reply(200, json.dumps({"cleared": n}).encode())
+
     def do_POST(self):
+        if self.path == "/rpc":
+            self._rpc()
+            return
         if self.path == "/graphql":
             length = int(self.headers.get("Content-Length") or 0)
             try:
