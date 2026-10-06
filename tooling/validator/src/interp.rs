@@ -926,6 +926,9 @@ fn val_to_json(v: &Val) -> Result<J> {
     })
 }
 
+/// The longest one `sleep` call may pause a live evaluation (milliseconds).
+const SLEEP_MAX_MS: i128 = 60_000;
+
 /// Builtin arity, or `None` if `name` is not a builtin. `nil` is handled separately (a nullary value).
 fn builtin_arity(name: &str) -> Option<usize> {
     Some(match name {
@@ -933,7 +936,7 @@ fn builtin_arity(name: &str) -> Option<usize> {
         | "reverse" | "fst" | "snd" | "str_length" | "str_lower" | "url_encode" | "to_string"
         | "to_float" | "parse_int"
         | "map_size" | "map_keys" | "parse_json" | "render_json" | "print" | "rand"
-        | "now" | "panic" | "read_file" | "http_get" => 1,
+        | "now" | "sleep" | "panic" | "read_file" | "http_get" => 1,
         "add" | "sub" | "mul" | "div" | "mod" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and"
         | "or" | "xor" | "cons" | "append" | "concat" | "map" | "filter" | "min" | "max"
         | "str_concat" | "str_contains" | "str_lt" | "str_split" | "str_join"
@@ -951,6 +954,7 @@ pub fn builtin_effect(name: &str) -> Option<&'static str> {
         "print" => Some("io.console"),
         "rand" => Some("random"),
         "now" => Some("time"),
+        "sleep" => Some("time"),
         "panic" => Some("panic"),
         "read_file" => Some("fs.read"),
         "write_file" => Some("fs.write"),
@@ -1441,6 +1445,23 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             effect_op("random", json!({ "bound": n.to_string() }), || Ok(Val::Int(effect_rand(n)?)))?
         }
         "now" => effect_op("time", json!({}), || Ok(Val::Int(0)))?,
+        "sleep" => {
+            // time: pause the LIVE evaluation for `ms` milliseconds — the pacing a bounded poll
+            // over an asynchronous service needs (Cloud Control's request tokens, the AWS
+            // ecosystem thread). Recorded like every effect; a replay does not wait. Bounded per
+            // call (60 s) so a body cannot turn a terminating evaluation into a hang.
+            let ms = as_int(&a[0])?;
+            if ms < 0 {
+                bail!("sleep: a negative duration ({ms} ms)");
+            }
+            if ms > SLEEP_MAX_MS {
+                bail!("sleep: {ms} ms exceeds the per-call bound of {SLEEP_MAX_MS} ms — poll in bounded steps");
+            }
+            effect_op("time", json!({ "sleep_ms": ms.to_string() }), || {
+                std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+                Ok(Val::Unit)
+            })?
+        }
         "panic" => {
             effect_op("panic", encode_value(&a[0]), || Ok(Val::Unit))?;
             bail!("panic: {}", encode_value(&a[0]));
@@ -2477,6 +2498,41 @@ mod tests {
         clear_effects();
         set_effect_grants(vec!["panic".to_string()]);
         assert!(eval_body(&unary("panic"), &[nat(1)]).is_err()); // granted but aborts
+        clear_effects();
+    }
+
+    #[test]
+    fn sleep_is_a_bounded_time_effect_that_replays_without_waiting() {
+        let unary = |op: &str| json!({ "kind": "lambda", "params": [{ "name": "x" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": op }, "args": [{ "kind": "var", "name": "x" }] } });
+
+        // Ungranted: rejected before any pause.
+        set_effect_grants(Vec::<String>::new());
+        assert!(eval_body(&unary("sleep"), &[nat(5)]).is_err());
+        clear_effects();
+
+        // Granted: really pauses (measured), returns unit, traces `time` with the duration.
+        set_effect_grants(vec!["time".to_string()]);
+        let t0 = std::time::Instant::now();
+        assert_eq!(eval_body(&unary("sleep"), &[nat(40)]).unwrap(), json!({ "kind": "unit" }));
+        assert!(t0.elapsed() >= std::time::Duration::from_millis(40));
+        let trace = take_effect_trace();
+        clear_effects();
+        assert_eq!(trace[0]["effect"], "time");
+        assert_eq!(trace[0]["detail"]["sleep_ms"], "40");
+
+        // Bounded: a negative or over-long duration refuses (a body cannot hang an evaluation).
+        set_effect_grants(vec!["time".to_string()]);
+        assert!(eval_body(&unary("sleep"), &[json!({ "kind": "int", "value": -1 })]).is_err());
+        assert!(eval_body(&unary("sleep"), &[json!({ "kind": "int", "value": 60_001 })]).is_err());
+        clear_effects();
+
+        // Replay: the recorded entry answers; no time passes.
+        set_effect_replay(trace);
+        let t0 = std::time::Instant::now();
+        assert_eq!(eval_body(&unary("sleep"), &[nat(40)]).unwrap(), json!({ "kind": "unit" }));
+        assert!(t0.elapsed() < std::time::Duration::from_millis(30));
+        clear_effect_replay();
         clear_effects();
     }
 

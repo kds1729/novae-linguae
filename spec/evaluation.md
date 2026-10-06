@@ -110,8 +110,10 @@ run end-to-end (principle 4). `nl-validator run --records <dir>` builds the link
 and resolves both a record's `body_hash` and its `fn_ref` arguments.
 
 **Scope (v0.1, honest).** Integers are 128-bit and `nat` is a non-negative `int`. Most builtins are
-pure; the effectful ones (`print` → `io.console`, `rand` → `random`, `now` → `time`, `panic` →
-`panic`) are gated by a capability sandbox (see **Effect enforcement** below). The evaluator does not enforce exhaustiveness or types;
+pure; the effectful ones (`print` → `io.console`, `rand` → `random`, `now` → `time`, `sleep` →
+`time` — `sleep : int → unit` pauses a LIVE evaluation for that many milliseconds, at most 60 000
+per call, so a bounded poll over an asynchronous service can pace itself; a replay does not wait —
+`panic` → `panic`) are gated by a capability sandbox (see **Effect enforcement** below). The evaluator does not enforce exhaustiveness or types;
 those are the checker's job.
 
 ## Type checking
