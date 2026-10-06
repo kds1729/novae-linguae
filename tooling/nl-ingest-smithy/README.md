@@ -128,8 +128,25 @@ two lying services: 27 tests, `python3 -m unittest discover -s tests`.
 `CreateCluster` and four agent-internal operations, all mutating with no required member);
 Global Accelerator 51/56, Cloud Control 7/8, ECR 46/58, Cloud Map 27/30 — every refusal an
 unmarked read (`List*`/`Describe*`/`Get*`) that `--readonly` recovers, or a mutating operation
-whose empty input is valid. The live half against AWS needs a signing proxy and is the
-`evolution/` module's business.
+whose empty input is valid.
+
+**Live against real AWS (same day, through a local SigV4 signing proxy, an otherwise empty
+account): 258 records certified and offline-replayed from 221 calls, nothing created.** ECS 93
+(from 72 calls), ECR 43, Cloud Map 37, Global Accelerator 70/70, Cloud Control 15/15 (including a
+real `ListResources AWS::ECS::Cluster` observation via `--observe-arg`). Every rejection row held:
+no service accepted `{}` where the model requires a member. What the gate refused, each a
+description-level finding: **authorization order varies per operation** — ECS validates
+`CreateService {}` before authorizing (the rejection costs no write permission) but authorizes
+`DeleteCluster` first (`AccessDeniedException`, the same 400 as a rejection — hence the
+request-refusal rule above); **"optional" in the model, required by the world** — `ListServices`/
+`ListTasks`/`ListContainerInstances` at `{}` answer `ClusterNotFoundException` because the implied
+default cluster does not exist; **a hidden server fault** — `ListServicesByNamespace {}` answers
+`500` where the model calls `namespace` optional; **a host prefix the record cannot carry** —
+Cloud Map's `DiscoverInstances*` live on `data-servicediscovery…` (`smithy.api#endpoint`), noted at
+plan time, the operator's `base` to honor; and ECR's registry-level operations denied by a
+deliberately repository-scoped permission ceiling. Observed outputs carry account identifiers
+(ARNs; `GetAuthorizationToken` even a short-lived login token), so such records are the
+operator's to publish or not — the `aws-sdk-poc` ARN boundary.
 
 Reuses [`ingest-common`](../ingest-common/). Requires only `python3` and the built `nl-validator`
 (sibling build, the quickstart's fetched binary, or `NL_VALIDATOR`).

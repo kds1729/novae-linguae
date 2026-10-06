@@ -426,6 +426,14 @@ def plan_operation(model, facts, op_id, *, readonly_globs=(), observe=None, obse
         readonly = True
         notes.append(f"{name}: readonly by OPERATOR DECLARATION (--readonly), not by trait — the model is "
                      "silent; the declaration licenses observing it")
+    host_prefix = (traits.get("smithy.api#endpoint") or {}).get("hostPrefix")
+    if host_prefix:
+        # Measured on Cloud Map: DiscoverInstances lives on `data-servicediscovery.<region>…`; at the
+        # service's ordinary host it answers UnknownOperationException. The record is host-portable
+        # by design (base is the caller's), so the prefix is the OPERATOR's to honor in `base`.
+        notes.append(f"{name}: the model routes this operation to a host prefixed `{host_prefix}` "
+                     "(smithy.api#endpoint) — observe and call it at a `base` naming THAT host; at the "
+                     "service's ordinary host it is an unknown operation")
     inp = (op.get("input") or {}).get("target")
     out = (op.get("output") or {}).get("target")
     members = _members(shapes, inp)
