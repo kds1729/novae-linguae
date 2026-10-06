@@ -956,9 +956,15 @@ models (`aws/api-models-aws` 7eb6ab98): ECS 72/77 plan (106 records licensed), G
 Accelerator 51/56, Cloud Control 7/8, ECR 46/58, Cloud Map 27/30 — every refusal an unmarked read
 or a valid-empty-input mutator. Live against the in-repo fake service's `/rpc`: all four rows of
 the table observed, a required-violating `PutItem {}` verified to change nothing, two lying
-services failing the gate with the stated reasons. The live half against AWS (a SigV4 signing
-proxy, Cloud Control's asynchronous request tokens, world-state contracts over the resource
-tree) is the next module's business.
+services failing the gate with the stated reasons. The live half ran the same day
+([`evolution/aws-ecosystem-poc`](../evolution/aws-ecosystem-poc/)): 258 records gated against five
+real services from 221 calls with nothing created, and then a whole two-region ecosystem (network,
+IAM, ECS on EC2, blue/green load balancing, Postgres primary + cross-region replica, an
+accelerator, CloudFront) provisioned, canary-deployed, and torn down through 96 hand-authored
+records over this adapter's vocabulary, sequenced in `check-plan`-verified plans. Three language
+pulls came out of it: `sleep` (a bounded `time` effect, so a poll over an asynchronous control
+plane can pace itself), `{{secret:NAME}}` placeholders in request **bodies** (RDS takes the
+master password in its payload), and a 60 s evaluator HTTP timeout (control planes are slow).
 
 - **Corpus/model arc**: string (then map, then Json) combinatorial families through the verify
   gate; retrain the reference tiers; the broaden→retrain→measure loop is documented and cheap.
