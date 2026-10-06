@@ -148,5 +148,11 @@ deliberately repository-scoped permission ceiling. Observed outputs carry accoun
 (ARNs; `GetAuthorizationToken` even a short-lived login token), so such records are the
 operator's to publish or not — the `aws-sdk-poc` ARN boundary.
 
+**At ecosystem scale** ([`evolution/aws-ecosystem-poc`](../../evolution/aws-ecosystem-poc/),
+same day): this vocabulary plus 96 hand-authored records over it (Cloud Control find/ensure/
+delete units, waits, typed per-resource records with world contracts) provisioned, deployed and
+tore down a two-region ECS ecosystem through checked plans. The module records the eleven Cloud
+Control behaviours no description states.
+
 Reuses [`ingest-common`](../ingest-common/). Requires only `python3` and the built `nl-validator`
 (sibling build, the quickstart's fetched binary, or `NL_VALIDATOR`).
