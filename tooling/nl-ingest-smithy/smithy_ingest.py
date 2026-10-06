@@ -55,7 +55,8 @@ What the shape dictates is the whole adapter:
                                          then the first provisioning step; the record carries the
                                          operator's values and is theirs to publish or not).
 
-  * Output projections (readonly operations, from a 200 observation): the whole output document
+  * Output projections (any operation observed at a 200 — a read, or an effect under the
+    opt-in, whose output is where the token/ARN a plan threads onward lives): the whole output document
     (`<Op>Output`, `Maybe Json`) plus one typed projection per top-level member the pattern language can narrow
     soundly — string/enum/blob -> `Maybe string`, boolean -> `Maybe bool`, structure/list/map/
     union/document -> `Maybe Json`; numeric and timestamp members are NOTED, never projected (JNum
@@ -492,8 +493,11 @@ def plan_operation(model, facts, op_id, *, readonly_globs=(), observe=None, obse
         "type_ast": {"kind": "fn", "params": [STRING, JSON_T], "result": INT},
         "body_ast": status_body(call), "intent": base_tags + _intent_ext(lead, facts["short"], name),
     }]
-    # Output projections: licensed for a readonly operation observed at a success.
-    if readonly and expect == "2xx" and out and out != UNIT:
+    # Output projections: licensed for an operation observed at a SUCCESS — a readonly one at `{}`
+    # or the operator's input, or a mutating one under the --observe-effect opt-in (its output is
+    # where the data a plan threads onward lives: the request token, the ARN). A rejection licenses
+    # none (there is no document).
+    if expect == "2xx" and out and out != UNIT:
         pending.append({
             "name": name + "Output", "hint": _param_name(name + "Output"), "member": None, "kind": "json",
             "type_ast": {"kind": "fn", "params": [STRING, JSON_T], "result": MAYBE_JSON},
