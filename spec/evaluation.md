@@ -598,9 +598,11 @@ appended to a structured **trace** (principle 9: an AI-ingestible record of what
 an effect kind is just an entry in `builtin_effect`; enforcement, tracing, and inference follow
 automatically. Two GW6 additions on top of the grant set: a **net grant may be host-scoped**
 (`net.write@api.example.com` — enforced at the effect boundary where the URL is known; the bare
-grant still means any host), and an `http` header value may carry a **`{{secret:NAME}}`
-placeholder** substituted from operator-supplied `--secret NAME=VALUE` values only inside the live
-effect — the trace records the placeholder, never the credential, so replay needs no secrets
+grant still means any host), and an `http` header value — or, since 2026-10-06, its request
+**body** (an API that takes a credential in its payload: RDS's `MasterUserPassword`, any
+"set password" call) — may carry a **`{{secret:NAME}}` placeholder** substituted from
+operator-supplied `--secret NAME=VALUE` values only inside the live effect — the trace records the
+placeholder (the symbolic body), never the credential, so replay needs no secrets
 (spec/agent-loop.md §Scope has the doctrine). GW17 (2026-07-13) extended the scope grammar past
 the host: a grant scope may carry a **path prefix** (`net.write@api.example.com/v0/things`) and
 **fs grants scope by path** the same way (`fs.read@/data`), matched SEGMENT-ALIGNED at the effect
