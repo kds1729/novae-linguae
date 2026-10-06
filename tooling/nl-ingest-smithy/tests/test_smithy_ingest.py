@@ -394,6 +394,16 @@ class ObservationGateTest(unittest.TestCase):
         # the valid empty call still observed fine against a 200 (its document conforms: nothing declared is wrong)
         self.assertIn("listitems", recs)
 
+    def test_an_access_denial_is_not_the_models_rejection(self):
+        # measured live: an out-of-boundary AWS call answers 400 AccessDeniedException — the same
+        # status a validation rejection carries, but the input was never looked at
+        code, tmp, recs, out = self._lying(400, b'{"__type":"AccessDeniedException","message":"no"}')
+        self.assertEqual(code, 1)
+        self.assertEqual(recs, {})
+        self.assertIn("PutItem: observation-gate=FAIL the service answered 400 AccessDeniedException — the REQUEST "
+                      "was refused", out)
+        self.assertIn("GetItem: observation-gate=FAIL the service answered 400 AccessDeniedException", out)
+
     def test_a_transport_refusal_is_not_an_observation(self):
         code, tmp, recs, out = self._lying(403, b"Forbidden")
         self.assertEqual(code, 1)
