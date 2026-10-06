@@ -44,7 +44,7 @@ adapter:
 | **any** operation with a required member | `{}` **violates** the model's own `required` contract, so the service must reject it *before acting* → expect a non-2xx carrying an awsJson error `__type`; the record's example is the status the service answered | `<Op> : (string, Json) → int` |
 | readonly with required members, `--observe-arg <Op>.input=<json>` | the operator's input (real server state the model cannot name) → expect `200` | `<Op>` + the output projections |
 | mutating, no required member | the empty input is a valid call, so **no effect-free observation exists** → **refused** | — |
-| mutating, `--observe-effect <Op>.input=<json>` | the explicit opt-in: the gate **performs the effect once** at the operator's input → expect `200` | `<Op>` (its example carries the operator's values) |
+| mutating, `--observe-effect <Op>.input=<json>` | the explicit opt-in: the gate **performs the effect once** at the operator's input → expect `200` | `<Op>` + the output projections (the request token, the ARN — what a plan threads onward), all from that ONE effect's trace; the examples carry the operator's values |
 
 The second row is the adapter's constructive answer to the question the OpenAPI adapter left
 open after `aws-sdk-poc` finding 3 (creates with required bodies refuse): the **effect-free call of
@@ -63,7 +63,7 @@ effect may have occurred.
 | `aws.protocols#awsJson1_0` / `awsJson1_1` on the service | `Content-Type: application/x-amz-json-1.0` / `-1.1` (a spec-time literal) |
 | the service shape's name | `X-Amz-Target: <ServiceShapeName>.<Op>` (a spec-time literal) |
 | the input structure | one `Json` parameter, `render_json input` as the body; `required` members = the enforced contract (table above) |
-| the output structure (readonly, observed at `200`) | `OpOutput : … → Maybe Json` (the whole document) + per top-level member: string / enum / blob → `Maybe string`, boolean → `Maybe bool`, structure / list / set / map / union / document → `Maybe Json`; numeric and timestamp members **noted, never projected** (`JNum` carries int or float; awsJson timestamps are epoch-seconds numbers) |
+| the output structure (observed at `200` — a read, or an effect under the opt-in) | `OpOutput : … → Maybe Json` (the whole document) + per top-level member: string / enum / blob → `Maybe string`, boolean → `Maybe bool`, structure / list / set / map / union / document → `Maybe Json`; numeric and timestamp members **noted, never projected** (`JNum` carries int or float; awsJson timestamps are epoch-seconds numbers) |
 | `aws.api#service.sdkId` | the short form in hints and tags (`ecs`, `global-accelerator`; the shape name when absent) |
 | the endpoint | the `base` parameter: for AWS the operator's **SigV4-signing entry point**, which also fixes service and region — the same record provisions in every region |
 | `aws.auth#sigv4` | nothing in the record (`aws-sdk-poc` finding 5): a computed signature is the operator's boundary; traces replay identity-free |

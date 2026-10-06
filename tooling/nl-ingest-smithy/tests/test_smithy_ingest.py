@@ -165,7 +165,9 @@ class PlanTest(unittest.TestCase):
         st, plan, notes = _plan("ResetAll", observe_effect={"ResetAll": "{}"})
         self.assertEqual((st, plan["mode"], plan["expect"]), ("ok", "effect", "2xx"))
         self.assertTrue(any("EFFECT OPT-IN" in n for n in notes))
-        self.assertEqual(_names(plan), ["ResetAll"])  # a mutating observation licenses no projection
+        # the effect's output is observable from the same trace: its projections are licensed
+        # (`cleared` is numeric: noted, not projected)
+        self.assertEqual(_names(plan), ["ResetAll", "ResetAllOutput"])
         st, _, why = _plan("ListItems", observe_effect={"ListItems": "{}"})
         self.assertEqual(st, "skip")
         self.assertIn("readonly", why)
@@ -353,6 +355,9 @@ class ObservationGateTest(unittest.TestCase):
         self.assertEqual(self._result(recs["resetall"]), {"kind": "int", "value": 200})
         self.assertNotIn("doomed", self._rpc("ListItems", {})["items"])  # the effect happened, once
         self.assertEqual(recs["resetall"]["intent_tags"], ["io", "io/network/http", "io/network/http/itemrpc-reset-all"])
+        # the effect's output document rides along, from the SAME trace (one effect, not two)
+        self.assertEqual(self._result(recs["resetalloutput"])["tag"], "Just")
+        self.assertEqual(recs["resetalloutput"]["examples"][0]["trace"], recs["resetall"]["examples"][0]["trace"])
         trace = _load(Path(tmp) / "trace-resetall-0.json")
         self.assertIn("cleared", json.dumps(trace["ops"][0]))
 
