@@ -140,7 +140,7 @@ fn first_order_head(node: &J) -> Option<String> {
 }
 
 /// The integer value of a `lit` int/nat node.
-fn int_lit(node: &J) -> Option<i64> {
+pub(crate) fn int_lit(node: &J) -> Option<i64> {
     if node.get("kind").and_then(|k| k.as_str()) != Some("lit") {
         return None;
     }
@@ -164,17 +164,22 @@ fn sub_descent(arg: &J) -> Option<(String, i64)> {
     (c >= 1).then(|| (p.to_string(), c))
 }
 
-/// If `arg` is `div(var p, lit c)` or `div(add(var p, lit k), lit c)` (either operand order of the
-/// `add`) with `c ≥ 2` — a halving-shaped descent — return `(p, k, c)`. Whether it DESCENDS depends on
-/// the floor in force: `(p + k) div c < p` for every `p ≥ floor` exactly when it holds at the floor,
-/// since the gap grows with `p` (slope `1/c − 1 < 0`).
-fn div_descent(arg: &J) -> Option<(String, i64, i64)> {
+/// The divisor of a halving-shaped descent: a literal `c ≥ 2`, or a VARIABLE whose floor the guards
+/// must supply (`digits`: `div(n, b)` under `b < 2 ⇒ nil`, so `b ≥ 2` on the recursing arm).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Divisor {
+    Lit(i64),
+    Var(String),
+}
+
+/// If `arg` is `div(var p, d)` or `div(add(var p, lit k), d)` (either operand order of the `add`)
+/// with `d` a literal `≥ 2` or a variable — a halving-shaped descent — return `(p, k, d)`. Whether it
+/// DESCENDS depends on the floors in force: `(p + k) div c < p` for every `p ≥ floor` exactly when it
+/// holds at the floor, since the gap grows with `p` (slope `1/c − 1 < 0`); a variable divisor needs
+/// its own floor `≥ 2`, and the check runs at that floor (the smallest divisor gives the largest quotient).
+pub(crate) fn div_descent(arg: &J) -> Option<(String, i64, Divisor)> {
     let (op, args) = app_spine(arg)?;
     if op != "div" || args.len() != 2 {
-        return None;
-    }
-    let c = int_lit(&args[1])?;
-    if c < 2 {
         return None;
     }
     let var = |n: &J| {
@@ -182,16 +187,42 @@ fn div_descent(arg: &J) -> Option<(String, i64, i64)> {
             .then(|| n.get("name").and_then(|x| x.as_str()).map(String::from))
             .flatten()
     };
+    let d = match (int_lit(&args[1]), var(&args[1])) {
+        (Some(c), _) if c >= 2 => Divisor::Lit(c),
+        (None, Some(q)) => Divisor::Var(q),
+        _ => return None,
+    };
     if let Some(p) = var(&args[0]) {
-        return Some((p, 0, c));
+        return Some((p, 0, d));
     }
     let (inner_op, inner) = app_spine(&args[0])?;
     if inner_op != "add" || inner.len() != 2 {
         return None;
     }
     match (var(&inner[0]), int_lit(&inner[1]), int_lit(&inner[0]), var(&inner[1])) {
-        (Some(p), Some(k), _, _) => Some((p, k, c)),
-        (_, _, Some(k), Some(p)) => Some((p, k, c)),
+        (Some(p), Some(k), _, _) => Some((p, k, d)),
+        (_, _, Some(k), Some(p)) => Some((p, k, d)),
+        _ => None,
+    }
+}
+
+/// An application whose spine head is a `fn_ref` LITERAL — composition by content address — with its
+/// target and collected arguments (curried spines flattened).
+pub(crate) fn fn_ref_spine(node: &J) -> Option<(String, Vec<J>)> {
+    if node.get("kind").and_then(|k| k.as_str()) != Some("app") {
+        return None;
+    }
+    let args: Vec<J> = node.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    let f = node.get("fn")?;
+    match f.get("kind").and_then(|k| k.as_str()) {
+        Some("lit") if f.pointer("/value/kind").and_then(|k| k.as_str()) == Some("fn_ref") => {
+            Some((f.pointer("/value/target")?.as_str()?.to_string(), args))
+        }
+        Some("app") => {
+            let (t, mut inner) = fn_ref_spine(f)?;
+            inner.extend(args);
+            Some((t, inner))
+        }
         _ => None,
     }
 }
@@ -212,7 +243,7 @@ fn mod_descent(arg: &J) -> Option<String> {
 /// descent WELL-FOUNDED (a strictly decreasing integer sequence needs a lower bound, which the
 /// guard supplies at every recursing activation).
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Guard {
+pub(crate) enum Guard {
     /// `p >= floor` holds — recursion continues only while `p` stays at or above a constant, so
     /// any constant decrement terminates (integers strictly decrease toward a fixed floor), and a
     /// halving `div(p, c)` or a `mod(_, p)` descent terminates when the floor is ≥ 1 (the value
@@ -225,7 +256,7 @@ enum Guard {
 }
 
 /// The facts a boolean scrutinee establishes for its `true` and `false` arms respectively.
-fn arm_facts(scrutinee: &J) -> (Vec<Guard>, Vec<Guard>) {
+pub(crate) fn arm_facts(scrutinee: &J) -> (Vec<Guard>, Vec<Guard>) {
     let Some((op, args)) = app_spine(scrutinee) else {
         return (vec![], vec![]);
     };
@@ -305,9 +336,32 @@ fn pattern_binds(pattern: &J, out: &mut std::collections::BTreeSet<String>) {
     }
 }
 
+/// What a self-call's descending position tells the induction principle: a structural (list) descent,
+/// or a numeric one with the FLOOR the recursion is bounded below by (the guard's, or the nat type's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DescentKind {
+    Structural,
+    Numeric { floor: i64 },
+}
+
+/// The well-founded measure a recursive body descends on — the one argument position every
+/// `self`-call provably shrinks — with the floor it is bounded below by. Numeric only (the input a
+/// strong induction over the integers can range over); `None` when no single numeric position descends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Measure {
+    pub position: usize,
+    pub floor: i64,
+}
+
+/// A linked view of other records, for folding a `fn_ref` callee into the analysis: does the callee
+/// (itself analyzed, transitively) provably terminate? `None` = unresolvable (no records view, or a
+/// cycle) — the application stays opaque.
+pub type CalleeTerminates<'a> = &'a dyn Fn(&str) -> Option<bool>;
+
 struct Ctx<'a> {
     params: &'a [String],
     nat_positions: &'a std::collections::BTreeSet<usize>,
+    callee: Option<CalleeTerminates<'a>>,
 }
 
 fn walk(
@@ -315,55 +369,67 @@ fn walk(
     ctx: &Ctx,
     shadowed: &std::collections::BTreeSet<String>,
     facts: &[Guard],
-    descents: &mut Vec<std::collections::BTreeSet<usize>>,
+    descents: &mut Vec<std::collections::BTreeMap<usize, DescentKind>>,
     opaque: &mut Option<String>,
 ) {
     if opaque.is_some() {
         return;
     }
     if let Some(sargs) = self_call_args(node) {
-        let call_descents: std::collections::BTreeSet<usize> = sargs
-            .iter()
-            .enumerate()
-            .filter(|(j, a)| {
-                // A descent must track the PARAMETER at this position — a shadowing `let`/pattern
-                // binding of the same name is a different value (`let xs = cons(1, xs) in
-                // self(tail(xs))` descends nothing).
-                let Some(pj) = ctx.params.get(*j) else { return false };
-                if shadowed.contains(pj) {
-                    return false;
-                }
-                if tail_descent(a).is_some_and(|(p, _)| p == *pj) {
-                    return true;
-                }
-                // The floor a GUARD establishes for this parameter (the tightest one in force),
-                // and the floor its nat typing adds under a non-zero guard (`p ≥ 0` by type, so
-                // `p != 0` ⇒ `p ≥ 1`).
-                let guard_floor = facts
+        let mut call_descents: std::collections::BTreeMap<usize, DescentKind> = Default::default();
+        for (j, a) in sargs.iter().enumerate() {
+            // A descent must track the PARAMETER at this position — a shadowing `let`/pattern
+            // binding of the same name is a different value (`let xs = cons(1, xs) in
+            // self(tail(xs))` descends nothing).
+            let Some(pj) = ctx.params.get(j) else { continue };
+            if shadowed.contains(pj) {
+                continue;
+            }
+            if tail_descent(a).is_some_and(|(p, _)| p == *pj) {
+                call_descents.insert(j, DescentKind::Structural);
+                continue;
+            }
+            // The floor a GUARD establishes for a parameter (the tightest one in force), and the
+            // floor nat typing adds under a non-zero guard (`p ≥ 0` by type, so `p != 0` ⇒ `p ≥ 1`).
+            let guard_floor = |p: &str| {
+                facts
                     .iter()
                     .filter_map(|g| match g {
-                        Guard::LowerBound(p, f) if p == pj => Some(*f),
+                        Guard::LowerBound(q, f) if q == p => Some(*f),
                         _ => None,
                     })
-                    .max();
-                let nat_nonzero = ctx.nat_positions.contains(j) && facts.contains(&Guard::NonZero(pj.clone()));
-                let positive_floor = guard_floor.into_iter().chain(nat_nonzero.then_some(1)).max();
-                if sub_descent(a).is_some_and(|(p, c)| p == *pj && (guard_floor.is_some() || (c == 1 && nat_nonzero))) {
-                    return true;
-                }
-                // Halving-shaped descent: `(p + k) div c < p` must hold at the floor (then everywhere above it).
-                if let Some((p, k, c)) = div_descent(a) {
-                    if p == *pj {
-                        if let Some(f) = positive_floor {
-                            return (f.saturating_add(k)).div_euclid(c) < f;
+                    .max()
+            };
+            let nat_nonzero = ctx.nat_positions.contains(&j) && facts.contains(&Guard::NonZero(pj.clone()));
+            let positive_floor = guard_floor(pj).into_iter().chain(nat_nonzero.then_some(1)).max();
+            let type_floor = ctx.nat_positions.contains(&j).then_some(0);
+            // The floor the induction principle may use: the guard's, else the nat type's 0.
+            let induction_floor = |f: Option<i64>| f.or(type_floor).unwrap_or(0);
+            if sub_descent(a).is_some_and(|(p, c)| p == *pj && (guard_floor(pj).is_some() || (c == 1 && nat_nonzero))) {
+                call_descents.insert(j, DescentKind::Numeric { floor: induction_floor(guard_floor(pj)) });
+                continue;
+            }
+            // Halving-shaped descent: `(p + k) div c < p` must hold at the floor (then everywhere above
+            // it). A variable divisor contributes its own floor (≥ 2) as the divisor to check at.
+            if let Some((p, k, d)) = div_descent(a) {
+                if p == *pj {
+                    let c = match &d {
+                        Divisor::Lit(c) => Some(*c),
+                        Divisor::Var(q) => guard_floor(q).filter(|f| *f >= 2),
+                    };
+                    if let (Some(f), Some(c)) = (positive_floor, c) {
+                        if (f.saturating_add(k)).div_euclid(c) < f {
+                            call_descents.insert(j, DescentKind::Numeric { floor: induction_floor(guard_floor(pj)) });
+                            continue;
                         }
                     }
                 }
-                // Euclid's step: the slot receives a remainder modulo its own parameter, `< p` for `p ≥ 1`.
-                mod_descent(a).is_some_and(|p| p == *pj && positive_floor.is_some_and(|f| f >= 1))
-            })
-            .map(|(j, _)| j)
-            .collect();
+            }
+            // Euclid's step: the slot receives a remainder modulo its own parameter, `< p` for `p ≥ 1`.
+            if mod_descent(a).is_some_and(|p| p == *pj && positive_floor.is_some_and(|f| f >= 1)) {
+                call_descents.insert(j, DescentKind::Numeric { floor: induction_floor(guard_floor(pj)) });
+            }
+        }
         descents.push(call_descents);
         for a in &sargs {
             walk(a, ctx, shadowed, facts, descents, opaque);
@@ -372,8 +438,31 @@ fn walk(
     }
     if node.get("kind").and_then(|k| k.as_str()) == Some("app") {
         if first_order_head(node).is_none() {
+            // Composition by content address: a `fn_ref` callee folds in when the linked view can
+            // vouch that IT terminates (analyzed, not declared) — then the application is one more
+            // terminating first-order step and only its arguments need walking.
+            if let Some((target, cargs)) = fn_ref_spine(node) {
+                match ctx.callee.and_then(|f| f(&target)) {
+                    Some(true) => {
+                        for a in &cargs {
+                            walk(a, ctx, shadowed, facts, descents, opaque);
+                        }
+                        return;
+                    }
+                    Some(false) => {
+                        *opaque = Some(format!("applies `{target}`, whose own termination is not provable"));
+                        return;
+                    }
+                    None => {
+                        *opaque = Some(format!(
+                            "applies the fn_ref `{target}` (unresolved here — pass --records to fold the callee's termination)"
+                        ));
+                        return;
+                    }
+                }
+            }
             // An application that is neither a self-call nor a recognized first-order builtin: a
-            // higher-order combinator (map/filter/fold), or applying a parameter / fn_ref. Opaque.
+            // higher-order combinator (map/filter/fold), or applying a parameter. Opaque.
             let head = node
                 .get("op")
                 .and_then(|o| o.as_str())
@@ -463,9 +552,13 @@ pub fn analyze_termination(body: &J) -> TerminationOutcome {
 /// The 0-based positions of a record's `nat`-typed parameters (unwrapping a `forall`), feeding
 /// [`analyze_termination_typed`]'s nat-guarded descent.
 pub fn nat_param_positions(record: &J) -> std::collections::BTreeSet<usize> {
-    let ty = record.pointer("/signature/type");
-    let fn_ty = ty
-        .and_then(|t| if t.get("kind").and_then(|k| k.as_str()) == Some("forall") { t.get("body") } else { Some(t) });
+    record.pointer("/signature/type").map(nat_positions_of_type).unwrap_or_default()
+}
+
+/// The `nat`-typed parameter positions of a function TYPE (the record-level helper above reads the
+/// signature; the refinement checker holds only the type).
+pub fn nat_positions_of_type(ty: &J) -> std::collections::BTreeSet<usize> {
+    let fn_ty = if ty.get("kind").and_then(|k| k.as_str()) == Some("forall") { ty.get("body") } else { Some(ty) };
     fn_ty
         .and_then(|t| t.get("params"))
         .and_then(|p| p.as_array())
@@ -491,41 +584,94 @@ pub fn analyze_termination_typed(
     body: &J,
     nat_positions: &std::collections::BTreeSet<usize>,
 ) -> TerminationOutcome {
+    analyze_termination_linked(body, nat_positions, None)
+}
+
+/// [`analyze_termination_typed`] over a LINKED view: `callee` answers whether a `fn_ref` target
+/// provably terminates (the caller analyzes the callee's own body — a declaration is never read as
+/// a fact), so composition by content address is a first-order step rather than an opaque call.
+pub fn analyze_termination_linked(
+    body: &J,
+    nat_positions: &std::collections::BTreeSet<usize>,
+    callee: Option<CalleeTerminates<'_>>,
+) -> TerminationOutcome {
+    match descent_analysis(body, nat_positions, callee) {
+        Err(why) => TerminationOutcome::Unknown(why),
+        Ok(_) => TerminationOutcome::Always,
+    }
+}
+
+/// The numeric well-founded measure of a recursive body, for a strong-induction principle: the
+/// argument position every `self`-call descends numerically, with the floor the recursion is bounded
+/// below by (the smallest floor any recursing activation relies on — any lower bound makes the
+/// order well-founded). `None` for a non-recursive body, a structural (list) recursion, or an
+/// unprovable one.
+pub fn induction_measure(body: &J, nat_positions: &std::collections::BTreeSet<usize>) -> Option<Measure> {
+    let common = descent_analysis(body, nat_positions, None).ok()??;
+    common.into_iter().find_map(|(position, kinds)| {
+        let floors: Option<Vec<i64>> = kinds
+            .iter()
+            .map(|k| match k {
+                DescentKind::Numeric { floor } => Some(*floor),
+                DescentKind::Structural => None,
+            })
+            .collect();
+        floors.and_then(|fs| fs.into_iter().min()).map(|floor| Measure { position, floor })
+    })
+}
+
+/// Shared core: `Ok(None)` for a non-recursive body, `Ok(Some(common))` with, per commonly-descending
+/// position, the descent kinds the self-calls establish there; `Err(reason)` when not provably
+/// well-founded.
+#[allow(clippy::type_complexity)]
+fn descent_analysis(
+    body: &J,
+    nat_positions: &std::collections::BTreeSet<usize>,
+    callee: Option<CalleeTerminates<'_>>,
+) -> Result<Option<std::collections::BTreeMap<usize, Vec<DescentKind>>>, String> {
     let Some(params) = lambda_params(body) else {
-        return TerminationOutcome::Unknown("body is not a `lambda`".into());
+        return Err("body is not a `lambda`".into());
     };
     let Some(inner) = body.get("body") else {
-        return TerminationOutcome::Unknown("lambda has no body".into());
+        return Err("lambda has no body".into());
     };
 
-    let mut descents: Vec<std::collections::BTreeSet<usize>> = Vec::new();
+    let mut descents: Vec<std::collections::BTreeMap<usize, DescentKind>> = Vec::new();
     let mut opaque: Option<String> = None;
-    let ctx = Ctx { params: &params, nat_positions };
+    let ctx = Ctx { params: &params, nat_positions, callee };
     walk(inner, &ctx, &std::collections::BTreeSet::new(), &[], &mut descents, &mut opaque);
 
     if let Some(why) = opaque {
-        return TerminationOutcome::Unknown(why);
+        return Err(why);
     }
     if descents.is_empty() {
         // Non-recursive over the first-order fragment: every builtin halts on finite input.
-        return TerminationOutcome::Always;
+        return Ok(None);
     }
     // Recursive: some ONE argument position must provably descend in EVERY self-call — a single
     // well-founded measure. (Any fixed position works, not just the first: `nth(i, xs)` descends
     // position 2; `range_from(a, n)` descends its guarded nat at position 2.)
-    let common = descents
+    let positions: std::collections::BTreeSet<usize> = descents
         .iter()
         .skip(1)
-        .fold(descents[0].clone(), |acc, s| acc.intersection(s).cloned().collect());
-    if common.is_empty() {
-        return TerminationOutcome::Unknown(
+        .fold(descents[0].keys().cloned().collect(), |acc: std::collections::BTreeSet<usize>, s| {
+            acc.intersection(&s.keys().cloned().collect()).cloned().collect()
+        });
+    if positions.is_empty() {
+        return Err(
             "no single argument position provably descends in every self-call (structural `tail`; \
              a guarded constant decrement — `gt(p, lit)`-guarded `sub(p, c)`, or a nat's \
              non-zero-guarded `sub(p, 1)`; a halving `div(p, c)` / `div(add(p, k), c)` under a floor \
-             it descends from; or Euclid's `mod(_, p)` under a floor ≥ 1)".into(),
+             it descends from, the divisor a literal ≥ 2 or a variable guarded ≥ 2; or Euclid's \
+             `mod(_, p)` under a floor ≥ 1)".into(),
         );
     }
-    TerminationOutcome::Always
+    Ok(Some(
+        positions
+            .into_iter()
+            .map(|j| (j, descents.iter().map(|d| d[&j]).collect::<Vec<_>>()))
+            .collect(),
+    ))
 }
 
 #[cfg(test)]

@@ -107,6 +107,7 @@ fn check_post(
     result_expr: &J,
     body_opt: Option<&J>,
     solver: &str,
+    nat_positions: &std::collections::BTreeSet<usize>,
 ) -> RefinementOutcome {
     // Substitute the reserved `result` variable with the body's actual result term.
     let subst: BTreeMap<String, J> = [(RESULT_VAR.to_string(), result_expr.clone())].into_iter().collect();
@@ -122,7 +123,7 @@ fn check_post(
     // A nullary contract has no parameter to range over — a lone dummy makes it a well-formed `forall`.
     let vars: Vec<String> = if pnames.is_empty() { vec!["__dummy".into()] } else { pnames.to_vec() };
     let goal = json!({ "kind": "forall", "vars": vars, "body": body_pred });
-    decide(&goal, body_opt, solver)
+    decide(&goal, body_opt, solver, nat_positions)
 }
 
 /// Check every refinement of a record — the declared `pre`/`post` plus the type-implied `nat`. Returns one
@@ -185,6 +186,8 @@ pub fn check_refinements(sig_type: &J, refinements: &[J], body: &J, solver: &str
         }
     }
 
+    // The nat-typed parameter positions bound the numeric-induction rung's measure below.
+    let nat_positions = crate::terminate::nat_positions_of_type(sig_type);
     let mut reports: Vec<RefinementReport> = Vec::new();
     // Declared postconditions.
     for (i, post) in refinements
@@ -195,7 +198,7 @@ pub fn check_refinements(sig_type: &J, refinements: &[J], body: &J, solver: &str
     {
         reports.push(RefinementReport {
             label: format!("post[{i}]"),
-            outcome: check_post(&pnames, &pre, post, &result_expr, body_opt, solver),
+            outcome: check_post(&pnames, &pre, post, &result_expr, body_opt, solver, &nat_positions),
         });
     }
     // The type-implied `nat` refinement: result ≥ 0.
@@ -203,7 +206,7 @@ pub fn check_refinements(sig_type: &J, refinements: &[J], body: &J, solver: &str
         let post = app("ge", vec![var(RESULT_VAR), int_lit(0)]);
         reports.push(RefinementReport {
             label: "nat-result (≥ 0)".into(),
-            outcome: check_post(&pnames, &pre, &post, &result_expr, body_opt, solver),
+            outcome: check_post(&pnames, &pre, &post, &result_expr, body_opt, solver, &nat_positions),
         });
     }
     // `inv` refinements are declared but not yet checked — surface that honestly rather than ignore them.
@@ -251,7 +254,7 @@ pub fn check_nat_refinement(sig_type: &J, body: &J, solver: &str) -> RefinementO
 
 /// Discharge the obligation: first-order SMT, then a structural-induction fallback for recursive bodies
 /// (mirrors `prove`). A non-closing induction is UNVERIFIABLE, never a false SOUND.
-fn decide(goal: &J, body: Option<&J>, solver: &str) -> RefinementOutcome {
+fn decide(goal: &J, body: Option<&J>, solver: &str, nat_positions: &std::collections::BTreeSet<usize>) -> RefinementOutcome {
     match prove_property(goal, body, solver).0 {
         ProofOutcome::Proved => RefinementOutcome::Sound,
         ProofOutcome::Refuted(model) => RefinementOutcome::Violated(model),
@@ -264,7 +267,16 @@ fn decide(goal: &J, body: Option<&J>, solver: &str) -> RefinementOutcome {
                 InductionOutcome::Failed(model) => RefinementOutcome::Violated(model),
                 InductionOutcome::NoSolver => RefinementOutcome::NoSolver,
                 InductionOutcome::Unknown => RefinementOutcome::Unverifiable("induction did not close".into()),
-                InductionOutcome::Unsupported(why) => RefinementOutcome::Unverifiable(why),
+                // Neither list engine applies: a contract on a RECURSIVE function over the integers
+                // gets the numeric rung — strong induction over the body's own measure.
+                InductionOutcome::Unsupported(why) => {
+                    match crate::prove::prove_by_numeric_induction(goal, body, nat_positions, solver).0 {
+                        ProofOutcome::Proved => RefinementOutcome::Sound,
+                        ProofOutcome::Unknown => RefinementOutcome::Unverifiable("numeric induction did not close (the step needs a lemma, or the arithmetic is nonlinear)".into()),
+                        ProofOutcome::NoSolver => RefinementOutcome::NoSolver,
+                        _ => RefinementOutcome::Unverifiable(why),
+                    }
+                }
             }
         }
     }

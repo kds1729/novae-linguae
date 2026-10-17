@@ -28,7 +28,7 @@ pub use eval::{check_properties, evaluate_property, Verdict};
 pub mod proptest;
 
 pub mod prove;
-pub use prove::{build_certificate, prove_property, type_mentions_float, Certificate, ProofOutcome, Sort};
+pub use prove::{build_certificate, prove_by_numeric_induction, prove_property, type_mentions_float, Certificate, ProofOutcome, Sort};
 
 pub mod lemmas;
 pub mod explore;
@@ -56,16 +56,19 @@ pub mod refine;
 pub use refine::{check_nat_refinement, check_refinements, RefinementOutcome, RefinementReport};
 
 pub mod terminate;
-pub use terminate::{analyze_termination, analyze_termination_typed, nat_param_positions, TerminationOutcome};
+pub use terminate::{
+    analyze_termination, analyze_termination_linked, analyze_termination_typed, induction_measure, nat_param_positions,
+    CalleeTerminates, Measure, TerminationOutcome,
+};
 
 pub mod complexity;
 pub use complexity::{
-    analyze_complexity, analyze_output_size, parse_class, parse_output_size, Class, ComplexityOutcome,
+    analyze_complexity, analyze_complexity_linked, analyze_output_size, parse_class, parse_output_size, CalleeComplexity, Class, ComplexityOutcome,
     OutputSize,
 };
 
 pub mod certify;
-pub use certify::{certify_record, CertCheck, Certification};
+pub use certify::{certify_record, certify_record_linked, CertCheck, Certification, LinkedView};
 
 pub mod effects;
 pub use effects::{check_effects, infer_effects};

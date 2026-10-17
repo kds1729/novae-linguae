@@ -191,7 +191,17 @@ it, so the recursion is well-founded and halts (normally, or with an error at `n
 **sound and conservative**: a recursion whose argument is not a strict structural descent, `self`-calls
 descending on different parameters, or any **higher-order / opaque** application (`map`/`filter`/`fold`,
 applying a parameter or an `fn_ref`, whose callee's termination is unseen) is `Unknown` — never a false
-`always`, the same honesty stance `check-effects` takes for opaque callees. Verdicts: **SOUND** (declared
+`always`, the same honesty stance `check-effects` takes for opaque callees. **Numeric descents** (the
+integer-tier module, 2026-10-17) widen the structural rule: a `case` guard establishes a FLOOR for a
+parameter (`p > lit`, `p >= lit`, the mirrored `lit < p`, and the FALSE arms of `p < lit` / `p <= lit` —
+the natural base-case spelling; a `nat` under a non-zero guard has floor 1), and above a floor a
+self-call's argument descends when it is a guarded constant decrement `sub(p, c)`, a **halving**
+`div(p, c)` / `div(add(p, k), c)` with `(floor + k) div c < floor` (the gap grows with `p`, so checking
+at the floor suffices; a VARIABLE divisor counts when its own floor is ≥ 2), or **Euclid's step**
+`mod(_, p)` with floor ≥ 1 (the remainder is in `[0, p)`). **Composition by content address** is folded
+over a linked view (`--records`): a `fn_ref` callee whose OWN body provably terminates — re-derived,
+transitively, never read from its declaration — is one more terminating step rather than an opaque
+call (a cycle through addresses stays unresolved). Verdicts: **SOUND** (declared
 `always`, verified), **VERIFIED** (provably always but declared weaker, so the declaration could be
 strengthened), or **UNVERIFIABLE** (declared `always`, not provable by this structural analysis). There is
 no refutation path — structural analysis cannot disprove termination, only fail to prove it.
@@ -210,7 +220,12 @@ the branching factor (the number of `self`-calls on the worst-case execution pat
 exclusive, so `filter` stays `O(n)` rather than reading as exponential), `k` the descent, and `w` the per-step
 non-recursive work: one self-call with `O(1)` work → `O(n)`, one with `O(n)` work (an `append` of the
 recursive result — naive `reverse`) → `O(n²)`, two-or-more constant-descent calls → **exponential** (a sound
-upper bound: naive `fib`), and a **halving** descent (`div(p, c)`) → `O(log n)` / `O(n log n)`. Because a
+upper bound: naive `fib`), and a **halving** descent (`div(p, c)`, `div(add(p, k), c)`, a variable divisor
+guarded ≥ 2, or Euclid's `mod(_, p)` — Lamé's bound) → `O(log n)` / `O(n log n)`. Over a linked view
+(`--records`) a `fn_ref` callee's own inferred class is the cost of applying it, provided every argument's
+VALUE is size-bounded by the input (parameters, literals, and `add`/`sub`/`div`/`mod`/`length`/… over them —
+not a product of two inputs, not a recursive result: a callee's `O(m)` is re-expressible in our `n` only
+when `m = O(n)`). Because a
 declared `O(f)` is an *upper-bound* claim, the check compares the inferred sound bound `O(g)` to it: `g ≤ f`
 → **SOUND** (or **VERIFIED** when `g` is provably tighter, so the declaration could be strengthened); `g > f`
 or a **higher-order / opaque** body (`map`/`filter`/`fold`, applying a parameter or `fn_ref`) → **UNVERIFIABLE**;
@@ -288,9 +303,15 @@ inputs (default 100), runs the body, and reports per property:
 
 The sampler is a fixed-seeded xorshift PRNG — no clock, no OS randomness — so a run is deterministic
 (principle 5): the same record and `N` give the same verdict and the same counterexample, and a
-REFUTED is replayable. Generation ranges over the inferred *type*, ignoring refinements and
+REFUTED is replayable. Generation ranges over the inferred *type* — including the signature's **`nat`**:
+a variable fed to a `nat`-typed parameter of `self` ranges over nats (exhaustive 0..8, sampled 0..64),
+because sampling negatives into a nat parameter manufactures counterexamples outside the function's
+domain (measured 2026-10-17: Euclid is not symmetric on negative ints) — ignoring refinements and
 preconditions; an input the body rejects at runtime is a **skipped** case, never a counterexample, so
-a partial function's domain gaps don't manufacture false refutations. A CONSISTENT/UNVERIFIABLE law
+a partial function's domain gaps don't manufacture false refutations. **`--wide`** replaces the small
+bounded domain with sampling ACROSS MAGNITUDES (log-uniform to 2^60, nats non-negative): number
+theory's cases live far above −4..4, and a law that HELD over 200 wide samples is evidence the small
+domain cannot give — still sampling, never a proof. A CONSISTENT/UNVERIFIABLE law
 that quantifies only over first-order data (e.g. `map`'s `forall xs. eq(map(id, xs), xs)`, which the
 example path cannot reach because the worked examples bind `xs` to the wrong shape) becomes a real
 HELD over hundreds of generated inputs (or EXHAUSTIVE when its domain is small). For a large domain
@@ -450,6 +471,31 @@ re-checking.
 
 `map`/`filter` exploration (the SMT backend models their function argument as an uninterpreted symbol
 and rarely discharges such laws even when handed the lemma) remains future work.
+
+## Numeric induction (recursive functions over the integers)
+
+A law about a function that recurses on an INTEGER — `gcd`, `isqrt`, `mod_pow`, a `nat`-result
+contract on Euclid (the integer-tier module, 2026-10-17) — is outside both rungs above: no
+`define-fun` may be recursive, and the structural backend inducts over lists. `prove` and
+`check-refinement` then try **strong induction over the body's own well-founded measure** — the
+argument position every self-call shrinks, with its floor, exactly as the termination checker
+identifies it (`terminate::induction_measure`). The encoding supplies everything the solver would
+otherwise have to invent: `self` is an **uninterpreted** function (never a recursive definition z3
+must unfold on its own); the induction hypothesis is the law itself, quantified over primed copies
+of the law's variables and restricted to measures in `[floor, m)`; the defining equation is
+**instantiated explicitly** at every `self` application the law makes and once more at every recursive
+call inside those (two levels), as `(self t…) = body[params := t…]` with the body's own `self` calls
+left uninterpreted; then the negated law is checked. **UNSAT ⇒ PROVED by numeric induction on `m`.**
+SAT is **not** a refutation — away from the instantiated points the uninterpreted `self` is
+under-constrained, so a model may be spurious — and is reported UNKNOWN; neither direction can
+mis-verdict. A law whose `self` applications all put a LITERAL at the measure position (`count(0) = 0`)
+needs no hypothesis: the instantiated equation alone decides it (unfolding). Out of scope, stated:
+a law applying `self` at two different measures (commutativity's shape needs a lexicographic or sum
+measure this rung lacks), structural list recursion (the backend above), tuples/lists/`fn_ref`s in
+the body (out of the fragment). Measured on the integer-tier records: `count(n) = n`, `2·Σn = n(n+1)`,
+`isqrt`'s floor bound and `0 ≤ mod_pow < m` prove; `gcd ≥ 0`, `isqrt ≥ 0`, `next_pow2 ≥ n` prove;
+the binomial's non-negativity and the digit-sum bound do not close (nonlinear steps); the false laws
+tried stay UNKNOWN.
 
 ## Semantic equivalence
 

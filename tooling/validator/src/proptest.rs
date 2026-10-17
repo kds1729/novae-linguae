@@ -83,14 +83,33 @@ impl Rng {
 /// length-in-scalars semantics is exercised). Deterministic like everything else here.
 const STR_ALPHABET: &[char] = &['a', 'b', ',', ' ', 'x', '7', 'é'];
 
-fn gen_value(kind: &GenKind, rng: &mut Rng) -> Val {
+/// A magnitude-spread integer for the WIDE mode: log-uniform over 1..2^60 (so a law meets every scale
+/// up to the evaluator's exact range, not just the small numbers), with a zero or a small value one
+/// time in eight. Signed for ints, non-negative for nats.
+fn wide_magnitude(rng: &mut Rng, signed: bool) -> i128 {
+    let v = if rng.int_in(0, 7) == 0 {
+        rng.int_in(0, 4)
+    } else {
+        let e = rng.int_in(0, 59) as u32;
+        rng.int_in(1i128 << e, (1i128 << (e + 1)) - 1)
+    };
+    if signed && rng.bool() {
+        -v
+    } else {
+        v
+    }
+}
+
+fn gen_value(kind: &GenKind, rng: &mut Rng, wide: bool) -> Val {
     match kind {
+        GenKind::Int if wide => Val::Int(wide_magnitude(rng, true)),
+        GenKind::Nat if wide => Val::Int(wide_magnitude(rng, false)),
         GenKind::Int => Val::Int(rng.int_in(-32, 32)),
         GenKind::Nat => Val::Int(rng.int_in(0, 64)),
         GenKind::Bool => Val::Bool(rng.bool()),
         GenKind::List(elem) => {
             let n = rng.int_in(0, 6) as usize;
-            Val::List((0..n).map(|_| gen_value(elem, rng)).collect())
+            Val::List((0..n).map(|_| gen_value(elem, rng, wide)).collect())
         }
         GenKind::Str => {
             let n = rng.int_in(0, 6) as usize;
@@ -368,6 +387,20 @@ pub fn generative_check(
     cases: usize,
     seed: u64,
 ) -> GenOutcome {
+    generative_check_mode(expr, self_fn, self_nat_positions, cases, seed, false)
+}
+
+/// [`generative_check`] with the WIDE option: skip the bounded exhaustive domain and SAMPLE
+/// integers across magnitudes (log-uniform to 2^60) — number theory's cases live far above −4..4,
+/// and a law that holds there is evidence the small domain cannot give (still not a proof).
+pub fn generative_check_mode(
+    expr: &J,
+    self_fn: &Option<Val>,
+    self_nat_positions: &BTreeSet<usize>,
+    cases: usize,
+    seed: u64,
+    wide: bool,
+) -> GenOutcome {
     // Only a `forall` gives a domain to range over.
     if expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
         return GenOutcome::Ungeneratable("not a forall — no domain to sample");
@@ -387,7 +420,7 @@ pub fn generative_check(
     };
 
     // Prefer EXHAUSTIVE checking when the bounded domain fits the budget — a proof over that domain.
-    if let Some(domain) = enumerate_domain(&names, &kinds, EXHAUSTIVE_BUDGET) {
+    if let Some(domain) = (!wide).then(|| enumerate_domain(&names, &kinds, EXHAUSTIVE_BUDGET)).flatten() {
         let mut decided = 0usize;
         for binding in domain {
             match eval_predicate_env(body, &binding, self_fn) {
@@ -411,7 +444,7 @@ pub fn generative_check(
     let mut decided = 0usize;
     for _ in 0..cases {
         let binding: BTreeMap<String, Val> =
-            names.iter().map(|n| (n.clone(), gen_value(&kinds[n], &mut rng))).collect();
+            names.iter().map(|n| (n.clone(), gen_value(&kinds[n], &mut rng, wide))).collect();
         match eval_predicate_env(body, &binding, self_fn) {
             Some(Val::Bool(true)) => decided += 1,
             Some(Val::Bool(false)) => {

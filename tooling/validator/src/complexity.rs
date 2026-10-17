@@ -44,6 +44,7 @@
 //! approximated in that one `n`.
 
 use serde_json::Value as J;
+use std::collections::BTreeSet;
 
 /// A complexity class `O(n^deg · (log n)^logs)`, or `exp` for any exponential (`O(2ⁿ)` and above). Covers the
 /// schema's `time` classes and the shapes the recurrence analysis produces.
@@ -301,11 +302,64 @@ fn arg_descent(arg: &J) -> Option<(String, Descent)> {
     tail_descent(arg).or_else(|| numeric_descent(arg))
 }
 
-/// The first opaque (higher-order / unrecognized-application) reason in `node`, if any. A `self`-call and a
-/// recognized first-order builtin application are fine; anything else applied is opaque.
-fn find_opaque(node: &J) -> Option<String> {
+/// A linked view of other records, for folding a `fn_ref` callee's cost: the callee's own inferred
+/// class (analyzed, never read from its declaration), or `None` when unresolvable.
+pub type CalleeComplexity<'a> = &'a dyn Fn(&str) -> Option<Class>;
+
+/// Ops whose RESULT is no larger than the sum of their inputs' sizes (values linear in the input): a
+/// callee applied to such arguments runs in its class measured in OUR `n`. `mul` is admitted only
+/// with a literal operand (a product of two inputs is quadratic in value — `self(n·n)` would make a
+/// callee's `O(m)` an `O(n²)`).
+const SIZE_BOUNDED_OPS: &[&str] = &[
+    "add", "sub", "neg", "abs", "min", "max", "mod", "div", "length", "head", "tail", "cons", "append",
+    "reverse", "concat", "init", "last", "fst", "snd", "null", "eq", "neq", "lt", "le", "gt", "ge", "and",
+    "or", "not", "to_float", "str_concat", "str_length",
+];
+
+/// Is `arg`'s VALUE bounded by the input size — a parameter (or a `let` name bound to such a value), a
+/// literal, a tuple of such, or a size-bounded op over such? A recursive result or a pattern-bound
+/// name is not (nothing bounds `self(…)`'s magnitude, and a tuple component came from a callee).
+fn size_bounded(arg: &J, bound: &BTreeSet<String>) -> bool {
+    match arg.get("kind").and_then(|k| k.as_str()) {
+        Some("var") => arg.get("name").and_then(|n| n.as_str()).is_some_and(|n| bound.contains(n) || n == "nil"),
+        Some("lit") => true,
+        Some("tuple") => arg.get("elems").and_then(|e| e.as_array()).is_some_and(|es| es.iter().all(|e| size_bounded(e, bound))),
+        Some("app") if self_call_args(arg).is_some() => false,
+        Some("app") => match app_spine(arg) {
+            Some((op, args)) if op == "mul" && args.len() == 2 => {
+                let lit = |n: &J| n.get("kind").and_then(|k| k.as_str()) == Some("lit");
+                (lit(&args[0]) || lit(&args[1])) && args.iter().all(|a| size_bounded(a, bound))
+            }
+            Some((op, args)) => SIZE_BOUNDED_OPS.contains(&op.as_str()) && args.iter().all(|a| size_bounded(a, bound)),
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+/// The first opaque (higher-order / unrecognized-application) reason in `node`, if any. A `self`-call,
+/// a recognized first-order builtin application, and — over a linked view — a `fn_ref` callee with an
+/// inferred class applied to size-bounded arguments are fine; anything else applied is opaque.
+fn find_opaque(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeSet<String>) -> Option<String> {
     if self_call_args(node).is_some() {
         // still descend into the call's arguments below
+    } else if let Some((target, cargs)) = crate::terminate::fn_ref_spine(node) {
+        match callee.and_then(|f| f(&target)) {
+            Some(_) => {
+                if let Some(a) = cargs.iter().find(|a| !size_bounded(a, bound)) {
+                    return Some(format!(
+                        "applies `{target}` to an argument whose size is not bounded by the input ({}) — its class cannot be re-expressed in n",
+                        a.get("kind").and_then(|k| k.as_str()).unwrap_or("?")
+                    ));
+                }
+                return cargs.iter().find_map(|a| find_opaque(a, callee, bound));
+            }
+            None => {
+                return Some(format!(
+                    "applies the fn_ref `{target}` (its cost is unresolved here — pass --records to fold the callee's class)"
+                ))
+            }
+        }
     } else if node.get("kind").and_then(|k| k.as_str()) == Some("app") {
         let op = app_spine(node).map(|(h, _)| h);
         let known = op
@@ -319,34 +373,70 @@ fn find_opaque(node: &J) -> Option<String> {
             ));
         }
     }
+    if node.get("kind").and_then(|k| k.as_str()) == Some("let") {
+        // A `let` name bound to a size-bounded value is itself size-bounded for the body.
+        if let Some(why) = node.get("value").and_then(|v| find_opaque(v, callee, bound)) {
+            return Some(why);
+        }
+        let mut inner = bound.clone();
+        if let (Some(n), Some(v)) = (node.get("name").and_then(|n| n.as_str()), node.get("value")) {
+            if size_bounded(v, bound) {
+                inner.insert(n.to_string());
+            } else {
+                inner.remove(n);
+            }
+        }
+        return node.get("body").and_then(|b| find_opaque(b, callee, &inner));
+    }
     match node {
         J::Object(m) => {
             for (k, v) in m {
                 if k == "pattern" {
                     continue;
                 }
-                if let Some(why) = find_opaque(v) {
+                if let Some(why) = find_opaque(v, callee, bound) {
                     return Some(why);
                 }
             }
             None
         }
-        J::Array(items) => items.iter().find_map(find_opaque),
+        J::Array(items) => items.iter().find_map(|v| find_opaque(v, callee, bound)),
         _ => None,
     }
 }
 
 /// Collect every `self`-call's descent (of its descending argument). A `None` entry marks a self-call whose
 /// arguments contain no recognized descent — the recursion is not provably well-founded.
-fn collect_self_descents(node: &J, out: &mut Vec<Option<(String, Descent)>>) {
+fn collect_self_descents(node: &J, facts: &[crate::terminate::Guard], out: &mut Vec<Vec<(String, Descent)>>) {
     if let Some(sargs) = self_call_args(node) {
-        // The descending argument is whichever one strictly decreases a parameter (append-style spectators
-        // don't, so the first descending arg is the recursion position).
-        out.push(sargs.iter().find_map(arg_descent));
+        // EVERY argument that strictly decreases a parameter (append-style spectators don't); the caller
+        // intersects across self-calls to find the one measure — a call may shrink two parameters
+        // (`pad_to`: the list AND the count) while another shrinks only the count. A `div(p, q)` by a
+        // VARIABLE divisor halves only under a guard that floors `q` at 2 — the facts in force decide.
+        out.push(sargs.iter().filter_map(|a| arg_descent(a).or_else(|| variable_divisor_descent(a, facts))).collect());
         for a in &sargs {
-            collect_self_descents(a, out);
+            collect_self_descents(a, facts, out);
         }
         return;
+    }
+    if node.get("kind").and_then(|k| k.as_str()) == Some("case") {
+        if let Some(s) = node.get("scrutinee") {
+            collect_self_descents(s, facts, out);
+            let (tf, ff) = crate::terminate::arm_facts(s);
+            for arm in node.get("arms").and_then(|a| a.as_array()).cloned().unwrap_or_default() {
+                let pat = arm.pointer("/pattern/value/value").and_then(|v| v.as_bool());
+                let mut inner: Vec<crate::terminate::Guard> = facts.to_vec();
+                match pat {
+                    Some(true) => inner.extend(tf.iter().cloned()),
+                    Some(false) => inner.extend(ff.iter().cloned()),
+                    None => {}
+                }
+                if let Some(b) = arm.get("body") {
+                    collect_self_descents(b, &inner, out);
+                }
+            }
+            return;
+        }
     }
     match node {
         J::Object(m) => {
@@ -354,11 +444,23 @@ fn collect_self_descents(node: &J, out: &mut Vec<Option<(String, Descent)>>) {
                 if k == "pattern" {
                     continue;
                 }
-                collect_self_descents(v, out);
+                collect_self_descents(v, facts, out);
             }
         }
-        J::Array(items) => items.iter().for_each(|v| collect_self_descents(v, out)),
+        J::Array(items) => items.iter().for_each(|v| collect_self_descents(v, facts, out)),
         _ => {}
+    }
+}
+
+/// `div(var p, var q)` (or `div(add(p, k), q)`) with a dominating guard `q ≥ 2`: a halving descent of `p`.
+fn variable_divisor_descent(arg: &J, facts: &[crate::terminate::Guard]) -> Option<(String, Descent)> {
+    let (p, _, d) = crate::terminate::div_descent(arg)?;
+    match d {
+        crate::terminate::Divisor::Var(q) => facts
+            .iter()
+            .any(|g| matches!(g, crate::terminate::Guard::LowerBound(v, f) if *v == q && *f >= 2))
+            .then_some((p, Descent::Halving)),
+        crate::terminate::Divisor::Lit(_) => None, // literal divisors are `numeric_descent`'s
     }
 }
 
@@ -388,16 +490,22 @@ fn path_self_count(node: &J) -> u32 {
 /// linear list op (`length`/`append`/`reverse`), else `O(1)`. `self`-calls are `O(1)` placeholders (their
 /// cost is the recurrence's `T(·)` term), but their arguments are still evaluated. `case` arms are
 /// mutually exclusive (max over arms).
-fn path_work(node: &J) -> Class {
+fn path_work(node: &J, callee: Option<CalleeComplexity<'_>>) -> Class {
     if let Some(sargs) = self_call_args(node) {
-        return sargs.iter().map(path_work).max().unwrap_or(Class::CONST);
+        return sargs.iter().map(|a| path_work(a, callee)).max().unwrap_or(Class::CONST);
+    }
+    // Composition by content address: the callee's own class (in our n — `find_opaque` has already
+    // required size-bounded arguments) is this step's work, beside the work of building the arguments.
+    if let Some((target, cargs)) = crate::terminate::fn_ref_spine(node) {
+        let own = callee.and_then(|f| f(&target)).unwrap_or(Class::CONST);
+        return cargs.iter().map(|a| path_work(a, callee)).fold(own, Class::max);
     }
     if node.get("kind").and_then(|k| k.as_str()) == Some("case") {
-        let scrut = node.get("scrutinee").map(path_work).unwrap_or(Class::CONST);
+        let scrut = node.get("scrutinee").map(|s| path_work(s, callee)).unwrap_or(Class::CONST);
         let arms = node
             .get("arms")
             .and_then(|a| a.as_array())
-            .map(|a| a.iter().map(|arm| arm.get("body").map(path_work).unwrap_or(Class::CONST)).max().unwrap_or(Class::CONST))
+            .map(|a| a.iter().map(|arm| arm.get("body").map(|b| path_work(b, callee)).unwrap_or(Class::CONST)).max().unwrap_or(Class::CONST))
             .unwrap_or(Class::CONST);
         return scrut.max(arms);
     }
@@ -408,8 +516,8 @@ fn path_work(node: &J) -> Class {
         }
     }
     match node {
-        J::Object(m) => m.iter().filter(|(k, _)| *k != "pattern").map(|(_, v)| path_work(v)).max().unwrap_or(Class::CONST),
-        J::Array(items) => items.iter().map(path_work).max().unwrap_or(Class::CONST),
+        J::Object(m) => m.iter().filter(|(k, _)| *k != "pattern").map(|(_, v)| path_work(v, callee)).max().unwrap_or(Class::CONST),
+        J::Array(items) => items.iter().map(|v| path_work(v, callee)).max().unwrap_or(Class::CONST),
         _ => Class::CONST,
     }
 }
@@ -437,56 +545,47 @@ fn combine(kind: Descent, branch: u32, work: Class) -> Option<Class> {
 /// Infer a sound upper bound on the body's running time as a complexity [`Class`], or report why it is
 /// outside the analyzable fragment. Sound and conservative — see the module docs.
 pub fn analyze_complexity(body: &J) -> ComplexityOutcome {
+    analyze_complexity_linked(body, None)
+}
+
+/// [`analyze_complexity`] over a LINKED view: `callee` answers a `fn_ref` target's own inferred class
+/// (analyzed, never declared), so composition by content address is a step of that cost — provided the
+/// callee's arguments are size-bounded by our input (else the class cannot be re-expressed in `n`).
+pub fn analyze_complexity_linked(body: &J, callee: Option<CalleeComplexity<'_>>) -> ComplexityOutcome {
     let Some(params) = lambda_params(body) else {
         return ComplexityOutcome::Opaque("body is not a `lambda`".into());
     };
     let Some(inner) = body.get("body") else {
         return ComplexityOutcome::Opaque("lambda has no body".into());
     };
-    if let Some(why) = find_opaque(inner) {
+    let bound: BTreeSet<String> = params.iter().cloned().collect();
+    if let Some(why) = find_opaque(inner, callee, &bound) {
         return ComplexityOutcome::Opaque(why);
     }
 
-    let mut descents: Vec<Option<(String, Descent)>> = Vec::new();
-    collect_self_descents(inner, &mut descents);
+    let mut descents: Vec<Vec<(String, Descent)>> = Vec::new();
+    collect_self_descents(inner, &[], &mut descents);
 
     if descents.is_empty() {
         // Non-recursive over the first-order fragment: constant number of ops on O(n)-bounded data.
-        return ComplexityOutcome::Bound(path_work(inner));
+        return ComplexityOutcome::Bound(path_work(inner, callee));
     }
 
     // Every self-call must descend on ONE fixed parameter; the kind is Constant unless every descent halves.
-    let mut on: Option<String> = None;
-    let mut any_constant = false;
-    let mut any_halving = false;
-    for d in &descents {
-        match d {
-            Some((p, kind)) if params.contains(p) => {
-                match &on {
-                    None => on = Some(p.clone()),
-                    Some(prev) if prev == p => {}
-                    Some(_) => {
-                        return ComplexityOutcome::Opaque(
-                            "self-calls descend on different parameters (no single measure)".into(),
-                        )
-                    }
-                }
-                match kind {
-                    Descent::Constant => any_constant = true,
-                    Descent::Halving => any_halving = true,
-                }
-            }
-            _ => {
-                return ComplexityOutcome::Opaque(
-                    "a self-call's recursion argument is not a recognized structural/numeric descent".into(),
-                )
-            }
-        }
+    if descents.iter().any(|d| d.iter().all(|(p, _)| !params.contains(p))) {
+        return ComplexityOutcome::Opaque(
+            "a self-call's recursion argument is not a recognized structural/numeric descent".into(),
+        );
     }
+    let Some((_, kinds)) = choose_measure(&descents, &params) else {
+        return ComplexityOutcome::Opaque("self-calls descend on different parameters (no single measure)".into());
+    };
+    let any_constant = kinds.iter().any(|k| *k == Descent::Constant);
+    let any_halving = kinds.iter().any(|k| *k == Descent::Halving);
     // Mixed constant+halving descents on the same parameter: the constant step drives the depth (Θ(n)).
     let kind = if any_constant || !any_halving { Descent::Constant } else { Descent::Halving };
     let branch = path_self_count(inner).max(1);
-    let work = path_work(inner);
+    let work = path_work(inner, callee);
     match combine(kind, branch, work) {
         Some(c) => ComplexityOutcome::Bound(c),
         None => ComplexityOutcome::Opaque(
@@ -616,28 +715,32 @@ fn list_size_degree(node: &J) -> u32 {
 /// Whether every `self`-call in `inner` descends `tail^k`/`sub(p,c)` (a **constant** step) on ONE fixed
 /// parameter — the shape for which the output-size recurrence `S(n) = S(n−1) + chunk(n)` holds. A halving
 /// descent or a mixed/non-descending recursion returns `false` (the caller then reports `Unknown`).
-fn single_param_constant_recursion(descents: &[Option<(String, Descent)>], params: &[String]) -> bool {
-    let mut on: Option<&str> = None;
-    for d in descents {
-        match d {
-            Some((p, Descent::Constant)) if params.contains(p) => match on {
-                None => on = Some(p),
-                Some(prev) if prev == p => {}
-                Some(_) => return false,
-            },
-            _ => return false,
-        }
+fn single_param_constant_recursion(descents: &[Vec<(String, Descent)>], params: &[String]) -> bool {
+    matches!(choose_measure(descents, params), Some((_, kinds)) if kinds.iter().all(|k| *k == Descent::Constant))
+}
+
+/// The one parameter EVERY self-call descends (the first such in parameter order), with the descent kind
+/// each call establishes for it. `None` when no parameter is common to all calls.
+fn choose_measure(descents: &[Vec<(String, Descent)>], params: &[String]) -> Option<(String, Vec<Descent>)> {
+    if descents.is_empty() {
+        return None;
     }
-    true
+    params.iter().find_map(|p| {
+        let kinds: Option<Vec<Descent>> = descents
+            .iter()
+            .map(|d| d.iter().find(|(q, _)| q == p).map(|(_, k)| *k))
+            .collect();
+        kinds.map(|ks| (p.clone(), ks))
+    })
 }
 
 /// Infer a sound upper bound on the size of a **list-returning** body's result.
 fn list_output_size(params: &[String], inner: &J) -> OutputSize {
-    if find_opaque(inner).is_some() {
+    if find_opaque(inner, None, &params.iter().cloned().collect()).is_some() {
         return OutputSize::Unknown; // a map/filter/fold/opaque build — can't see the result's size
     }
-    let mut descents: Vec<Option<(String, Descent)>> = Vec::new();
-    collect_self_descents(inner, &mut descents);
+    let mut descents: Vec<Vec<(String, Descent)>> = Vec::new();
+    collect_self_descents(inner, &[], &mut descents);
     if descents.is_empty() {
         // Non-recursive list expression: at most Θ(n) (Const for nil/literal).
         return OutputSize::from_degree(list_size_degree(inner));

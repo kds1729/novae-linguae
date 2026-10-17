@@ -182,6 +182,11 @@ enum Commands {
         /// `run --records` executes it (a checker record over a vocabulary, say).
         #[arg(long = "records")]
         records: Option<PathBuf>,
+        /// With --generate: sample integers ACROSS MAGNITUDES (log-uniform to 2^60, nats non-negative)
+        /// instead of enumerating the small bounded domain — the evidence a number-theoretic law
+        /// needs (its cases live far above −4..4). Still sampling, never a proof.
+        #[arg(long)]
+        wide: bool,
     },
     /// Evaluate a Nova Lingua body-expression AST and apply it to zero or more
     /// argument values, printing the resulting value AST. This *executes* the
@@ -366,6 +371,10 @@ enum Commands {
         /// Path to the body-expression JSON AST.
         #[arg(long)]
         body: PathBuf,
+        /// Directory of records/bodies: a `fn_ref` callee whose OWN body provably terminates (re-derived
+        /// here, never read from its declaration) folds in as a terminating step instead of an opaque call.
+        #[arg(long)]
+        records: Option<PathBuf>,
     },
     /// Verify a record's declared `signature.complexity` (an `O(…)` upper bound) by **structural** cost
     /// analysis (no solver): it infers a sound upper-bound class from the body — non-recursive first-order
@@ -383,6 +392,10 @@ enum Commands {
         /// Path to the body-expression JSON AST.
         #[arg(long)]
         body: PathBuf,
+        /// Directory of records/bodies: a `fn_ref` callee's own inferred class (re-derived here) is the
+        /// cost of applying it, when its arguments are size-bounded by the input.
+        #[arg(long)]
+        records: Option<PathBuf>,
     },
     /// **Certify** a function record end to end: run every "verified by default" check against the body in
     /// one pass — `typecheck` (type), `check-effects` (effects ⊆ declared), `check-refinement` (the type
@@ -1009,8 +1022,8 @@ fn real_main() -> ExitCode {
         Commands::CheckPredicate { record } => (cmd_check_predicate(&record), true),
         Commands::CheckValue { record } => (cmd_check_value(&record), true),
         Commands::CheckBody { record } => (cmd_check_body(&record), true),
-        Commands::CheckProperties { record, body, generate, cases, records } => {
-            (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases), records.as_ref()), true)
+        Commands::CheckProperties { record, body, generate, cases, records, wide } => {
+            (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases), records.as_ref(), wide), true)
         }
         Commands::Eval { body, args, grants, secrets, oauth, redact, replay, trace_out, records } => {
             match parse_secrets(&secrets).and_then(|s| Ok((s, parse_oauth(&oauth)?, parse_redactions(&redact)?))) {
@@ -1040,8 +1053,8 @@ fn real_main() -> ExitCode {
         Commands::CheckPlan { plan, records, node, probe, grants, secrets } => {
             (cmd_check_plan(&plan, records.as_deref(), node.as_deref(), &probe, &grants, &secrets), false)
         }
-        Commands::CheckTermination { record, body } => (cmd_check_termination(&record, &body), false),
-        Commands::CheckComplexity { record, body } => (cmd_check_complexity(&record, &body), false),
+        Commands::CheckTermination { record, body, records } => (cmd_check_termination(&record, &body, records.as_ref()), false),
+        Commands::CheckComplexity { record, body, records } => (cmd_check_complexity(&record, &body, records.as_ref()), false),
         Commands::Certify { record, body, records, solver, json, sign, timestamp } => {
             (cmd_certify(&record, &body, records.as_ref(), &solver, json, sign.as_deref(), timestamp.as_deref()), false)
         }
@@ -1296,6 +1309,7 @@ fn cmd_check_properties(
     body: Option<&PathBuf>,
     generate: Option<usize>,
     records: Option<&PathBuf>,
+    wide: bool,
 ) -> Result<()> {
     let value = nl_validator::read_json(record)?;
     let body = body.map(|p| nl_validator::read_json(p)).transpose()?;
@@ -1303,7 +1317,7 @@ fn cmd_check_properties(
         // Link: the body (and the laws) may apply commons functions by `fn_ref`.
         nl_validator::set_resolver(nl_validator::build_link_map(dir)?);
     }
-    let r = nl_validator::check_properties(&value, body.as_ref(), generate);
+    let r = nl_validator::check_properties(&value, body.as_ref(), generate, wide);
     nl_validator::clear_resolver();
     r
 }
@@ -1487,12 +1501,24 @@ fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str) -> Resul
     Ok(())
 }
 
-fn cmd_check_termination(record: &PathBuf, body: &PathBuf) -> Result<()> {
+/// The linked view behind `--records` for the standalone termination/complexity commands.
+fn linked_maps(records: Option<&PathBuf>) -> Result<Option<(std::collections::HashMap<String, serde_json::Value>, std::collections::HashMap<String, serde_json::Value>)>> {
+    match records {
+        Some(dir) => Ok(Some((nl_validator::build_record_map(dir)?, nl_validator::build_link_map(dir)?))),
+        None => Ok(None),
+    }
+}
+
+fn cmd_check_termination(record: &PathBuf, body: &PathBuf, records: Option<&PathBuf>) -> Result<()> {
     use nl_validator::TerminationOutcome;
     let record = nl_validator::read_json(record)?;
     let body = nl_validator::read_json(body)?;
     let declared = record.pointer("/signature/terminates").and_then(|v| v.as_str()).unwrap_or("unknown");
-    match nl_validator::analyze_termination_typed(&body, &nl_validator::nat_param_positions(&record)) {
+    let maps = linked_maps(records)?;
+    let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b));
+    let lookup = |t: &str| view.as_ref().and_then(|v| v.terminates(t));
+    let cb: Option<nl_validator::CalleeTerminates<'_>> = view.as_ref().map(|_| &lookup as nl_validator::CalleeTerminates<'_>);
+    match nl_validator::analyze_termination_linked(&body, &nl_validator::nat_param_positions(&record), cb) {
         TerminationOutcome::Always => match declared {
             "always" => println!("SOUND        the body provably always terminates (matches declared `always`)"),
             other => {
@@ -1507,10 +1533,14 @@ fn cmd_check_termination(record: &PathBuf, body: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn cmd_check_complexity(record: &PathBuf, body: &PathBuf) -> Result<()> {
+fn cmd_check_complexity(record: &PathBuf, body: &PathBuf, records: Option<&PathBuf>) -> Result<()> {
     let record = nl_validator::read_json(record)?;
     let body = nl_validator::read_json(body)?;
-    let inferred = nl_validator::analyze_complexity(&body);
+    let maps = linked_maps(records)?;
+    let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b));
+    let lookup = |t: &str| view.as_ref().and_then(|v| v.complexity(t));
+    let cb: Option<nl_validator::CalleeComplexity<'_>> = view.as_ref().map(|_| &lookup as nl_validator::CalleeComplexity<'_>);
+    let inferred = nl_validator::analyze_complexity_linked(&body, cb);
 
     // (1) The flat `signature.complexity` bound.
     let declared = record.pointer("/signature/complexity").and_then(|v| v.as_str());
@@ -1589,11 +1619,11 @@ fn cmd_certify(
 ) -> Result<()> {
     let record = nl_validator::read_json(record)?;
     let body = nl_validator::read_json(body)?;
-    let record_map = match records {
-        Some(dir) => nl_validator::build_record_map(dir)?,
-        None => std::collections::HashMap::new(),
+    let (record_map, link_map) = match records {
+        Some(dir) => (nl_validator::build_record_map(dir)?, Some(nl_validator::build_link_map(dir)?)),
+        None => (std::collections::HashMap::new(), None),
     };
-    let cert = nl_validator::certify_record(&record, &body, &record_map, solver);
+    let cert = nl_validator::certify_record_linked(&record, &body, &record_map, link_map.as_ref(), solver);
     let certified = cert.certified;
 
     // The certification artifact — the same object whether printed as JSON or signed into a commons record.
@@ -1839,11 +1869,43 @@ fn cmd_prove(
                     no_solver = true;
                     format!("NO-SOLVER    `{solver}` not found; obligations emitted, re-check elsewhere")
                 }
-                // Neither engine applies — report the first-order reason (the more general one).
-                InductionOutcome::Unsupported(_) => match &outcome {
-                    ProofOutcome::Unsupported(why) => format!("UNSUPPORTED  {why}"),
-                    _ => "UNSUPPORTED".to_string(),
-                },
+                // Neither list engine applies: a law about a RECURSIVE function over the integers
+                // gets the numeric rung — strong induction over the body's own measure.
+                InductionOutcome::Unsupported(_) => {
+                    let nats = nl_validator::nat_param_positions(&value);
+                    let (nout, ncert, measure) =
+                        nl_validator::prove_by_numeric_induction(expr, body_ast.as_ref(), &nats, solver);
+                    if let Some(c) = &ncert {
+                        write_cert(".induction", &c.smt)?;
+                    }
+                    match nout {
+                        ProofOutcome::Proved => format!(
+                            "PROVED       by numeric induction on `{}` (strong induction over the measure; unsat)",
+                            measure.as_deref().unwrap_or("?")
+                        ),
+                        ProofOutcome::Unknown => format!(
+                            "UNKNOWN      numeric induction on `{}` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
+                            measure.as_deref().unwrap_or("?")
+                        ),
+                        ProofOutcome::NoSolver => {
+                            no_solver = true;
+                            format!("NO-SOLVER    `{solver}` not found; induction obligation emitted, re-check elsewhere")
+                        }
+                        // No engine applies: for a recursive body the numeric rung's reason is the
+                        // specific one; otherwise the first-order reason (the more general one).
+                        ProofOutcome::Unsupported(why_n) => match &outcome {
+                            ProofOutcome::Unsupported(why) if why.contains("body is recursive") => {
+                                format!("UNSUPPORTED  recursive body — numeric induction: {why_n}")
+                            }
+                            ProofOutcome::Unsupported(why) => format!("UNSUPPORTED  {why}"),
+                            _ => "UNSUPPORTED".to_string(),
+                        },
+                        _ => match &outcome {
+                            ProofOutcome::Unsupported(why) => format!("UNSUPPORTED  {why}"),
+                            _ => "UNSUPPORTED".to_string(),
+                        },
+                    }
+                }
             }
         } else {
             match &outcome {

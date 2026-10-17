@@ -20,7 +20,7 @@ use serde_json::Value as J;
 use std::collections::HashMap;
 
 use crate::{
-    analyze_complexity, analyze_output_size, check_refinements, infer_effects,
+    analyze_output_size, check_refinements, infer_effects,
     parse_class, parse_output_size, typecheck_record, ComplexityOutcome, OutputSize, RefinementOutcome,
     TerminationOutcome,
 };
@@ -93,6 +93,103 @@ fn v02_validator() -> Option<&'static jsonschema::Validator> {
 /// Run every "verified by default" check against `record` + `body`, resolving `fn_ref` effect callees
 /// against `records`. See the module docs for the certification rule.
 pub fn certify_record(record: &J, body: &J, records: &HashMap<String, J>, solver: &str) -> Certification {
+    certify_record_linked(record, body, records, None, solver)
+}
+
+/// A LINKED view over a records directory for folding `fn_ref` callees into the termination and
+/// complexity checks: `records` maps `fn_…` → function record, `bodies` maps `fn_…`/`expr_…` → body
+/// (what [`crate::build_link_map`] builds). A callee's verdict is RE-DERIVED from its own body (its
+/// declaration is never read as a fact), transitively, memoized, with a cycle guard (a cycle is
+/// unresolvable — mutual recursion through addresses has no single measure here).
+pub struct LinkedView<'a> {
+    records: &'a HashMap<String, J>,
+    bodies: &'a HashMap<String, J>,
+    term: std::cell::RefCell<HashMap<String, Option<bool>>>,
+    cx: std::cell::RefCell<HashMap<String, Option<crate::Class>>>,
+    in_progress: std::cell::RefCell<std::collections::HashSet<String>>,
+}
+
+impl<'a> LinkedView<'a> {
+    pub fn new(records: &'a HashMap<String, J>, bodies: &'a HashMap<String, J>) -> Self {
+        LinkedView {
+            records,
+            bodies,
+            term: Default::default(),
+            cx: Default::default(),
+            in_progress: Default::default(),
+        }
+    }
+
+    fn callee(&self, target: &str) -> Option<(&'a J, &'a J)> {
+        let rec = self.records.get(target)?;
+        let body = self.bodies.get(target).or_else(|| rec.get("body_hash").and_then(|h| h.as_str()).and_then(|h| self.bodies.get(h)))?;
+        Some((rec, body))
+    }
+
+    /// Does the callee at `target` provably terminate (its own analysis, over this same view)?
+    pub fn terminates(&self, target: &str) -> Option<bool> {
+        if let Some(v) = self.term.borrow().get(target) {
+            return *v;
+        }
+        if !self.in_progress.borrow_mut().insert(target.to_string()) {
+            return None; // a cycle: unresolvable
+        }
+        let (rec, body) = match self.callee(target) {
+            Some(x) => x,
+            None => {
+                self.in_progress.borrow_mut().remove(target);
+                return None;
+            }
+        };
+        let nat = crate::terminate::nat_param_positions(rec);
+        let lookup = |t: &str| self.terminates(t);
+        let out = matches!(
+            crate::terminate::analyze_termination_linked(body, &nat, Some(&lookup)),
+            crate::terminate::TerminationOutcome::Always
+        );
+        self.in_progress.borrow_mut().remove(target);
+        self.term.borrow_mut().insert(target.to_string(), Some(out));
+        Some(out)
+    }
+
+    /// The callee's own inferred complexity class (over this same view), if it has one.
+    pub fn complexity(&self, target: &str) -> Option<crate::Class> {
+        if let Some(v) = self.cx.borrow().get(target) {
+            return *v;
+        }
+        let key = format!("cx:{target}");
+        if !self.in_progress.borrow_mut().insert(key.clone()) {
+            return None;
+        }
+        let out = match self.callee(target) {
+            Some((_, body)) => {
+                let lookup = |t: &str| self.complexity(t);
+                match crate::complexity::analyze_complexity_linked(body, Some(&lookup)) {
+                    crate::complexity::ComplexityOutcome::Bound(c) => Some(c),
+                    _ => None,
+                }
+            }
+            None => None,
+        };
+        self.in_progress.borrow_mut().remove(&key);
+        self.cx.borrow_mut().insert(target.to_string(), out);
+        out
+    }
+}
+
+/// [`certify_record`] with an optional LINKED view (`bodies` = [`crate::build_link_map`] of the records
+/// directory): with it, a `fn_ref` callee whose own body provably terminates / has an inferred class
+/// folds into the termination and complexity checks instead of reading as an opaque call.
+pub fn certify_record_linked(
+    record: &J,
+    body: &J,
+    records: &HashMap<String, J>,
+    bodies: Option<&HashMap<String, J>>,
+    solver: &str,
+) -> Certification {
+    let view = bodies.map(|b| LinkedView::new(records, b));
+    let term_lookup = |t: &str| view.as_ref().and_then(|v| v.terminates(t));
+    let cx_lookup = |t: &str| view.as_ref().and_then(|v| v.complexity(t));
     let sig = record.pointer("/signature");
     let mut checks: Vec<CertCheck> = Vec::new();
 
@@ -175,7 +272,8 @@ pub fn certify_record(record: &J, body: &J, records: &HashMap<String, J>, solver
 
     // 4. Termination.
     let declared_term = sig.and_then(|s| s.get("terminates")).and_then(|t| t.as_str()).unwrap_or("unknown");
-    match crate::terminate::analyze_termination_typed(body, &crate::terminate::nat_param_positions(record)) {
+    let term_cb: Option<crate::terminate::CalleeTerminates<'_>> = view.as_ref().map(|_| &term_lookup as crate::terminate::CalleeTerminates<'_>);
+    match crate::terminate::analyze_termination_linked(body, &crate::terminate::nat_param_positions(record), term_cb) {
         TerminationOutcome::Always if declared_term == "always" => {
             checks.push(CertCheck::new("termination", "SOUND", "provably always-terminates", false))
         }
@@ -191,7 +289,8 @@ pub fn certify_record(record: &J, body: &J, records: &HashMap<String, J>, solver
     }
 
     // 5. Complexity + structured cost.
-    let complexity = analyze_complexity(body);
+    let cx_cb: Option<crate::complexity::CalleeComplexity<'_>> = view.as_ref().map(|_| &cx_lookup as crate::complexity::CalleeComplexity<'_>);
+    let complexity = crate::complexity::analyze_complexity_linked(body, cx_cb);
     match sig.and_then(|s| s.get("complexity")).and_then(|c| c.as_str()) {
         Some(d) => {
             let (v, detail) = time_verdict_parts(d, &complexity);

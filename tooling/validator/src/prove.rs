@@ -26,7 +26,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value as J;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sort {
@@ -808,6 +808,276 @@ pub fn prove_property(prop_expr: &J, body: Option<&J>, solver: &str) -> (ProofOu
     }
 }
 
+// --- numeric induction --------------------------------------------------------------------------------
+//
+// A law about a RECURSIVE function over the integers — `gcd`, `isqrt`, `mod_pow`, a nat-result
+// contract on Euclid — is outside the first-order fragment (no `define-fun` can be recursive) and
+// outside the structural backend (which inducts over lists). This rung proves it by STRONG
+// INDUCTION over the function's own well-founded measure, the one the termination checker already
+// identifies (`terminate::induction_measure`: the argument position every self-call shrinks, with
+// the floor it is bounded below by):
+//
+//   * `self` is an UNINTERPRETED function (`declare-fun`) — never a recursive definition z3 would
+//     have to unfold on its own (measured on the equivalence prover: it does not).
+//   * The induction hypothesis is the law itself, universally quantified over the law's variables,
+//     restricted to measures in `[floor, m)`: `∀ v'. floor ≤ m' < m ⇒ P(v')`.
+//   * The defining equation is instantiated EXPLICITLY, at every `self`-application the law makes
+//     and once more at every recursive call inside those (two levels), as `(self t…) = body[params := t…]`
+//     with the body's own `self` calls left uninterpreted — so the step case sees exactly the
+//     unfolding it needs, and nothing the solver must invent.
+//   * The negated law is checked: UNSAT ⇒ PROVED by induction on the measure. SAT is NOT a
+//     refutation (the uninterpreted `self` is under-constrained away from the instantiated points)
+//     and is reported UNKNOWN; never a false verdict in either direction.
+//
+// Scope: every `self`-application in the law must put the SAME law variable at the measure
+// position (the variable the induction is on); the law and body must lower to the Int/Bool/String
+// fragment (tuples, lists, fn_refs refuse — honestly, as UNSUPPORTED).
+
+/// Where the measure sits in a law: the quantified variable at the descending position of the `self`
+/// applications. `Ok(None)` when every application puts a LITERAL there (`self(a, 0)`): no induction
+/// variable, and none needed — the instantiated defining equation alone decides the law (unfolding).
+fn measure_variable(pred: &J, position: usize, vars: &[String]) -> Result<Option<String>> {
+    let mut found: Option<String> = None;
+    let mut any = false;
+    for call in collect_self_applications(pred) {
+        any = true;
+        let Some(arg) = call.get(position) else {
+            bail!("a `self` application in the law has no argument at the measure position {position}");
+        };
+        if arg.get("kind").and_then(|k| k.as_str()) == Some("lit") {
+            continue;
+        }
+        let Some(v) = var_name(arg) else {
+            bail!("the law applies `self` with a compound term at the measure position (induction needs the measure to be a quantified variable or a literal)");
+        };
+        if !vars.iter().any(|x| x == v) {
+            bail!("the measure argument `{v}` is not a quantified variable of the law");
+        }
+        match &found {
+            Some(prev) if prev != v => bail!("the law applies `self` with different measures (`{prev}` and `{v}`) — one induction variable is needed (a law like commutativity needs a lexicographic or sum measure this rung does not have)"),
+            _ => found = Some(v.to_string()),
+        }
+    }
+    if !any {
+        bail!("the law does not apply `self`");
+    }
+    Ok(found)
+}
+
+/// Every `self` application in a predicate or body AST (both spellings), as its argument list.
+fn collect_self_applications(node: &J) -> Vec<Vec<J>> {
+    let mut out = Vec::new();
+    fn go(node: &J, out: &mut Vec<Vec<J>>) {
+        if let Some((head, args)) = flatten_call(node) {
+            if head == "self" {
+                out.push(args.iter().map(|a| (*a).clone()).collect());
+                for a in args {
+                    go(a, out);
+                }
+                return;
+            }
+        }
+        match node {
+            J::Object(m) => m.iter().filter(|(k, _)| *k != "pattern").for_each(|(_, v)| go(v, out)),
+            J::Array(xs) => xs.iter().for_each(|v| go(v, out)),
+            _ => {}
+        }
+    }
+    go(node, &mut out);
+    out
+}
+
+/// Lower a RECURSIVE body for the induction rung: `self` stays an uninterpreted symbol inside its own
+/// body (the sort of the result is found by trying the candidates against the body's arms).
+fn lower_self_uninterpreted(body: &J) -> Result<SelfDef> {
+    let (params, inner): (Vec<String>, &J) = if body.get("kind").and_then(|k| k.as_str()) == Some("lambda") {
+        let ps = body
+            .get("params")
+            .and_then(|p| p.as_array())
+            .ok_or_else(|| anyhow!("lambda has no params"))?
+            .iter()
+            .map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from).ok_or_else(|| anyhow!("param has no name")))
+            .collect::<Result<Vec<_>>>()?;
+        (ps, body.get("body").ok_or_else(|| anyhow!("lambda has no body"))?)
+    } else {
+        bail!("body is not a lambda");
+    };
+    let mut inferred: BTreeMap<String, Option<Sort>> = params.iter().map(|p| (p.clone(), None)).collect();
+    visit_for_sorts(inner, &params, &mut inferred, None)?;
+    let param_sorts: Vec<Sort> = params.iter().map(|p| inferred[p].unwrap_or(Sort::Int)).collect();
+    let mut last_err = None;
+    for cand in [Sort::Int, Sort::Bool, Sort::Str] {
+        let partial = SelfDef { params: params.clone(), param_sorts: param_sorts.clone(), ret: cand, body_smt: String::new() };
+        let mut env: BTreeMap<String, Sort> = params.iter().cloned().zip(param_sorts.iter().copied()).collect();
+        match sort_of(inner, &env, Some(&partial)) {
+            Ok(s) if s == cand => {
+                let body_smt = lower(inner, &mut env, Some(&partial))?;
+                return Ok(SelfDef { params, param_sorts, ret: cand, body_smt });
+            }
+            Ok(_) => {}
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow!("could not infer the recursive body's result sort")))
+}
+
+/// The SMT-LIB `let` that evaluates `body_smt` with the parameters bound to `terms`.
+fn let_params(params: &[String], terms: &[String], body_smt: &str) -> String {
+    if params.is_empty() {
+        return body_smt.to_string();
+    }
+    let binds = params.iter().zip(terms).map(|(p, t)| format!("({p} {t})")).collect::<Vec<_>>().join(" ");
+    format!("(let ({binds}) {body_smt})")
+}
+
+/// Prove `prop_expr` (a `forall` law mentioning `self`) about the recursive `body` by strong induction
+/// over the body's numeric measure. Returns the outcome, the certificate (the one SMT script, which
+/// re-checks independently), and the measure variable the induction is on.
+pub fn prove_by_numeric_induction(
+    prop_expr: &J,
+    body: Option<&J>,
+    nat_positions: &BTreeSet<usize>,
+    solver: &str,
+) -> (ProofOutcome, Option<Certificate>, Option<String>) {
+    match build_induction_certificate(prop_expr, body, nat_positions) {
+        Err(e) => (ProofOutcome::Unsupported(format!("{e:#}")), None, None),
+        Ok((cert, m)) => match run_smt(&cert.smt, solver) {
+            Ok(SatAnswer::Unsat) => (ProofOutcome::Proved, Some(cert), Some(m)),
+            // SAT is not a counterexample: `self` is uninterpreted away from the instantiated points.
+            Ok(SatAnswer::Sat(_)) | Ok(SatAnswer::Unknown) => (ProofOutcome::Unknown, Some(cert), Some(m)),
+            Ok(SatAnswer::NoSolver) => (ProofOutcome::NoSolver, Some(cert), Some(m)),
+            Err(e) => (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert), Some(m)),
+        },
+    }
+}
+
+fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &BTreeSet<usize>) -> Result<(Certificate, String)> {
+    let prop_expr = &uncurry(prop_expr);
+    let body = body.map(uncurry).ok_or_else(|| anyhow!("numeric induction needs the body"))?;
+    if prop_expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
+        bail!("not a `forall` — no universally-quantified obligation to prove");
+    }
+    let vars: Vec<String> = prop_expr
+        .get("vars")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    if vars.is_empty() {
+        bail!("`forall` has no variables");
+    }
+    let pred = prop_expr.get("body").ok_or_else(|| anyhow!("`forall` has no body"))?;
+    if !references_self(pred) {
+        bail!("the law does not mention `self` — nothing to induct on");
+    }
+    let measure = crate::terminate::induction_measure(&body, nat_positions)
+        .ok_or_else(|| anyhow!("the body's recursion has no provable numeric measure (structural list recursion, or termination not established)"))?;
+    let sd = lower_self_uninterpreted(&body)?;
+    if measure.position >= sd.params.len() {
+        bail!("measure position out of range");
+    }
+    let m_opt = measure_variable(pred, measure.position, &vars)?;
+    let m = m_opt.clone().unwrap_or_else(|| "<unfolding>".to_string());
+
+    let var_sorts = infer_var_sorts(pred, &vars, Some(&sd.param_sorts))?;
+    let mut env: BTreeMap<String, Sort> = var_sorts.clone();
+    if sort_of(pred, &env, Some(&sd))? != Sort::Bool {
+        bail!("property body is not a boolean predicate");
+    }
+    let pred_smt = lower(pred, &mut env, Some(&sd))?;
+
+    // The induction hypothesis: the law over primed variables, at smaller measures.
+    let prime = |v: &str| format!("{v}__ih");
+    let renaming: BTreeMap<String, J> = vars.iter().map(|v| (v.clone(), serde_json::json!({ "kind": "var", "name": prime(v) }))).collect();
+    let pred_ih = crate::equiv::subst_many(pred, &renaming);
+    let mut env_ih: BTreeMap<String, Sort> = vars.iter().map(|v| (prime(v), var_sorts[v])).collect();
+    let pred_ih_smt = lower(&pred_ih, &mut env_ih, Some(&sd))?;
+
+    // Domain facts: a law variable fed to a nat-typed `self` parameter ranges over nats.
+    let mut nat_vars: BTreeSet<String> = BTreeSet::new();
+    for call in collect_self_applications(pred) {
+        for (i, a) in call.iter().enumerate() {
+            if nat_positions.contains(&i) {
+                if let Some(v) = var_name(a) {
+                    if vars.iter().any(|x| x == v) {
+                        nat_vars.insert(v.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut out = String::new();
+    out.push_str("(set-logic ALL)\n");
+    out.push_str(&format!(
+        ";; numeric induction on `{m}` (measure position {}, floor {}): self is uninterpreted, its defining\n;; equation instantiated at every application the law makes and at the recursive calls inside them.\n",
+        measure.position, measure.floor
+    ));
+    out.push_str(&format!(
+        "(declare-fun self ({}) {})\n",
+        sd.param_sorts.iter().map(|s| s.smt()).collect::<Vec<_>>().join(" "),
+        sd.ret.smt()
+    ));
+    for v in &vars {
+        out.push_str(&format!("(declare-const {v} {})\n", var_sorts[v].smt()));
+    }
+    for v in &nat_vars {
+        out.push_str(&format!("(assert (>= {v} 0))\n"));
+    }
+    // IH — only when there is a measure variable to induct on (a law with a literal at the measure
+    // position is decided by the unfolding below alone).
+    if let Some(m) = &m_opt {
+        let ih_binders = vars.iter().map(|v| format!("({} {})", prime(v), var_sorts[v].smt())).collect::<Vec<_>>().join(" ");
+        let mut ih_guards = vec![format!("(>= {} {})", prime(m), smt_int_lit(measure.floor)), format!("(< {} {m})", prime(m))];
+        for v in &nat_vars {
+            ih_guards.push(format!("(>= {} 0)", prime(v)));
+        }
+        out.push_str(&format!(
+            "(assert (forall ({ih_binders}) (=> (and {}) {pred_ih_smt})))\n",
+            ih_guards.join(" ")
+        ));
+    } else {
+        let _ = pred_ih_smt;
+    }
+    // Defining-equation instantiations: at the law's applications, and at the recursive calls inside them.
+    let recursive_calls = collect_self_applications(body.get("body").unwrap_or(&J::Null));
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    for call in collect_self_applications(pred) {
+        if call.len() != sd.params.len() {
+            bail!("self applied to {} args, expects {}", call.len(), sd.params.len());
+        }
+        let terms: Vec<String> = call.iter().map(|a| lower(a, &mut env.clone(), Some(&sd))).collect::<Result<_>>()?;
+        let app = format!("(self {})", terms.join(" "));
+        if seen.insert(app.clone()) {
+            out.push_str(&format!("(assert (= {app} {}))\n", let_params(&sd.params, &terms, &sd.body_smt)));
+        }
+        // One level deeper: the body's own recursive calls, at this instantiation.
+        let mut penv: BTreeMap<String, Sort> = sd.params.iter().cloned().zip(sd.param_sorts.iter().copied()).collect();
+        for rc in &recursive_calls {
+            if rc.len() != sd.params.len() {
+                continue;
+            }
+            let rterms: Vec<String> = rc.iter().map(|a| lower(a, &mut penv, Some(&sd))).collect::<Result<_>>()?;
+            let inner_app = format!("(self {})", rterms.join(" "));
+            let eq = format!("(= {inner_app} {})", let_params(&sd.params, &rterms, &sd.body_smt));
+            let instantiated = let_params(&sd.params, &terms, &eq);
+            if seen.insert(instantiated.clone()) {
+                out.push_str(&format!("(assert {instantiated})\n"));
+            }
+        }
+    }
+    out.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
+    let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
+    Ok((Certificate { smt: out, quantified, uses_self: true }, m))
+}
+
+fn smt_int_lit(n: i64) -> String {
+    if n < 0 {
+        format!("(- {})", -(n as i128))
+    } else {
+        n.to_string()
+    }
+}
+
 /// Does a type-expression AST mention the `float` builtin anywhere (params, result, nested)?
 ///
 /// **The float-domain guard (GW5).** The proof fragment's arithmetic is the solver's *Int*
@@ -841,6 +1111,66 @@ pub fn type_mentions_float(ty: &J) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// count: \n -> case gt(n, 0) of true -> add(1, self(sub(n, 1))) | false -> 0 — a nat recursion.
+    fn count_body() -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "n" }],
+            "body": { "kind": "case",
+                      "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "gt" },
+                                     "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+                      "arms": [
+                          { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                            "body": { "kind": "app", "fn": { "kind": "var", "name": "add" },
+                                      "args": [{ "kind": "lit", "value": { "kind": "int", "value": 1 } },
+                                               { "kind": "app", "fn": { "kind": "var", "name": "self" },
+                                                 "args": [{ "kind": "app", "fn": { "kind": "var", "name": "sub" },
+                                                           "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 1 } }] }] }] } },
+                          { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                            "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } }] } })
+    }
+
+    fn law(vars: &[&str], body: J) -> J {
+        json!({ "kind": "forall", "vars": vars, "body": body })
+    }
+    fn self_app(args: Vec<J>) -> J {
+        json!({ "kind": "app", "op": "self", "args": args })
+    }
+    fn v(n: &str) -> J {
+        json!({ "kind": "var", "name": n })
+    }
+    fn lit(n: i64) -> J {
+        json!({ "kind": "lit", "value": n })
+    }
+    fn op(o: &str, args: Vec<J>) -> J {
+        json!({ "kind": "app", "op": o, "args": args })
+    }
+
+    #[test]
+    fn numeric_induction_proves_true_laws_and_never_false_ones() {
+        let Some(solver) = solver() else { return };
+        let nats: BTreeSet<usize> = [0].into();
+        let body = count_body();
+        // count(n) == n over nats: PROVED by strong induction on n.
+        let (out, cert, m) = prove_by_numeric_induction(&law(&["n"], op("eq", vec![self_app(vec![v("n")]), v("n")])), Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert_eq!(m.as_deref(), Some("n"));
+        let smt = cert.unwrap().smt;
+        assert!(smt.contains("(declare-fun self (Int) Int)") && smt.contains("(forall ((n__ih Int))"), "{smt}");
+        // A FALSE law is never proved (the uninterpreted self makes SAT uninformative: UNKNOWN).
+        let (out, _, _) = prove_by_numeric_induction(&law(&["n"], op("eq", vec![self_app(vec![v("n")]), lit(0)])), Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+        // A literal at the measure position needs no induction: unfolding alone decides count(0) == 0.
+        let (out, _, m) = prove_by_numeric_induction(&law(&["k"], op("eq", vec![self_app(vec![lit(0)]), lit(0)])), Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert_eq!(m.as_deref(), Some("<unfolding>"));
+        // Two different measures in one law (commutativity's shape) are out of this rung — UNSUPPORTED, stated.
+        let two = law(&["a", "b"], op("eq", vec![self_app(vec![v("a")]), self_app(vec![v("b")])]));
+        let (out, _, _) = prove_by_numeric_induction(&two, Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Unsupported(ref why) if why.contains("different measures")), "{out:?}");
+        // A non-recursive body has no measure: UNSUPPORTED (the first-order prover owns it).
+        let (out, _, _) = prove_by_numeric_induction(&law(&["n"], op("eq", vec![self_app(vec![v("n")]), v("n")])), Some(&double_body()), &Default::default(), solver);
+        assert!(matches!(out, ProofOutcome::Unsupported(_)), "{out:?}");
+    }
 
     fn double_body() -> J {
         json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": {
