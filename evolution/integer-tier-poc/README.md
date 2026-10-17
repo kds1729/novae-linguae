@@ -4,8 +4,10 @@
   language-level finding below is in the tree: eight evaluator/checker defects fixed, two checkers
   widened, and — from the follow-up — callee folding over a linked view, a numeric-induction rung
   in the prover, variable divisors, and magnitude-wide sampling (`tooling/validator`); the records
-  published to the commons with signed certifications. The 38 records and their builder live here
-  (`records/`, `build_records.py`) — reproducible with no credential.
+  published to the commons with signed certifications. The 41 records and their builder live here
+  (`records/`, `build_records.py`) — reproducible with no credential. Final tally (second follow-up):
+  41/41 certify, termination SOUND on all 41, complexity on 36, 14 contracts and 12 laws proved, 31 laws
+  held both over the bounded domain and across magnitudes.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
 - **Dates:** first published 2026-10-17, last updated 2026-10-17
 - **Scope:** `tooling/validator` (`interp.rs` arithmetic + comparison + recursion depth,
@@ -236,7 +238,7 @@ without the view (its `gcd` callee is opaque), SOUND with it, O(log n) inferred.
   could never show; the HELD counts under 200 are the body's own refusals (depth, the 2^63 bound)
   skipped, never counterexamples.
 
-### Still open
+### Still open after the first follow-up (closed in the second, below)
 
 - A lexicographic / sum measure for laws that apply `self` at two measures.
 - Folding a callee's class when the argument is a *bounded* recursive result (`mod_pow < m`): the
@@ -244,6 +246,78 @@ without the view (its `gcd` callee is opaque), SOUND with it, O(log n) inferred.
   postcondition as a size bound — a second use of certified facts, out of scope here.
 - `ntt_rec`: recursion on a callee's result (`ntt_split` halves the list) is well-founded only through
   the callee's output-size contract (`preserving`/halving) — the same fact-reuse.
+
+## Second follow-up (2026-10-17, same day): the three remaining rungs
+
+### Measured
+
+41 records now (three helpers added: `log2_floor`, `scale_mod`, and `odd_part` split into
+`odd_part_d`/`odd_part_s`; see below why). **41/41 run, 41/41 certify.**
+
+| check | after the first follow-up (38) | now (41) |
+|---|---|---|
+| termination | 33 / 5 | **41 / 0** |
+| complexity | 27 / 11 | **36 / 5** — the NTT chain only: `ntt_rec` applies `ntt_butterfly` to its own recursive results (nothing bounds their size), and `ntt`, `ntt_inverse`, `ntt_roundtrip`, `convolution` inherit |
+| refinements | 8 SOUND / 4 UNVERIFIABLE | **14 SOUND / 4** — new: `isqrt ≤ n`, `odd_part_d ≤ d`, `odd_part_s ≤ d`, plus the earlier six (`mod_add`/`mod_mul` posts, `gcd ≥ 0`, …); still open: `lcm ≥ 0` (composition), `from_digits ≥ 0` (list in the second position), `digit_sum ≥ 0` and `binomial ≥ 0` (nonlinear steps) |
+| laws, generative | 28 of 28 | **31 of 31** (28 EXHAUSTIVE, 3 HELD); `--wide` **31 of 31 HELD** |
+| laws, prove | 9 PROVED / 4 UNKNOWN / 15 UNSUPPORTED | **12 PROVED / 7 UNKNOWN / 12 UNSUPPORTED** — new: **`gcd(a, b) = gcd(b, a)`** (by unfolding alone), `odd_part_d` odd-or-zero, `log2_floor`'s bound; UNKNOWN now includes the two-measure laws that reach the solver (`gcd` associativity, `binomial` symmetry and Pascal — nonlinear steps); UNSUPPORTED: the 7 checker records and `lcm` (`fn_ref` heads), `isqrt(n·n) = n` (its only measure argument is compound and `n` is not nat-constrained), the two list-length laws |
+
+**The ladder decides commutativity.** With the quantified induction hypothesis present z3 answered
+*unknown* on `gcd(a, b) = gcd(b, a)` (in 2.3 s, not a timeout); the same certificate **without** the
+hypothesis is *unsat*. The defining equation instantiated at `(a, b)`, `(b, a)` and the two recursive
+calls inside them already contains the case analysis (`a < b ⇒ a mod b = a`, `a = b ⇒ a mod a = 0`,
+`b = 0`), and the hypothesis only obscured it. So the rung tries unfolding alone first, then the
+hypothesis. The false probes (`count(n) = 0`, `count(a) = count(b)`, `gcd(a, b) = a`) stay UNKNOWN.
+
+**Proved postconditions as size bounds.** `mr_witness` passes `mod_pow`'s result to `mr_squarings`;
+`mod_pow`'s `0 ≤ result < m` is proved (by numeric induction), so the complexity fold reads the result
+as bounded by `n` — `mr_witness` SOUND, and up the chain. `odd_part` returned a tuple `(d, s)`, and a
+tuple component carries no provable bound (predicates cannot project tuples): split into two scalar
+records with `result ≤ d` each, both proved, and `is_prime`'s complexity folds (`O(n²)` in the
+checker's measure: the list of twelve bases times a witness test it reads as linear). `isqrt` gained
+the second post `result ≤ n` — the size bound `is_prime_trial` needed. `digits` as a list result:
+the output-size analysis now reads a halving recursion consing O(1) per level as Linear, so
+`from_digits(digits(b, n))` folds.
+
+**The NTT recursion.** No certified fact says a half of `ntt_split`'s result is shorter than the
+input (a tuple of lists; no output-size vocabulary for "strictly smaller"), so the depth is carried
+explicitly: `ntt_rec xs w levels` counts a nat down (`levels = log2_floor(length xs)`, supplied by
+`ntt`/`ntt_inverse`). Termination SOUND by the nat descent. The checker then reads the two-way
+branching on a constant descent as exponential in `levels` — which is `n`, correct and useless —
+so the NTT chain's `O(n log n)` stays UNVERIFIABLE on complexity; the halving the recursion rests on
+is a fact about `ntt_split` the checker has no vocabulary for. `ntt_inverse`'s `map (\x -> …)` was a
+higher-order application (opaque to both checkers); it is now the first-order `scale_mod`.
+
+### Argued
+
+- **An induction hypothesis can be a liability.** Strong induction is the general principle, but a
+  quantified hypothesis over nonlinear arithmetic (`mod` by a variable) sends z3 into unknown even
+  when the goal needs no induction at all. Trying the hypothesis-free certificate first costs one
+  solver call and recovers every unfolding-decidable law; the order is the design.
+- **A sum measure is the honest multi-variable principle.** Induction on `a + b` over the nats is
+  well-founded with no lexicographic machinery, and the hypothesis then covers every application
+  whose measure arguments add up to less; requiring every variable in the sum to be
+  nat-constrained is what keeps it sound (an int variable could make the sum unbounded below).
+  The two-measure laws it reaches but does not close (associativity, Pascal, symmetry) now fail on
+  the solver's nonlinear arithmetic, not on the prover's vocabulary — a different, better residue.
+- **Certified facts compose, and tuples are where they stop.** A proved postcondition on a scalar
+  result is a size bound the complexity checker can use; a tuple result has no predicate
+  vocabulary to state one. Splitting `odd_part` is the operator paying that cost in records rather
+  than the language paying it in grammar — the right trade until predicates project tuples.
+- **Fuel makes termination certifiable and complexity blind.** An explicit depth parameter is a
+  legitimate termination measure, and the honest effect on complexity (exponential in fuel) is a
+  true statement about what the checker can see. The remaining NTT complexity verdicts are the one
+  place in this tier where the language needs a fact it cannot yet express: a callee's output is
+  strictly smaller than its input.
+
+### Still open
+
+- Complexity of the NTT chain: a `strictly-shorter` output-size class (or a provable
+  `length(fst(result)) < length(xs)` — predicates would need tuple projection) for `ntt_split`.
+- `lcm ≥ 0` through composition: a callee's proved `result ≥ 0` could discharge a caller's
+  nat-result contract the way a proved upper bound now feeds the complexity fold.
+- The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, the `mod` congruences): solver
+  limits, unchanged.
 
 ## Open questions (as they stood before the follow-up)
 

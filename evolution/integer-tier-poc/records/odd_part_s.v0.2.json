@@ -1,0 +1,106 @@
+{
+ "body_hash": "expr_71852a30e3e99222ce0a74efee8fbf520c080ee29eaa273c1855aaf6ba008bef",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 560
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 4
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 0
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1024
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 10
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 0
+   }
+  }
+ ],
+ "hash": "fn_9cf6c991c7fea12d5ceef95f83d7eb7aa639dfe342ea8152587a92470dc586b7",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/odd-part-s"
+ ],
+ "name_hints": [
+  "odd_part_s",
+  "two_adic_valuation",
+  "trailing_zero_count"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "result"
+      },
+      {
+       "kind": "var",
+       "name": "d"
+      }
+     ],
+     "kind": "app",
+     "op": "le"
+    },
+    "kind": "post"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "nat"
+   }
+  }
+ },
+ "supersedes": null
+}

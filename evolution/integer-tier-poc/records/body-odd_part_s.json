@@ -10,25 +10,34 @@
          {
           "args": [
            {
-            "kind": "lit",
-            "value": {
-             "kind": "nat",
-             "value": 1
-            }
+            "args": [
+             {
+              "kind": "lit",
+              "value": {
+               "kind": "nat",
+               "value": 2
+              }
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "var",
+               "name": "d"
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "div"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
            }
           ],
           "fn": {
-           "args": [
-            {
-             "kind": "var",
-             "name": "s"
-            }
-           ],
-           "fn": {
-            "kind": "var",
-            "name": "add"
-           },
-           "kind": "app"
+           "kind": "var",
+           "name": "self"
           },
           "kind": "app"
          }
@@ -36,34 +45,16 @@
         "fn": {
          "args": [
           {
-           "args": [
-            {
-             "kind": "lit",
-             "value": {
-              "kind": "nat",
-              "value": 2
-             }
-            }
-           ],
-           "fn": {
-            "args": [
-             {
-              "kind": "var",
-              "name": "d"
-             }
-            ],
-            "fn": {
-             "kind": "var",
-             "name": "div"
-            },
-            "kind": "app"
-           },
-           "kind": "app"
+           "kind": "lit",
+           "value": {
+            "kind": "nat",
+            "value": 1
+           }
           }
          ],
          "fn": {
           "kind": "var",
-          "name": "self"
+          "name": "add"
          },
          "kind": "app"
         },
@@ -79,17 +70,11 @@
       },
       {
        "body": {
-        "elems": [
-         {
-          "kind": "var",
-          "name": "d"
-         },
-         {
-          "kind": "var",
-          "name": "s"
-         }
-        ],
-        "kind": "tuple"
+        "kind": "lit",
+        "value": {
+         "kind": "nat",
+         "value": 0
+        }
        },
        "pattern": {
         "kind": "lit",
@@ -158,17 +143,11 @@
    },
    {
     "body": {
-     "elems": [
-      {
-       "kind": "var",
-       "name": "d"
-      },
-      {
-       "kind": "var",
-       "name": "s"
-      }
-     ],
-     "kind": "tuple"
+     "kind": "lit",
+     "value": {
+      "kind": "nat",
+      "value": 0
+     }
     },
     "pattern": {
      "kind": "lit",
@@ -210,9 +189,6 @@
  "params": [
   {
    "name": "d"
-  },
-  {
-   "name": "s"
   }
  ]
 }

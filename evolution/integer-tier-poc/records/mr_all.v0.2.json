@@ -73,7 +73,7 @@
    }
   }
  ],
- "hash": "fn_66f1365fcc88225f651bb33dc6376d1bffc28ff925b5f808a5330923f3fa2cf7",
+ "hash": "fn_4fb25b3b2abb253181931b3cad40cea2330ce3e9b2d03513b36e093df15747ba",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -87,7 +87,7 @@
  "schema_version": "0.2.0",
  "signature": {
   "capabilities": [],
-  "complexity": "O(n)",
+  "complexity": "O(n^2)",
   "effects": [],
   "refinements": [],
   "terminates": "always",

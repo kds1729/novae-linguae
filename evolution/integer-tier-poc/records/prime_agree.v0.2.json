@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_5a3a6e05eb46097f9a69d4f1f3ddf8a1b9fe9b8aa0a54ce4bbc6cee0e754ae89",
+ "body_hash": "expr_413929ccf9b6db8e1f1c98ea5bfe87d90b17eb3e765a849369326986a44eab70",
  "derived_from": null,
  "examples": [
   {
@@ -63,7 +63,7 @@
    }
   }
  ],
- "hash": "fn_97a19d1dee402e48bca06734292eac3137140defaaa699d577d4ca7f4b7abd22",
+ "hash": "fn_826a1c3bbe41288efaeec2d27b5455f55d0434ed41f3c725f35e418cae9d7c43",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -108,7 +108,7 @@
  "schema_version": "0.2.0",
  "signature": {
   "capabilities": [],
-  "complexity": "O(n)",
+  "complexity": "O(n^2)",
   "effects": [],
   "refinements": [],
   "terminates": "always",

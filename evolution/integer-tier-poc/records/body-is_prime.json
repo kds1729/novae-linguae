@@ -57,296 +57,293 @@
          },
          {
           "body": {
-           "arms": [
-            {
-             "body": {
-              "args": [
-               {
-                "args": [
-                 {
-                  "args": [
-                   {
-                    "args": [
-                     {
-                      "args": [
-                       {
-                        "args": [
-                         {
-                          "args": [
-                           {
-                            "args": [
-                             {
-                              "args": [
-                               {
-                                "args": [
-                                 {
-                                  "args": [
-                                   {
-                                    "args": [
-                                     {
-                                      "args": [
-                                       {
-                                        "kind": "var",
-                                        "name": "nil"
-                                       }
-                                      ],
-                                      "fn": {
-                                       "args": [
-                                        {
-                                         "kind": "lit",
-                                         "value": {
-                                          "kind": "nat",
-                                          "value": 37
-                                         }
-                                        }
-                                       ],
-                                       "fn": {
-                                        "kind": "var",
-                                        "name": "cons"
-                                       },
-                                       "kind": "app"
-                                      },
-                                      "kind": "app"
-                                     }
-                                    ],
-                                    "fn": {
+           "body": {
+            "body": {
+             "args": [
+              {
+               "args": [
+                {
+                 "args": [
+                  {
+                   "args": [
+                    {
+                     "args": [
+                      {
+                       "args": [
+                        {
+                         "args": [
+                          {
+                           "args": [
+                            {
+                             "args": [
+                              {
+                               "args": [
+                                {
+                                 "args": [
+                                  {
+                                   "args": [
+                                    {
                                      "args": [
                                       {
-                                       "kind": "lit",
-                                       "value": {
-                                        "kind": "nat",
-                                        "value": 31
-                                       }
+                                       "kind": "var",
+                                       "name": "nil"
                                       }
                                      ],
                                      "fn": {
-                                      "kind": "var",
-                                      "name": "cons"
+                                      "args": [
+                                       {
+                                        "kind": "lit",
+                                        "value": {
+                                         "kind": "nat",
+                                         "value": 37
+                                        }
+                                       }
+                                      ],
+                                      "fn": {
+                                       "kind": "var",
+                                       "name": "cons"
+                                      },
+                                      "kind": "app"
                                      },
                                      "kind": "app"
-                                    },
-                                    "kind": "app"
-                                   }
-                                  ],
-                                  "fn": {
-                                   "args": [
-                                    {
-                                     "kind": "lit",
-                                     "value": {
-                                      "kind": "nat",
-                                      "value": 29
-                                     }
                                     }
                                    ],
                                    "fn": {
-                                    "kind": "var",
-                                    "name": "cons"
+                                    "args": [
+                                     {
+                                      "kind": "lit",
+                                      "value": {
+                                       "kind": "nat",
+                                       "value": 31
+                                      }
+                                     }
+                                    ],
+                                    "fn": {
+                                     "kind": "var",
+                                     "name": "cons"
+                                    },
+                                    "kind": "app"
                                    },
                                    "kind": "app"
-                                  },
-                                  "kind": "app"
-                                 }
-                                ],
-                                "fn": {
-                                 "args": [
-                                  {
-                                   "kind": "lit",
-                                   "value": {
-                                    "kind": "nat",
-                                    "value": 23
-                                   }
                                   }
                                  ],
                                  "fn": {
-                                  "kind": "var",
-                                  "name": "cons"
+                                  "args": [
+                                   {
+                                    "kind": "lit",
+                                    "value": {
+                                     "kind": "nat",
+                                     "value": 29
+                                    }
+                                   }
+                                  ],
+                                  "fn": {
+                                   "kind": "var",
+                                   "name": "cons"
+                                  },
+                                  "kind": "app"
                                  },
                                  "kind": "app"
-                                },
-                                "kind": "app"
-                               }
-                              ],
-                              "fn": {
-                               "args": [
-                                {
-                                 "kind": "lit",
-                                 "value": {
-                                  "kind": "nat",
-                                  "value": 19
-                                 }
                                 }
                                ],
                                "fn": {
-                                "kind": "var",
-                                "name": "cons"
+                                "args": [
+                                 {
+                                  "kind": "lit",
+                                  "value": {
+                                   "kind": "nat",
+                                   "value": 23
+                                  }
+                                 }
+                                ],
+                                "fn": {
+                                 "kind": "var",
+                                 "name": "cons"
+                                },
+                                "kind": "app"
                                },
                                "kind": "app"
-                              },
-                              "kind": "app"
-                             }
-                            ],
-                            "fn": {
-                             "args": [
-                              {
-                               "kind": "lit",
-                               "value": {
-                                "kind": "nat",
-                                "value": 17
-                               }
                               }
                              ],
                              "fn": {
-                              "kind": "var",
-                              "name": "cons"
+                              "args": [
+                               {
+                                "kind": "lit",
+                                "value": {
+                                 "kind": "nat",
+                                 "value": 19
+                                }
+                               }
+                              ],
+                              "fn": {
+                               "kind": "var",
+                               "name": "cons"
+                              },
+                              "kind": "app"
                              },
                              "kind": "app"
-                            },
-                            "kind": "app"
-                           }
-                          ],
-                          "fn": {
-                           "args": [
-                            {
-                             "kind": "lit",
-                             "value": {
-                              "kind": "nat",
-                              "value": 13
-                             }
                             }
                            ],
                            "fn": {
-                            "kind": "var",
-                            "name": "cons"
+                            "args": [
+                             {
+                              "kind": "lit",
+                              "value": {
+                               "kind": "nat",
+                               "value": 17
+                              }
+                             }
+                            ],
+                            "fn": {
+                             "kind": "var",
+                             "name": "cons"
+                            },
+                            "kind": "app"
                            },
                            "kind": "app"
-                          },
-                          "kind": "app"
-                         }
-                        ],
-                        "fn": {
-                         "args": [
-                          {
-                           "kind": "lit",
-                           "value": {
-                            "kind": "nat",
-                            "value": 11
-                           }
                           }
                          ],
                          "fn": {
-                          "kind": "var",
-                          "name": "cons"
+                          "args": [
+                           {
+                            "kind": "lit",
+                            "value": {
+                             "kind": "nat",
+                             "value": 13
+                            }
+                           }
+                          ],
+                          "fn": {
+                           "kind": "var",
+                           "name": "cons"
+                          },
+                          "kind": "app"
                          },
                          "kind": "app"
-                        },
-                        "kind": "app"
-                       }
-                      ],
-                      "fn": {
-                       "args": [
-                        {
-                         "kind": "lit",
-                         "value": {
-                          "kind": "nat",
-                          "value": 7
-                         }
                         }
                        ],
                        "fn": {
-                        "kind": "var",
-                        "name": "cons"
+                        "args": [
+                         {
+                          "kind": "lit",
+                          "value": {
+                           "kind": "nat",
+                           "value": 11
+                          }
+                         }
+                        ],
+                        "fn": {
+                         "kind": "var",
+                         "name": "cons"
+                        },
+                        "kind": "app"
                        },
                        "kind": "app"
-                      },
-                      "kind": "app"
-                     }
-                    ],
-                    "fn": {
-                     "args": [
-                      {
-                       "kind": "lit",
-                       "value": {
-                        "kind": "nat",
-                        "value": 5
-                       }
                       }
                      ],
                      "fn": {
-                      "kind": "var",
-                      "name": "cons"
+                      "args": [
+                       {
+                        "kind": "lit",
+                        "value": {
+                         "kind": "nat",
+                         "value": 7
+                        }
+                       }
+                      ],
+                      "fn": {
+                       "kind": "var",
+                       "name": "cons"
+                      },
+                      "kind": "app"
                      },
                      "kind": "app"
-                    },
-                    "kind": "app"
-                   }
-                  ],
-                  "fn": {
-                   "args": [
-                    {
-                     "kind": "lit",
-                     "value": {
-                      "kind": "nat",
-                      "value": 3
-                     }
                     }
                    ],
                    "fn": {
-                    "kind": "var",
-                    "name": "cons"
+                    "args": [
+                     {
+                      "kind": "lit",
+                      "value": {
+                       "kind": "nat",
+                       "value": 5
+                      }
+                     }
+                    ],
+                    "fn": {
+                     "kind": "var",
+                     "name": "cons"
+                    },
+                    "kind": "app"
                    },
                    "kind": "app"
-                  },
-                  "kind": "app"
-                 }
-                ],
-                "fn": {
-                 "args": [
-                  {
-                   "kind": "lit",
-                   "value": {
-                    "kind": "nat",
-                    "value": 2
-                   }
                   }
                  ],
                  "fn": {
-                  "kind": "var",
-                  "name": "cons"
+                  "args": [
+                   {
+                    "kind": "lit",
+                    "value": {
+                     "kind": "nat",
+                     "value": 3
+                    }
+                   }
+                  ],
+                  "fn": {
+                   "kind": "var",
+                   "name": "cons"
+                  },
+                  "kind": "app"
                  },
                  "kind": "app"
+                }
+               ],
+               "fn": {
+                "args": [
+                 {
+                  "kind": "lit",
+                  "value": {
+                   "kind": "nat",
+                   "value": 2
+                  }
+                 }
+                ],
+                "fn": {
+                 "kind": "var",
+                 "name": "cons"
                 },
                 "kind": "app"
+               },
+               "kind": "app"
+              }
+             ],
+             "fn": {
+              "args": [
+               {
+                "kind": "var",
+                "name": "s"
                }
               ],
               "fn": {
                "args": [
                 {
                  "kind": "var",
-                 "name": "s"
+                 "name": "d"
                 }
                ],
                "fn": {
                 "args": [
                  {
                   "kind": "var",
-                  "name": "d"
+                  "name": "n"
                  }
                 ],
                 "fn": {
-                 "args": [
-                  {
-                   "kind": "var",
-                   "name": "n"
-                  }
-                 ],
-                 "fn": {
-                  "kind": "lit",
-                  "value": {
-                   "kind": "fn_ref",
-                   "target": "fn_66f1365fcc88225f651bb33dc6376d1bffc28ff925b5f808a5330923f3fa2cf7"
-                  }
-                 },
-                 "kind": "app"
+                 "kind": "lit",
+                 "value": {
+                  "kind": "fn_ref",
+                  "target": "fn_4fb25b3b2abb253181931b3cad40cea2330ce3e9b2d03513b36e093df15747ba"
+                 }
                 },
                 "kind": "app"
                },
@@ -354,33 +351,11 @@
               },
               "kind": "app"
              },
-             "pattern": {
-              "elems": [
-               {
-                "kind": "bind",
-                "name": "d"
-               },
-               {
-                "kind": "bind",
-                "name": "s"
-               }
-              ],
-              "kind": "tuple"
-             }
-            }
-           ],
-           "kind": "case",
-           "scrutinee": {
-            "args": [
-             {
-              "kind": "lit",
-              "value": {
-               "kind": "nat",
-               "value": 0
-              }
-             }
-            ],
-            "fn": {
+             "kind": "app"
+            },
+            "kind": "let",
+            "name": "s",
+            "value": {
              "args": [
               {
                "args": [
@@ -412,10 +387,48 @@
               "kind": "lit",
               "value": {
                "kind": "fn_ref",
-               "target": "fn_b528296cdff1f8ded9b362a5148166478c7ec73058575d0efc39c66b431d6560"
+               "target": "fn_9cf6c991c7fea12d5ceef95f83d7eb7aa639dfe342ea8152587a92470dc586b7"
               }
              },
              "kind": "app"
+            }
+           },
+           "kind": "let",
+           "name": "d",
+           "value": {
+            "args": [
+             {
+              "args": [
+               {
+                "kind": "lit",
+                "value": {
+                 "kind": "nat",
+                 "value": 1
+                }
+               }
+              ],
+              "fn": {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "n"
+                }
+               ],
+               "fn": {
+                "kind": "var",
+                "name": "sub"
+               },
+               "kind": "app"
+              },
+              "kind": "app"
+             }
+            ],
+            "fn": {
+             "kind": "lit",
+             "value": {
+              "kind": "fn_ref",
+              "target": "fn_407a595edab18c0859afd35192caf74b6b4c0eaacea3c060801bab50936bfe35"
+             }
             },
             "kind": "app"
            }

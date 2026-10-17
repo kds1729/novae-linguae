@@ -356,7 +356,7 @@ def main():
            {"args": [nlit(2**100 - 1)], "result": nlit(2**50 - 1)}],
           props=[("square_root_of_square", "forall n. n < 0 || self(n * n) == n"),
                  ("floor_bounds", "forall n. n < 0 || (self(n) * self(n) <= n && n < (self(n) + 1) * (self(n) + 1))")],
-          refinements=[("post", "result * result <= n")],
+          refinements=[("post", "result * result <= n"), ("post", "result <= n")],  # the second is the size bound the complexity fold reads
           hints=["integer_square_root"], complexity="O(log n)")
     gauntlet("isqrt", prove)
 
@@ -372,27 +372,37 @@ def main():
            {"args": [nlit(2047), nlit(1023), nlit(1), nlit(3)], "result": blit(False)}],
           hints=["miller_rabin_witness"], complexity="O(n)")
     gauntlet("mr_witness", prove)
-    build("odd_part", r"\d s -> case gt d 0 of { true => case eq (mod d 2) 0 of { true => self (div d 2) (add s 1); false => (d, s) }; false => (d, s) }",
-          FN([NAT, NAT], TUPLE(NAT, NAT)),
-          [{"args": [nlit(560), nlit(0)], "result": tup(nlit(35), nlit(4))}, {"args": [nlit(1), nlit(0)], "result": tup(nlit(1), nlit(0))},
-           {"args": [nlit(1024), nlit(0)], "result": tup(nlit(1), nlit(10))}],
-          hints=["split_powers_of_two"], complexity="O(log n)")
-    gauntlet("odd_part", prove)
+    # n − 1 = d · 2^s as TWO scalar records rather than one tuple: a tuple component carries no certified
+    # bound, while each scalar carries a postcondition (`result <= d`) the numeric-induction rung proves —
+    # and a proved bound is what lets the complexity fold read `mr_all`'s arguments as size-bounded.
+    build("odd_part_d", r"\d -> case gt d 0 of { true => case eq (mod d 2) 0 of { true => self (div d 2); false => d }; false => d }",
+          FN([NAT], NAT),
+          [{"args": [nlit(560)], "result": nlit(35)}, {"args": [nlit(1)], "result": nlit(1)}, {"args": [nlit(1024)], "result": nlit(1)}, {"args": [nlit(0)], "result": nlit(0)}],
+          props=[("odd_or_zero", "forall d. d < 1 || self(d) % 2 == 1")],
+          refinements=[("post", "result <= d")],
+          hints=["odd_part", "split_powers_of_two"], complexity="O(log n)")
+    gauntlet("odd_part_d", prove)
+    build("odd_part_s", r"\d -> case gt d 0 of { true => case eq (mod d 2) 0 of { true => add 1 (self (div d 2)); false => 0 }; false => 0 }",
+          FN([NAT], NAT),
+          [{"args": [nlit(560)], "result": nlit(4)}, {"args": [nlit(1)], "result": nlit(0)}, {"args": [nlit(1024)], "result": nlit(10)}, {"args": [nlit(0)], "result": nlit(0)}],
+          refinements=[("post", "result <= d")],
+          hints=["two_adic_valuation", "trailing_zero_count"], complexity="O(log n)")
+    gauntlet("odd_part_s", prove)
     build("mr_all", r"\n d s bases -> case null bases of { true => true; false => let a = head bases in case ge a n of { true => true; false => "
                     r"case {mr_witness} n d s a of { true => self n d s (tail bases); false => false } } }",
           FN([NAT, NAT, NAT, LIST(NAT)], BOOL),
           [{"args": [nlit(561), nlit(35), nlit(4), nlist(2, 3)], "result": blit(False)}, {"args": [nlit(13), nlit(3), nlit(2), nlist(2, 3, 5)], "result": blit(True)}],
-          hints=["miller_rabin_all_bases"], complexity="O(n)")
+          hints=["miller_rabin_all_bases"], complexity="O(n^2)")  # list of bases × a witness test the checker reads as O(n)
     gauntlet("mr_all", prove)
     build("is_prime", r"\n -> case lt n 2 of { true => false; false => case lt n 4 of { true => true; false => case eq (mod n 2) 0 of { true => false; false => "
-                      r"case {odd_part} (sub n 1) 0 of { (d, s) => {mr_all} n d s (cons 2 (cons 3 (cons 5 (cons 7 (cons 11 (cons 13 (cons 17 (cons 19 (cons 23 (cons 29 (cons 31 (cons 37 nil)))))))))))) } } } }",
+                      r"let d = {odd_part_d} (sub n 1) in let s = {odd_part_s} (sub n 1) in {mr_all} n d s (cons 2 (cons 3 (cons 5 (cons 7 (cons 11 (cons 13 (cons 17 (cons 19 (cons 23 (cons 29 (cons 31 (cons 37 nil)))))))))))) } } }",
           FN([NAT], BOOL),
           [{"args": [nlit(n)], "result": blit(py_is_prime(n))} for n in
            (0, 1, 2, 3, 4, 9, 37, 561, 1105, 2047, 1373653, 25326001, 3215031751, 1000000007, 3825123056546413051, 2**61 - 1, 9223372036854775783, 9223372036854775781)],
           refinements=[("pre", f"n <= {I64_MAX}")],
           # O(n) in the checker's measure: the squaring loop descends `s` by a constant step, and the
           # checker reads a constant-step recursion as linear in ITS input (it cannot know s ≤ log n).
-          tags=["predicate/number"], hints=["primality", "miller_rabin"], complexity="O(n)")
+          tags=["predicate/number"], hints=["primality", "miller_rabin"], complexity="O(n^2)")
     gauntlet("is_prime", prove)
     build("no_divisor_from", r"\n d -> case lt d 2 of { true => true; false => case eq (mod n d) 0 of { true => false; false => self n (sub d 1) } }",
           FN([NAT, NAT], BOOL),
@@ -408,7 +418,7 @@ def main():
           FN([NAT], BOOL),
           [{"args": [nlit(n)], "result": blit(True)} for n in (0, 2, 561, 2047, 1000003)],
           props=[("miller_rabin_agrees_with_trial", "forall n. self(n) == true")],
-          tags=["predicate/check"], hints=["primality_agreement"], complexity="O(n)")
+          tags=["predicate/check"], hints=["primality_agreement"], complexity="O(n^2)")
     gauntlet("prime_agree", prove)
 
     # 9. Chinese remainder for two coprime moduli.
@@ -443,7 +453,7 @@ def main():
           FN([NAT, NAT], BOOL),
           [{"args": [nlit(10), nlit(1234)], "result": blit(True)}, {"args": [nlit(2), nlit(0)], "result": blit(True)}],
           props=[("digits_then_from_digits", "forall b n. self(b, n) == true")],
-          tags=["predicate/check"], hints=["digits_roundtrip_check"], complexity="O(log n)")
+          tags=["predicate/check"], hints=["digits_roundtrip_check"], complexity="O(n)")  # from_digits is linear in the digit list
     gauntlet("digits_roundtrip", prove)
     build("digit_sum", r"\b n -> case lt b 2 of { true => 0; false => case lt n 1 of { true => 0; false => add (mod n b) (self b (div n b)) } }",
           FN([NAT, NAT], NAT),
@@ -479,21 +489,39 @@ def main():
           [{"args": [ilist(3, 7), ilist(2, 5), ilit(1), ilit(998244352)], "result": tup(ilist(5, 2), ilist(1, 12))}],
           tags=["transform/list"], hints=["butterfly"], complexity="O(n)")
     gauntlet("ntt_butterfly", prove)
-    build("ntt_rec", rf"\xs w -> case null xs of {{ true => nil; false => case null (tail xs) of {{ true => xs; false => case {{ntt_split}} xs of {{ (ev, od) => "
-                     rf"let w2 = mod (mul w w) {P_NTT} in case {{ntt_butterfly}} (self ev w2) (self od w2) 1 w of {{ (lo, hi) => append lo hi }} }} }} }}",
-          FN([LIST(INT), INT], LIST(INT)),
-          [{"args": [ilist(1, 2, 3, 4), ilit(pow(3, (P_NTT - 1) // 4, P_NTT))], "result": ilist(*py_ntt([1, 2, 3, 4]))},
-           {"args": [ilist(5), ilit(1)], "result": ilist(5)}],
+    # The recursion on the halves `ntt_split` returns is not a descent of ntt_rec's own parameter, and no
+    # certified fact says a half is shorter — so the depth is carried EXPLICITLY: `levels` = log2 of the
+    # length, a nat the recursion counts down (termination SOUND by the nat descent; the checker then reads
+    # the two-way branching on a constant descent as exponential in `levels`, which IS n — recorded).
+    build("log2_floor", r"\n -> case lt n 2 of { true => 0; false => add 1 (self (div n 2)) }",
+          FN([NAT], NAT),
+          [{"args": [nlit(1)], "result": nlit(0)}, {"args": [nlit(8)], "result": nlit(3)}, {"args": [nlit(1000)], "result": nlit(9)}, {"args": [nlit(2**62)], "result": nlit(62)}],
+          props=[("below_power", "forall n. n < 1 || 2 * self(n) <= n + n")],
+          hints=["integer_log2", "bit_length_minus_one"], complexity="O(log n)")
+    gauntlet("log2_floor", prove)
+    build("ntt_rec", rf"\xs w levels -> case gt levels 0 of {{ false => xs; true => case {{ntt_split}} xs of {{ (ev, od) => "
+                     rf"let w2 = mod (mul w w) {P_NTT} in case {{ntt_butterfly}} (self ev w2 (sub levels 1)) (self od w2 (sub levels 1)) 1 w of {{ (lo, hi) => append lo hi }} }} }}",
+          FN([LIST(INT), INT, NAT], LIST(INT)),
+          [{"args": [ilist(1, 2, 3, 4), ilit(pow(3, (P_NTT - 1) // 4, P_NTT)), nlit(2)], "result": ilist(*py_ntt([1, 2, 3, 4]))},
+           {"args": [ilist(5), ilit(1), nlit(0)], "result": ilist(5)}],
           tags=["transform/list"], hints=["number_theoretic_transform_recursive"], complexity="O(n log n)")
     gauntlet("ntt_rec", prove)
-    build("ntt", rf"\xs -> {{ntt_rec}} xs ({{mod_pow}} 3 (div {P_NTT - 1} (length xs)) {P_NTT})",
+    build("ntt", rf"\xs -> {{ntt_rec}} xs ({{mod_pow}} 3 (div {P_NTT - 1} (length xs)) {P_NTT}) ({{log2_floor}} (length xs))",
           FN([LIST(INT)], LIST(INT)),
           [{"args": [ilist(*v)], "result": ilist(*py_ntt(v))} for v in ([1, 2, 3, 4], [1, 0, 0, 0, 0, 0, 0, 0], [5, 6, 7, 8, 9, 10, 11, 12], [1])],
           refinements=[("pre", "length(xs) > 0")],
           tags=["transform/list"], hints=["number_theoretic_transform", "fft_mod_p"], complexity="O(n log n)")
     gauntlet("ntt", prove)
+    # Scaling by a constant as a first-order structural recursion: `map` with a lambda is a higher-order
+    # application the termination and complexity checkers cannot see through.
+    build("scale_mod", rf"\xs c -> case null xs of {{ true => nil; false => cons (mod (mul (head xs) c) {P_NTT}) (self (tail xs) c) }}",
+          FN([LIST(INT), INT], LIST(INT)),
+          [{"args": [ilist(1, 2, 3), ilit(2)], "result": ilist(2, 4, 6)}, {"args": [ilist(), ilit(5)], "result": ilist()}],
+          props=[("length_preserving", "forall xs c. length(self(xs, c)) == length(xs)")],
+          tags=["transform/list"], hints=["scale_mod_p"], complexity="O(n)")
+    gauntlet("scale_mod", prove)
     build("ntt_inverse", rf"\xs -> let n = length xs in let inv_n = {{mod_pow}} n {P_NTT - 2} {P_NTT} in "
-                         rf"map (\x -> mod (mul x inv_n) {P_NTT}) ({{ntt_rec}} xs ({{mod_pow}} ({{mod_pow}} 3 (div {P_NTT - 1} n) {P_NTT}) {P_NTT - 2} {P_NTT}))",
+                         rf"{{scale_mod}} ({{ntt_rec}} xs ({{mod_pow}} ({{mod_pow}} 3 (div {P_NTT - 1} n) {P_NTT}) {P_NTT - 2} {P_NTT}) ({{log2_floor}} n)) inv_n",
           FN([LIST(INT)], LIST(INT)),
           [{"args": [ilist(*py_ntt(v))], "result": ilist(*v)} for v in ([1, 2, 3, 4], [5, 6, 7, 8, 9, 10, 11, 12])],
           refinements=[("pre", "length(xs) > 0")],

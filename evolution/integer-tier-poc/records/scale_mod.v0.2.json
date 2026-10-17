@@ -1,0 +1,167 @@
+{
+ "body_hash": "expr_387b887b2c6c3559214d17ec9f3ccd664b44253c8ecef9a7f028b42378a67f30",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 2
+      },
+      {
+       "kind": "int",
+       "value": 3
+      }
+     ],
+     "kind": "list"
+    },
+    {
+     "kind": "int",
+     "value": 2
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 2
+     },
+     {
+      "kind": "int",
+      "value": 4
+     },
+     {
+      "kind": "int",
+      "value": 6
+     }
+    ],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "elems": [],
+     "kind": "list"
+    },
+    {
+     "kind": "int",
+     "value": 5
+    }
+   ],
+   "result": {
+    "elems": [],
+    "kind": "list"
+   }
+  }
+ ],
+ "hash": "fn_c7bf02595d4efae5b0f5fdcc346209a5c0c6bf6bb7728b9e11e5dc36f8155401",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/scale-mod",
+  "transform/list"
+ ],
+ "name_hints": [
+  "scale_mod",
+  "scale_mod_p"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "xs"
+          },
+          {
+           "kind": "var",
+           "name": "c"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        }
+       ],
+       "kind": "app",
+       "op": "length"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "xs"
+        }
+       ],
+       "kind": "app",
+       "op": "length"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "xs",
+     "c"
+    ]
+   },
+   "name": "length_preserving"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "args": [
+      {
+       "kind": "builtin",
+       "name": "int"
+      }
+     ],
+     "ctor": {
+      "kind": "builtin",
+      "name": "List"
+     },
+     "kind": "apply"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "int"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "List"
+    },
+    "kind": "apply"
+   }
+  }
+ },
+ "supersedes": null
+}

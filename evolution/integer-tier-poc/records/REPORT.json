@@ -33,10 +33,10 @@
    "associative: UNVERIFIABLE  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "commutative: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` with different measures (`b` and `a`) \u2014 one induction variable is needed (a law like commutativity needs a lexicographic or sum measure this rung does not have)",
+   "commutative: PROVED       by numeric induction on `a+b (by unfolding alone)` (strong induction over the measure; unsat)",
    "right_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
    "divides_both: UNKNOWN      numeric induction on `b` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
-   "associative: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` with different measures (`c` and `b`) \u2014 one induction variable is needed (a law like commutativity needs a lexicographic or sum measure this rung does not have)"
+   "associative: UNKNOWN      numeric induction on `b+c` did not close (the step needs a lemma, or the arithmetic is nonlinear)"
   ]
  },
  {
@@ -366,6 +366,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
    "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
@@ -375,6 +376,7 @@
    "typecheck": "(int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
+   "refinement:post[1]": "",
    "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
@@ -388,7 +390,7 @@
    "floor_bounds: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "square_root_of_square: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` with a compound term at the measure position (induction needs the measure to be a quantified variable or a literal)",
+   "square_root_of_square: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` at several measures (n), so the induction needs their SUM, but `n` is not nat-constrained (fed to a `nat` parameter somewhere in the law) \u2014 the sum would not be well-founded",
    "floor_bounds: PROVED       by numeric induction on `n` (strong induction over the measure; unsat)"
   ]
  },
@@ -425,7 +427,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -433,11 +435,11 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n)`, not established: applies `fn_61f00798cc15868bd0e932d80c236a77b979ce22c2c7720abe87cb6ddb4c7733` to an argument whose size is not bounded by the input (var) \u2014 its class cannot be re-expressed in n"
+   "complexity": "within declared `O(n)` (inferred O(n))"
   }
  },
  {
-  "name": "odd_part",
+  "name": "odd_part_d",
   "schema": "VALID",
   "run": "PASS",
   "certified": true,
@@ -445,15 +447,50 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:refinements": "N/A",
+   "refinement:post[0]": "SOUND",
+   "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
-   "typecheck": "(int, int) -> (int, int)",
+   "typecheck": "(int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:refinements": "",
+   "refinement:post[0]": "",
+   "refinement:nat-result (\u2265 0)": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  },
+  "properties_generative": [
+   "odd_or_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "odd_or_zero: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "odd_or_zero: PROVED       by numeric induction on `d` (strong induction over the measure; unsat)"
+  ]
+ },
+ {
+  "name": "odd_part_s",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:nat-result (\u2265 0)": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   }
@@ -469,7 +506,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -477,7 +514,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n)`, not established: applies the fn_ref `fn_9e1d4e1f9fe7e33885418220cf7cdf38c75b9636016cb4e9e9f75236ee83a19d` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "within declared `O(n^2)` (inferred O(n^2))"
   }
  },
  {
@@ -491,7 +528,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -499,7 +536,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n)`, not established: applies the fn_ref `fn_66f1365fcc88225f651bb33dc6376d1bffc28ff925b5f808a5330923f3fa2cf7` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "within declared `O(n^2)` (inferred O(n^2))"
   }
  },
  {
@@ -535,7 +572,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -543,7 +580,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n)`, not established: applies `fn_696a9e62eb92dc4088b98fcfcd34478e406398af4161faf8f8ba7f09e8366c75` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "within declared `O(n)` (inferred O(n))"
   }
  },
  {
@@ -557,7 +594,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -565,7 +602,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n)`, not established: applies the fn_ref `fn_d6af9003a5e655df9597ad7c1936af6238fa7e51f0b6e77d81d6361c06fc5fcf` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "within declared `O(n^2)` (inferred O(n^2))"
   },
   "properties_generative": [
    "miller_rabin_agrees_with_trial: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
@@ -685,7 +722,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -693,7 +730,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies `fn_4c57b69b1cb566fbf428bddbf2fb7a8fa10632460ff29f3a7d397016bb149983` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "within declared `O(n)` (inferred O(n))"
   },
   "properties_generative": [
    "digits_then_from_digits: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -768,8 +805,8 @@
    "choose_zero: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "symmetry: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` with a compound term at the measure position (induction needs the measure to be a quantified variable or a literal)",
-   "pascal: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` with a compound term at the measure position (induction needs the measure to be a quantified variable or a literal)",
+   "symmetry: UNKNOWN      numeric induction on `k+n` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
+   "pascal: UNKNOWN      numeric induction on `k` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
    "choose_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)"
   ]
  },
@@ -818,6 +855,37 @@
   }
  },
  {
+  "name": "log2_floor",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:nat-result (\u2265 0)": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:nat-result (\u2265 0)": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  },
+  "properties_generative": [
+   "below_power: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "below_power: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "below_power: PROVED       by numeric induction on `n` (strong induction over the measure; unsat)"
+  ]
+ },
+ {
   "name": "ntt_rec",
   "schema": "VALID",
   "run": "PASS",
@@ -827,15 +895,15 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
-   "typecheck": "(List(int), int) -> List(int)",
+   "typecheck": "(List(int), int, int) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: no single argument position provably descends in every self-call (structural `tail`; a guarded constant decrement \u2014 `gt(p, lit)`-guarded `sub(p, c)`, or a nat's non-zero-guarded `sub(p, 1)`; a halving `div(p, ",
+   "termination": "provably always-terminates",
    "complexity": "declared `O(n log n)`, not established: applies `fn_73769062b1965eb41b3bb42d85535d3fd68b0450cfb4b9396744e60d11c393d7` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   }
  },
@@ -849,7 +917,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -857,9 +925,40 @@
    "typecheck": "(List(int)) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies `fn_81d8af646046b7e93ce6ab9c7816d6333196a6e313e7bd76fcff54a45d6fab8f`, whose own termination is not provable",
-   "complexity": "declared `O(n log n)`, not established: applies the fn_ref `fn_81d8af646046b7e93ce6ab9c7816d6333196a6e313e7bd76fcff54a45d6fab8f` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n log n)`, not established: applies the fn_ref `fn_dde56182045924264e16345e2dc7c73afef34949c1c882f4628b2938238d84d1` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   }
+ },
+ {
+  "name": "scale_mod",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(List(int), int) -> List(int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  },
+  "properties_generative": [
+   "length_preserving: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "length_preserving: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "length_preserving: UNSUPPORTED  recursive body \u2014 numeric induction: the body's recursion has no provable numeric measure (structural list recursion, or termination not established)"
+  ]
  },
  {
   "name": "ntt_inverse",
@@ -871,7 +970,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -879,8 +978,8 @@
    "typecheck": "(List(int)) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(n log n)`, not established: applies a higher-order/opaque callee `map` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n log n)`, not established: applies `fn_c7bf02595d4efae5b0f5fdcc346209a5c0c6bf6bb7728b9e11e5dc36f8155401` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   }
  },
  {
@@ -893,7 +992,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -901,8 +1000,8 @@
    "typecheck": "(List(int)) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies `fn_f943ae1e0e77b72773f6d41cafd351c533a6bc682ee8f8102773a573031237cc`, whose own termination is not provable",
-   "complexity": "declared `O(n log n)`, not established: applies the fn_ref `fn_f943ae1e0e77b72773f6d41cafd351c533a6bc682ee8f8102773a573031237cc` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n log n)`, not established: applies the fn_ref `fn_96d2df36bc9e05e592d25f5e09d4fd259688a0fc5ba5b2716d81be2abd74e355` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   }
  },
  {
@@ -1011,7 +1110,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -1019,7 +1118,7 @@
    "typecheck": "(List(int), List(int)) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies `fn_f943ae1e0e77b72773f6d41cafd351c533a6bc682ee8f8102773a573031237cc`, whose own termination is not provable",
+   "termination": "provably always-terminates",
    "complexity": "declared `O(n log n)`, not established: applies `fn_cf0cca543c5eb5050ab83f1c515cc0747a60b2fe64ed76243294714941b6ddd9` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   }
  }

@@ -1,0 +1,166 @@
+{
+ "body_hash": "expr_6e864e0154310cb02a66cccd898736cf1122b287eceef22c118df88e0e9d634e",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 560
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 35
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 1
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1024
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 1
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 0
+   }
+  }
+ ],
+ "hash": "fn_407a595edab18c0859afd35192caf74b6b4c0eaacea3c060801bab50936bfe35",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/odd-part-d"
+ ],
+ "name_hints": [
+  "odd_part_d",
+  "odd_part",
+  "split_powers_of_two"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "d"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "d"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          },
+          {
+           "kind": "lit",
+           "value": 2
+          }
+         ],
+         "kind": "app",
+         "op": "mod"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "d"
+    ]
+   },
+   "name": "odd_or_zero"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "result"
+      },
+      {
+       "kind": "var",
+       "name": "d"
+      }
+     ],
+     "kind": "app",
+     "op": "le"
+    },
+    "kind": "post"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "nat"
+   }
+  }
+ },
+ "supersedes": null
+}

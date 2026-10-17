@@ -1,0 +1,158 @@
+{
+ "body_hash": "expr_7bb4f50b6cecfea447a8d1ebdb913c65637d13289899b6a312096b01050b2700",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 0
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 8
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 3
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1000
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 9
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": "4611686018427387904"
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 62
+   }
+  }
+ ],
+ "hash": "fn_b917665637907721091514d4ead89dca3817d9dd6cd5d783cc136a23eeeb2d60",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/log2-floor"
+ ],
+ "name_hints": [
+  "log2_floor",
+  "integer_log2",
+  "bit_length_minus_one"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": 2
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "n"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "n"
+          },
+          {
+           "kind": "var",
+           "name": "n"
+          }
+         ],
+         "kind": "app",
+         "op": "add"
+        }
+       ],
+       "kind": "app",
+       "op": "le"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n"
+    ]
+   },
+   "name": "below_power"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "nat"
+   }
+  }
+ },
+ "supersedes": null
+}

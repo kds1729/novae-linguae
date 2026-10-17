@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_51627b7bec62a4e3872e98acc57d32a85844da38a916570b84d6559ba44d45e4",
+ "body_hash": "expr_09271084cc1e1cc91f224ebfdcc28ac334b65170779a945b7a5b9fc57c66c99b",
  "derived_from": null,
  "examples": [
   {
@@ -28,6 +28,10 @@
     {
      "kind": "int",
      "value": 911660635
+    },
+    {
+     "kind": "nat",
+     "value": 2
     }
    ],
    "result": {
@@ -66,6 +70,10 @@
     {
      "kind": "int",
      "value": 1
+    },
+    {
+     "kind": "nat",
+     "value": 0
     }
    ],
    "result": {
@@ -79,7 +87,7 @@
    }
   }
  ],
- "hash": "fn_81d8af646046b7e93ce6ab9c7816d6333196a6e313e7bd76fcff54a45d6fab8f",
+ "hash": "fn_dde56182045924264e16345e2dc7c73afef34949c1c882f4628b2938238d84d1",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -117,6 +125,10 @@
     {
      "kind": "builtin",
      "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
     }
    ],
    "result": {
