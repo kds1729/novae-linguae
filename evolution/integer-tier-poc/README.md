@@ -537,7 +537,7 @@ with the real reason (its signature leaves the fragment, it is absent, a cycle).
   `List nat` now enters as `all_nat`. A law can be true on the declared domain and false off it,
   and the certificate shows which domain the proof is over.
 
-### Still open
+### Still open after the fifth follow-up (the first closed in the sixth, below)
 
 - The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, `digit_sum ≥ 0`, the `mod`
   congruences, Bézout and CRT as checker laws, `pow_mod_agree`/`prime_agree`): both solvers time
@@ -545,6 +545,72 @@ with the real reason (its signature leaves the fragment, it is absent, a cycle).
 - `digits_roundtrip`: a non-recursive law whose truth lives in two callees' definitions —
   definitional unfolding of linked callees under an induction on a law variable, a rung not built.
 - `isqrt(n·n) = n`: a compound measure (`self` at `n·n`) — needs the two-measure principle.
+
+## Sixth follow-up (2026-10-17, same day): contracts at the point of use
+
+### Measured
+
+| law | before | now |
+|---|---|---|
+| `isqrt`: `n < 0 ∨ isqrt(n·n) = n` | UNSUPPORTED (compound measure) | **PROVED** from `isqrt`'s own certified contract — the floor bounds, instantiated at `n·n` |
+| `bezout_holds`: `a < 0 ∨ b < 0 ∨ self(a, b)` (new, the nat-qualified law) | — | **PROVED**: `ext_gcd`'s Bézout post, instantiated at the body's application |
+| `bezout_holds`: `self(a, b)` over all ints | UNKNOWN | UNKNOWN — the post is certified for nats; the prover will not extend it (the −12 example is generative evidence only) |
+| `inverse_holds`, `crt_holds`, `pow_mod_agree`, `prime_agree`, `lcm`'s `multiple_of_both`, `digits_roundtrip` | UNKNOWN | UNKNOWN — their callees' contracts state nothing that decides them (below) |
+
+Totals: laws **18 PROVED / 14 UNKNOWN / 0 UNSUPPORTED** (was 16 / 14 / 1,
+with one law added); everything else unchanged (41/41 run, certify, terminate, complexity;
+refinements 19 / 2).
+
+**Quantifiers were the obstacle, twice more.** The compound-measure law `isqrt(n·n) = n` needs no
+induction at all: it follows from `r² ≤ x < (r+1)²` at `x = n·n` (then `r ≤ n < r + 1`). Those
+bounds were already PROVED about `isqrt` — a post and a law — and a callee's contract already
+entered a dependent's proof as quantified axioms. Stated that way about `isqrt` itself, z3 answers
+*unknown*: nonlinear arithmetic under a quantifier. Stated as the one instance the law uses, unsat
+in 10 ms. So every contract fact is now also written at each application the obligation makes,
+and an obligation z3 leaves unknown with the quantified axioms is retried on the instances alone
+(a strictly weaker set, so as sound). The second obstacle was scope: a checker record applies its
+callee inside its body — `case ext_gcd(a, b) of (g, (x, y)) ⇒ …` — which the first-order prover
+inlines in parameter scope, where no instance could land. The body's applications are now
+instantiated at every `self` application the goal makes, `let`-bound over the parameters: the
+discipline the induction rung already used for unfoldings.
+
+**The self-contract rung.** `prove`'s ladder ends with the record's OWN certified contract —
+posts and laws re-derived by the linked view, exactly as for a callee (without `--records`, a
+one-record view of the record and body in hand) — with `self` uninterpreted under it. Nothing
+unproved enters; a satisfiable negation is UNKNOWN. The false `isqrt(n·n) = n + 1` stays UNKNOWN.
+
+**What stays UNKNOWN says what the contracts lack, record by record.** `bezout_holds` over all
+ints: `ext_gcd` is typed `nat → nat → …`, so its post is certified there and nowhere else; the
+checker's own law over ints is true (exhaustive on the bounded domain, the −12 example runs) but
+not a consequence of anything certified — the nat-qualified law is the one the commons can
+vouch for. `inverse_holds` and `crt_holds` check `mod_inverse` and `crt2`, which carry NO
+postcondition (a `Maybe`-valued contract — `Just(x) ⇒ a·x ≡ 1 (mod m)` — is statable now, and
+is the next authoring step; whether its nonlinear proof closes is the open question).
+`pow_mod_agree` and `prime_agree` compare two definitions; a contract bounds a result, it does
+not pin one — that is the equivalence prover's job, and both recursions are numeric (its fragment
+is lists). `lcm`'s `multiple_of_both` needs `gcd` divides both arguments, itself UNKNOWN
+(nonlinear). `digits_roundtrip` needs the callees' definitions, not their contracts.
+
+### Argued
+
+- **The point of use is where a fact is cheap.** Three rungs now share one idiom — unfoldings
+  instantiated at the recursive calls, the structural hypothesis instantiated at the tail
+  descents, contracts instantiated at the applications — and each was measured against its
+  quantified form first. Quantifiers remain in the certificate (they are the general statement);
+  the instances are what the solver uses.
+- **A contract's domain is the proof's domain.** The int-typed checker and the nat-typed callee
+  are both legitimate records; the law that bridges them has to say on which domain it claims,
+  and the prover holds it to the callee's certificate rather than extending the certificate.
+
+### Still open
+
+- The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, `digit_sum ≥ 0`, the `mod`
+  congruences, `gcd` divides both): both solvers time out; a lemma rung (stating `mod`
+  distributivity as axioms) is the next lever if a driver appears.
+- `Maybe`-valued contracts for `mod_inverse` and `crt2` (authoring, then a nonlinear proof).
+- `pow_mod_agree` / `prime_agree`: numeric two-recursive equivalence (the equivalence prover
+  inducts over lists); `digits_roundtrip`: definitional unfolding of callees under an induction
+  on a law variable.
 
 ## Open questions (as they stood before the follow-up)
 

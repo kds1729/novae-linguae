@@ -119,13 +119,16 @@
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
-   "bezout_identity: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+   "bezout_identity: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "bezout_identity_nat: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "bezout_identity: CONSISTENT  |  generative: HELD (200 cases)"
+   "bezout_identity: CONSISTENT  |  generative: HELD (200 cases)",
+   "bezout_identity_nat: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "bezout_identity: UNKNOWN      solver could not decide"
+   "bezout_identity: UNKNOWN      solver could not decide",
+   "bezout_identity_nat: PROVED       holds for all inputs (unsat negation)"
   ]
  },
  {
@@ -392,7 +395,7 @@
    "floor_bounds: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "square_root_of_square: UNSUPPORTED  recursive body \u2014 structural induction: recursion parameter `n` is used at sort Int, not as a list \u2014 structural induction is over a leading list parameter (numeric/boolean recursion is out of fragment); numeric induction: the law applies `self` at several measures (n), so the induction needs their SUM, but `n` is not nat-constrained (fed to a `nat` parameter somewhere in the law) \u2014 the sum would not be well-founded",
+   "square_root_of_square: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)",
    "floor_bounds: PROVED       by numeric induction on `n` (strong induction over the measure; unsat)"
   ]
  },

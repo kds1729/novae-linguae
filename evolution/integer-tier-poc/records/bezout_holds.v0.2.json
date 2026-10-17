@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_4d23767bb1bad56237fe39e87ed32734a5f9f1c1da5ece0b5140db6e6bbc6423",
+ "hash": "fn_b030830b66012f902bbf6ace3c82a4fdfc531f6a83bad303d85ccb32c910ca3c",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -96,6 +96,80 @@
     ]
    },
    "name": "bezout_identity"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        }
+       ],
+       "kind": "app",
+       "op": "or"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": true
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "bezout_identity_nat"
   }
  ],
  "schema_version": "0.2.0",

@@ -275,7 +275,12 @@ def main():
           FN([INT, INT], BOOL),
           [{"args": [ilit(240), ilit(46)], "result": blit(True)}, {"args": [ilit(-12), ilit(18)], "result": blit(True)},
            {"args": [ilit(0), ilit(0)], "result": blit(True)}],
-          props=[("bezout_identity", "forall a b. self(a, b) == true")],
+          # The checker ranges over ALL ints (its −12 example is deliberate: ext_gcd's body works
+          # there too), but ext_gcd's Bézout post is CERTIFIED on its declared nat domain only — so
+          # the law provable from the contract is the nat-qualified one; the int-domain law stays
+          # generative evidence.
+          props=[("bezout_identity", "forall a b. self(a, b) == true"),
+                 ("bezout_identity_nat", "forall a b. a < 0 || b < 0 || self(a, b) == true")],
           tags=["predicate/check"], hints=["bezout_identity_check"], complexity="O(log n)")
     gauntlet("bezout_holds", prove)
 
