@@ -2012,6 +2012,26 @@ fn cmd_prove(
                 _ => label,
             }
         };
+        // And through the callees' DEFINITIONS: a non-recursive law whose truth is an induction
+        // inside a callee (`from_digits(b, digits(b, n)) = n` on `n`, through `digits`' recursion).
+        let label = match (label.starts_with("PROVED"), contract_view.as_ref(), body_ast.as_ref()) {
+            (false, Some(v), Some(b)) => {
+                let nats = nl_validator::nat_param_positions(&value);
+                let def = |t: &str| v.callee_def(t);
+                let (cout, ccert, m) = nl_validator::prove_by_callee_induction(expr, b, &nats, &def, solver);
+                if let Some(c) = &ccert {
+                    write_cert(".callee-induction", &c.smt)?;
+                }
+                match cout {
+                    ProofOutcome::Proved => format!(
+                        "PROVED       by induction through the callees' definitions, on `{}` (unsat)",
+                        m.as_deref().unwrap_or("?")
+                    ),
+                    _ => label,
+                }
+            }
+            _ => label,
+        };
         println!("{name}: {label}");
     }
     if !refuted.is_empty() {

@@ -213,6 +213,14 @@ impl<'a> LinkedView<'a> {
         out
     }
 
+    /// A callee's body and `nat`-typed parameter positions, for the prover's induction THROUGH
+    /// a callee's definition (`prove::prove_by_callee_induction`).
+    pub fn callee_def(&self, target: &str) -> Option<(J, std::collections::BTreeSet<usize>)> {
+        let (rec, body) = self.callee(target)?;
+        let nats = rec.pointer("/signature/type").map(crate::terminate::nat_positions_of_type).unwrap_or_default();
+        Some((body.clone(), nats))
+    }
+
     fn callee(&self, target: &str) -> Option<(&'a J, &'a J)> {
         let rec = self.records.get(target)?;
         let body = self.bodies.get(target).or_else(|| rec.get("body_hash").and_then(|h| h.as_str()).and_then(|h| self.bodies.get(h)))?;

@@ -607,6 +607,25 @@ negation is UNKNOWN. Measured: `isqrt(n·n) = n` PROVED from the contract; the c
 over all ints — ext_gcd's post is certified for nats, and the prover will not extend it; the
 false `isqrt(n·n) = n + 1` stays UNKNOWN (never REFUTED).
 
+**Induction through a callee's definition (2026-10-17, the seventh follow-up).** A checker record
+is not recursive — `digits_roundtrip = \b n -> from_digits(b, digits(b, n)) = n` — yet its law is
+an induction: on `n`, through `digits`' own recursion (`digits(b, n) = cons(n mod b, digits(b,
+n div b))`) and `from_digits`' structure. Neither callee's CONTRACT says it (`digits` has none;
+`from_digits ≥ 0` does not relate the two); their DEFINITIONS do. The rung inlines `self` (it is
+non-recursive, as the first-order prover does), lowers each linked callee's body over fresh
+parameter names with its own recursion as the callee's symbol, and instantiates the defining
+equation at every application the goal's `self` applications make (the body's applications,
+`let`-bound over `self`'s parameters) and one level deeper at the recursive calls inside — the
+numeric rung's discipline. The induction variable is the law variable that reaches a recursive
+callee's measure position (`terminate::induction_measure` on the CALLEE's body — one analysis,
+one more verdict); the hypothesis is an **instance** at that callee's recursive-call argument
+(`n div b`), guarded by the measure decrease, measured once more against the quantified form:
+the instance is unsat in 14 ms, the quantifier times out — and so does the callee's quantified
+`≥ 0` contract axiom, so the contract ladder runs here too (quantified, then instances only).
+Callees stay uninterpreted otherwise; SAT is UNKNOWN. Measured: `digits_roundtrip` PROVED on
+`n` through `digits`; the false `… = n + 1` stays UNKNOWN. The rung is the last on `prove`'s
+ladder, after the self-contract rung.
+
 ## Semantic equivalence
 
 `nl-validator equiv` decides whether two functions compute the same thing — `∀x. f(x) = g(x)` over the

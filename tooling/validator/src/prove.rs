@@ -2196,6 +2196,246 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees }, m))
 }
 
+// --- induction through a callee's definition --------------------------------------------------------
+//
+// A checker record is not recursive — `digits_roundtrip = \b n -> from_digits(b, digits(b, n)) = n`
+// — yet its law is an induction: on `n`, through `digits`' own recursion (`digits(b, n) =
+// cons(n mod b, digits(b, n div b))`) and `from_digits`' structure. Neither callee's CONTRACT says
+// it; their DEFINITIONS do. This rung inlines `self` (non-recursive, as the first-order prover does),
+// unfolds each linked callee's defining equation at the applications the goal makes (and one level
+// deeper, at the recursive calls inside — the numeric rung's discipline), and inducts on the law
+// variable that reaches a recursive callee's measure position: the hypothesis is stated as an
+// INSTANCE at that callee's recursive-call argument (`n div b`), guarded by the measure decrease —
+// measured: the quantified hypothesis times out, the instance is unsat in 13 ms. Callees stay
+// uninterpreted otherwise (under their contracts), so SAT is UNKNOWN.
+
+/// Every linked-callee application in an AST (head a `fn_…` address), as (target, argument ASTs).
+fn collect_callee_apps(node: &J) -> Vec<(String, Vec<J>)> {
+    let mut out = Vec::new();
+    fn go(node: &J, out: &mut Vec<(String, Vec<J>)>) {
+        if node.get("kind").and_then(|k| k.as_str()) == Some("app") {
+            if let Some(op) = head_op(node) {
+                if op.starts_with("fn_") {
+                    let args: Vec<J> = node.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+                    if !out.iter().any(|(t, a)| *t == op && *a == args) {
+                        out.push((op, args.clone()));
+                    }
+                }
+            }
+        }
+        match node {
+            J::Object(m) => m.values().for_each(|v| go(v, out)),
+            J::Array(xs) => xs.iter().for_each(|v| go(v, out)),
+            _ => {}
+        }
+    }
+    go(node, &mut out);
+    out
+}
+
+struct CalleeDef {
+    params: Vec<String>,
+    body_smt: String,
+    /// The callee's own recursive calls, argument ASTs in its (renamed) parameter scope.
+    rec_calls: Vec<Vec<J>>,
+    measure: Option<crate::terminate::Measure>,
+}
+
+fn build_callee_induction(
+    prop_expr: &J,
+    body: &J,
+    nat_positions: &BTreeSet<usize>,
+    callee_def: &dyn Fn(&str) -> Option<(J, BTreeSet<usize>)>,
+    with_ih: bool,
+) -> Result<(Certificate, String)> {
+    take_callees_used();
+    take_callee_apps();
+    reset_list_emission();
+    let _lists = admit_lists();
+    let law = uncurry(prop_expr);
+    let body = uncurry(body);
+    if law.get("kind").and_then(|k| k.as_str()) != Some("forall") {
+        bail!("not a `forall`");
+    }
+    let vars: Vec<String> = law.get("vars").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    let pred = law.get("body").ok_or_else(|| anyhow!("`forall` has no body"))?;
+    if !references_self(pred) {
+        bail!("the law does not mention `self`");
+    }
+    let sd = lower_self(&body)?; // non-recursive, inlined; bails (stated) on a recursive body
+    let _ = take_body_apps();
+    let inner = body.get("body").ok_or_else(|| anyhow!("body is not a lambda"))?;
+    let body_apps = collect_callee_apps(inner);
+    if body_apps.is_empty() {
+        bail!("the body applies no linked callee — nothing to induct through");
+    }
+    let goal_calls = collect_self_applications(pred);
+    if goal_calls.is_empty() {
+        bail!("the law applies no `self`");
+    }
+    let var_sorts = infer_var_sorts(pred, &vars, Some(&sd.param_sorts))?;
+    let mut env: BTreeMap<String, Sort> = var_sorts.clone();
+    if sort_of(pred, &env, Some(&sd))? != Sort::Bool {
+        bail!("property body is not a boolean predicate");
+    }
+    let pred_smt = lower_goal(pred, &mut env, Some(&sd))?;
+
+    // Each callee's definition, lowered over FRESH parameter names (no clash with the law's).
+    let mut defs: BTreeMap<String, CalleeDef> = BTreeMap::new();
+    for (t, _) in &body_apps {
+        if defs.contains_key(t) {
+            continue;
+        }
+        let Some(c) = callee_contract(t) else { bail!("{}", no_contract_reason(t)) };
+        let Some((cbody, cnat)) = callee_def(t) else { bail!("the callee `{t}`'s body is not in the linked view") };
+        let cbody = uncurry(&cbody);
+        let cparams: Vec<String> = cbody.get("params").and_then(|p| p.as_array()).map(|ps| ps.iter().filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from)).collect()).unwrap_or_default();
+        if cparams.len() != c.params.len() {
+            bail!("the callee `{t}` has {} params, its contract {}", cparams.len(), c.params.len());
+        }
+        let cinner = cbody.get("body").ok_or_else(|| anyhow!("the callee `{t}`'s body is not a lambda"))?;
+        let fresh: Vec<String> = (0..cparams.len()).map(|i| format!("cp{i}_{}", &t[3..11])).collect();
+        let renaming: BTreeMap<String, J> = cparams.iter().zip(&fresh).map(|(p, f)| (p.clone(), serde_json::json!({ "kind": "var", "name": f }))).collect();
+        let cinner = crate::equiv::subst_many(cinner, &renaming);
+        let rec_calls = collect_self_applications(&cinner);
+        let cinner_t = law_about(&cinner, t);
+        let mut cenv: BTreeMap<String, Sort> = fresh.iter().cloned().zip(c.param_sorts.iter().copied()).collect();
+        let body_smt = lower(&cinner_t, &mut cenv, None)?;
+        let measure = crate::terminate::induction_measure(&cbody, &cnat).filter(|m| !m.structural);
+        defs.insert(t.clone(), CalleeDef { params: fresh, body_smt, rec_calls, measure });
+    }
+
+    // The induction variable: a law variable the goal feeds to a `self` parameter that the body
+    // passes to a recursive callee at its measure position.
+    let mut induct: Option<(String, usize, String, usize)> = None; // (law var, self param index, callee, measure position)
+    for (t, args) in &body_apps {
+        let Some(m) = defs[t].measure else { continue };
+        let Some(p) = args.get(m.position).and_then(|a| var_name(a)) else { continue };
+        let Some(i) = sd.params.iter().position(|x| x == p) else { continue };
+        if let Some(v) = goal_calls.iter().find_map(|call| call.get(i).and_then(|a| var_name(a)).filter(|v| vars.iter().any(|x| x == v))) {
+            induct = Some((v.to_string(), i, t.clone(), m.position));
+            break;
+        }
+    }
+    let m_label = induct.as_ref().map(|(v, _, t, _)| format!("{v} (through `{}…`)", &t[..11])).unwrap_or_else(|| "<unfolding>".into());
+
+    let mut out = String::new();
+    out.push_str("(set-logic ALL)\n");
+    out.push_str(&format!(";; induction through a callee's definition, on `{m_label}`: self inlined, each linked callee's defining\n;; equation instantiated at the applications the goal makes and at the recursive calls inside them.\n"));
+    let (callees, callee_insts, _) = callee_preamble()?;
+    out.push_str(&callees);
+    let params = sd.params.iter().zip(&sd.param_sorts).map(|(p, s)| format!("({p} {})", s.smt())).collect::<Vec<_>>().join(" ");
+    out.push_str(&format!("(define-fun self ({params}) {} {})\n", sd.ret.smt(), sd.body_smt));
+    for v in &vars {
+        out.push_str(&format!("(declare-const {v} {})\n", var_sorts[v].smt()));
+    }
+    let mut nat_vars: BTreeSet<String> = BTreeSet::new();
+    for call in &goal_calls {
+        for (i, a) in call.iter().enumerate() {
+            if nat_positions.contains(&i) {
+                if let Some(v) = var_name(a) {
+                    if vars.iter().any(|x| x == v) {
+                        nat_vars.insert(v.to_string());
+                    }
+                }
+            }
+        }
+    }
+    for v in &nat_vars {
+        out.push_str(&format!("(assert (>= {v} 0))\n"));
+    }
+    out.push_str(&callee_insts);
+
+    // Unfoldings (and hypothesis instances) at every `self` application the goal makes.
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    for call in &goal_calls {
+        if call.len() != sd.params.len() {
+            continue;
+        }
+        let terms: Vec<String> = call.iter().map(|a| lower(a, &mut env.clone(), Some(&sd))).collect::<Result<_>>()?;
+        let mut penv: BTreeMap<String, Sort> = sd.params.iter().cloned().zip(sd.param_sorts.iter().copied()).collect();
+        for (t, args) in &body_apps {
+            let c = callee_contract(t).ok_or_else(|| anyhow!("{}", no_contract_reason(t)))?;
+            let d = &defs[t];
+            // The application's arguments in goal scope: lowered in self's parameter scope, the
+            // parameters bound to the goal's terms.
+            let a: Vec<String> = args.iter().map(|x| lower(x, &mut penv, Some(&sd)).map(|s| let_params(&sd.params, &terms, &s))).collect::<Result<_>>()?;
+            let app = format!("({} {})", c.symbol, a.join(" "));
+            let eq = format!("(assert (= {app} {}))\n", let_params(&d.params, &a, &d.body_smt));
+            if seen.insert(eq.clone()) {
+                out.push_str(&eq);
+            }
+            let mut cenv: BTreeMap<String, Sort> = d.params.iter().cloned().zip(c.param_sorts.iter().copied()).collect();
+            for rc in &d.rec_calls {
+                if rc.len() != d.params.len() {
+                    continue;
+                }
+                let r: Vec<String> = rc.iter().map(|x| lower(&law_about(x, t), &mut cenv, None)).collect::<Result<_>>()?;
+                let inner_app = format!("({} {})", c.symbol, r.join(" "));
+                let eq = format!("(assert {})\n", let_params(&d.params, &a, &format!("(= {inner_app} {})", let_params(&d.params, &r, &d.body_smt))));
+                if seen.insert(eq.clone()) {
+                    out.push_str(&eq);
+                }
+                // The hypothesis at this recursive call: the law with the induction variable replaced
+                // by the call's measure argument, guarded by `floor ≤ it < the variable` (the callee's
+                // parameter at the measure position is bound to the goal's term for it).
+                if let (true, Some((v, i, it, p))) = (with_ih, induct.as_ref()) {
+                    if it == t && call.get(*i).and_then(|x| var_name(x)) == Some(v.as_str()) {
+                        let m = d.measure.expect("chosen callee has a measure");
+                        let smaller = &r[*p];
+                        let guard = format!("(and (>= {smaller} {}) (< {smaller} {}))", smt_int_lit(m.floor), d.params[*p]);
+                        let ih = format!("(=> {guard} (let (({v} {smaller})) {pred_smt}))");
+                        let inst = format!(";; induction hypothesis at {inner_app}\n(assert {})\n", let_params(&d.params, &a, &ih));
+                        if seen.insert(inst.clone()) {
+                            out.push_str(&inst);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
+    let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
+    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees: true }, m_label))
+}
+
+/// Prove a law about a NON-recursive function by induction through the definitions of the linked
+/// callees it applies (see the module comment above). `callee_def` supplies a callee's body and
+/// `nat` positions from the linked view. Unfolding alone first, then with the hypothesis.
+pub fn prove_by_callee_induction(
+    prop_expr: &J,
+    body: &J,
+    nat_positions: &BTreeSet<usize>,
+    callee_def: &dyn Fn(&str) -> Option<(J, BTreeSet<usize>)>,
+    solver: &str,
+) -> (ProofOutcome, Option<Certificate>, Option<String>) {
+    // The ladder: unfolding alone, then with the hypothesis; each first with the callees' quantified
+    // contract axioms, then with their instances only (the contract ladder — measured here too: the
+    // round-trip is unsat in 14 ms on the instances and times out under the quantified `≥ 0`).
+    let mut last: (ProofOutcome, Option<Certificate>, Option<String>) = (ProofOutcome::Unknown, None, None);
+    for with_ih in [false, true] {
+        for quantified in [true, false] {
+            let built = if quantified {
+                build_callee_induction(prop_expr, body, nat_positions, callee_def, with_ih)
+            } else {
+                without_contract_quantifiers(|| build_callee_induction(prop_expr, body, nat_positions, callee_def, with_ih))
+            };
+            let (cert, m) = match built {
+                Err(e) => return (ProofOutcome::Unsupported(format!("{e:#}")), None, None),
+                Ok(x) => x,
+            };
+            let m = if with_ih { m } else { "<unfolding>".to_string() };
+            match run_smt(&cert.smt, solver) {
+                Ok(SatAnswer::Unsat) => return (ProofOutcome::Proved, Some(cert), Some(m)),
+                Ok(SatAnswer::NoSolver) => return (ProofOutcome::NoSolver, Some(cert), Some(m)),
+                Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert), Some(m)),
+                Ok(SatAnswer::Sat(_)) | Ok(SatAnswer::Unknown) => last = (ProofOutcome::Unknown, Some(cert), Some(m)),
+            }
+        }
+    }
+    last
+}
+
 fn smt_int_lit(n: i64) -> String {
     if n < 0 {
         format!("(- {})", -(n as i128))
@@ -2745,6 +2985,45 @@ mod tests {
         assert!(smt.contains("(let ((a (let ((a a) (b b)) a))"), "the body's application is instantiated at the goal's: {smt}");
         // Over all ints the callee's contract says nothing: UNKNOWN, never a false PROVED (nor REFUTED).
         let (out, _) = prove_property_in_domain(&law, Some(&body), &BTreeSet::new(), solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+        set_callee_contracts(prev);
+    }
+
+    #[test]
+    fn callee_induction_proves_the_digits_round_trip() {
+        let Some(solver) = solver() else { return };
+        // digits: \b n -> case lt(b, 2) of true -> nil | false -> case lt(n, 1) of true -> nil
+        //   | false -> cons(mod(n, b), self(b, div(n, b)))            — numeric recursion on n
+        // from_digits: \b ds -> case null(ds) of true -> 0 | false -> add(head(ds), mul(b, self(b, tail(ds))))
+        let digits = json!({ "kind": "lambda", "params": [{ "name": "b" }, { "name": "n" }], "body":
+            case_bool(op("lt", vec![v("b"), slit(2)]), v("nil"),
+                case_bool(op("lt", vec![v("n"), slit(1)]), v("nil"),
+                    op("cons", vec![op("mod", vec![v("n"), v("b")]), self_app(vec![v("b"), op("div", vec![v("n"), v("b")])])]))) });
+        let from_digits = from_digits_body();
+        let (td, tf) = ("fn_digits_test", "fn_from_digits_test");
+        let contracts: BTreeMap<String, CalleeContract> = [
+            (td.to_string(), CalleeContract { symbol: "callee_digits".into(), params: vec!["b".into(), "n".into()], param_sorts: vec![Sort::Int, Sort::Int], ret: Sort::Lst, pres: vec![], posts: vec![], laws: vec![], nat_positions: [0, 1].into() }),
+            (tf.to_string(), CalleeContract { symbol: "callee_from_digits".into(), params: vec!["b".into(), "ds".into()], param_sorts: vec![Sort::Int, Sort::Lst], ret: Sort::Int, pres: vec![], posts: vec![op("ge", vec![v("result"), lit(0)])], laws: vec![], nat_positions: [0].into() }),
+        ].into_iter().collect();
+        let prev = set_callee_contracts(contracts);
+        let defs = move |t: &str| -> Option<(J, BTreeSet<usize>)> {
+            if t == td { Some((digits.clone(), [0, 1].into())) } else if t == tf { Some((from_digits.clone(), [0].into())) } else { None }
+        };
+        // digits_roundtrip: \b n -> case lt(b, 2) of true -> true | false -> case lt(n, 0) of true -> true
+        //   | false -> eq(from_digits(b, digits(b, n)), RHS)
+        let checker = |rhs: J| json!({ "kind": "lambda", "params": [{ "name": "b" }, { "name": "n" }], "body":
+            case_bool(op("lt", vec![v("b"), slit(2)]), json!({ "kind": "lit", "value": { "kind": "bool", "value": true } }),
+                case_bool(op("lt", vec![v("n"), slit(0)]), json!({ "kind": "lit", "value": { "kind": "bool", "value": true } }),
+                    op("eq", vec![op(tf, vec![v("b"), op(td, vec![v("b"), v("n")])]), rhs]))) });
+        let law = law(&["b", "n"], op("eq", vec![self_app(vec![v("b"), v("n")]), json!({ "kind": "lit", "value": true })]));
+        let nats: BTreeSet<usize> = [0, 1].into();
+        let (out, cert, m) = prove_by_callee_induction(&law, &checker(v("n")), &nats, &defs, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert_eq!(m.as_deref(), Some("n (through `fn_digits_t…`)"));
+        let smt = cert.unwrap().smt;
+        assert!(smt.contains(";; induction hypothesis at (callee_digits") && smt.contains("(= (callee_digits "), "{smt}");
+        // The false round-trip `… = n + 1` is never proved.
+        let (out, _, _) = prove_by_callee_induction(&law, &checker(op("add", vec![v("n"), lit(1)])), &nats, &defs, solver);
         assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
         set_callee_contracts(prev);
     }
