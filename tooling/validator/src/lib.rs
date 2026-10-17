@@ -28,7 +28,11 @@ pub use eval::{check_properties, evaluate_property, Verdict};
 pub mod proptest;
 
 pub mod prove;
-pub use prove::{build_certificate, prove_by_numeric_induction, prove_property, type_mentions_float, Certificate, ProofOutcome, Sort};
+pub use prove::{
+    build_certificate, build_certificate_in_domain, prove_by_numeric_induction, prove_property, prove_property_in_domain,
+    set_callee_contracts, type_mentions_float, CalleeContract,
+    Certificate, ProofOutcome, Sort,
+};
 
 pub mod lemmas;
 pub mod explore;

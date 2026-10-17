@@ -319,6 +319,10 @@ enum Commands {
         /// SMT solver binary to invoke.
         #[arg(long, default_value = "z3")]
         solver: String,
+        /// Directory of records/bodies: callees applied by `fn_ref` contribute their CERTIFIED contracts
+        /// (proved postconditions, re-derived here) as axioms.
+        #[arg(long)]
+        records: Option<PathBuf>,
     },
     /// Check a PLAN — a sequence of concrete applications — against the records' declared
     /// **world-state refinements** (`requires`/`ensures` over abstract resources,
@@ -469,6 +473,11 @@ enum Commands {
         /// Directory to write each property's SMT-LIB certificate into (created if absent).
         #[arg(long = "smt-out")]
         smt_out: Option<PathBuf>,
+        /// Directory of records/bodies: a `fn_ref` callee the body applies becomes an uninterpreted
+        /// function under its CERTIFIED contract (its proved postconditions, re-derived here) — modular
+        /// verification through content addresses.
+        #[arg(long)]
+        records: Option<PathBuf>,
         /// SMT solver binary to invoke (must accept SMT-LIB 2 on stdin via `-in`).
         #[arg(long, default_value = "z3")]
         solver: String,
@@ -1049,7 +1058,7 @@ fn real_main() -> ExitCode {
             (cmd_check_effects(&record, &body, records.as_ref()), false)
         }
         Commands::Typecheck { record, body } => (cmd_typecheck(&record, &body), false),
-        Commands::CheckRefinement { record, body, solver } => (cmd_check_refinement(&record, &body, &solver), false),
+        Commands::CheckRefinement { record, body, solver, records } => (cmd_check_refinement(&record, &body, &solver, records.as_ref()), false),
         Commands::CheckPlan { plan, records, node, probe, grants, secrets } => {
             (cmd_check_plan(&plan, records.as_deref(), node.as_deref(), &probe, &grants, &secrets), false)
         }
@@ -1071,8 +1080,8 @@ fn real_main() -> ExitCode {
                 Err(e) => (Err(e), false),
             }
         }
-        Commands::Prove { record, body, smt_out, solver } => {
-            (cmd_prove(&record, body.as_ref(), smt_out.as_ref(), &solver), false)
+        Commands::Prove { record, body, smt_out, solver, records } => {
+            (cmd_prove(&record, body.as_ref(), smt_out.as_ref(), &solver, records.as_ref()), false)
         }
         Commands::Equiv { body_f, body_g, solver } => (cmd_equiv(&body_f, &body_g, &solver), false),
         Commands::Compose { records } => (cmd_compose(&records), false),
@@ -1457,10 +1466,15 @@ fn cmd_check_plan(
     }
 }
 
-fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str) -> Result<()> {
+fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str, records: Option<&PathBuf>) -> Result<()> {
     use nl_validator::RefinementOutcome;
     let record = nl_validator::read_json(record)?;
     let body = nl_validator::read_json(body)?;
+    let maps = linked_maps(records)?;
+    let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, solver));
+    if let Some(v) = &view {
+        nl_validator::set_callee_contracts(v.contracts_for(&body));
+    }
     let sig_type = record
         .pointer("/signature/type")
         .ok_or_else(|| anyhow::anyhow!("record has no `signature.type`"))?;
@@ -1789,10 +1803,17 @@ fn cmd_prove(
     body: Option<&PathBuf>,
     smt_out: Option<&PathBuf>,
     solver: &str,
+    records: Option<&PathBuf>,
 ) -> Result<()> {
     use nl_validator::ProofOutcome;
     let value = nl_validator::read_json(record)?;
     let body_ast = body.map(|p| nl_validator::read_json(p)).transpose()?;
+    // The linked view: callees' certified contracts become axioms for every proof below.
+    let maps = linked_maps(records)?;
+    let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, solver));
+    if let (Some(v), Some(b)) = (&view, &body_ast) {
+        nl_validator::set_callee_contracts(v.contracts_for(b));
+    }
     let props = value.get("properties").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     if props.is_empty() {
         println!("no properties to prove");
@@ -1826,7 +1847,12 @@ fn cmd_prove(
             Ok(())
         };
 
-        let (outcome, cert) = nl_validator::prove_property(expr, body_ast.as_ref(), solver);
+        let (outcome, cert) = nl_validator::prove_property_in_domain(
+            expr,
+            body_ast.as_ref(),
+            &nl_validator::nat_param_positions(&value),
+            solver,
+        );
         if let Some(cert) = &cert {
             write_cert("", &cert.smt)?;
         }

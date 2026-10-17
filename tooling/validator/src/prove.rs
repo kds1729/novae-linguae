@@ -65,6 +65,10 @@ pub struct Certificate {
     pub smt: String,
     pub quantified: Vec<(String, Sort)>,
     pub uses_self: bool,
+    /// The obligation applied a linked callee under its certified contract. The callee is then an
+    /// UNINTERPRETED function constrained only by that contract, so a satisfiable negation may be a
+    /// spurious model: `run_solver` reports it UNKNOWN, never REFUTED.
+    pub uses_callees: bool,
 }
 
 // --- self definition ------------------------------------------------------------------------------
@@ -149,8 +153,9 @@ fn uncurry(node: &J) -> J {
     }
 }
 
-/// Resolve the head operator of an application node: either an explicit `op` string (predicate form)
-/// or a `fn` that is a `var` (body form).
+/// Resolve the head operator of an application node: either an explicit `op` string (predicate form),
+/// a `fn` that is a `var` (body form), or a `fn` that is a `fn_ref` LITERAL (composition by content
+/// address — the op is then the target's `fn_…` address, resolved against the callee-contract registry).
 fn head_op(node: &J) -> Option<String> {
     if let Some(op) = node.get("op").and_then(|o| o.as_str()) {
         return Some(op.to_string());
@@ -158,7 +163,166 @@ fn head_op(node: &J) -> Option<String> {
     if node.pointer("/fn/kind").and_then(|k| k.as_str()) == Some("var") {
         return node.pointer("/fn/name").and_then(|n| n.as_str()).map(String::from);
     }
+    if node.pointer("/fn/kind").and_then(|k| k.as_str()) == Some("lit")
+        && node.pointer("/fn/value/kind").and_then(|k| k.as_str()) == Some("fn_ref")
+    {
+        return node.pointer("/fn/value/target").and_then(|t| t.as_str()).map(String::from);
+    }
     None
+}
+
+// --- callee contracts (modular verification) --------------------------------------------------------
+//
+// A body that applies another record by `fn_ref` is outside the first-order fragment (the callee's
+// body is not inlined — it may be recursive, or large, or simply another artifact). Over a LINKED
+// view, the callee becomes an UNINTERPRETED function whose CERTIFIED contract is an axiom: for every
+// postcondition the callee's own `check-refinement` proves (re-derived on the same view, never read
+// from its declaration), `∀ params. (pre ∧ nat-typed params ≥ 0) ⇒ post[result := callee(params)]`.
+// That is modular verification through content addresses: `lcm`'s `result ≥ 0` follows from `gcd`'s
+// proved `result ≥ 1`, without re-proving `gcd`. Contracts are installed per proof by the caller
+// (`set_callee_contracts`), thread-locally, and the certificate records which were used.
+
+/// A linked callee's certified contract, as the prover uses it.
+#[derive(Debug, Clone)]
+pub struct CalleeContract {
+    /// The SMT symbol standing for the callee (`callee_<address prefix>`).
+    pub symbol: String,
+    /// The callee's parameter names (the contract predicates range over them).
+    pub params: Vec<String>,
+    pub param_sorts: Vec<Sort>,
+    pub ret: Sort,
+    /// Declared preconditions (assumed in the axiom's antecedent).
+    pub pres: Vec<J>,
+    /// PROVED postconditions (the axiom's consequent, with `result` the callee's application).
+    pub posts: Vec<J>,
+    /// PROVED laws (`forall` predicates about `self`, as the callee's record states them): each becomes
+    /// an axiom with `self` read as the callee — `lcm`'s commutativity follows from `gcd`'s.
+    pub laws: Vec<J>,
+    /// Parameter positions typed `nat` (≥ 0 in the antecedent).
+    pub nat_positions: BTreeSet<usize>,
+}
+
+/// Rewrite a law's `self` applications (either spelling) into applications of `target`, so the law
+/// lowers against the callee's uninterpreted symbol.
+fn law_about(node: &J, target: &str) -> J {
+    if let Some((head, args)) = flatten_call(node) {
+        if head == "self" {
+            let args: Vec<J> = args.iter().map(|a| law_about(a, target)).collect();
+            return serde_json::json!({ "kind": "app", "op": target, "args": args });
+        }
+    }
+    match node {
+        J::Object(m) => J::Object(m.iter().map(|(k, v)| (k.clone(), law_about(v, target))).collect()),
+        J::Array(xs) => J::Array(xs.iter().map(|v| law_about(v, target)).collect()),
+        other => other.clone(),
+    }
+}
+
+thread_local! {
+    static CALLEE_CONTRACTS: std::cell::RefCell<BTreeMap<String, CalleeContract>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+    static CALLEES_USED: std::cell::RefCell<BTreeSet<String>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+/// Install the callee contracts the next proofs may use (replacing any), returning the previous set so
+/// a nested use (proving a callee's own contract while computing it) can restore them.
+pub fn set_callee_contracts(contracts: BTreeMap<String, CalleeContract>) -> BTreeMap<String, CalleeContract> {
+    CALLEE_CONTRACTS.with(|c| std::mem::replace(&mut *c.borrow_mut(), contracts))
+}
+
+fn callee_contract(target: &str) -> Option<CalleeContract> {
+    CALLEE_CONTRACTS.with(|c| c.borrow().get(target).cloned())
+}
+
+fn mark_callee_used(target: &str) {
+    CALLEES_USED.with(|u| {
+        u.borrow_mut().insert(target.to_string());
+    });
+}
+
+fn take_callees_used() -> BTreeSet<String> {
+    CALLEES_USED.with(|u| std::mem::take(&mut *u.borrow_mut()))
+}
+
+/// The SMT preamble for every callee the lowering just used: its declaration and its contract axioms.
+fn callee_preamble() -> Result<(String, bool)> {
+    let used = take_callees_used();
+    let any = !used.is_empty();
+    let mut out = String::new();
+    for target in used {
+        let Some(c) = callee_contract(&target) else { continue };
+        out.push_str(&format!(
+            "(declare-fun {} ({}) {})\n",
+            c.symbol,
+            c.param_sorts.iter().map(|s| s.smt()).collect::<Vec<_>>().join(" "),
+            c.ret.smt()
+        ));
+        if c.posts.is_empty() {
+            continue;
+        }
+        let mut env: BTreeMap<String, Sort> = c.params.iter().cloned().zip(c.param_sorts.iter().copied()).collect();
+        let app = serde_json::json!({ "kind": "app", "op": target, "args": c.params.iter().map(|p| serde_json::json!({ "kind": "var", "name": p })).collect::<Vec<_>>() });
+        let subst: BTreeMap<String, J> = [("result".to_string(), app)].into_iter().collect();
+        let mut ante: Vec<String> = Vec::new();
+        for (i, p) in c.params.iter().enumerate() {
+            if c.nat_positions.contains(&i) {
+                ante.push(format!("(>= {p} 0)"));
+            }
+        }
+        for pre in &c.pres {
+            ante.push(lower(pre, &mut env.clone(), None)?);
+        }
+        let binders = c.params.iter().zip(&c.param_sorts).map(|(p, s)| format!("({p} {})", s.smt())).collect::<Vec<_>>().join(" ");
+        for post in &c.posts {
+            let body = lower(&crate::equiv::subst_many(post, &subst), &mut env, None)?;
+            let ante_smt = match ante.len() {
+                0 => "true".to_string(),
+                1 => ante[0].clone(),
+                _ => format!("(and {})", ante.join(" ")),
+            };
+            if c.params.is_empty() {
+                out.push_str(&format!("(assert (=> {ante_smt} {body}))\n"));
+            } else {
+                out.push_str(&format!(";; certified contract of {target}\n(assert (forall ({binders}) (=> {ante_smt} {body})))\n"));
+            }
+        }
+        // Proved laws: `forall vars. P` with `self` read as the callee, guarded to the callee's nat
+        // domain on the variables it feeds there (a law proved by numeric induction assumed it).
+        for law in &c.laws {
+            let law = uncurry(law);
+            let Some(vars_arr) = law.get("vars").and_then(|v| v.as_array()) else { continue };
+            let vars: Vec<String> = vars_arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+            let Some(pred) = law.get("body") else { continue };
+            let pred = law_about(pred, &target);
+            let Ok(var_sorts) = infer_var_sorts(&pred, &vars, Some(&c.param_sorts)) else { continue };
+            let mut lenv: BTreeMap<String, Sort> = var_sorts.clone();
+            let Ok(body) = lower(&pred, &mut lenv, None) else { continue };
+            let mut guards: Vec<String> = Vec::new();
+            for call in collect_self_applications_of(&pred, &target) {
+                for (i, a) in call.iter().enumerate() {
+                    if c.nat_positions.contains(&i) {
+                        if let Some(v) = var_name(a) {
+                            if vars.iter().any(|x| x == v) {
+                                let g = format!("(>= {v} 0)");
+                                if !guards.contains(&g) {
+                                    guards.push(g);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let lbinders = vars.iter().map(|v| format!("({v} {})", var_sorts[v].smt())).collect::<Vec<_>>().join(" ");
+            let guarded = match guards.len() {
+                0 => body,
+                1 => format!("(=> {} {body})", guards[0]),
+                _ => format!("(=> (and {}) {body})", guards.join(" ")),
+            };
+            out.push_str(&format!(";; certified law of {target}\n(assert (forall ({lbinders}) {guarded}))\n"));
+        }
+    }
+    // Lowering the axioms marked the callee used again; the preamble is complete, so clear.
+    take_callees_used();
+    Ok((out, any))
 }
 
 /// Sort returned by `op` given the sorts of its operands are well-formed.
@@ -226,6 +390,11 @@ fn sort_of(node: &J, env: &BTreeMap<String, Sort>, self_def: Option<&SelfDef>) -
         }
         "app" => {
             let op = head_op(node).ok_or_else(|| anyhow!("application with no resolvable head"))?;
+            if op.starts_with("fn_") {
+                return callee_contract(&op).map(|c| c.ret).ok_or_else(|| {
+                    anyhow!("applies the fn_ref `{op}` (its certified contract is not available here — pass --records to use it)")
+                });
+            }
             if op == "id" {
                 return sort_of(&node.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()).cloned()
                     .ok_or_else(|| anyhow!("id needs an arg"))?, env, self_def);
@@ -417,6 +586,20 @@ fn lower_app(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfD
         xs.iter().map(|a| lower(a, env, self_def)).collect()
     };
 
+    // Composition by content address: the callee is an uninterpreted function under its certified
+    // contract (axioms emitted by `callee_preamble`), when the linked view supplied one.
+    if op.starts_with("fn_") {
+        let Some(c) = callee_contract(&op) else {
+            bail!("applies the fn_ref `{op}` (its certified contract is not available here — pass --records to use it)");
+        };
+        if args.len() != c.params.len() {
+            bail!("`{op}` applied to {} args, expects {}", args.len(), c.params.len());
+        }
+        let lowered = lower_args(env, &args)?;
+        mark_callee_used(&op);
+        return Ok(if lowered.is_empty() { c.symbol.clone() } else { format!("({} {})", c.symbol, lowered.join(" ")) });
+    }
+
     // self / apply-of-self.
     if op == "apply" || op == "self" {
         if let Some((head, call_args)) = flatten_call(node) {
@@ -527,6 +710,16 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
     if kind == "app" {
         let op = head_op(node).unwrap_or_default();
         let args: Vec<&J> = node.get("args").and_then(|a| a.as_array()).map(|a| a.iter().collect()).unwrap_or_default();
+        // A callee's parameter sorts constrain the variables fed to it.
+        if op.starts_with("fn_") {
+            if let Some(c) = callee_contract(&op) {
+                for (i, a) in args.iter().enumerate() {
+                    if let (Some(n), Some(s)) = (var_name(a), c.param_sorts.get(i)) {
+                        constrain(n, *s, vars, sorts)?;
+                    }
+                }
+            }
+        }
         // Operand sorts implied by the operator.
         let operand_sort = match op.as_str() {
             "add" | "sub" | "mul" | "neg" | "abs" | "min" | "max" | "mod" | "div" | "lt" | "le" | "gt" | "ge" => Some(Sort::Int),
@@ -612,6 +805,15 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
 /// required only if the property references `self`. Returns Err if the property is outside the
 /// decidable fragment (the caller maps that to UNSUPPORTED).
 pub fn build_certificate(prop_expr: &J, body: Option<&J>) -> Result<Certificate> {
+    build_certificate_in_domain(prop_expr, body, &BTreeSet::new())
+}
+
+/// [`build_certificate`] over the function's DECLARED domain: a law variable the law feeds to a
+/// `nat`-typed parameter of `self` is asserted `≥ 0` (the generative checker already samples it so;
+/// a callee's contract axioms are guarded to its nat domain, so without this a law over `lcm : nat
+/// nat → nat` would be asked to hold where `gcd`'s contract says nothing — measured: a timeout).
+pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_positions: &BTreeSet<usize>) -> Result<Certificate> {
+    take_callees_used(); // a failed earlier lowering must not leak its callees into this certificate
     // Normalize away curried application spines first, so surface-parsed properties/bodies
     // (juxtaposition parses curried) analyze identically to AST-authored flat ones.
     let prop_expr = &uncurry(prop_expr);
@@ -651,6 +853,8 @@ pub fn build_certificate(prop_expr: &J, body: Option<&J>) -> Result<Certificate>
 
     let mut out = String::new();
     out.push_str("(set-logic ALL)\n");
+    let (callees, uses_callees) = callee_preamble()?;
+    out.push_str(&callees);
     if let Some(sd) = &self_def {
         let params = sd
             .params
@@ -665,12 +869,28 @@ pub fn build_certificate(prop_expr: &J, body: Option<&J>) -> Result<Certificate>
     for (v, s) in &quantified {
         out.push_str(&format!("(declare-const {v} {})\n", s.smt()));
     }
+    // The declared domain: variables fed to `self`'s nat parameters range over nats.
+    let mut nat_vars: BTreeSet<String> = BTreeSet::new();
+    for call in collect_self_applications(pred) {
+        for (i, a) in call.iter().enumerate() {
+            if self_nat_positions.contains(&i) {
+                if let Some(v) = var_name(a) {
+                    if vars.iter().any(|x| x == v) {
+                        nat_vars.insert(v.to_string());
+                    }
+                }
+            }
+        }
+    }
+    for v in &nat_vars {
+        out.push_str(&format!("(assert (>= {v} 0))\n"));
+    }
     // Assert the negation of the law: unsat ⇒ the law holds for all inputs.
     out.push_str(&format!("(assert (not {pred_smt}))\n"));
     out.push_str("(check-sat)\n");
     out.push_str("(get-model)\n");
 
-    Ok(Certificate { smt: out, quantified, uses_self })
+    Ok(Certificate { smt: out, quantified, uses_self, uses_callees })
 }
 
 fn references_self(node: &J) -> bool {
@@ -790,6 +1010,9 @@ pub fn run_smt_secs(script: &str, solver: &str, secs: u64) -> Result<SatAnswer> 
 pub fn run_solver(cert: &Certificate, solver: &str) -> Result<ProofOutcome> {
     Ok(match run_smt(&cert.smt, solver)? {
         SatAnswer::Unsat => ProofOutcome::Proved,
+        // A model over an uninterpreted callee is not a counterexample to the law (the callee is
+        // pinned only by its contract): honest UNKNOWN.
+        SatAnswer::Sat(_) if cert.uses_callees => ProofOutcome::Unknown,
         SatAnswer::Sat(model) => ProofOutcome::Refuted(model),
         SatAnswer::Unknown => ProofOutcome::Unknown,
         SatAnswer::NoSolver => ProofOutcome::NoSolver,
@@ -799,7 +1022,17 @@ pub fn run_solver(cert: &Certificate, solver: &str) -> Result<ProofOutcome> {
 /// Attempt to prove one property: build the certificate, run the solver. Out-of-fragment properties
 /// yield `Unsupported` (with the certificate left `None`).
 pub fn prove_property(prop_expr: &J, body: Option<&J>, solver: &str) -> (ProofOutcome, Option<Certificate>) {
-    match build_certificate(prop_expr, body) {
+    prove_property_in_domain(prop_expr, body, &BTreeSet::new(), solver)
+}
+
+/// [`prove_property`] over the function's declared domain (see [`build_certificate_in_domain`]).
+pub fn prove_property_in_domain(
+    prop_expr: &J,
+    body: Option<&J>,
+    self_nat_positions: &BTreeSet<usize>,
+    solver: &str,
+) -> (ProofOutcome, Option<Certificate>) {
+    match build_certificate_in_domain(prop_expr, body, self_nat_positions) {
         Err(e) => (ProofOutcome::Unsupported(format!("{e:#}")), None),
         Ok(cert) => match run_solver(&cert, solver) {
             Ok(outcome) => (outcome, Some(cert)),
@@ -911,6 +1144,25 @@ fn quantified_vars_in(node: &J, vars: &[String]) -> BTreeSet<String> {
     out
 }
 
+/// Every application of `target` (an op-form app) in a predicate AST, as its argument list.
+fn collect_self_applications_of(node: &J, target: &str) -> Vec<Vec<J>> {
+    let mut out = Vec::new();
+    fn go(node: &J, target: &str, out: &mut Vec<Vec<J>>) {
+        if node.get("op").and_then(|o| o.as_str()) == Some(target) {
+            if let Some(args) = node.get("args").and_then(|a| a.as_array()) {
+                out.push(args.clone());
+            }
+        }
+        match node {
+            J::Object(m) => m.values().for_each(|v| go(v, target, out)),
+            J::Array(xs) => xs.iter().for_each(|v| go(v, target, out)),
+            _ => {}
+        }
+    }
+    go(node, target, &mut out);
+    out
+}
+
 /// Every `self` application in a predicate or body AST (both spellings), as its argument list.
 fn collect_self_applications(node: &J) -> Vec<Vec<J>> {
     let mut out = Vec::new();
@@ -1015,6 +1267,7 @@ pub fn prove_by_numeric_induction(
 }
 
 fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &BTreeSet<usize>, with_ih: bool) -> Result<(Certificate, String)> {
+    take_callees_used();
     let prop_expr = &uncurry(prop_expr);
     let body = body.map(uncurry).ok_or_else(|| anyhow!("numeric induction needs the body"))?;
     if prop_expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
@@ -1083,6 +1336,8 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
         sd.param_sorts.iter().map(|s| s.smt()).collect::<Vec<_>>().join(" "),
         sd.ret.smt()
     ));
+    let (callees, uses_callees) = callee_preamble()?;
+    out.push_str(&callees);
     for v in &vars {
         out.push_str(&format!("(declare-const {v} {})\n", var_sorts[v].smt()));
     }
@@ -1141,7 +1396,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     }
     out.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
     let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
-    Ok((Certificate { smt: out, quantified, uses_self: true }, m))
+    Ok((Certificate { smt: out, quantified, uses_self: true, uses_callees }, m))
 }
 
 fn smt_int_lit(n: i64) -> String {
@@ -1217,6 +1472,44 @@ mod tests {
     }
     fn op(o: &str, args: Vec<J>) -> J {
         json!({ "kind": "app", "op": o, "args": args })
+    }
+
+    #[test]
+    fn callee_contracts_are_axioms_and_sat_is_never_a_refutation() {
+        let Some(solver) = solver() else { return };
+        // A callee `fn_abab…` : nat -> int with the proved contract `result >= 0`, applied by a law
+        // `fn_abab(n) + 1 > 0` that needs exactly that contract.
+        let target = format!("fn_{}", "ab".repeat(32));
+        let contract = CalleeContract {
+            symbol: "callee_abab".into(),
+            params: vec!["x".into()],
+            param_sorts: vec![Sort::Int],
+            ret: Sort::Int,
+            pres: vec![],
+            posts: vec![json!({ "kind": "app", "op": "ge", "args": [{ "kind": "var", "name": "result" }, { "kind": "lit", "value": 0 }] })],
+            laws: vec![],
+            nat_positions: [0].into(),
+        };
+        let call = |a: J| json!({ "kind": "app", "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": target } }, "args": [a] });
+        // (Guarded to the callee's nat domain: for n < 0 the contract says nothing about fn_abab(n).)
+        let law_ok = law(&["n"], op("or", vec![op("lt", vec![v("n"), lit(0)]), op("gt", vec![op("add", vec![call(v("n")), lit(1)]), lit(0)])]));
+        let law_too_strong = law(&["n"], op("gt", vec![call(v("n")), lit(5)]));
+        // Without the contract installed: UNSUPPORTED, stated.
+        let prev = set_callee_contracts(BTreeMap::new());
+        let (out, _) = prove_property(&law_ok, None, solver);
+        assert!(matches!(out, ProofOutcome::Unsupported(ref why) if why.contains("certified contract")), "{out:?}");
+        // With it: the true law proves from the axiom alone …
+        set_callee_contracts([(target.clone(), contract)].into_iter().collect());
+        let (out, cert) = prove_property(&law_ok, None, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        let cert = cert.unwrap();
+        assert!(cert.uses_callees, "the certificate records the contract use");
+        assert!(cert.smt.contains("(declare-fun callee_abab (Int) Int)"), "{}", cert.smt);
+        assert!(cert.smt.contains("(>= x 0)"), "{}", cert.smt);
+        // … and a law the contract does not imply is UNKNOWN — never REFUTED on a spurious model.
+        let (out, _) = prove_property(&law_too_strong, None, solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+        set_callee_contracts(prev);
     }
 
     #[test]

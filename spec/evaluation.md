@@ -178,6 +178,20 @@ Each postcondition discharges `∀ params. (⋀ pre ∧ ⋀ nat-typed params ≥
 it the post is **VIOLATED** at `a < b`), and a `post: result = a + b` is sound for an `add` body but
 **VIOLATED** for a `mul` body. (`inv` refinements are reserved — not checked in v0.1.)
 
+**Contracts compose (2026-10-17).** A body that applies another record by `fn_ref` is outside the
+first-order fragment — the callee's body is not inlined. Over a linked view (`check-refinement
+--records`, `prove --records`, and `certify --records`), the callee becomes an **uninterpreted
+function under its certified contract**: for every postcondition the callee's own
+`check-refinement` PROVES on the same view (re-derived, never read from its declaration; the
+callee's own callees first, transitively), the axiom `∀ params. (pre ∧ nat-typed params ≥ 0) ⇒
+post[result := callee(params)]` is emitted beside the obligation, and so is every LAW of the callee
+that its own `prove` proves (`∀ vars. law[self := callee]`, guarded to the callee's `nat` domain). So
+`lcm`'s `result ≥ 0` follows from `gcd`'s proved `result ≥ 1`, and `lcm`'s commutativity from `gcd`'s
+proved commutativity, without re-proving `gcd` — modular verification through content addresses. Honesty rule: a certificate that used a callee contract reports a satisfiable
+negation as **UNKNOWN**, never REFUTED — the uninterpreted callee is under-constrained away from
+its contract, so a model may be spurious. Callees whose sorts leave the Int/Bool/String fragment
+(tuples, lists, `Maybe`) contribute no contract and keep the obligation UNVERIFIABLE, stated.
+
 ## Termination checking
 
 Every record declares `signature.terminates` (`always` / `conditional` / `never` / `unknown`), but it was
@@ -349,6 +363,11 @@ quantifies over `String`, not `Int`); the tool asserts the **negation** of the l
   from ours on negatives (mapping them would be unsound); higher-order arguments, recursion, opaque
   callees). Reported honestly, never silently "proved" — the same boundary the generative checker
   draws as UNGENERATABLE.
+
+`prove` ranges a law over the function's **declared domain** (2026-10-17): a law variable the law
+feeds to a `nat`-typed parameter of `self` is asserted `≥ 0`, as the generative checker already
+samples it — without that, a law over `lcm : nat nat → nat` is asked to hold where `gcd`'s
+contract axioms say nothing, and the solver times out on a question the record never posed.
 
 The emitted SMT-LIB script **is the proof certificate** (`--smt-out <dir>` writes one per property):
 any SMT solver re-checks it independently, so a receiver verifies by re-checking the certificate

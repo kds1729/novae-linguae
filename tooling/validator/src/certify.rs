@@ -108,6 +108,7 @@ pub struct LinkedView<'a> {
     term: std::cell::RefCell<HashMap<String, Option<bool>>>,
     cx: std::cell::RefCell<HashMap<String, Option<crate::Class>>>,
     bounds: std::cell::RefCell<HashMap<String, Option<Vec<usize>>>>,
+    contracts: std::cell::RefCell<HashMap<String, Option<crate::CalleeContract>>>,
     in_progress: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
@@ -120,6 +121,7 @@ impl<'a> LinkedView<'a> {
             term: Default::default(),
             cx: Default::default(),
             bounds: Default::default(),
+            contracts: Default::default(),
             in_progress: Default::default(),
         }
     }
@@ -238,6 +240,122 @@ impl<'a> LinkedView<'a> {
         self.in_progress.borrow_mut().remove(&key);
         self.cx.borrow_mut().insert(target.to_string(), out);
         out
+    }
+}
+
+impl<'a> LinkedView<'a> {
+    /// The callee's CERTIFIED contract for the prover (`prove::CalleeContract`): its declared
+    /// preconditions and every postcondition (plus the type-implied `result ≥ 0` of a `nat` result)
+    /// that `check-refinement` PROVES on this view — the callee's own callees' contracts installed
+    /// first, transitively. `None` when the callee is unresolvable, its sorts are outside the
+    /// Int/Bool/String fragment, or it is in progress (a cycle).
+    pub fn contract(&self, target: &str) -> Option<crate::CalleeContract> {
+        if let Some(v) = self.contracts.borrow().get(target) {
+            return v.clone();
+        }
+        let key = format!("contract:{target}");
+        if !self.in_progress.borrow_mut().insert(key.clone()) {
+            return None;
+        }
+        let out = self.callee(target).and_then(|(rec, body)| {
+            let params: Vec<String> = body
+                .get("params")
+                .and_then(|p| p.as_array())
+                .map(|ps| ps.iter().filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from)).collect())
+                .unwrap_or_default();
+            let sig_type = rec.pointer("/signature/type")?;
+            let fn_ty = if sig_type.get("kind").and_then(|k| k.as_str()) == Some("forall") { sig_type.get("body")? } else { sig_type };
+            let sort_of_type = |t: &J| -> Option<crate::Sort> {
+                match crate::builtin_type_name(t) {
+                    Some("int") | Some("nat") => Some(crate::Sort::Int),
+                    Some("bool") => Some(crate::Sort::Bool),
+                    Some("string") => Some(crate::Sort::Str),
+                    _ => None,
+                }
+            };
+            let param_tys = fn_ty.get("params").and_then(|p| p.as_array())?;
+            if param_tys.len() != params.len() {
+                return None;
+            }
+            let param_sorts: Vec<crate::Sort> = param_tys.iter().map(sort_of_type).collect::<Option<_>>()?;
+            let ret = sort_of_type(fn_ty.get("result")?)?;
+            let nat_positions = crate::terminate::nat_positions_of_type(sig_type);
+            let refinements: Vec<J> = rec.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+            let pres: Vec<J> = refinements
+                .iter()
+                .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("pre"))
+                .filter_map(|r| r.get("expr").cloned())
+                .collect();
+            let declared_posts: Vec<J> = refinements
+                .iter()
+                .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("post"))
+                .filter_map(|r| r.get("expr").cloned())
+                .collect();
+            // Prove the callee's contract — posts AND laws — with ITS callees' contracts installed.
+            let deps = self.contracts_for(body);
+            let prev = crate::set_callee_contracts(deps);
+            let reports = check_refinements(sig_type, &refinements, body, &self.solver);
+            let laws: Vec<J> = rec
+                .get("properties")
+                .and_then(|p| p.as_array())
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|p| p.get("expr").cloned())
+                .filter(|law| {
+                    matches!(crate::prove_property(law, Some(body), &self.solver).0, crate::ProofOutcome::Proved)
+                        || matches!(crate::prove_by_numeric_induction(law, Some(body), &nat_positions, &self.solver).0, crate::ProofOutcome::Proved)
+                })
+                .collect();
+            crate::set_callee_contracts(prev);
+            let sound = |label: &str| reports.iter().any(|r| r.label == label && matches!(r.outcome, RefinementOutcome::Sound));
+            let mut posts: Vec<J> = declared_posts
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| sound(&format!("post[{i}]")))
+                .map(|(_, p)| p.clone())
+                .collect();
+            if sound("nat-result (≥ 0)") {
+                posts.push(serde_json::json!({ "kind": "app", "op": "ge", "args": [
+                    { "kind": "var", "name": "result" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] }));
+            }
+            Some(crate::CalleeContract {
+                symbol: format!("callee_{}", &target[3..target.len().min(15)]),
+                params,
+                param_sorts,
+                ret,
+                pres,
+                posts,
+                laws,
+                nat_positions,
+            })
+        });
+        self.in_progress.borrow_mut().remove(&key);
+        self.contracts.borrow_mut().insert(target.to_string(), out.clone());
+        out
+    }
+
+    /// The contracts of every callee a body applies by `fn_ref` (those that have one).
+    pub fn contracts_for(&self, body: &J) -> std::collections::BTreeMap<String, crate::CalleeContract> {
+        let mut targets = std::collections::BTreeSet::new();
+        fn_ref_targets(body, &mut targets);
+        targets.into_iter().filter_map(|t| self.contract(&t).map(|c| (t, c))).collect()
+    }
+}
+
+/// Every `fn_ref` literal target in an AST.
+fn fn_ref_targets(node: &J, out: &mut std::collections::BTreeSet<String>) {
+    match node {
+        J::Object(m) => {
+            if m.get("kind").and_then(|k| k.as_str()) == Some("fn_ref") {
+                if let Some(t) = m.get("target").and_then(|t| t.as_str()) {
+                    out.insert(t.to_string());
+                }
+            }
+            m.values().for_each(|v| fn_ref_targets(v, out));
+        }
+        J::Array(xs) => xs.iter().for_each(|v| fn_ref_targets(v, out)),
+        _ => {}
     }
 }
 
@@ -362,11 +480,17 @@ pub fn certify_record_linked(
         checks.push(CertCheck::new("effects", "SOUND", format!("effects [{eff_show}] ⊆ declared"), false));
     }
 
-    // 3. Refinements (type-implied `nat` + declared pre/post).
+    // 3. Refinements (type-implied `nat` + declared pre/post) — over the linked view, with every callee's
+    //    CERTIFIED contract installed as an axiom (modular verification through content addresses).
     if let Some(sig_type) = record.pointer("/signature/type") {
         let refinements: Vec<J> =
             record.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
-        for r in check_refinements(sig_type, &refinements, body, solver) {
+        let prev = view.as_ref().map(|v| crate::set_callee_contracts(v.contracts_for(body)));
+        let reports = check_refinements(sig_type, &refinements, body, solver);
+        if let Some(p) = prev {
+            crate::set_callee_contracts(p);
+        }
+        for r in reports {
             let (v, hard): (&'static str, bool) = match &r.outcome {
                 RefinementOutcome::Sound => ("SOUND", false),
                 RefinementOutcome::Violated(_) => ("VIOLATED", true),
