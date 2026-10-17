@@ -1,0 +1,136 @@
+{
+ "body_hash": "expr_a1c6299f4c8688949315319cd86fb45010d413ae4777b12fe383e78d01810067",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 9
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 97
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 561
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 7919
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1000003
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  }
+ ],
+ "hash": "fn_d6af9003a5e655df9597ad7c1936af6238fa7e51f0b6e77d81d6361c06fc5fcf",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/is-prime-trial",
+  "predicate/number"
+ ],
+ "name_hints": [
+  "is_prime_trial",
+  "primality_trial_division"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "bool"
+   }
+  }
+ },
+ "supersedes": null
+}

@@ -1,0 +1,160 @@
+{
+ "body_hash": "expr_5bb45f61b2f59b0e85c9757ddaf3edf562e82030f975f10c52c7b925834755f2",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 10
+    },
+    {
+     "kind": "nat",
+     "value": 1234
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "nat",
+      "value": 4
+     },
+     {
+      "kind": "nat",
+      "value": 3
+     },
+     {
+      "kind": "nat",
+      "value": 2
+     },
+     {
+      "kind": "nat",
+      "value": 1
+     }
+    ],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 2
+    },
+    {
+     "kind": "nat",
+     "value": 10
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "nat",
+      "value": 0
+     },
+     {
+      "kind": "nat",
+      "value": 1
+     },
+     {
+      "kind": "nat",
+      "value": 0
+     },
+     {
+      "kind": "nat",
+      "value": 1
+     }
+    ],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 10
+    },
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "elems": [],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 16
+    },
+    {
+     "kind": "nat",
+     "value": 255
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "nat",
+      "value": 15
+     },
+     {
+      "kind": "nat",
+      "value": 15
+     }
+    ],
+    "kind": "list"
+   }
+  }
+ ],
+ "hash": "fn_23994af4f046d4d70f794a6e94dd9f74f07e06b9cbce2a20205623db82e1bc2c",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/digits"
+ ],
+ "name_hints": [
+  "digits",
+  "to_digits",
+  "digits_little_endian"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "nat"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "List"
+    },
+    "kind": "apply"
+   }
+  }
+ },
+ "supersedes": null
+}

@@ -1,0 +1,351 @@
+{
+ "body_hash": "expr_f5e16cb949e84d40b2aa7e938733ce3d86e992c5740e043d98d90efd74ade9d4",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 48
+    },
+    {
+     "kind": "nat",
+     "value": 18
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 6
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 17
+    },
+    {
+     "kind": "nat",
+     "value": 5
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 1
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 0
+    },
+    {
+     "kind": "nat",
+     "value": 9
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 9
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": "2305843009213693951"
+    },
+    {
+     "kind": "nat",
+     "value": "6917529027641081853"
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": "2305843009213693951"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1071
+    },
+    {
+     "kind": "nat",
+     "value": 462
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 21
+   }
+  }
+ ],
+ "hash": "fn_b03bf154e634ef3077f7819c77ac7cecd6829ac7c2009e6d93a50030b1f47e1c",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/gcd"
+ ],
+ "name_hints": [
+  "gcd",
+  "greatest_common_divisor",
+  "euclid"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "a"
+        },
+        {
+         "kind": "var",
+         "name": "b"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "b"
+        },
+        {
+         "kind": "var",
+         "name": "a"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "commutative"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "a"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "kind": "var",
+       "name": "a"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "a"
+    ]
+   },
+   "name": "right_zero"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "mod"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "mod"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "and"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "divides_both"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "var",
+         "name": "c"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "a"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "var",
+           "name": "c"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b",
+     "c"
+    ]
+   },
+   "name": "associative"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "nat"
+   }
+  }
+ },
+ "supersedes": null
+}

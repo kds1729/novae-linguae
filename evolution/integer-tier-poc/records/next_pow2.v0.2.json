@@ -1,0 +1,176 @@
+{
+ "body_hash": "expr_7dd786a897fa2156c315c33b755c08b5fc59acdc595d631da25dc902eb93e2d7",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 5
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 8
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 8
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 8
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 1
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 1
+   }
+  }
+ ],
+ "hash": "fn_6fe3a56d334f9eb9aa79a01a65df67ec1c260781cc661012259791a642d57fef",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/next-pow2"
+ ],
+ "name_hints": [
+  "next_pow2",
+  "next_power_of_two"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "kind": "var",
+       "name": "n"
+      }
+     ],
+     "kind": "app",
+     "op": "ge"
+    },
+    "kind": "forall",
+    "vars": [
+     "n"
+    ]
+   },
+   "name": "at_least_n"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "n"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": 2
+          },
+          {
+           "kind": "var",
+           "name": "n"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n"
+    ]
+   },
+   "name": "under_twice_n"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "nat"
+   }
+  }
+ },
+ "supersedes": null
+}

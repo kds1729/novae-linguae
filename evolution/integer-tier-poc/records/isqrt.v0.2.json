@@ -1,0 +1,326 @@
+{
+ "body_hash": "expr_958786909f025c95127050817a5983d7cc002627c9a88369b0b81941f43a979d",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 0
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 15
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 3
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 16
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 4
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": "1000000000000000000"
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 1000000000
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": "1267650600228229401496703205376"
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 1125899906842624
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": "1267650600228229401496703205375"
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 1125899906842623
+   }
+  }
+ ],
+ "hash": "fn_2baac10c711b5705b8a68986dc08d66c60ea97a37a2937cebae02d8a3d07464c",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/isqrt"
+ ],
+ "name_hints": [
+  "isqrt",
+  "integer_square_root"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "n"
+            },
+            {
+             "kind": "var",
+             "name": "n"
+            }
+           ],
+           "kind": "app",
+           "op": "mul"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "var",
+         "name": "n"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n"
+    ]
+   },
+   "name": "square_root_of_square"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "n"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            },
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "n"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            }
+           ],
+           "kind": "app",
+           "op": "mul"
+          },
+          {
+           "kind": "var",
+           "name": "n"
+          }
+         ],
+         "kind": "app",
+         "op": "le"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "n"
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "n"
+                }
+               ],
+               "kind": "app",
+               "op": "self"
+              },
+              {
+               "kind": "lit",
+               "value": 1
+              }
+             ],
+             "kind": "app",
+             "op": "add"
+            },
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "n"
+                }
+               ],
+               "kind": "app",
+               "op": "self"
+              },
+              {
+               "kind": "lit",
+               "value": 1
+              }
+             ],
+             "kind": "app",
+             "op": "add"
+            }
+           ],
+           "kind": "app",
+           "op": "mul"
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        }
+       ],
+       "kind": "app",
+       "op": "and"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n"
+    ]
+   },
+   "name": "floor_bounds"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "result"
+        },
+        {
+         "kind": "var",
+         "name": "result"
+        }
+       ],
+       "kind": "app",
+       "op": "mul"
+      },
+      {
+       "kind": "var",
+       "name": "n"
+      }
+     ],
+     "kind": "app",
+     "op": "le"
+    },
+    "kind": "post"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "nat"
+   }
+  }
+ },
+ "supersedes": null
+}

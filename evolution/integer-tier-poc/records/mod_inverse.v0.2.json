@@ -1,0 +1,148 @@
+{
+ "body_hash": "expr_e25a954eac46fc920397f61aa0e526b5a8bd2f1e53e4f49d01b8fda665068d06",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 3
+    },
+    {
+     "kind": "int",
+     "value": 11
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": 4
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 10
+    },
+    {
+     "kind": "int",
+     "value": 17
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": 12
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 6
+    },
+    {
+     "kind": "int",
+     "value": 9
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -1
+    },
+    {
+     "kind": "int",
+     "value": 7
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": 6
+    },
+    "tag": "Just"
+   }
+  }
+ ],
+ "hash": "fn_f374139fbbda299d7aff62b9f8cd9632cb897daec769458d4a9ce9b37d65ca95",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/mod-inverse"
+ ],
+ "name_hints": [
+  "mod_inverse",
+  "modular_inverse"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "m"
+      },
+      {
+       "kind": "lit",
+       "value": 1
+      }
+     ],
+     "kind": "app",
+     "op": "gt"
+    },
+    "kind": "pre"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    }
+   ],
+   "result": {
+    "kind": "sum",
+    "variants": [
+     {
+      "tag": "Just",
+      "type": {
+       "kind": "builtin",
+       "name": "int"
+      }
+     },
+     {
+      "tag": "None"
+     }
+    ]
+   }
+  }
+ },
+ "supersedes": null
+}

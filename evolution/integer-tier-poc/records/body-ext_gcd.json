@@ -1,0 +1,232 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "elems": [
+      {
+       "kind": "var",
+       "name": "a"
+      },
+      {
+       "elems": [
+        {
+         "kind": "lit",
+         "value": {
+          "kind": "int",
+          "value": 1
+         }
+        },
+        {
+         "kind": "lit",
+         "value": {
+          "kind": "int",
+          "value": 0
+         }
+        }
+       ],
+       "kind": "tuple"
+      }
+     ],
+     "kind": "tuple"
+    },
+    "pattern": {
+     "kind": "lit",
+     "value": {
+      "kind": "bool",
+      "value": true
+     }
+    }
+   },
+   {
+    "body": {
+     "arms": [
+      {
+       "body": {
+        "elems": [
+         {
+          "kind": "var",
+          "name": "g"
+         },
+         {
+          "elems": [
+           {
+            "kind": "var",
+            "name": "y"
+           },
+           {
+            "args": [
+             {
+              "args": [
+               {
+                "kind": "var",
+                "name": "y"
+               }
+              ],
+              "fn": {
+               "args": [
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "b"
+                  }
+                 ],
+                 "fn": {
+                  "args": [
+                   {
+                    "kind": "var",
+                    "name": "a"
+                   }
+                  ],
+                  "fn": {
+                   "kind": "var",
+                   "name": "div"
+                  },
+                  "kind": "app"
+                 },
+                 "kind": "app"
+                }
+               ],
+               "fn": {
+                "kind": "var",
+                "name": "mul"
+               },
+               "kind": "app"
+              },
+              "kind": "app"
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "var",
+               "name": "x"
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "sub"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           }
+          ],
+          "kind": "tuple"
+         }
+        ],
+        "kind": "tuple"
+       },
+       "pattern": {
+        "elems": [
+         {
+          "kind": "bind",
+          "name": "g"
+         },
+         {
+          "elems": [
+           {
+            "kind": "bind",
+            "name": "x"
+           },
+           {
+            "kind": "bind",
+            "name": "y"
+           }
+          ],
+          "kind": "tuple"
+         }
+        ],
+        "kind": "tuple"
+       }
+      }
+     ],
+     "kind": "case",
+     "scrutinee": {
+      "args": [
+       {
+        "args": [
+         {
+          "kind": "var",
+          "name": "b"
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "mod"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "args": [
+        {
+         "kind": "var",
+         "name": "b"
+        }
+       ],
+       "fn": {
+        "kind": "var",
+        "name": "self"
+       },
+       "kind": "app"
+      },
+      "kind": "app"
+     }
+    },
+    "pattern": {
+     "kind": "lit",
+     "value": {
+      "kind": "bool",
+      "value": false
+     }
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "lit",
+     "value": {
+      "kind": "nat",
+      "value": 0
+     }
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "b"
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "eq"
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "b"
+  }
+ ]
+}

@@ -1,0 +1,236 @@
+{
+ "body_hash": "expr_d5df3e547c766b48991244aa74e6f36de16bebe3783f29f1e29d3d82a1a92ee6",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 4
+    },
+    {
+     "kind": "nat",
+     "value": 6
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 12
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 21
+    },
+    {
+     "kind": "nat",
+     "value": 6
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 42
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 0
+    },
+    {
+     "kind": "nat",
+     "value": 5
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 0
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 7
+    },
+    {
+     "kind": "nat",
+     "value": 7
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 7
+   }
+  }
+ ],
+ "hash": "fn_96558d790aa29f2c93b738a1fe177f91008e6113240dcef85b54016adc88f202",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/lcm"
+ ],
+ "name_hints": [
+  "lcm",
+  "least_common_multiple"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          },
+          {
+           "kind": "var",
+           "name": "a"
+          }
+         ],
+         "kind": "app",
+         "op": "mod"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "kind": "app",
+         "op": "mod"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "and"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "multiple_of_both"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "a"
+        },
+        {
+         "kind": "var",
+         "name": "b"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "b"
+        },
+        {
+         "kind": "var",
+         "name": "a"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "commutative"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "nat"
+   }
+  }
+ },
+ "supersedes": null
+}

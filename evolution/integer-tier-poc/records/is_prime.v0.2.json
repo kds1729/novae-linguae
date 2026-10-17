@@ -1,0 +1,275 @@
+{
+ "body_hash": "expr_aabd8a385c8da95944b6b89fa0fde502c2690c62d2efc7a6e67e5f634416e816",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 3
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 4
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 9
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 37
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 561
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1105
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 2047
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1373653
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 25326001
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 3215031751
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1000000007
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": "3825123056546413051"
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": "2305843009213693951"
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": "9223372036854775783"
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": "9223372036854775781"
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  }
+ ],
+ "hash": "fn_99bbc16177b4fa3691bd5906c4d924d7b215fcc2dea20a8dcd9b06e3c47f5140",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/is-prime",
+  "predicate/number"
+ ],
+ "name_hints": [
+  "is_prime",
+  "primality",
+  "miller_rabin"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "n"
+      },
+      {
+       "kind": "lit",
+       "value": 9223372036854775807
+      }
+     ],
+     "kind": "app",
+     "op": "le"
+    },
+    "kind": "pre"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "bool"
+   }
+  }
+ },
+ "supersedes": null
+}

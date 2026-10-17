@@ -1,0 +1,964 @@
+[
+ {
+  "name": "gcd",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  },
+  "properties_generative": [
+   "commutative: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "right_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
+   "divides_both: CONSISTENT  |  generative: EXHAUSTIVE (80 cases \u2014 bounded domain, no counterexample)",
+   "associative: UNVERIFIABLE  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "commutative: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
+   "right_zero: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
+   "divides_both: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
+   "associative: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+  ]
+ },
+ {
+  "name": "lcm",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:nat-result (\u2265 0)": "no list-typed quantified variable to induct on (use the first-order prover)",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  },
+  "properties_generative": [
+   "multiple_of_both: CONSISTENT  |  generative: EXHAUSTIVE (64 cases \u2014 bounded domain, no counterexample)",
+   "commutative: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "multiple_of_both: UNSUPPORTED  application with no resolvable head",
+   "commutative: UNSUPPORTED  application with no resolvable head"
+  ]
+ },
+ {
+  "name": "ext_gcd",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> (int, (int, int))",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  }
+ },
+ {
+  "name": "bezout_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  },
+  "properties_generative": [
+   "bezout_identity: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "bezout_identity: UNSUPPORTED  application with no resolvable head"
+  ]
+ },
+ {
+  "name": "mod_inverse",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> Sum",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  }
+ },
+ {
+  "name": "inverse_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  },
+  "properties_generative": [
+   "inverse_identity: CONSISTENT  |  generative: EXHAUSTIVE (72 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "inverse_identity: UNSUPPORTED  application with no resolvable head"
+  ]
+ },
+ {
+  "name": "mod_add",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "congruent_to_plain_sum: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)",
+   "commutative: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "congruent_to_plain_sum: UNKNOWN      solver could not decide",
+   "commutative: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "mod_mul",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "congruent_to_plain_product: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)",
+   "commutative: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "congruent_to_plain_product: UNKNOWN      solver could not decide",
+   "commutative: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "is_even",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "period_two: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
+   "alternates: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "period_two: PROVED       holds for all inputs (unsat negation)",
+   "alternates: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "pow_mod_naive",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "UNVERIFIABLE",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "application with no resolvable head",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  }
+ },
+ {
+  "name": "mod_pow",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "UNVERIFIABLE",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "application with no resolvable head",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  }
+ },
+ {
+  "name": "pow_mod_agree",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  },
+  "properties_generative": [
+   "fast_equals_naive: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "fast_equals_naive: UNSUPPORTED  application with no resolvable head"
+  ]
+ },
+ {
+  "name": "isqrt",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "UNVERIFIABLE",
+   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "application with no resolvable head",
+   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  },
+  "properties_generative": [
+   "square_root_of_square: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
+   "floor_bounds: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "square_root_of_square: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
+   "floor_bounds: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+  ]
+ },
+ {
+  "name": "mr_squarings",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  }
+ },
+ {
+  "name": "mr_witness",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  }
+ },
+ {
+  "name": "odd_part",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  }
+ },
+ {
+  "name": "mr_all",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, List(int)) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  }
+ },
+ {
+  "name": "is_prime",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  }
+ },
+ {
+  "name": "no_divisor_from",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  }
+ },
+ {
+  "name": "is_prime_trial",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  }
+ },
+ {
+  "name": "prime_agree",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  },
+  "properties_generative": [
+   "miller_rabin_agrees_with_trial: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "miller_rabin_agrees_with_trial: UNSUPPORTED  application with no resolvable head"
+  ]
+ },
+ {
+  "name": "crt2",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> Sum",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  }
+ },
+ {
+  "name": "crt_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  },
+  "properties_generative": [
+   "solves_both_congruences: CONSISTENT  |  generative: HELD (399 cases)"
+  ],
+  "prove": [
+   "solves_both_congruences: UNSUPPORTED  application with no resolvable head"
+  ]
+ },
+ {
+  "name": "digits",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> List(int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: no single argument position provably descends in every self-call (structural `tail`; a guarded constant decrement \u2014 `gt(p, lit)`-guarded `sub(p, c)`, or a nat's non-zero-guarded `sub(p, 1)`; a halving `div(p, ",
+   "complexity": "declared `O(log n)`, not established: a self-call's recursion argument is not a recognized structural/numeric descent"
+  }
+ },
+ {
+  "name": "from_digits",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, List(int)) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  }
+ },
+ {
+  "name": "digits_roundtrip",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  },
+  "properties_generative": [
+   "digits_then_from_digits: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "digits_then_from_digits: UNSUPPORTED  application with no resolvable head"
+  ]
+ },
+ {
+  "name": "digit_sum",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "termination": "declared `always`, not proven: no single argument position provably descends in every self-call (structural `tail`; a guarded constant decrement \u2014 `gt(p, lit)`-guarded `sub(p, c)`, or a nat's non-zero-guarded `sub(p, 1)`; a halving `div(p, ",
+   "complexity": "declared `O(log n)`, not established: a self-call's recursion argument is not a recognized structural/numeric descent"
+  },
+  "properties_generative": [
+   "sum_bounded_by_value: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "sum_bounded_by_value: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+  ]
+ },
+ {
+  "name": "binomial",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  },
+  "properties_generative": [
+   "symmetry: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "pascal: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "choose_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "symmetry: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
+   "pascal: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
+   "choose_zero: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+  ]
+ },
+ {
+  "name": "ntt_split",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(List(int)) -> (List(int), List(int))",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  }
+ },
+ {
+  "name": "ntt_butterfly",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(List(int), List(int), int, int) -> (List(int), List(int))",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  }
+ },
+ {
+  "name": "ntt_rec",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(List(int), int) -> List(int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(n log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  }
+ },
+ {
+  "name": "ntt",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(List(int)) -> List(int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(n log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  }
+ },
+ {
+  "name": "ntt_inverse",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(List(int)) -> List(int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(n log n)`, not established: applies a higher-order/opaque callee `map` (its cost is unchecked)"
+  }
+ },
+ {
+  "name": "ntt_roundtrip",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(List(int)) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(n log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  }
+ },
+ {
+  "name": "pointwise_mod",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(List(int), List(int)) -> List(int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  },
+  "properties_generative": [
+   "length_is_min: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "prove": [
+   "length_is_min: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+  ]
+ },
+ {
+  "name": "pad_to",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(List(int), int) -> List(int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n)`, not established: self-calls descend on different parameters (no single measure)"
+  },
+  "properties_generative": [
+   "length_is_n: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "length_is_n: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+  ]
+ },
+ {
+  "name": "next_pow2",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  },
+  "properties_generative": [
+   "at_least_n: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
+   "under_twice_n: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "prove": [
+   "at_least_n: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
+   "under_twice_n: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+  ]
+ },
+ {
+  "name": "convolution",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(List(int), List(int)) -> List(int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
+   "complexity": "declared `O(n log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+  }
+ }
+]

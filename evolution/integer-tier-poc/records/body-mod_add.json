@@ -1,0 +1,90 @@
+{
+ "body": {
+  "args": [
+   {
+    "kind": "var",
+    "name": "m"
+   }
+  ],
+  "fn": {
+   "args": [
+    {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "m"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "kind": "var",
+          "name": "b"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "mod"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "args": [
+         {
+          "kind": "var",
+          "name": "m"
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "mod"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "add"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    }
+   ],
+   "fn": {
+    "kind": "var",
+    "name": "mod"
+   },
+   "kind": "app"
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "b"
+  },
+  {
+   "name": "m"
+  }
+ ]
+}

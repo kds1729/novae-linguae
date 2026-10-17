@@ -1,0 +1,87 @@
+{
+ "body_hash": "expr_284fce8debe5394c0f88134719060043bba0690163ef1c89ad1c7354c853f7ce",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 561
+    },
+    {
+     "kind": "nat",
+     "value": 263
+    },
+    {
+     "kind": "nat",
+     "value": 3
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 13
+    },
+    {
+     "kind": "nat",
+     "value": 5
+    },
+    {
+     "kind": "nat",
+     "value": 1
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  }
+ ],
+ "hash": "fn_61f00798cc15868bd0e932d80c236a77b979ce22c2c7720abe87cb6ddb4c7733",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/mr-squarings"
+ ],
+ "name_hints": [
+  "mr_squarings",
+  "miller_rabin_squarings"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "bool"
+   }
+  }
+ },
+ "supersedes": null
+}

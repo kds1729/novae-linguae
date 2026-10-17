@@ -1,0 +1,123 @@
+{
+ "body_hash": "expr_cd97bdbb7a4b221f6c217cfb58ab9f28a6c4e43266b4b6de7ab6234c2bf165d4",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 561
+    },
+    {
+     "kind": "nat",
+     "value": 35
+    },
+    {
+     "kind": "nat",
+     "value": 4
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 2047
+    },
+    {
+     "kind": "nat",
+     "value": 1023
+    },
+    {
+     "kind": "nat",
+     "value": 1
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 2047
+    },
+    {
+     "kind": "nat",
+     "value": 1023
+    },
+    {
+     "kind": "nat",
+     "value": 1
+    },
+    {
+     "kind": "nat",
+     "value": 3
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  }
+ ],
+ "hash": "fn_9e1d4e1f9fe7e33885418220cf7cdf38c75b9636016cb4e9e9f75236ee83a19d",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/mr-witness"
+ ],
+ "name_hints": [
+  "mr_witness",
+  "miller_rabin_witness"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "bool"
+   }
+  }
+ },
+ "supersedes": null
+}

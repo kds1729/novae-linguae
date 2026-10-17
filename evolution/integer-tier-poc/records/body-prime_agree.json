@@ -1,0 +1,54 @@
+{
+ "body": {
+  "args": [
+   {
+    "args": [
+     {
+      "kind": "var",
+      "name": "n"
+     }
+    ],
+    "fn": {
+     "kind": "lit",
+     "value": {
+      "kind": "fn_ref",
+      "target": "fn_d6af9003a5e655df9597ad7c1936af6238fa7e51f0b6e77d81d6361c06fc5fcf"
+     }
+    },
+    "kind": "app"
+   }
+  ],
+  "fn": {
+   "args": [
+    {
+     "args": [
+      {
+       "kind": "var",
+       "name": "n"
+      }
+     ],
+     "fn": {
+      "kind": "lit",
+      "value": {
+       "kind": "fn_ref",
+       "target": "fn_99bbc16177b4fa3691bd5906c4d924d7b215fcc2dea20a8dcd9b06e3c47f5140"
+      }
+     },
+     "kind": "app"
+    }
+   ],
+   "fn": {
+    "kind": "var",
+    "name": "eq"
+   },
+   "kind": "app"
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "n"
+  }
+ ]
+}

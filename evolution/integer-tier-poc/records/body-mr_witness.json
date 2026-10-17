@@ -1,0 +1,238 @@
+{
+ "body": {
+  "body": {
+   "arms": [
+    {
+     "body": {
+      "kind": "lit",
+      "value": {
+       "kind": "bool",
+       "value": true
+      }
+     },
+     "pattern": {
+      "kind": "lit",
+      "value": {
+       "kind": "bool",
+       "value": true
+      }
+     }
+    },
+    {
+     "body": {
+      "arms": [
+       {
+        "body": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": true
+         }
+        },
+        "pattern": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": true
+         }
+        }
+       },
+       {
+        "body": {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "lit",
+             "value": {
+              "kind": "nat",
+              "value": 1
+             }
+            }
+           ],
+           "fn": {
+            "args": [
+             {
+              "kind": "var",
+              "name": "s"
+             }
+            ],
+            "fn": {
+             "kind": "var",
+             "name": "sub"
+            },
+            "kind": "app"
+           },
+           "kind": "app"
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "kind": "var",
+            "name": "x"
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "kind": "var",
+             "name": "n"
+            }
+           ],
+           "fn": {
+            "kind": "lit",
+            "value": {
+             "kind": "fn_ref",
+             "target": "fn_61f00798cc15868bd0e932d80c236a77b979ce22c2c7720abe87cb6ddb4c7733"
+            }
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        },
+        "pattern": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": false
+         }
+        }
+       }
+      ],
+      "kind": "case",
+      "scrutinee": {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": {
+            "kind": "nat",
+            "value": 1
+           }
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "kind": "var",
+            "name": "n"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "sub"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "kind": "var",
+          "name": "x"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "eq"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      }
+     },
+     "pattern": {
+      "kind": "lit",
+      "value": {
+       "kind": "bool",
+       "value": false
+      }
+     }
+    }
+   ],
+   "kind": "case",
+   "scrutinee": {
+    "args": [
+     {
+      "kind": "lit",
+      "value": {
+       "kind": "nat",
+       "value": 1
+      }
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "x"
+      }
+     ],
+     "fn": {
+      "kind": "var",
+      "name": "eq"
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   }
+  },
+  "kind": "let",
+  "name": "x",
+  "value": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "n"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "d"
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "a"
+      }
+     ],
+     "fn": {
+      "kind": "lit",
+      "value": {
+       "kind": "fn_ref",
+       "target": "fn_31c081eb43c203d82f72d6e189d4a35b7d2cb9096a257270d0359223de68da65"
+      }
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "n"
+  },
+  {
+   "name": "d"
+  },
+  {
+   "name": "s"
+  },
+  {
+   "name": "a"
+  }
+ ]
+}

@@ -1,0 +1,206 @@
+{
+ "body_hash": "expr_7f17d6a0903869656cd182c4b73aaf417c335585c6d9796e4b3189052ab49f86",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 10
+      },
+      {
+       "kind": "int",
+       "value": 173167434
+      },
+      {
+       "kind": "int",
+       "value": 998244351
+      },
+      {
+       "kind": "int",
+       "value": 825076915
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 2
+     },
+     {
+      "kind": "int",
+      "value": 3
+     },
+     {
+      "kind": "int",
+      "value": 4
+     }
+    ],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 68
+      },
+      {
+       "kind": "int",
+       "value": 894301004
+      },
+      {
+       "kind": "int",
+       "value": 346334868
+      },
+      {
+       "kind": "int",
+       "value": 201631260
+      },
+      {
+       "kind": "int",
+       "value": 998244349
+      },
+      {
+       "kind": "int",
+       "value": 796613085
+      },
+      {
+       "kind": "int",
+       "value": 651909477
+      },
+      {
+       "kind": "int",
+       "value": 103943341
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 5
+     },
+     {
+      "kind": "int",
+      "value": 6
+     },
+     {
+      "kind": "int",
+      "value": 7
+     },
+     {
+      "kind": "int",
+      "value": 8
+     },
+     {
+      "kind": "int",
+      "value": 9
+     },
+     {
+      "kind": "int",
+      "value": 10
+     },
+     {
+      "kind": "int",
+      "value": 11
+     },
+     {
+      "kind": "int",
+      "value": 12
+     }
+    ],
+    "kind": "list"
+   }
+  }
+ ],
+ "hash": "fn_f943ae1e0e77b72773f6d41cafd351c533a6bc682ee8f8102773a573031237cc",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/ntt-inverse",
+  "transform/list"
+ ],
+ "name_hints": [
+  "ntt_inverse",
+  "inverse_number_theoretic_transform"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n log n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "xs"
+        }
+       ],
+       "kind": "app",
+       "op": "length"
+      },
+      {
+       "kind": "lit",
+       "value": 0
+      }
+     ],
+     "kind": "app",
+     "op": "gt"
+    },
+    "kind": "pre"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "args": [
+      {
+       "kind": "builtin",
+       "name": "int"
+      }
+     ],
+     "ctor": {
+      "kind": "builtin",
+      "name": "List"
+     },
+     "kind": "apply"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "int"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "List"
+    },
+    "kind": "apply"
+   }
+  }
+ },
+ "supersedes": null
+}

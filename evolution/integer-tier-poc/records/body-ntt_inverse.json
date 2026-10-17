@@ -1,0 +1,252 @@
+{
+ "body": {
+  "body": {
+   "body": {
+    "args": [
+     {
+      "args": [
+       {
+        "args": [
+         {
+          "kind": "lit",
+          "value": {
+           "kind": "nat",
+           "value": 998244353
+          }
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "kind": "lit",
+           "value": {
+            "kind": "nat",
+            "value": 998244351
+           }
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "args": [
+             {
+              "kind": "lit",
+              "value": {
+               "kind": "nat",
+               "value": 998244353
+              }
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "n"
+                }
+               ],
+               "fn": {
+                "args": [
+                 {
+                  "kind": "lit",
+                  "value": {
+                   "kind": "nat",
+                   "value": 998244352
+                  }
+                 }
+                ],
+                "fn": {
+                 "kind": "var",
+                 "name": "div"
+                },
+                "kind": "app"
+               },
+               "kind": "app"
+              }
+             ],
+             "fn": {
+              "args": [
+               {
+                "kind": "lit",
+                "value": {
+                 "kind": "nat",
+                 "value": 3
+                }
+               }
+              ],
+              "fn": {
+               "kind": "lit",
+               "value": {
+                "kind": "fn_ref",
+                "target": "fn_31c081eb43c203d82f72d6e189d4a35b7d2cb9096a257270d0359223de68da65"
+               }
+              },
+              "kind": "app"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           }
+          ],
+          "fn": {
+           "kind": "lit",
+           "value": {
+            "kind": "fn_ref",
+            "target": "fn_31c081eb43c203d82f72d6e189d4a35b7d2cb9096a257270d0359223de68da65"
+           }
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "args": [
+        {
+         "kind": "var",
+         "name": "xs"
+        }
+       ],
+       "fn": {
+        "kind": "lit",
+        "value": {
+         "kind": "fn_ref",
+         "target": "fn_81d8af646046b7e93ce6ab9c7816d6333196a6e313e7bd76fcff54a45d6fab8f"
+        }
+       },
+       "kind": "app"
+      },
+      "kind": "app"
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "body": {
+        "args": [
+         {
+          "kind": "lit",
+          "value": {
+           "kind": "nat",
+           "value": 998244353
+          }
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "inv_n"
+            }
+           ],
+           "fn": {
+            "args": [
+             {
+              "kind": "var",
+              "name": "x"
+             }
+            ],
+            "fn": {
+             "kind": "var",
+             "name": "mul"
+            },
+            "kind": "app"
+           },
+           "kind": "app"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "mod"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       },
+       "kind": "lambda",
+       "params": [
+        {
+         "name": "x"
+        }
+       ]
+      }
+     ],
+     "fn": {
+      "kind": "var",
+      "name": "map"
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   },
+   "kind": "let",
+   "name": "inv_n",
+   "value": {
+    "args": [
+     {
+      "kind": "lit",
+      "value": {
+       "kind": "nat",
+       "value": 998244353
+      }
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "lit",
+       "value": {
+        "kind": "nat",
+        "value": 998244351
+       }
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "n"
+       }
+      ],
+      "fn": {
+       "kind": "lit",
+       "value": {
+        "kind": "fn_ref",
+        "target": "fn_31c081eb43c203d82f72d6e189d4a35b7d2cb9096a257270d0359223de68da65"
+       }
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   }
+  },
+  "kind": "let",
+  "name": "n",
+  "value": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "xs"
+    }
+   ],
+   "fn": {
+    "kind": "var",
+    "name": "length"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "xs"
+  }
+ ]
+}

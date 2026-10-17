@@ -1,0 +1,54 @@
+{
+ "body": {
+  "args": [
+   {
+    "kind": "lit",
+    "value": {
+     "kind": "nat",
+     "value": 0
+    }
+   }
+  ],
+  "fn": {
+   "args": [
+    {
+     "args": [
+      {
+       "kind": "lit",
+       "value": {
+        "kind": "nat",
+        "value": 2
+       }
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "n"
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "mod"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    }
+   ],
+   "fn": {
+    "kind": "var",
+    "name": "eq"
+   },
+   "kind": "app"
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "n"
+  }
+ ]
+}

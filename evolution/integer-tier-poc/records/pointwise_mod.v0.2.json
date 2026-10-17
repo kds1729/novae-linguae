@@ -1,0 +1,215 @@
+{
+ "body_hash": "expr_cd9500466a82da8d8b15034a558e9d73a83920d284f599bbbfe65328f0c28243",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 2
+      },
+      {
+       "kind": "int",
+       "value": 3
+      }
+     ],
+     "kind": "list"
+    },
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 4
+      },
+      {
+       "kind": "int",
+       "value": 5
+      },
+      {
+       "kind": "int",
+       "value": 6
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 4
+     },
+     {
+      "kind": "int",
+      "value": 10
+     },
+     {
+      "kind": "int",
+      "value": 18
+     }
+    ],
+    "kind": "list"
+   }
+  }
+ ],
+ "hash": "fn_b5032636ab25e8b6bc83d9d8d3c1d0b28828f68ba54ed7d489b7e2072afe7e6b",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/pointwise-mod",
+  "transform/list"
+ ],
+ "name_hints": [
+  "pointwise_mod",
+  "pointwise_product_mod_p"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "xs"
+            },
+            {
+             "kind": "var",
+             "name": "ys"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "length"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "xs"
+          }
+         ],
+         "kind": "app",
+         "op": "length"
+        }
+       ],
+       "kind": "app",
+       "op": "le"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "xs"
+            },
+            {
+             "kind": "var",
+             "name": "ys"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "length"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "ys"
+          }
+         ],
+         "kind": "app",
+         "op": "length"
+        }
+       ],
+       "kind": "app",
+       "op": "le"
+      }
+     ],
+     "kind": "app",
+     "op": "and"
+    },
+    "kind": "forall",
+    "vars": [
+     "xs",
+     "ys"
+    ]
+   },
+   "name": "length_is_min"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "args": [
+      {
+       "kind": "builtin",
+       "name": "int"
+      }
+     ],
+     "ctor": {
+      "kind": "builtin",
+      "name": "List"
+     },
+     "kind": "apply"
+    },
+    {
+     "args": [
+      {
+       "kind": "builtin",
+       "name": "int"
+      }
+     ],
+     "ctor": {
+      "kind": "builtin",
+      "name": "List"
+     },
+     "kind": "apply"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "int"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "List"
+    },
+    "kind": "apply"
+   }
+  }
+ },
+ "supersedes": null
+}

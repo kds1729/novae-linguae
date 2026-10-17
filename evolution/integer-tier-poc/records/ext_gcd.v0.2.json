@@ -1,0 +1,164 @@
+{
+ "body_hash": "expr_5fca7cc87fa9bbab4ca417d0fef870c3e80da1f5f1172c21a0a1526d0a861092",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 240
+    },
+    {
+     "kind": "int",
+     "value": 46
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 2
+     },
+     {
+      "elems": [
+       {
+        "kind": "int",
+        "value": -9
+       },
+       {
+        "kind": "int",
+        "value": 47
+       }
+      ],
+      "kind": "tuple"
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 17
+    },
+    {
+     "kind": "int",
+     "value": 5
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "elems": [
+       {
+        "kind": "int",
+        "value": -2
+       },
+       {
+        "kind": "int",
+        "value": 7
+       }
+      ],
+      "kind": "tuple"
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 7
+    },
+    {
+     "kind": "int",
+     "value": 0
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 7
+     },
+     {
+      "elems": [
+       {
+        "kind": "int",
+        "value": 1
+       },
+       {
+        "kind": "int",
+        "value": 0
+       }
+      ],
+      "kind": "tuple"
+     }
+    ],
+    "kind": "tuple"
+   }
+  }
+ ],
+ "hash": "fn_ff6d219fd84cca952f3d37f1091735807bb08c3bb9952d0b23a886e5a7499533",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/ext-gcd"
+ ],
+ "name_hints": [
+  "ext_gcd",
+  "extended_euclid",
+  "bezout"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "builtin",
+      "name": "int"
+     },
+     {
+      "elems": [
+       {
+        "kind": "builtin",
+        "name": "int"
+       },
+       {
+        "kind": "builtin",
+        "name": "int"
+       }
+      ],
+      "kind": "tuple"
+     }
+    ],
+    "kind": "tuple"
+   }
+  }
+ },
+ "supersedes": null
+}

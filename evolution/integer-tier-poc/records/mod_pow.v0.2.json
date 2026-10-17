@@ -1,0 +1,220 @@
+{
+ "body_hash": "expr_d4cafef5cd5972ba632deb821e1710c7fe5af84d85f1125a16fc824f84c4e278",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 2
+    },
+    {
+     "kind": "nat",
+     "value": 10
+    },
+    {
+     "kind": "int",
+     "value": 1000
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 24
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 3
+    },
+    {
+     "kind": "nat",
+     "value": 200
+    },
+    {
+     "kind": "int",
+     "value": 1000000007
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 136318165
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 2
+    },
+    {
+     "kind": "nat",
+     "value": "4611686018427387904"
+    },
+    {
+     "kind": "int",
+     "value": "2305843009213693951"
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 16
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 5
+    },
+    {
+     "kind": "nat",
+     "value": 0
+    },
+    {
+     "kind": "int",
+     "value": 13
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 1
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 7
+    },
+    {
+     "kind": "nat",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 1
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 0
+   }
+  }
+ ],
+ "hash": "fn_31c081eb43c203d82f72d6e189d4a35b7d2cb9096a257270d0359223de68da65",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/mod-pow"
+ ],
+ "name_hints": [
+  "mod_pow",
+  "modular_exponentiation",
+  "square_and_multiply"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "m"
+      },
+      {
+       "kind": "lit",
+       "value": 0
+      }
+     ],
+     "kind": "app",
+     "op": "gt"
+    },
+    "kind": "pre"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "m"
+      },
+      {
+       "kind": "lit",
+       "value": 9223372036854775807
+      }
+     ],
+     "kind": "app",
+     "op": "le"
+    },
+    "kind": "pre"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "result"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "ge"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "result"
+        },
+        {
+         "kind": "var",
+         "name": "m"
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      }
+     ],
+     "kind": "app",
+     "op": "and"
+    },
+    "kind": "post"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "int"
+   }
+  }
+ },
+ "supersedes": null
+}

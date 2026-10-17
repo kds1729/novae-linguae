@@ -1,0 +1,141 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "g"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "args": [
+         {
+          "args": [
+           {
+            "kind": "var",
+            "name": "y"
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "mul"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "x"
+            }
+           ],
+           "fn": {
+            "args": [
+             {
+              "kind": "var",
+              "name": "a"
+             }
+            ],
+            "fn": {
+             "kind": "var",
+             "name": "mul"
+            },
+            "kind": "app"
+           },
+           "kind": "app"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "add"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "eq"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    },
+    "pattern": {
+     "elems": [
+      {
+       "kind": "bind",
+       "name": "g"
+      },
+      {
+       "elems": [
+        {
+         "kind": "bind",
+         "name": "x"
+        },
+        {
+         "kind": "bind",
+         "name": "y"
+        }
+       ],
+       "kind": "tuple"
+      }
+     ],
+     "kind": "tuple"
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "b"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "a"
+     }
+    ],
+    "fn": {
+     "kind": "lit",
+     "value": {
+      "kind": "fn_ref",
+      "target": "fn_ff6d219fd84cca952f3d37f1091735807bb08c3bb9952d0b23a886e5a7499533"
+     }
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "b"
+  }
+ ]
+}

@@ -1,0 +1,185 @@
+{
+ "body_hash": "expr_8f8e30c2c1173d0fd094a1f7e0baba9da0df89276f3187ca5bbba5780916a860",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 2
+      },
+      {
+       "kind": "int",
+       "value": 3
+      },
+      {
+       "kind": "int",
+       "value": 4
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "elems": [
+       {
+        "kind": "int",
+        "value": 1
+       },
+       {
+        "kind": "int",
+        "value": 3
+       }
+      ],
+      "kind": "list"
+     },
+     {
+      "elems": [
+       {
+        "kind": "int",
+        "value": 2
+       },
+       {
+        "kind": "int",
+        "value": 4
+       }
+      ],
+      "kind": "list"
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 7
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "elems": [
+       {
+        "kind": "int",
+        "value": 7
+       }
+      ],
+      "kind": "list"
+     },
+     {
+      "elems": [],
+      "kind": "list"
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "elems": [],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "elems": [],
+      "kind": "list"
+     },
+     {
+      "elems": [],
+      "kind": "list"
+     }
+    ],
+    "kind": "tuple"
+   }
+  }
+ ],
+ "hash": "fn_34b443c21c2cf606ae53461aeb37faf895d0d71868ab8abe03b594dc470106f0",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/ntt-split",
+  "transform/list"
+ ],
+ "name_hints": [
+  "ntt_split",
+  "deinterleave",
+  "evens_odds"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "args": [
+      {
+       "kind": "builtin",
+       "name": "int"
+      }
+     ],
+     "ctor": {
+      "kind": "builtin",
+      "name": "List"
+     },
+     "kind": "apply"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "args": [
+       {
+        "kind": "builtin",
+        "name": "int"
+       }
+      ],
+      "ctor": {
+       "kind": "builtin",
+       "name": "List"
+      },
+      "kind": "apply"
+     },
+     {
+      "args": [
+       {
+        "kind": "builtin",
+        "name": "int"
+       }
+      ],
+      "ctor": {
+       "kind": "builtin",
+       "name": "List"
+      },
+      "kind": "apply"
+     }
+    ],
+    "kind": "tuple"
+   }
+  }
+ },
+ "supersedes": null
+}

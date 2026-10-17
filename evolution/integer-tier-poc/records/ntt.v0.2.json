@@ -1,0 +1,307 @@
+{
+ "body_hash": "expr_8b10661709736c9839d529a0f4cf0f3eb1a420ddd040340382994b32d13f9978",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 2
+      },
+      {
+       "kind": "int",
+       "value": 3
+      },
+      {
+       "kind": "int",
+       "value": 4
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 10
+     },
+     {
+      "kind": "int",
+      "value": 173167434
+     },
+     {
+      "kind": "int",
+      "value": 998244351
+     },
+     {
+      "kind": "int",
+      "value": 825076915
+     }
+    ],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 0
+      },
+      {
+       "kind": "int",
+       "value": 0
+      },
+      {
+       "kind": "int",
+       "value": 0
+      },
+      {
+       "kind": "int",
+       "value": 0
+      },
+      {
+       "kind": "int",
+       "value": 0
+      },
+      {
+       "kind": "int",
+       "value": 0
+      },
+      {
+       "kind": "int",
+       "value": 0
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 1
+     }
+    ],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 5
+      },
+      {
+       "kind": "int",
+       "value": 6
+      },
+      {
+       "kind": "int",
+       "value": 7
+      },
+      {
+       "kind": "int",
+       "value": 8
+      },
+      {
+       "kind": "int",
+       "value": 9
+      },
+      {
+       "kind": "int",
+       "value": 10
+      },
+      {
+       "kind": "int",
+       "value": 11
+      },
+      {
+       "kind": "int",
+       "value": 12
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 68
+     },
+     {
+      "kind": "int",
+      "value": 894301004
+     },
+     {
+      "kind": "int",
+      "value": 346334868
+     },
+     {
+      "kind": "int",
+      "value": 201631260
+     },
+     {
+      "kind": "int",
+      "value": 998244349
+     },
+     {
+      "kind": "int",
+      "value": 796613085
+     },
+     {
+      "kind": "int",
+      "value": 651909477
+     },
+     {
+      "kind": "int",
+      "value": 103943341
+     }
+    ],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 1
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 1
+     }
+    ],
+    "kind": "list"
+   }
+  }
+ ],
+ "hash": "fn_c4166a6c6496f044ce5c2bced1fb310ab00a01864546f4e388b5f0420c765917",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/ntt",
+  "transform/list"
+ ],
+ "name_hints": [
+  "ntt",
+  "number_theoretic_transform",
+  "fft_mod_p"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n log n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "xs"
+        }
+       ],
+       "kind": "app",
+       "op": "length"
+      },
+      {
+       "kind": "lit",
+       "value": 0
+      }
+     ],
+     "kind": "app",
+     "op": "gt"
+    },
+    "kind": "pre"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "args": [
+      {
+       "kind": "builtin",
+       "name": "int"
+      }
+     ],
+     "ctor": {
+      "kind": "builtin",
+      "name": "List"
+     },
+     "kind": "apply"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "int"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "List"
+    },
+    "kind": "apply"
+   }
+  }
+ },
+ "supersedes": null
+}

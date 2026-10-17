@@ -1,0 +1,209 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "body": {
+      "kind": "variant",
+      "payload": {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "m2"
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "kind": "var",
+            "name": "m1"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "mul"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "args": [
+           {
+            "args": [
+             {
+              "kind": "var",
+              "name": "t"
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "var",
+               "name": "m1"
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "mul"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a1"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "add"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "mod"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      },
+      "tag": "Just"
+     },
+     "kind": "let",
+     "name": "t",
+     "value": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "m2"
+       }
+      ],
+      "fn": {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "inv"
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "args": [
+             {
+              "kind": "var",
+              "name": "a1"
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "var",
+               "name": "a2"
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "sub"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "mul"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        }
+       ],
+       "fn": {
+        "kind": "var",
+        "name": "mod"
+       },
+       "kind": "app"
+      },
+      "kind": "app"
+     }
+    },
+    "pattern": {
+     "kind": "variant",
+     "payload": {
+      "kind": "bind",
+      "name": "inv"
+     },
+     "tag": "Just"
+    }
+   },
+   {
+    "body": {
+     "kind": "variant",
+     "tag": "None"
+    },
+    "pattern": {
+     "kind": "variant",
+     "tag": "None"
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "m2"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "m1"
+     }
+    ],
+    "fn": {
+     "kind": "lit",
+     "value": {
+      "kind": "fn_ref",
+      "target": "fn_f374139fbbda299d7aff62b9f8cd9632cb897daec769458d4a9ce9b37d65ca95"
+     }
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a1"
+  },
+  {
+   "name": "m1"
+  },
+  {
+   "name": "a2"
+  },
+  {
+   "name": "m2"
+  }
+ ]
+}

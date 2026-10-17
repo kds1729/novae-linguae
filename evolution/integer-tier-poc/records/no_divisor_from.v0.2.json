@@ -1,0 +1,75 @@
+{
+ "body_hash": "expr_57760b419d2722afdbbdab8b6f1dddb9e1d5ccb6530d6f565bf94c43bec5dca9",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 91
+    },
+    {
+     "kind": "nat",
+     "value": 9
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": false
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 97
+    },
+    {
+     "kind": "nat",
+     "value": 9
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  }
+ ],
+ "hash": "fn_696a9e62eb92dc4088b98fcfcd34478e406398af4161faf8f8ba7f09e8366c75",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/no-divisor-from"
+ ],
+ "name_hints": [
+  "no_divisor_from",
+  "trial_division_downward"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "bool"
+   }
+  }
+ },
+ "supersedes": null
+}

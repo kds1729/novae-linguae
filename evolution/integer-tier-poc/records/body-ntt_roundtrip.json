@@ -1,0 +1,54 @@
+{
+ "body": {
+  "args": [
+   {
+    "kind": "var",
+    "name": "xs"
+   }
+  ],
+  "fn": {
+   "args": [
+    {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "xs"
+        }
+       ],
+       "fn": {
+        "kind": "lit",
+        "value": {
+         "kind": "fn_ref",
+         "target": "fn_c4166a6c6496f044ce5c2bced1fb310ab00a01864546f4e388b5f0420c765917"
+        }
+       },
+       "kind": "app"
+      }
+     ],
+     "fn": {
+      "kind": "lit",
+      "value": {
+       "kind": "fn_ref",
+       "target": "fn_f943ae1e0e77b72773f6d41cafd351c533a6bc682ee8f8102773a573031237cc"
+      }
+     },
+     "kind": "app"
+    }
+   ],
+   "fn": {
+    "kind": "var",
+    "name": "eq"
+   },
+   "kind": "app"
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "xs"
+  }
+ ]
+}

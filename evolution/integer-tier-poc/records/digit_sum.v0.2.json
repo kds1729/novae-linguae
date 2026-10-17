@@ -1,0 +1,146 @@
+{
+ "body_hash": "expr_af58e88a09d20db86cfa926cdf3e5c8d2c85d83f7e78cb3ae80b37ca98fe3f02",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 10
+    },
+    {
+     "kind": "nat",
+     "value": 1234
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 10
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 10
+    },
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 0
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 2
+    },
+    {
+     "kind": "nat",
+     "value": 255
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 8
+   }
+  }
+ ],
+ "hash": "fn_cdc0896aa90a49bfcc1ef1bf80223249690d7c72fc2f31829bc37a43a6a31822",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/digit-sum"
+ ],
+ "name_hints": [
+  "digit_sum",
+  "sum_of_digits"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "var",
+           "name": "n"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "var",
+         "name": "n"
+        }
+       ],
+       "kind": "app",
+       "op": "le"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "b",
+     "n"
+    ]
+   },
+   "name": "sum_bounded_by_value"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "nat"
+   }
+  }
+ },
+ "supersedes": null
+}
