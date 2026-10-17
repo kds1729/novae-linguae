@@ -392,7 +392,7 @@
    "floor_bounds: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "square_root_of_square: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` at several measures (n), so the induction needs their SUM, but `n` is not nat-constrained (fed to a `nat` parameter somewhere in the law) \u2014 the sum would not be well-founded",
+   "square_root_of_square: UNSUPPORTED  recursive body \u2014 structural induction: recursion parameter `n` is used at sort Int, not as a list \u2014 structural induction is over a leading list parameter (numeric/boolean recursion is out of fragment); numeric induction: the law applies `self` at several measures (n), so the induction needs their SUM, but `n` is not nat-constrained (fed to a `nat` parameter somewhere in the law) \u2014 the sum would not be well-founded",
    "floor_bounds: PROVED       by numeric induction on `n` (strong induction over the measure; unsat)"
   ]
  },
@@ -700,7 +700,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -708,7 +708,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, List(int)) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(n)` (inferred O(n))"
   }
@@ -741,7 +741,7 @@
    "digits_then_from_digits: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "digits_then_from_digits: UNSUPPORTED  applies the fn_ref `fn_4c57b69b1cb566fbf428bddbf2fb7a8fa10632460ff29f3a7d397016bb149983` (its certified contract is not available here \u2014 pass --records to use it)"
+   "digits_then_from_digits: UNKNOWN      solver could not decide"
   ]
  },
  {
@@ -959,7 +959,7 @@
    "length_preserving: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "length_preserving: UNSUPPORTED  recursive body \u2014 numeric induction: the body's recursion has no provable numeric measure (structural list recursion, or termination not established)"
+   "length_preserving: PROVED       by structural induction on `xs` (base + step both unsat)"
   ]
  },
  {
@@ -1034,7 +1034,7 @@
    "length_is_min: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "length_is_min: UNSUPPORTED  recursive body \u2014 numeric induction: the body's recursion has no provable numeric measure (structural list recursion, or termination not established)"
+   "length_is_min: PROVED       by structural induction on `xs` using lemmas: length_nonneg"
   ]
  },
  {
@@ -1065,7 +1065,7 @@
    "length_is_n: CONSISTENT  |  generative: HELD (7 cases)"
   ],
   "prove": [
-   "length_is_n: UNSUPPORTED  recursive body \u2014 numeric induction: predicate uses list/structural operator `null` (out of fragment)"
+   "length_is_n: PROVED       by induction on `n` (strong induction over the measure; unsat)"
   ]
  },
  {

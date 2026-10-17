@@ -446,7 +446,7 @@ as z3 does at 60 s. Two solvers, same silence — recorded, not pursued.
   not inductively provable in one step; `≤ max(1, 2n − 1)` is. A record author who wants the bound
   to compose has to state the invariant the induction can carry, exactly as in a paper proof.
 
-### Still open
+### Still open after the fourth follow-up (the list items closed in the fifth, below)
 
 - The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, the `mod` congruences, Bézout
   and CRT as checker laws, `pow_mod_agree`/`prime_agree`): both solvers time out; a lemma rung
@@ -454,6 +454,96 @@ as z3 does at 60 s. Two solvers, same silence — recorded, not pursued.
 - `digits_roundtrip` and the three list-length laws: numeric induction is the wrong principle for
   list-structural recursion; the list-induction backend (`induct.rs`) does not yet read records by
   `fn_ref`. `from_digits ≥ 0`: a `head` in the inductive step.
+- `isqrt(n·n) = n`: a compound measure (`self` at `n·n`) — needs the two-measure principle.
+
+## Fifth follow-up (2026-10-17, same day): the list rung
+
+### Measured
+
+The "Still open" list above named five list items. Re-running the gauntlet after the validator
+changes below, with every record re-minted (addresses unchanged — bodies and signatures are the
+same; certifications re-signed where their content moved):
+
+| law / contract | before | now |
+|---|---|---|
+| `scale_mod`: `length(self(xs, c)) = length(xs)` | UNSUPPORTED | **PROVED** by structural induction on `xs` |
+| `pointwise_mod`: `length(self(xs, ys)) ≤ length(xs)` and `≤ length(ys)` | UNSUPPORTED | **PROVED** by structural induction on `xs` using `length_nonneg` |
+| `pad_to`: `n < 0 ∨ length(self(xs, n)) = n` | UNSUPPORTED | **PROVED** by induction on `n` — the measure rung, now lowering lists |
+| `from_digits ≥ 0` (nat result) | UNVERIFIABLE | **SOUND** by induction on the structure of `ds`, the element domain stated |
+| `digits_roundtrip`: `from_digits(b, digits(b, n)) = n` | UNSUPPORTED (callee contract "not available") | UNKNOWN — the callees' contracts are in the fragment now and say nothing that decides it (below) |
+
+Totals: refinements **19 SOUND / 2** (was 18 / 3); laws **16 PROVED /
+14 UNKNOWN / 1 UNSUPPORTED** (was 13 / 13 / 5); 41/41 run, 41/41 certify,
+termination and complexity unchanged at 41/41.
+
+**What the first measurement found.** The three length laws were never structural-backend
+material in the first place: the backend's lowering reads one head with all its arguments, the
+surface parser emits curried spines (`((cons h) t)`), and the backend's entry points — unlike the
+first-order prover's — never normalized them. Every surface-authored cons-recursive body read
+"application with no resolvable head", and the CLI then printed the NUMERIC rung's refusal over
+it ("no provable numeric measure"), so the module's report named the wrong rung for a whole class
+of laws. A second gap of the same kind: predicate-form (bare) literals — `pad_to`'s `lt(n, 0)` —
+read "unsupported literal kind: None" in the backend. Both normalized at entry; the CLI now reports
+both rungs' reasons when both refuse. With that alone `scale_mod` proved; `pointwise_mod` needed
+two more things — the ∀-generalized induction hypothesis (the backend asserted it for folds only;
+a `self` that tails BOTH lists needs it, as a fold's accumulator does) and the base-case lemma
+`0 ≤ length(ys)`, which no unfolding of a symbolic list yields (`length_nonneg`, now in the
+catalog, proved by its own induction before use).
+
+**`pad_to` is the measure rung's.** Its recursion counts `n` down while consing (and resets `xs`
+to `nil` in one branch), so structural induction on `xs` is the wrong principle — base case
+`length(self(nil, n)) = n` is itself an induction on `n` — and the measure rung had lists out of
+its fragment. It lowers them now (the structural backend's `Lst` datatype and definitions, as the
+solver's own), while the **first-order prover keeps refusing lists**, so a plain list law still
+reaches the structural backend first and every earlier list proof keeps its path. The CLI and
+`check-refinement` also run the measure rung after a structural induction that ended UNKNOWN, not
+only after one that refused. 21 s end to end (the structural attempt's lemma search is most of it).
+
+**`from_digits ≥ 0` needed the structural measure, stated the right way.** The recursion tails
+`ds` (position 1) — no numeric measure, and `head ds` in the step. The termination checker now
+reports a structural measure, and the first encoding tried — the quantified hypothesis guarded by
+`length(ds') < length(ds)` — is exactly what z3 cannot discharge over the recursive `length`
+definition: measured, the obligation closes in 10 ms without that guard and times out at 120 s
+with it; the nonlinear `b · self(b, tail ds)` is not the problem. So the hypothesis is stated as
+explicit **instances** at each tail-descending recursive call, guarded by the descended list being
+a cons (on `nil` the selector is an unconstrained value — asserting the instance there would be
+unsound) — the form in which the checker proved the descent, and the strong structural induction
+principle instantiated. One more fact was missing: over Int-element lists the law is FALSE
+(`ds = [−1]`); the declared `List nat` domain is now stated as `all_nat ds` (every element ≥ 0),
+the list analogue of a `nat` parameter's `≥ 0`, carried into the hypothesis instances. The false
+strengthening `≥ 1` and the Int-element variant stay UNKNOWN (pinned by tests).
+
+**`digits_roundtrip` is honestly UNKNOWN, not UNSUPPORTED.** With `List nat` in the contract
+fragment both callees have contracts, but neither states anything that decides the law
+(`digits` has no postcondition; `from_digits ≥ 0` does not relate the two), and the law's own body
+is not recursive — no measure to induct on. Proving it needs the callees' DEFINITIONS unfolded
+under an induction on `n`, a rung this module does not reach. The previous refusal said "pass
+--records to use it" when `--records` WAS passed; a callee without a usable contract now refuses
+with the real reason (its signature leaves the fragment, it is absent, a cycle).
+
+### Argued
+
+- **The ordering is the design.** First-order, then structural induction, then the measure rung:
+  each later rung lowers strictly more, and the first-order prover's continued refusal of lists is
+  what keeps the structural backend's proven path for plain list laws. Admitting lists everywhere
+  would have turned `length(append(xs, ys)) = …` into a first-order UNKNOWN that the ladder never
+  escalates.
+- **Instances over quantifiers, again.** The equivalence prover learned that z3's recfun engine
+  will not unfold at `(+ n 1)`; the numeric rung learned that the quantified hypothesis obscures
+  `gcd`'s commutativity; this rung learned that a `length`-guarded quantifier over a recursive
+  definition does not fire. Each time the fix was the same: say explicitly what the induction
+  principle grants at the points the proof uses, and let the solver do arithmetic, not search.
+- **The declared domain is part of the obligation.** `nat` parameters already entered as `≥ 0`;
+  `List nat` now enters as `all_nat`. A law can be true on the declared domain and false off it,
+  and the certificate shows which domain the proof is over.
+
+### Still open
+
+- The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, `digit_sum ≥ 0`, the `mod`
+  congruences, Bézout and CRT as checker laws, `pow_mod_agree`/`prime_agree`): both solvers time
+  out; a lemma rung (stating `mod` distributivity as axioms) is the next lever if a driver appears.
+- `digits_roundtrip`: a non-recursive law whose truth lives in two callees' definitions —
+  definitional unfolding of linked callees under an induction on a law variable, a rung not built.
 - `isqrt(n·n) = n`: a compound measure (`self` at `n·n`) — needs the two-measure principle.
 
 ## Open questions (as they stood before the follow-up)
