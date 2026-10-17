@@ -109,7 +109,11 @@ body's own `expr_` address) against a link map and runs the referenced body — 
 run end-to-end (principle 4). `nl-validator run --records <dir>` builds the link map from a directory
 and resolves both a record's `body_hash` and its `fn_ref` arguments.
 
-**Scope (v0.1, honest).** Integers are 128-bit and `nat` is a non-negative `int`. Most builtins are
+**Scope (v0.1, honest).** Integers are 128-bit and `nat` is a non-negative `int`; an arithmetic result
+that does not fit **refuses** (`integer overflow`, 2026-10-17 — before that it wrapped silently), and
+two ints always compare exactly (a float round-trip past 2^53 is not a comparison). A recursion deeper
+than 100,000 nested applications refuses too (the evaluator is a tree walker without tail-call
+elimination; the bound is a stated error, not a stack overflow). Most builtins are
 pure; the effectful ones (`print` → `io.console`, `rand` → `random`, `now` → `time` — `now : a →
 int` reads the wall clock as Unix epoch MILLISECONDS live, and a replay returns the recorded
 instant, so a time-budgeted poll (wait until a service's `RetryAfter`) is expressible and still

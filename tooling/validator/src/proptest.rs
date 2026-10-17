@@ -26,6 +26,11 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum GenKind {
     Int,
+    /// A non-negative int: the kind of a variable fed to a `nat`-typed parameter of `self`. The
+    /// signature's `nat` is a TYPE, not a refinement — a law over `gcd : nat nat -> nat` ranges over
+    /// nats, and sampling negatives would manufacture counterexamples outside the function's domain
+    /// (measured on the integer-tier module: Euclid is not symmetric on negative ints).
+    Nat,
     Bool,
     List(Box<GenKind>),
     Str,
@@ -81,6 +86,7 @@ const STR_ALPHABET: &[char] = &['a', 'b', ',', ' ', 'x', '7', 'é'];
 fn gen_value(kind: &GenKind, rng: &mut Rng) -> Val {
     match kind {
         GenKind::Int => Val::Int(rng.int_in(-32, 32)),
+        GenKind::Nat => Val::Int(rng.int_in(0, 64)),
         GenKind::Bool => Val::Bool(rng.bool()),
         GenKind::List(elem) => {
             let n = rng.int_in(0, 6) as usize;
@@ -97,10 +103,14 @@ fn gen_value(kind: &GenKind, rng: &mut Rng) -> Val {
 
 /// Infer a generator for every name in `vars` from how it is used in `node`. Returns `Err(reason)`
 /// if any variable is used in function position (we can't synthesize functions).
-fn infer_kinds(node: &J, vars: &BTreeSet<String>) -> Result<BTreeMap<String, GenKind>, &'static str> {
+fn infer_kinds(
+    node: &J,
+    vars: &BTreeSet<String>,
+    self_nat_positions: &BTreeSet<usize>,
+) -> Result<BTreeMap<String, GenKind>, &'static str> {
     let mut kinds: BTreeMap<String, GenKind> = vars.iter().map(|v| (v.clone(), GenKind::Int)).collect();
     let mut function_vars: BTreeSet<String> = BTreeSet::new();
-    collect(node, vars, &mut kinds, &mut function_vars);
+    collect(node, vars, self_nat_positions, &mut kinds, &mut function_vars);
     if !function_vars.is_empty() {
         return Err("property quantifies over a function (higher-order) — cannot generate");
     }
@@ -114,9 +124,10 @@ fn as_qvar<'a>(node: &'a J, vars: &BTreeSet<String>) -> Option<&'a str> {
 }
 
 fn set_kind(kinds: &mut BTreeMap<String, GenKind>, name: &str, k: GenKind) {
-    // List/Bool/Str evidence is more specific than the default Int; don't let a later Int overwrite it.
+    // List/Bool/Str/Nat evidence is more specific than the default Int; don't let a later Int
+    // overwrite it (a nat fed to `add` is still a nat).
     match kinds.get(name) {
-        Some(GenKind::List(_)) | Some(GenKind::Bool) | Some(GenKind::Str) if k == GenKind::Int => {}
+        Some(GenKind::List(_)) | Some(GenKind::Bool) | Some(GenKind::Str) | Some(GenKind::Nat) if k == GenKind::Int => {}
         _ => {
             kinds.insert(name.to_string(), k);
         }
@@ -126,6 +137,7 @@ fn set_kind(kinds: &mut BTreeMap<String, GenKind>, name: &str, k: GenKind) {
 fn collect(
     node: &J,
     vars: &BTreeSet<String>,
+    self_nat_positions: &BTreeSet<usize>,
     kinds: &mut BTreeMap<String, GenKind>,
     func_vars: &mut BTreeSet<String>,
 ) {
@@ -140,8 +152,25 @@ fn collect(
             }
             let int_list = || GenKind::List(Box::new(GenKind::Int));
             let arg = |i: usize| args.get(i);
+            // A quantified variable fed to a `nat`-typed parameter of the function under test ranges
+            // over nats: `self(a, b)` binds positionally; `apply(self, a, b)` shifts by the head.
+            let self_arg_position = |i: usize| -> Option<usize> {
+                if op == "self" {
+                    Some(i)
+                } else if op == "apply" && i >= 1 && as_qvar(&args[0], vars).is_none()
+                    && args[0].get("kind").and_then(|k| k.as_str()) == Some("var")
+                    && args[0].get("name").and_then(|n| n.as_str()) == Some("self")
+                {
+                    Some(i - 1)
+                } else {
+                    None
+                }
+            };
             for (i, a) in args.iter().enumerate() {
                 if let Some(name) = as_qvar(a, vars) {
+                    if self_arg_position(i).is_some_and(|p| self_nat_positions.contains(&p)) {
+                        set_kind(kinds, name, GenKind::Nat);
+                    }
                     match (op, i) {
                         // Higher-order function positions ⇒ ungeneratable function variable.
                         ("map" | "filter" | "foldl" | "foldr" | "apply", 0) => {
@@ -174,12 +203,12 @@ fn collect(
             }
             let _ = arg; // (kept for readability of the match above)
             for a in &args {
-                collect(a, vars, kinds, func_vars);
+                collect(a, vars, self_nat_positions, kinds, func_vars);
             }
         }
         "forall" | "exists" => {
             if let Some(body) = node.get("body") {
-                collect(body, vars, kinds, func_vars);
+                collect(body, vars, self_nat_positions, kinds, func_vars);
             }
         }
         _ => {}
@@ -267,6 +296,8 @@ fn domain_of(kind: &GenKind) -> Vec<Val> {
     match kind {
         GenKind::Bool => vec![Val::Bool(false), Val::Bool(true)],
         GenKind::Int => (INT_LO..=INT_HI).map(Val::Int).collect(),
+        // Same domain SIZE as Int, shifted onto the nats (so the exhaustive budget behaves alike).
+        GenKind::Nat => (0..=(INT_HI - INT_LO)).map(Val::Int).collect(),
         // A curated bounded string domain (edge shapes: empty, singletons, separators, repeats,
         // a non-ASCII scalar) — like Int's bounded range, "exhaustive" means over THIS domain.
         GenKind::Str => ["", "a", "b", ",", " ", "ab", "a,b", "a,,b", "é"]
@@ -330,7 +361,13 @@ fn report_binding(names: &[String], binding: &BTreeMap<String, Val>) -> Vec<(Str
 /// Generatively check one property's predicate. `expr` is the property AST; `self_fn` is the
 /// executable function-under-test (bound to `self`); `cases` is how many inputs to sample when the
 /// domain is too large to enumerate; `seed` makes a sampled run deterministic.
-pub fn generative_check(expr: &J, self_fn: &Option<Val>, cases: usize, seed: u64) -> GenOutcome {
+pub fn generative_check(
+    expr: &J,
+    self_fn: &Option<Val>,
+    self_nat_positions: &BTreeSet<usize>,
+    cases: usize,
+    seed: u64,
+) -> GenOutcome {
     // Only a `forall` gives a domain to range over.
     if expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
         return GenOutcome::Ungeneratable("not a forall — no domain to sample");
@@ -344,7 +381,7 @@ pub fn generative_check(expr: &J, self_fn: &Option<Val>, cases: usize, seed: u64
         return GenOutcome::Ungeneratable("forall has no body");
     };
 
-    let kinds = match infer_kinds(body, &vars) {
+    let kinds = match infer_kinds(body, &vars, self_nat_positions) {
         Ok(k) => k,
         Err(reason) => return GenOutcome::Ungeneratable(reason),
     };
@@ -405,6 +442,35 @@ mod tests {
     }
 
     #[test]
+    fn nat_typed_self_parameters_bound_the_domain_to_nats() {
+        // gcd: \a b -> case eq(b, 0) of true -> a | false -> self(b, mod(a, b)). Euclid with the
+        // language's Euclidean `mod` is NOT symmetric on negative ints (gcd(-2, -1) = -1 but
+        // gcd(-1, -2) = 1), while over the declared `nat nat -> nat` domain commutativity holds.
+        let gcd = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }],
+            "body": { "kind": "case",
+                      "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "eq" },
+                                     "args": [{ "kind": "var", "name": "b" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+                      "arms": [
+                          { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": { "kind": "var", "name": "a" } },
+                          { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                            "body": { "kind": "app", "fn": { "kind": "var", "name": "self" },
+                                      "args": [{ "kind": "var", "name": "b" },
+                                               { "kind": "app", "fn": { "kind": "var", "name": "mod" },
+                                                 "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] }] } }] } });
+        let self_fn = self_fn_from_body(&gcd);
+        // The surface spelling `self(a, b)` — an app with op "self".
+        let law = json!({ "kind": "forall", "vars": ["a", "b"],
+            "body": { "kind": "app", "op": "eq", "args": [
+                { "kind": "app", "op": "self", "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] },
+                { "kind": "app", "op": "self", "args": [{ "kind": "var", "name": "b" }, { "kind": "var", "name": "a" }] }] } });
+        let nats: BTreeSet<usize> = [0, 1].into();
+        assert!(matches!(generative_check(&law, &self_fn, &nats, 200, 1), GenOutcome::Exhaustive(_)),
+                "over nats the law holds exhaustively");
+        assert!(matches!(generative_check(&law, &self_fn, &Default::default(), 200, 1), GenOutcome::Refuted(_)),
+                "over ints the generator finds the negative counterexample");
+    }
+
+    #[test]
     fn holds_for_a_true_law() {
         // forall n. eq(self(n), add(n, n))  — true for double, over generated ints.
         let expr = json!({ "kind": "forall", "vars": ["n"], "body": {
@@ -413,7 +479,7 @@ mod tests {
                 { "kind": "app", "op": "add", "args": [{ "kind": "var", "name": "n" }, { "kind": "var", "name": "n" }] }] } });
         let self_fn = self_fn_from_body(&double_body());
         // `n` is an int → the bounded domain is small, so this is checked EXHAUSTIVELY.
-        match generative_check(&expr, &self_fn, 200, 1) {
+        match generative_check(&expr, &self_fn, &Default::default(), 200, 1) {
             GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
             _ => panic!("double's doubling law should hold"),
         }
@@ -427,7 +493,7 @@ mod tests {
                 { "kind": "app", "op": "apply", "args": [{ "kind": "var", "name": "self" }, { "kind": "var", "name": "n" }] },
                 { "kind": "var", "name": "n" }] } });
         let self_fn = self_fn_from_body(&double_body());
-        match generative_check(&expr, &self_fn, 500, 1) {
+        match generative_check(&expr, &self_fn, &Default::default(), 500, 1) {
             GenOutcome::Refuted(b) => {
                 // The minimal counterexample is n = 0.
                 assert_eq!(b.len(), 1);
@@ -446,7 +512,7 @@ mod tests {
                 { "kind": "app", "op": "reverse", "args": [
                     { "kind": "app", "op": "reverse", "args": [{ "kind": "var", "name": "xs" }] }] },
                 { "kind": "var", "name": "xs" }] } });
-        match generative_check(&expr, &None, 200, 7) {
+        match generative_check(&expr, &None, &Default::default(), 200, 7) {
             GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
             _ => panic!("reverse∘reverse = id should hold"),
         }
@@ -463,7 +529,7 @@ mod tests {
                 { "kind": "app", "op": "str_join", "args": [comma.clone(),
                     { "kind": "app", "op": "str_split", "args": [comma, { "kind": "var", "name": "s" }] }] },
                 { "kind": "var", "name": "s" }] } });
-        match generative_check(&expr, &None, 200, 7) {
+        match generative_check(&expr, &None, &Default::default(), 200, 7) {
             GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
             other => panic!("join . split should hold, got {other:?}"),
         }
@@ -476,7 +542,7 @@ mod tests {
             "kind": "app", "op": "str_contains", "args": [
                 { "kind": "lit", "value": { "kind": "string", "value": "a" } },
                 { "kind": "var", "name": "s" }] } });
-        match generative_check(&expr, &None, 200, 7) {
+        match generative_check(&expr, &None, &Default::default(), 200, 7) {
             GenOutcome::Refuted(bind) => {
                 assert_eq!(bind.len(), 1);
                 assert_eq!(bind[0].1, json!({ "kind": "string", "value": "" }),
@@ -494,7 +560,7 @@ mod tests {
         let join = json!({ "kind": "app", "op": "str_join", "args": [empty, { "kind": "var", "name": "xs" }] });
         let expr = json!({ "kind": "forall", "vars": ["xs"], "body": {
             "kind": "app", "op": "eq", "args": [join.clone(), join] } });
-        match generative_check(&expr, &None, 100, 3) {
+        match generative_check(&expr, &None, &Default::default(), 100, 3) {
             GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
             other => panic!("str_join over generated List(Str) should hold, got {other:?}"),
         }
@@ -508,7 +574,7 @@ mod tests {
                 { "kind": "app", "op": "length", "args": [
                     { "kind": "app", "op": "map", "args": [{ "kind": "var", "name": "f" }, { "kind": "var", "name": "xs" }] }] },
                 { "kind": "app", "op": "length", "args": [{ "kind": "var", "name": "xs" }] }] } });
-        assert!(matches!(generative_check(&expr, &None, 50, 1), GenOutcome::Ungeneratable(_)));
+        assert!(matches!(generative_check(&expr, &None, &Default::default(), 50, 1), GenOutcome::Ungeneratable(_)));
     }
 
     #[test]
@@ -519,7 +585,7 @@ mod tests {
                 { "kind": "app", "op": "not", "args": [
                     { "kind": "app", "op": "not", "args": [{ "kind": "var", "name": "b" }] }] },
                 { "kind": "var", "name": "b" }] } });
-        match generative_check(&expr, &None, 200, 1) {
+        match generative_check(&expr, &None, &Default::default(), 200, 1) {
             GenOutcome::Exhaustive(n) => assert_eq!(n, 2),
             _ => panic!("a boolean law should be checked exhaustively over both cases"),
         }
@@ -538,6 +604,6 @@ mod tests {
         };
         let expr = json!({ "kind": "forall", "vars": ["a", "b", "c", "d"],
             "body": { "kind": "app", "op": "eq", "args": [sum(["a", "b", "c", "d"]), sum(["d", "c", "b", "a"])] } });
-        assert!(matches!(generative_check(&expr, &None, 200, 1), GenOutcome::Held(_)));
+        assert!(matches!(generative_check(&expr, &None, &Default::default(), 200, 1), GenOutcome::Held(_)));
     }
 }

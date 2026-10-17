@@ -262,16 +262,38 @@ fn numeric_descent(arg: &J) -> Option<(String, Descent)> {
     let (op, args) = app_spine(arg)?;
     let op = op.as_str();
     let (lhs, rhs) = (args.first()?, args.get(1)?);
-    if lhs.get("kind").and_then(|k| k.as_str()) != Some("var") {
-        return None;
+    let var_name = |n: &J| {
+        (n.get("kind").and_then(|k| k.as_str()) == Some("var"))
+            .then(|| n.get("name").and_then(|x| x.as_str()).map(String::from))
+            .flatten()
+    };
+    // Euclid's step `mod(_, p)`: the slot receives a remainder modulo the parameter. The remainder
+    // at least halves the measure every two steps (Lamé), so the depth is Θ(log n) — the halving row.
+    if op == "mod" {
+        return var_name(rhs).map(|p| (p, Descent::Halving));
     }
-    let p = lhs.get("name").and_then(|n| n.as_str())?.to_string();
     let c = rhs.pointer("/value/value").and_then(|v| v.as_i64())?;
-    match op {
-        "sub" if c >= 1 => Some((p, Descent::Constant)),
-        "div" if c >= 2 => Some((p, Descent::Halving)),
-        _ => None,
+    if let Some(p) = var_name(lhs) {
+        return match op {
+            "sub" if c >= 1 => Some((p, Descent::Constant)),
+            "div" if c >= 2 => Some((p, Descent::Halving)),
+            _ => None,
+        };
     }
+    // `div(add(p, k), c)` with `c ≥ 2` — the ceiling-halving shape (`(n + 1) div 2`): still Θ(log n) deep.
+    if op == "div" && c >= 2 {
+        let (inner_op, inner) = app_spine(lhs)?;
+        if inner_op == "add" && inner.len() == 2 {
+            let lit = |n: &J| n.pointer("/value/value").and_then(|v| v.as_i64());
+            if let (Some(p), Some(_)) = (var_name(&inner[0]), lit(&inner[1])) {
+                return Some((p, Descent::Halving));
+            }
+            if let (Some(_), Some(p)) = (lit(&inner[0]), var_name(&inner[1])) {
+                return Some((p, Descent::Halving));
+            }
+        }
+    }
+    None
 }
 
 /// The descent of a single recursion argument, if it is a recognized strict decrease of a parameter.
@@ -799,6 +821,22 @@ mod tests {
     }
 
     // ---- halving recursion ----
+
+    #[test]
+    fn euclid_mod_recursion_is_log() {
+        // gcd: \a b -> case eq(b,0) of true -> a | false -> self(b, mod(a,b)) — Lamé: Θ(log n) steps, O(1) each.
+        let step = self_call(vec![v("b"), app("mod", vec![v("a"), v("b")])]);
+        let body = lambda(&["a", "b"], case2(app("eq", vec![v("b"), lit_i(0)]), v("a"), step));
+        assert_eq!(bound(&body), Class::LOG);
+    }
+
+    #[test]
+    fn ceiling_halving_recursion_is_log() {
+        // next_pow2: \n -> case lt(n,2) of true -> 1 | false -> mul(2, self(div(add(n,1), 2))).
+        let step = app("mul", vec![lit_i(2), self_call(vec![app("div", vec![app("add", vec![v("n"), lit_i(1)]), lit_i(2)])])]);
+        let body = lambda(&["n"], case2(app("lt", vec![v("n"), lit_i(2)]), lit_i(1), step));
+        assert_eq!(bound(&body), Class::LOG);
+    }
 
     #[test]
     fn halving_recursion_is_log() {

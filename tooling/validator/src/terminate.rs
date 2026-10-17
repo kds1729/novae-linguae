@@ -164,14 +164,60 @@ fn sub_descent(arg: &J) -> Option<(String, i64)> {
     (c >= 1).then(|| (p.to_string(), c))
 }
 
-/// A branch fact a boolean `case` scrutinee establishes about a parameter — what makes a constant
-/// numeric decrement WELL-FOUNDED (a strictly decreasing integer sequence needs a lower bound,
-/// which the guard supplies at every recursing activation).
+/// If `arg` is `div(var p, lit c)` or `div(add(var p, lit k), lit c)` (either operand order of the
+/// `add`) with `c ≥ 2` — a halving-shaped descent — return `(p, k, c)`. Whether it DESCENDS depends on
+/// the floor in force: `(p + k) div c < p` for every `p ≥ floor` exactly when it holds at the floor,
+/// since the gap grows with `p` (slope `1/c − 1 < 0`).
+fn div_descent(arg: &J) -> Option<(String, i64, i64)> {
+    let (op, args) = app_spine(arg)?;
+    if op != "div" || args.len() != 2 {
+        return None;
+    }
+    let c = int_lit(&args[1])?;
+    if c < 2 {
+        return None;
+    }
+    let var = |n: &J| {
+        (n.get("kind").and_then(|k| k.as_str()) == Some("var"))
+            .then(|| n.get("name").and_then(|x| x.as_str()).map(String::from))
+            .flatten()
+    };
+    if let Some(p) = var(&args[0]) {
+        return Some((p, 0, c));
+    }
+    let (inner_op, inner) = app_spine(&args[0])?;
+    if inner_op != "add" || inner.len() != 2 {
+        return None;
+    }
+    match (var(&inner[0]), int_lit(&inner[1]), int_lit(&inner[0]), var(&inner[1])) {
+        (Some(p), Some(k), _, _) => Some((p, k, c)),
+        (_, _, Some(k), Some(p)) => Some((p, k, c)),
+        _ => None,
+    }
+}
+
+/// If `arg` is `mod(_, var p)` — Euclid's step: the next value is a remainder MODULO the parameter,
+/// hence `< p` whenever `p ≥ 1` (the language's `mod` is Euclidean, so the remainder is also ≥ 0).
+fn mod_descent(arg: &J) -> Option<String> {
+    let (op, args) = app_spine(arg)?;
+    if op != "mod" || args.len() != 2 {
+        return None;
+    }
+    (args[1].get("kind").and_then(|k| k.as_str()) == Some("var"))
+        .then(|| args[1].get("name").and_then(|x| x.as_str()).map(String::from))
+        .flatten()
+}
+
+/// A branch fact a boolean `case` scrutinee establishes about a parameter — what makes a numeric
+/// descent WELL-FOUNDED (a strictly decreasing integer sequence needs a lower bound, which the
+/// guard supplies at every recursing activation).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Guard {
-    /// `p > lit` / `p >= lit` holds — recursion continues only while `p` exceeds a constant, so
-    /// any constant decrement terminates (integers strictly decrease toward a fixed floor).
-    LowerBound(String),
+    /// `p >= floor` holds — recursion continues only while `p` stays at or above a constant, so
+    /// any constant decrement terminates (integers strictly decrease toward a fixed floor), and a
+    /// halving `div(p, c)` or a `mod(_, p)` descent terminates when the floor is ≥ 1 (the value
+    /// then strictly shrinks and cannot do so forever above the floor).
+    LowerBound(String, i64),
     /// `p != 0` holds — a floor ONLY for a `nat`-typed parameter (`p ≥ 0` by type, so `p ≥ 1`),
     /// and only for a unit decrement (`sub(p, 1)` keeps the value a nat; a larger step could
     /// tunnel below zero and recurse forever).
@@ -191,14 +237,30 @@ fn arm_facts(scrutinee: &J) -> (Vec<Guard>, Vec<Guard>) {
             .then(|| n.get("name").and_then(|x| x.as_str()).map(String::from))
             .flatten()
     };
+    let lb = |p: String, floor: i64| vec![Guard::LowerBound(p, floor)];
     match op.as_str() {
-        // p > lit / p >= lit (and the mirrored lit < p / lit <= p): the true arm has the bound.
-        "gt" | "ge" => match (var(&args[0]), int_lit(&args[1])) {
-            (Some(p), Some(_)) => (vec![Guard::LowerBound(p)], vec![]),
+        // p > lit / p >= lit: the TRUE arm has the floor (lit+1 / lit). lit > p / lit >= p: the
+        // FALSE arm does (p >= lit / p >= lit+1).
+        "gt" => match (var(&args[0]), int_lit(&args[1]), int_lit(&args[0]), var(&args[1])) {
+            (Some(p), Some(l), _, _) => (lb(p, l.saturating_add(1)), vec![]),
+            (_, _, Some(l), Some(p)) => (vec![], lb(p, l)),
             _ => (vec![], vec![]),
         },
-        "lt" | "le" => match (int_lit(&args[0]), var(&args[1])) {
-            (Some(_), Some(p)) => (vec![Guard::LowerBound(p)], vec![]),
+        "ge" => match (var(&args[0]), int_lit(&args[1]), int_lit(&args[0]), var(&args[1])) {
+            (Some(p), Some(l), _, _) => (lb(p, l), vec![]),
+            (_, _, Some(l), Some(p)) => (vec![], lb(p, l.saturating_add(1))),
+            _ => (vec![], vec![]),
+        },
+        // lit < p / lit <= p: the TRUE arm has the floor. p < lit / p <= lit: the FALSE arm does
+        // (the `case lt(n, 2) of { true => base; false => step }` shape of a halving recursion).
+        "lt" => match (int_lit(&args[0]), var(&args[1]), var(&args[0]), int_lit(&args[1])) {
+            (Some(l), Some(p), _, _) => (lb(p, l.saturating_add(1)), vec![]),
+            (_, _, Some(p), Some(l)) => (vec![], lb(p, l)),
+            _ => (vec![], vec![]),
+        },
+        "le" => match (int_lit(&args[0]), var(&args[1]), var(&args[0]), int_lit(&args[1])) {
+            (Some(l), Some(p), _, _) => (lb(p, l), vec![]),
+            (_, _, Some(p), Some(l)) => (vec![], lb(p, l.saturating_add(1))),
             _ => (vec![], vec![]),
         },
         // eq(p, 0): the FALSE arm knows p != 0; neq(p, 0): the true arm does.
@@ -274,13 +336,31 @@ fn walk(
                 if tail_descent(a).is_some_and(|(p, _)| p == *pj) {
                     return true;
                 }
-                sub_descent(a).is_some_and(|(p, c)| {
-                    p == *pj
-                        && (facts.contains(&Guard::LowerBound(p.clone()))
-                            || (c == 1
-                                && ctx.nat_positions.contains(j)
-                                && facts.contains(&Guard::NonZero(p.clone()))))
-                })
+                // The floor a GUARD establishes for this parameter (the tightest one in force),
+                // and the floor its nat typing adds under a non-zero guard (`p ≥ 0` by type, so
+                // `p != 0` ⇒ `p ≥ 1`).
+                let guard_floor = facts
+                    .iter()
+                    .filter_map(|g| match g {
+                        Guard::LowerBound(p, f) if p == pj => Some(*f),
+                        _ => None,
+                    })
+                    .max();
+                let nat_nonzero = ctx.nat_positions.contains(j) && facts.contains(&Guard::NonZero(pj.clone()));
+                let positive_floor = guard_floor.into_iter().chain(nat_nonzero.then_some(1)).max();
+                if sub_descent(a).is_some_and(|(p, c)| p == *pj && (guard_floor.is_some() || (c == 1 && nat_nonzero))) {
+                    return true;
+                }
+                // Halving-shaped descent: `(p + k) div c < p` must hold at the floor (then everywhere above it).
+                if let Some((p, k, c)) = div_descent(a) {
+                    if p == *pj {
+                        if let Some(f) = positive_floor {
+                            return (f.saturating_add(k)).div_euclid(c) < f;
+                        }
+                    }
+                }
+                // Euclid's step: the slot receives a remainder modulo its own parameter, `< p` for `p ≥ 1`.
+                mod_descent(a).is_some_and(|p| p == *pj && positive_floor.is_some_and(|f| f >= 1))
             })
             .map(|(j, _)| j)
             .collect();
@@ -439,9 +519,10 @@ pub fn analyze_termination_typed(
         .fold(descents[0].clone(), |acc, s| acc.intersection(s).cloned().collect());
     if common.is_empty() {
         return TerminationOutcome::Unknown(
-            "no single argument position provably descends in every self-call (structural `tail`, \
-             or a guarded constant decrement — `gt(p, lit)`-guarded `sub(p, c)`, or a nat's \
-             non-zero-guarded `sub(p, 1)`)".into(),
+            "no single argument position provably descends in every self-call (structural `tail`; \
+             a guarded constant decrement — `gt(p, lit)`-guarded `sub(p, c)`, or a nat's \
+             non-zero-guarded `sub(p, 1)`; a halving `div(p, c)` / `div(add(p, k), c)` under a floor \
+             it descends from; or Euclid's `mod(_, p)` under a floor ≥ 1)".into(),
         );
     }
     TerminationOutcome::Always
@@ -579,6 +660,68 @@ mod tests {
         assert!(matches!(analyze_termination_typed(&body, &Default::default()),
                          TerminationOutcome::Unknown(_)),
                 "a non-zero guard is only a floor for a nat");
+    }
+
+    #[test]
+    fn euclid_mod_descent_terminates_for_nats() {
+        // gcd: \a b -> case eq(b, 0) of true -> a | false -> self(b, mod(a, b)). Position 2 receives
+        // a remainder modulo its own parameter: < b whenever b >= 1 (nat + non-zero guard).
+        let rec = json!({ "kind": "app", "op": "self", "args": [v("b"), app("mod", vec![v("a"), v("b")])] });
+        let body = lambda(&["a", "b"], eq_zero_case("b", v("a"), rec));
+        let nats: std::collections::BTreeSet<usize> = [0, 1].into();
+        assert_eq!(analyze_termination_typed(&body, &nats), TerminationOutcome::Always);
+        // Plain ints: a negative b has no floor — the remainder jumps above it. UNKNOWN.
+        assert!(matches!(analyze_termination_typed(&body, &Default::default()), TerminationOutcome::Unknown(_)));
+    }
+
+    #[test]
+    fn halving_descent_terminates_under_a_positive_floor() {
+        // isqrt shape: \n -> case lt(n, 2) of true -> n | false -> self(div(n, 4)): the FALSE arm of
+        // `n < 2` is the floor n >= 2, and 2 div 4 = 0 < 2 — strictly shrinking above the floor.
+        let rec = json!({ "kind": "app", "op": "self", "args": [app("div", vec![v("n"), lit_i(4)])] });
+        let body = lambda(&["n"], json!({
+            "kind": "case",
+            "scrutinee": app("lt", vec![v("n"), lit_i(2)]),
+            "arms": [{ "pattern": lit_b(true), "body": v("n") }, { "pattern": lit_b(false), "body": rec }]
+        }));
+        assert_eq!(analyze_termination_typed(&body, &Default::default()), TerminationOutcome::Always);
+        // next_pow2 shape: self(div(add(n, 1), 2)) under the same floor: (2+1) div 2 = 1 < 2.
+        let rec2 = json!({ "kind": "app", "op": "self",
+                           "args": [app("div", vec![app("add", vec![v("n"), lit_i(1)]), lit_i(2)])] });
+        let body2 = lambda(&["n"], json!({
+            "kind": "case",
+            "scrutinee": app("lt", vec![v("n"), lit_i(2)]),
+            "arms": [{ "pattern": lit_b(true), "body": lit_i(1) }, { "pattern": lit_b(false), "body": rec2 }]
+        }));
+        assert_eq!(analyze_termination_typed(&body2, &Default::default()), TerminationOutcome::Always);
+        // A floor of 0 does NOT make halving descend (0 div 2 = 0): `ge(n, 0)`-guarded div is UNKNOWN.
+        let body3 = lambda(&["n"], json!({
+            "kind": "case",
+            "scrutinee": app("ge", vec![v("n"), lit_i(0)]),
+            "arms": [{ "pattern": lit_b(true), "body": rec.clone() }, { "pattern": lit_b(false), "body": v("n") }]
+        }));
+        assert!(matches!(analyze_termination_typed(&body3, &Default::default()), TerminationOutcome::Unknown(_)));
+        // A variable divisor is not a recognized descent (it could be 1).
+        let rec4 = json!({ "kind": "app", "op": "self", "args": [v("b"), app("div", vec![v("n"), v("b")])] });
+        let body4 = lambda(&["b", "n"], json!({
+            "kind": "case",
+            "scrutinee": app("lt", vec![v("n"), lit_i(1)]),
+            "arms": [{ "pattern": lit_b(true), "body": lit_i(0) }, { "pattern": lit_b(false), "body": rec4 }]
+        }));
+        assert!(matches!(analyze_termination_typed(&body4, &Default::default()), TerminationOutcome::Unknown(_)));
+    }
+
+    #[test]
+    fn mirrored_lower_bound_guards_read_the_false_arm() {
+        // \n d -> case lt(d, 2) of true -> true | false -> self(n, sub(d, 1)): the false arm of
+        // `d < 2` is d >= 2 — a floor for the constant decrement (trial division counting down).
+        let rec = json!({ "kind": "app", "op": "self", "args": [v("n"), app("sub", vec![v("d"), lit_i(1)])] });
+        let body = lambda(&["n", "d"], json!({
+            "kind": "case",
+            "scrutinee": app("lt", vec![v("d"), lit_i(2)]),
+            "arms": [{ "pattern": lit_b(true), "body": lit_b(true) }, { "pattern": lit_b(false), "body": rec }]
+        }));
+        assert_eq!(analyze_termination_typed(&body, &Default::default()), TerminationOutcome::Always);
     }
 
     #[test]

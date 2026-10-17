@@ -1128,6 +1128,17 @@ fn match_pattern(pat: &J, v: &Val) -> Result<Option<Env>> {
 
 /// Apply a callable to arguments, supporting currying (too few args → a partial application) and
 /// over-application (extra args applied to the result).
+/// The deepest chain of nested closure applications one evaluation may build. The evaluator is a
+/// tree walker with no tail-call elimination, so a non-structural recursion of depth d costs d
+/// native stack frames; past this bound the evaluation is REFUSED with a stated reason instead of
+/// overflowing the process stack (measured on the integer-tier module: trial division to a
+/// 56,000-step depth aborted the binary). `main` runs on a thread whose stack is sized for it.
+pub const MAX_APPLY_DEPTH: usize = 100_000;
+
+thread_local! {
+    static APPLY_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub fn apply(f: Val, mut args: Vec<Val>) -> Result<Val> {
     if args.is_empty() {
         return Ok(f);
@@ -1145,7 +1156,21 @@ pub fn apply(f: Val, mut args: Vec<Val>) -> Result<Val> {
                 for (p, a) in params.iter().zip(args.iter()) {
                     env2.insert(p.clone(), a.clone());
                 }
-                let result = eval(&body, &env2)?;
+                let depth = APPLY_DEPTH.with(|d| {
+                    d.set(d.get() + 1);
+                    d.get()
+                });
+                if depth > MAX_APPLY_DEPTH {
+                    APPLY_DEPTH.with(|d| d.set(d.get() - 1));
+                    bail!(
+                        "recursion depth exceeded {MAX_APPLY_DEPTH} nested applications: the evaluator is a tree \
+                         walker without tail-call elimination — restructure the recursion to descend faster \
+                         (halving, structural) or bound the input"
+                    );
+                }
+                let result = eval(&body, &env2);
+                APPLY_DEPTH.with(|d| d.set(d.get() - 1));
+                let result = result?;
                 let extra = args.split_off(params.len());
                 apply(result, extra)
             }
@@ -1184,19 +1209,29 @@ pub fn apply(f: Val, mut args: Vec<Val>) -> Result<Val> {
 }
 
 fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
-    // Arithmetic stays exact on two ints; if either operand is a float, promote to f64 (so `number`
-    // bodies from TS/JS, which carry floats, run). Comparison always compares numerically.
-    let num2 = |fi: fn(i128, i128) -> i128, ff: fn(f64, f64) -> f64| -> Result<Val> {
+    // Arithmetic stays exact on two ints — and REFUSES on overflow (a 128-bit result that does not
+    // fit is an error, never a silently wrapped value: measured on the integer-tier module, 2^100
+    // squared evaluated to 0 before this guard); if either operand is a float, promote to f64 (so
+    // `number` bodies from TS/JS, which carry floats, run). Comparison of two ints is EXACT too —
+    // a float round-trip is wrong past 2^53 (2^100 − 1 < 2^100 compared false), and guards are
+    // where such comparisons live.
+    const OVERFLOW: &str = "integer overflow: the result does not fit the evaluator's 128-bit integers";
+    let num2 = |fi: fn(i128, i128) -> Option<i128>, ff: fn(f64, f64) -> f64| -> Result<Val> {
         Ok(match (&a[0], &a[1]) {
-            (Val::Int(x), Val::Int(y)) => Val::Int(fi(*x, *y)),
+            (Val::Int(x), Val::Int(y)) => Val::Int(fi(*x, *y).ok_or_else(|| anyhow!("{OVERFLOW}"))?),
             _ => Val::Float(ff(as_f64n(&a[0])?, as_f64n(&a[1])?)),
         })
     };
-    let numcmp = |f: fn(f64, f64) -> bool| -> Result<Val> { Ok(Val::Bool(f(as_f64n(&a[0])?, as_f64n(&a[1])?))) };
+    let numcmp = |fi: fn(&i128, &i128) -> bool, ff: fn(f64, f64) -> bool| -> Result<Val> {
+        Ok(Val::Bool(match (&a[0], &a[1]) {
+            (Val::Int(x), Val::Int(y)) => fi(x, y),
+            _ => ff(as_f64n(&a[0])?, as_f64n(&a[1])?),
+        }))
+    };
     Ok(match name {
-        "add" => num2(|x, y| x + y, |x, y| x + y)?,
-        "sub" => num2(|x, y| x - y, |x, y| x - y)?,
-        "mul" => num2(|x, y| x * y, |x, y| x * y)?,
+        "add" => num2(i128::checked_add, |x, y| x + y)?,
+        "sub" => num2(i128::checked_sub, |x, y| x - y)?,
+        "mul" => num2(i128::checked_mul, |x, y| x * y)?,
         "div" => match (&a[0], &a[1]) {
             (Val::Int(x), Val::Int(y)) => {
                 if *y == 0 {
@@ -1230,21 +1265,21 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             }
         },
         "neg" => match &a[0] {
-            Val::Int(i) => Val::Int(-i),
+            Val::Int(i) => Val::Int(i.checked_neg().ok_or_else(|| anyhow!("{OVERFLOW}"))?),
             v => Val::Float(-as_f64n(v)?),
         },
         "abs" => match &a[0] {
-            Val::Int(i) => Val::Int(i.abs()),
+            Val::Int(i) => Val::Int(i.checked_abs().ok_or_else(|| anyhow!("{OVERFLOW}"))?),
             v => Val::Float(as_f64n(v)?.abs()),
         },
-        "min" => num2(std::cmp::min, f64::min)?,
-        "max" => num2(std::cmp::max, f64::max)?,
+        "min" => num2(|x, y| Some(std::cmp::min(x, y)), f64::min)?,
+        "max" => num2(|x, y| Some(std::cmp::max(x, y)), f64::max)?,
         "eq" => Val::Bool(val_eq(&a[0], &a[1])),
         "neq" => Val::Bool(!val_eq(&a[0], &a[1])),
-        "lt" => numcmp(|x, y| x < y)?,
-        "le" => numcmp(|x, y| x <= y)?,
-        "gt" => numcmp(|x, y| x > y)?,
-        "ge" => numcmp(|x, y| x >= y)?,
+        "lt" => numcmp(|x, y| x < y, |x, y| x < y)?,
+        "le" => numcmp(|x, y| x <= y, |x, y| x <= y)?,
+        "gt" => numcmp(|x, y| x > y, |x, y| x > y)?,
+        "ge" => numcmp(|x, y| x >= y, |x, y| x >= y)?,
         "and" => Val::Bool(as_bool(&a[0])? && as_bool(&a[1])?),
         "or" => Val::Bool(as_bool(&a[0])? || as_bool(&a[1])?),
         "xor" => Val::Bool(as_bool(&a[0])? ^ as_bool(&a[1])?),
@@ -1780,6 +1815,10 @@ fn eval_predicate(node: &J, env: &Env, self_fn: &Option<Val>) -> Option<Val> {
                     (Val::Bool(a), Val::Bool(b)) => Some(Val::Bool(a == b)),
                     _ => None,
                 },
+                // `self(args…)` — the surface form `parse-predicate` emits for a law about the
+                // function under test (the older `apply(self, …)` spelling reaches the builtin
+                // arm below and binds `self` as a var). Without a body there is no `self`: None.
+                "self" => apply(self_fn.clone()?, args).ok(),
                 // A content-address op (`fn_…`/`expr_…`) is a commons function referenced by hash —
                 // apply it as a `fn_ref` so the thread-local resolver links it (set during claim
                 // verification, see `eval_claim`). If no resolver is installed the apply errors →
@@ -2493,6 +2532,29 @@ mod tests {
         set_effect_grants(Vec::<String>::new());
         assert!(eval_body(&body, &[n]).is_err(), "rand must be rejected without the random grant");
         clear_effects();
+    }
+
+    #[test]
+    fn big_integers_compare_exactly_and_overflow_refuses() {
+        let bin = |op: &str| json!({ "kind": "lambda", "params": [{ "name": "x" }, { "name": "y" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": op },
+                      "args": [{ "kind": "var", "name": "x" }, { "kind": "var", "name": "y" }] } });
+        let big = |v: i128| json!({ "kind": "int", "value": v.to_string() });
+        let p100 = 1i128 << 100;
+        // Exact comparison past 2^53: a float round-trip would call these equal.
+        assert_eq!(eval_body(&bin("lt"), &[big(p100 - 1), big(p100)]).unwrap(), json!({ "kind": "bool", "value": true }));
+        assert_eq!(eval_body(&bin("ge"), &[big(p100 - 1), big(p100)]).unwrap(), json!({ "kind": "bool", "value": false }));
+        assert_eq!(eval_body(&bin("le"), &[big(p100), big(p100)]).unwrap(), json!({ "kind": "bool", "value": true }));
+        // Exact arithmetic within range …
+        assert_eq!(eval_body(&bin("mul"), &[big(1 << 62), big(1 << 62)]).unwrap(), big(1i128 << 124));
+        // … and a stated refusal past it (2^100 · 2^100 used to wrap to 0).
+        let err = eval_body(&bin("mul"), &[big(p100), big(p100)]).unwrap_err().to_string();
+        assert!(err.contains("integer overflow"), "{err}");
+        let err = eval_body(&bin("add"), &[big(i128::MAX), big(1)]).unwrap_err().to_string();
+        assert!(err.contains("integer overflow"), "{err}");
+        // Floats keep their IEEE semantics on the mixed path.
+        let f = |v: f64| json!({ "kind": "float", "value": v });
+        assert_eq!(eval_body(&bin("lt"), &[f(1.5), big(2)]).unwrap(), json!({ "kind": "bool", "value": true }));
     }
 
     #[test]

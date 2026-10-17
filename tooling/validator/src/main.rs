@@ -177,6 +177,11 @@ enum Commands {
         /// Cases to sample per property when --generate is set.
         #[arg(long, default_value_t = 100)]
         cases: usize,
+        /// Directory of records/bodies to resolve `fn_ref`s against, so a COMPOSED body — one that
+        /// applies commons functions by content-address — can run under the properties exactly as
+        /// `run --records` executes it (a checker record over a vocabulary, say).
+        #[arg(long = "records")]
+        records: Option<PathBuf>,
     },
     /// Evaluate a Nova Lingua body-expression AST and apply it to zero or more
     /// argument values, printing the resulting value AST. This *executes* the
@@ -974,7 +979,20 @@ fn parse_oauth(raw: &[String]) -> Result<Vec<(String, nl_validator::OAuthConfig)
         .collect()
 }
 
+/// The evaluator is a tree walker: a recursion of depth d costs d native frames (several KiB each),
+/// and the default 8 MiB main-thread stack aborted the process below 5,000 nested applications
+/// (measured on the integer-tier module's trial division). Run the CLI on a thread with a stack
+/// sized for `interp::MAX_APPLY_DEPTH`, so that bound — a stated refusal — is what a deep
+/// recursion meets, never a stack overflow. The reservation is virtual; only touched pages cost.
 fn main() -> ExitCode {
+    const STACK_BYTES: usize = 2 << 30;
+    match std::thread::Builder::new().name("nl-validator".into()).stack_size(STACK_BYTES).spawn(real_main) {
+        Ok(handle) => handle.join().unwrap_or(ExitCode::FAILURE),
+        Err(_) => real_main(),
+    }
+}
+
+fn real_main() -> ExitCode {
     let cli = Cli::parse();
     let (result, print_ok) = match cli.command {
         Commands::Validate { schema, record } => (cmd_validate(&schema, &record), true),
@@ -991,8 +1009,8 @@ fn main() -> ExitCode {
         Commands::CheckPredicate { record } => (cmd_check_predicate(&record), true),
         Commands::CheckValue { record } => (cmd_check_value(&record), true),
         Commands::CheckBody { record } => (cmd_check_body(&record), true),
-        Commands::CheckProperties { record, body, generate, cases } => {
-            (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases)), true)
+        Commands::CheckProperties { record, body, generate, cases, records } => {
+            (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases), records.as_ref()), true)
         }
         Commands::Eval { body, args, grants, secrets, oauth, redact, replay, trace_out, records } => {
             match parse_secrets(&secrets).and_then(|s| Ok((s, parse_oauth(&oauth)?, parse_redactions(&redact)?))) {
@@ -1277,10 +1295,17 @@ fn cmd_check_properties(
     record: &PathBuf,
     body: Option<&PathBuf>,
     generate: Option<usize>,
+    records: Option<&PathBuf>,
 ) -> Result<()> {
     let value = nl_validator::read_json(record)?;
     let body = body.map(|p| nl_validator::read_json(p)).transpose()?;
-    nl_validator::check_properties(&value, body.as_ref(), generate)
+    if let Some(dir) = records {
+        // Link: the body (and the laws) may apply commons functions by `fn_ref`.
+        nl_validator::set_resolver(nl_validator::build_link_map(dir)?);
+    }
+    let r = nl_validator::check_properties(&value, body.as_ref(), generate);
+    nl_validator::clear_resolver();
+    r
 }
 
 fn cmd_check_effects(record: &PathBuf, body: &PathBuf, records: Option<&PathBuf>) -> Result<()> {

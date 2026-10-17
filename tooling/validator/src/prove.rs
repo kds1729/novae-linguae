@@ -93,6 +93,16 @@ fn lower_self(body: &J) -> Result<SelfDef> {
     } else {
         (vec![], body)
     };
+    // A body that refers to `self` is RECURSIVE: inlining it as a `define-fun` would be ill-formed
+    // (the first-order fragment has no recursion). Say so — the historical failure surfaced from the
+    // inner lowering as "`self` used but no body supplied", which misread a supplied body.
+    if references_self(inner) {
+        bail!(
+            "body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only — \
+             a law about a recursive function needs the inductive backend (structural list recursion) or a \
+             domain-qualified equivalence claim (numeric induction)"
+        );
+    }
     // Infer parameter sorts from body usage (the same walk the law-side inference uses — it reads
     // both the op and fn/var application spellings), defaulting to Int.
     let mut inferred: BTreeMap<String, Option<Sort>> = params.iter().map(|p| (p.clone(), None)).collect();
@@ -191,7 +201,7 @@ fn flatten_call<'a>(node: &'a J) -> Option<(String, Vec<&'a J>)> {
 fn sort_of(node: &J, env: &BTreeMap<String, Sort>, self_def: Option<&SelfDef>) -> Result<Sort> {
     let kind = node.get("kind").and_then(|k| k.as_str()).unwrap_or_default();
     match kind {
-        "lit" => match node.pointer("/value/kind").and_then(|k| k.as_str()) {
+        "lit" => match node.get("value").and_then(lit_kind) {
             Some("int") | Some("nat") => Ok(Sort::Int),
             Some("bool") => Ok(Sort::Bool),
             Some("string") => Ok(Sort::Str),
@@ -235,8 +245,40 @@ fn sort_of(node: &J, env: &BTreeMap<String, Sort>, self_def: Option<&SelfDef>) -
     }
 }
 
+/// The kind of a predicate literal. `predicate-expression.schema.json` admits BOTH spellings — a
+/// structured value-AST (`{"kind":"int","value":0}`) and the bare JSON literal `parse-predicate`
+/// emits (`0`, `true`, `"s"`; spec/surface-syntax.md §2) — so the bare form is normalized here
+/// (2026-10-17: every surface-authored law hit `unsupported literal kind: None` before this).
+pub(crate) fn lit_kind(value: &J) -> Option<&'static str> {
+    match value {
+        J::Object(_) => match value.get("kind").and_then(|k| k.as_str()) {
+            Some("int") => Some("int"),
+            Some("nat") => Some("nat"),
+            Some("bool") => Some("bool"),
+            Some("string") => Some("string"),
+            Some("float") => Some("float"),
+            _ => None,
+        },
+        J::Bool(_) => Some("bool"),
+        J::Number(n) => Some(if n.is_i64() || n.is_u64() { "int" } else { "float" }),
+        J::String(_) => Some("string"),
+        _ => None,
+    }
+}
+
+/// The payload of a literal in either spelling (the structured form's `value`, or the bare literal itself).
+fn lit_payload(value: &J) -> &J {
+    if value.is_object() {
+        value.get("value").unwrap_or(value)
+    } else {
+        value
+    }
+}
+
 /// Lower an integer/boolean/string literal value-AST to an SMT term.
-fn lower_lit(value: &J) -> Result<String> {
+fn lower_lit(raw: &J) -> Result<String> {
+    let kind = lit_kind(raw);
+    let value = serde_json::json!({ "kind": kind, "value": lit_payload(raw) });
     match value.get("kind").and_then(|k| k.as_str()) {
         Some("bool") => Ok(value.get("value").and_then(|v| v.as_bool()).unwrap_or(false).to_string()),
         Some("int") | Some("nat") => {
@@ -449,7 +491,7 @@ fn infer_var_sorts(pred: &J, vars: &[String], self_param_sorts: Option<&[Sort]>)
 /// inference (`eq(str_concat(a,b), c)` makes `c` a String).
 fn evident_sort(node: &J) -> Option<Sort> {
     match node.get("kind").and_then(|k| k.as_str()) {
-        Some("lit") => match node.pointer("/value/kind").and_then(|k| k.as_str()) {
+        Some("lit") => match node.get("value").and_then(lit_kind) {
             Some("int") | Some("nat") => Some(Sort::Int),
             Some("bool") => Some(Sort::Bool),
             Some("string") => Some(Sort::Str),

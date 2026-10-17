@@ -684,7 +684,7 @@ fn lower_value(value: &J) -> Result<String> {
 /// solver-error text instead of a clean out-of-fragment reason.
 fn expr_is_bool(node: &J) -> bool {
     match node.get("kind").and_then(|k| k.as_str()) {
-        Some("lit") => node.pointer("/value/kind").and_then(|k| k.as_str()) == Some("bool"),
+        Some("lit") => node.get("value").and_then(crate::prove::lit_kind) == Some("bool"),
         Some("app") => matches!(
             head_op(node).as_deref(),
             Some("and" | "or" | "xor" | "not" | "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "null")
@@ -780,7 +780,7 @@ fn lower_app(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
 /// Best-effort sort of an expression's result, used to pick `self`'s SMT return sort. Defaults to `Int`.
 fn infer_result_sort(node: &J) -> Sort3 {
     match node.get("kind").and_then(|k| k.as_str()) {
-        Some("lit") => match node.pointer("/value/kind").and_then(|k| k.as_str()) {
+        Some("lit") => match node.pointer("/value/kind").and_then(|k| k.as_str()).or_else(|| node.get("value").and_then(crate::prove::lit_kind)) {
             Some("bool") => Sort3::Bool,
             Some("list") => Sort3::Lst,
             _ => Sort3::Int,
