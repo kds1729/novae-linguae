@@ -8,6 +8,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
    "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
@@ -16,6 +17,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
    "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
@@ -48,7 +50,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -56,7 +58,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:nat-result (\u2265 0)": "no list-typed quantified variable to induct on (use the first-order prover)",
+   "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
@@ -69,8 +71,8 @@
    "commutative: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "multiple_of_both: UNSUPPORTED  application with no resolvable head",
-   "commutative: UNSUPPORTED  application with no resolvable head"
+   "multiple_of_both: UNKNOWN      solver could not decide",
+   "commutative: PROVED       holds for all inputs (unsat negation)"
   ]
  },
  {
@@ -123,7 +125,7 @@
    "bezout_identity: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "bezout_identity: UNSUPPORTED  application with no resolvable head"
+   "bezout_identity: UNSUPPORTED  applies the fn_ref `fn_ff6d219fd84cca952f3d37f1091735807bb08c3bb9952d0b23a886e5a7499533` (its certified contract is not available here \u2014 pass --records to use it)"
   ]
  },
  {
@@ -176,7 +178,7 @@
    "inverse_identity: CONSISTENT  |  generative: HELD (196 cases)"
   ],
   "prove": [
-   "inverse_identity: UNSUPPORTED  application with no resolvable head"
+   "inverse_identity: UNSUPPORTED  applies the fn_ref `fn_f374139fbbda299d7aff62b9f8cd9632cb897daec769458d4a9ce9b37d65ca95` (its certified contract is not available here \u2014 pass --records to use it)"
   ]
  },
  {
@@ -353,7 +355,7 @@
    "fast_equals_naive: CONSISTENT  |  generative: HELD (73 cases)"
   ],
   "prove": [
-   "fast_equals_naive: UNSUPPORTED  application with no resolvable head"
+   "fast_equals_naive: UNKNOWN      solver could not decide"
   ]
  },
  {
@@ -611,7 +613,7 @@
    "miller_rabin_agrees_with_trial: CONSISTENT  |  generative: HELD (137 cases)"
   ],
   "prove": [
-   "miller_rabin_agrees_with_trial: UNSUPPORTED  application with no resolvable head"
+   "miller_rabin_agrees_with_trial: UNKNOWN      solver could not decide"
   ]
  },
  {
@@ -664,7 +666,7 @@
    "solves_both_congruences: CONSISTENT  |  generative: HELD (195 cases)"
   ],
   "prove": [
-   "solves_both_congruences: UNSUPPORTED  application with no resolvable head"
+   "solves_both_congruences: UNSUPPORTED  applies the fn_ref `fn_a61b26500d0cc09e333561268c4eb71a2b84c8cf535bf5b5fab57cdf37e78fb6` (its certified contract is not available here \u2014 pass --records to use it)"
   ]
  },
  {
@@ -739,7 +741,7 @@
    "digits_then_from_digits: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "digits_then_from_digits: UNSUPPORTED  application with no resolvable head"
+   "digits_then_from_digits: UNSUPPORTED  applies the fn_ref `fn_4c57b69b1cb566fbf428bddbf2fb7a8fa10632460ff29f3a7d397016bb149983` (its certified contract is not available here \u2014 pass --records to use it)"
   ]
  },
  {

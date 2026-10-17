@@ -135,7 +135,7 @@ def gauntlet(name, prove=True):
         row["properties_wide"] = [ln.strip() for ln in r.stdout.splitlines()
                                   if any(k in ln for k in ("HELD", "REFUTED", "UNGENERATABLE"))][:12]
         if prove:
-            r = sh(V, "prove", rp, "--body", bp, check=False)
+            r = sh(V, "prove", rp, "--body", bp, "--records", OUT, check=False)  # callees' certified contracts as axioms
             row["prove"] = [ln.strip() for ln in r.stdout.splitlines()
                             if any(k in ln for k in ("PROVED", "REFUTED", "UNKNOWN", "UNSUPPORTED"))][:12]
     REPORT.append(row)
@@ -240,6 +240,9 @@ def main():
                  ("right_zero", "forall a. self(a, 0) == a"),
                  ("divides_both", "forall a b. a % self(a, b) == 0 && b % self(a, b) == 0"),
                  ("associative", "forall a b c. self(self(a, b), c) == self(a, self(b, c))")],
+          # Positivity: a certified contract `lcm` relies on through composition (its `div` by gcd is sound
+          # only because gcd ≥ 1 whenever an argument is).
+          refinements=[("post", "(a < 1 && b < 1) || result >= 1")],
           hints=["greatest_common_divisor", "euclid"], complexity="O(log n)")
     gauntlet("gcd", prove)
 

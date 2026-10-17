@@ -6,8 +6,9 @@
   in the prover, variable divisors, and magnitude-wide sampling (`tooling/validator`); the records
   published to the commons with signed certifications. The 41 records and their builder live here
   (`records/`, `build_records.py`) — reproducible with no credential. Final tally (second follow-up):
-  41/41 certify, termination SOUND on all 41, complexity on 36, 14 contracts and 12 laws proved, 31 laws
-  held both over the bounded domain and across magnitudes.
+  41/41 certify, termination SOUND on all 41, complexity on 36, 16 contracts and 13 laws proved — two of
+  them (`lcm`'s) through `gcd`'s certified contract rather than its body — and 31 laws held both over the
+  bounded domain and across magnitudes.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
 - **Dates:** first published 2026-10-17, last updated 2026-10-17
 - **Scope:** `tooling/validator` (`interp.rs` arithmetic + comparison + recursion depth,
@@ -310,7 +311,7 @@ higher-order application (opaque to both checkers); it is now the first-order `s
   place in this tier where the language needs a fact it cannot yet express: a callee's output is
   strictly smaller than its input.
 
-### Still open
+### Still open after the second follow-up (the middle one closed in the third, below)
 
 - Complexity of the NTT chain: a `strictly-shorter` output-size class (or a provable
   `length(fst(result)) < length(xs)` — predicates would need tuple projection) for `ntt_split`.
@@ -318,6 +319,58 @@ higher-order application (opaque to both checkers); it is now the first-order `s
   nat-result contract the way a proved upper bound now feeds the complexity fold.
 - The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, the `mod` congruences): solver
   limits, unchanged.
+
+## Third follow-up (2026-10-17, same day): contracts compose
+
+### Measured
+
+**Callee contracts as axioms.** Over the linked view, a `fn_ref` callee is an uninterpreted function
+and its CERTIFIED contract — every postcondition its own `check-refinement` proves, every law its own
+`prove` proves, the type-implied `result ≥ 0` of a nat result — is a quantified axiom guarded to the
+callee's preconditions and nat domain, re-derived on the same view (the callee's callees first).
+`gcd` gained the postcondition `(a < 1 ∧ b < 1) ∨ result ≥ 1` (PROVED by numeric induction). Then:
+
+| | before | now |
+|---|---|---|
+| refinements | 14 SOUND / 4 UNVERIFIABLE | **16 / 3** — `lcm ≥ 0` from `gcd`'s proved `≥ 1`, plus `gcd`'s new post itself; open: `from_digits`, `digit_sum`, `binomial` (list position / nonlinear) |
+| laws, prove | 12 PROVED / 7 UNKNOWN / 12 UNSUPPORTED | **13 / 10 / 8** — `lcm`'s commutativity PROVED from `gcd`'s proved commutativity (no re-proof of `gcd`); the checker records over Int callees (`pow_mod_agree`, `prime_agree`, `lcm` multiple-of-both) now REACH the solver and read UNKNOWN (a contract does not pin a function); UNSUPPORTED is down to callees whose results leave the fragment (tuples, `Maybe`, lists) and the compound-measure `isqrt(n·n) = n` |
+| everything else | | unchanged: 41/41 run and certify, termination 41/41, complexity 36/5, 31/31 laws held bounded and wide |
+
+**Two honesty rules the measurement forced.** (1) The first run reported `lcm`'s commutativity
+**REFUTED** and `lcm ≥ 0` **VIOLATED**, with a model in which the uninterpreted `gcd` returned −1 —
+a spurious counterexample about a function the axioms only partly pin. A certificate that used a
+contract now reports a satisfiable negation as UNKNOWN, never REFUTED. (2) `prove` ranged a law over
+ALL ints while `gcd`'s axioms are guarded to its nat domain, so `lcm(a, b) = lcm(b, a)` was asked
+about negative arguments the record never admits and timed out (60 s, z3); laws now range over the
+function's declared domain (variables fed to `nat` parameters are ≥ 0), as the generative checker
+already samples them. With both: PROVED in well under a second.
+
+### Argued
+
+- **Certified facts are the composition primitive.** The commons already composes *bodies* by
+  content address; this composes *proofs* by content address — `lcm`'s contract rests on `gcd`'s
+  address and `gcd`'s proof, both re-derivable by anyone holding the records. Nothing is trusted from
+  a declaration: a callee whose contract no longer proves silently contributes no axiom, and the
+  caller's verdict weakens honestly. This is the same discipline as the termination/complexity fold,
+  applied to the prover.
+- **Under-constrained symbols change what SAT means.** The first-order prover's REFUTED is a real
+  counterexample only when every symbol is fully pinned; an uninterpreted callee is pinned only by
+  its contract. The rule "SAT with a contract ⇒ UNKNOWN" costs precision (a genuine counterexample
+  is reported as unknown) and buys the only thing that matters here: no false refutation ever.
+- **The declared domain is part of the law.** A record's `nat` parameters are a promise about where
+  it is meant to run; a law about it is a claim over that domain. Ranging the prover over all ints
+  was not stricter, it was asking a different question — and one the composition axioms could not
+  answer.
+
+### Still open
+
+- Complexity of the NTT chain: a `strictly-shorter` output-size class (or a provable
+  `length(fst(result)) < length(xs)` — predicates would need tuple projection) for `ntt_split`.
+- Contracts for callees whose results leave the Int/Bool/String fragment (`ext_gcd`'s tuple,
+  `mod_inverse`'s `Maybe`, the list records): the seven checker records stay UNSUPPORTED until the
+  prover's sorts grow (tuples and sums as SMT datatypes).
+- The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, the `mod` congruences, the
+  equivalence checkers `pow_mod_agree`/`prime_agree`): solver limits, or facts no contract states.
 
 ## Open questions (as they stood before the follow-up)
 
