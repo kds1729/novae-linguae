@@ -219,7 +219,7 @@
    }
   }
  ],
- "hash": "fn_99bbc16177b4fa3691bd5906c4d924d7b215fcc2dea20a8dcd9b06e3c47f5140",
+ "hash": "fn_73ce8e3a4367e64a5cdc42ad5c5a3d8b8cb405a38e4a3eb130e3aea3c243d298",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -235,7 +235,7 @@
  "schema_version": "0.2.0",
  "signature": {
   "capabilities": [],
-  "complexity": "O(log n)",
+  "complexity": "O(n)",
   "effects": [],
   "refinements": [
    {

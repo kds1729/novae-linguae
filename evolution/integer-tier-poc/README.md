@@ -1,7 +1,9 @@
 # A certified integer tier: number theory and the NTT as in-language records, and what the gauntlet found
 
-- **Status:** absorbed (2026-10-17). Every language-level finding below is in the tree: eight
-  evaluator/checker defects fixed and two checkers widened (`tooling/validator`), the records
+- **Status:** absorbed (2026-10-17; the four open questions closed the same day, below). Every
+  language-level finding below is in the tree: eight evaluator/checker defects fixed, two checkers
+  widened, and — from the follow-up — callee folding over a linked view, a numeric-induction rung
+  in the prover, variable divisors, and magnitude-wide sampling (`tooling/validator`); the records
   published to the commons with signed certifications. The 38 records and their builder live here
   (`records/`, `build_records.py`) — reproducible with no credential.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
@@ -187,7 +189,63 @@ module (each with a unit test): `interp.rs` (checked arithmetic, exact int compa
 bound, `self` op in predicates), `main.rs` (2 GiB stack thread, `check-properties --records`),
 `proptest.rs` (`Nat` kind), `prove.rs` + `induct.rs` (bare literals, recursion message).
 
-## Open questions
+## Follow-up (2026-10-17, same day): the four open questions, closed
+
+Each was built as recommended, measured on these 38 records, and is in the tree with tests.
+
+### Measured
+
+| check | first run (35 records) | after the fixes (38) | after the follow-up (38) |
+|---|---|---|---|
+| termination | 8 SOUND / 27 UNVERIFIABLE | 18 / 20 | **33 / 5** (the five: `ntt_rec` recurses on the halves `ntt_split` returns — not a descent of its own parameter — and `ntt`, `ntt_inverse`, `ntt_roundtrip`, `convolution` inherit it) |
+| complexity | 11 / 24 | 17 / 21 | **27 / 11** (the primality chain: `mr_witness` passes `mod_pow`'s RESULT to `mr_squarings`, a value the checker cannot bound by the input, and `mr_all`/`is_prime`/`is_prime_trial`/`prime_agree` inherit; `digits_roundtrip` feeds `digits`' result to `from_digits`; the NTT chain as above) |
+| refinements | 0 SOUND | 2 SOUND / 10 UNVERIFIABLE | **8 SOUND / 4 UNVERIFIABLE** — proved by numeric induction: `gcd ≥ 0`, `isqrt ≥ 0` and `isqrt² ≤ n`, `0 ≤ mod_pow < m`, `0 ≤ pow_mod_naive < m`, `next_pow2 ≥ 0`; still open: `lcm ≥ 0` (composition), `from_digits ≥ 0` (list recursion with the list in the second position), `digit_sum ≥ 0` and `binomial ≥ 0` (nonlinear steps) |
+| laws, generative (bounded) | 0 of 25 decidable | 28 of 28 | 28 of 28 (26 EXHAUSTIVE, 2 HELD) |
+| laws, generative (`--wide`, 200 samples to 2^60) | — | — | **28 of 28 HELD**; decided counts drop where the body refuses (depth-bounded trial division at 2^60: `prime_agree` 137/200; the 2^63 modulus bound: `pow_mod_agree` 73/200) |
+| laws, prove | 0 | 4 PROVED / 2 UNKNOWN / 22 UNSUPPORTED | **9 PROVED / 4 UNKNOWN / 15 UNSUPPORTED** — new by numeric induction: `gcd(a, 0) = a` (unfolding), `isqrt`'s floor bounds, `binomial(n, 0) = 1`, `next_pow2(n) ≥ n` and `< 2n`; UNKNOWN: `gcd` divides both, the two `mod` congruences, the digit-sum bound (nonlinear steps); UNSUPPORTED: laws applying `self` at two different measures (commutativity, associativity, symmetry, Pascal — a lexicographic/sum measure this rung lacks), the seven checker records (`fn_ref` heads), the two list laws (`length`) |
+
+**Soundness probes of the induction rung.** `count(n) = n`, `count(n) ≥ 0`, `count(n) ≤ n`, and
+Gauss `2·Σn = n(n+1)` PROVED; the false `count(n) = 0`, `count(n) = n + 1`, `2·Σn = n²`, and
+`gcd(a, b) = a` all UNKNOWN — never REFUTED (SAT is uninformative with an uninterpreted `self`) and
+never PROVED.
+
+**Standalone.** `check-termination --records` / `check-complexity --records` on `lcm`: UNVERIFIABLE
+without the view (its `gcd` callee is opaque), SOUND with it, O(log n) inferred.
+
+### Argued
+
+- **Fold by re-derivation, never by declaration.** The linked view analyzes each callee's own body
+  (transitively, memoized, a cycle unresolved), so a callee re-minted with a body that no longer
+  terminates weakens its dependents' verdicts LOUDLY, at check time — the failure mode the open
+  question feared is the one this design cannot have. The cost: a callee's complexity class is in
+  its own input size, so it folds only when every argument's value is bounded by ours (parameters,
+  literals, `add`/`div`/`mod`/`length`/… over them); a recursive result or a product of two inputs
+  is refused with the reason. That is exactly where the eleven remaining complexity verdicts sit,
+  and they are honest: `mr_squarings` runs `s` steps on a value the checker cannot relate to `n`.
+- **Numeric induction is the termination checker's measure, reused.** The induction principle needs
+  a well-founded order; the checker already finds it (position + floor) to prove termination, so the
+  prover inherits it for free — one analysis, two verdicts. Supplying the unfolding explicitly
+  (two levels) and keeping `self` uninterpreted is what makes z3 decide: the same idiom the
+  equivalence prover measured out, now general over laws and contracts.
+- **What the rung cannot reach is a measure, not a solver.** Commutativity, associativity,
+  symmetry and Pascal's rule each apply `self` at two measures; strong induction on one variable
+  does not cover them. A lexicographic or sum measure (`a + b`) is the named next rung. The
+  nonlinear UNKNOWNs (`binomial ≥ 0`, the `mod` congruences) are the solver's limit, and stay so.
+- **Wide sampling is evidence, not proof, and it says so.** 28 of 28 laws held at magnitudes to
+  2^60 — including Miller–Rabin vs trial division to the depth bound — which the −4..4 domain
+  could never show; the HELD counts under 200 are the body's own refusals (depth, the 2^63 bound)
+  skipped, never counterexamples.
+
+### Still open
+
+- A lexicographic / sum measure for laws that apply `self` at two measures.
+- Folding a callee's class when the argument is a *bounded* recursive result (`mod_pow < m`): the
+  contract `0 ≤ result < m` is proved now, so the checker could, in principle, read a proved
+  postcondition as a size bound — a second use of certified facts, out of scope here.
+- `ntt_rec`: recursion on a callee's result (`ntt_split` halves the list) is well-founded only through
+  the callee's output-size contract (`preserving`/halving) — the same fact-reuse.
+
+## Open questions (as they stood before the follow-up)
 
 - **Folding certified callees into termination and complexity.** Eighteen of twenty UNVERIFIABLE
   termination verdicts (and 18 of 21 on complexity) are composed records whose callees are
@@ -197,17 +255,17 @@ bound, `self` op in predicates), `main.rs` (2 GiB stack thread, `check-propertie
   `--records` already folds declared effects. The argument against: it makes a verdict depend on
   another record's analysis rather than on the body alone, and a callee re-minted with a weaker
   verdict would silently weaken its dependents' verdicts — so the fold should re-run the callee's
-  check, not read its declaration. Not built here; the module measures the gap.
+  check, not read its declaration. → **Built (re-derivation), above.**
 - **Numeric induction in `prove`.** The laws worth proving here (`gcd` commutativity, Pascal,
   Bézout, `isqrt` bounds, `mod_pow ≡ pow_mod_naive`) are all about recursive `nat` functions; the
   inductive backend has the list principle and the equivalence prover a constant-descent numeric
-  one. A `nat` induction principle with a halving/mod step is the named next rung.
+  one. → **Built (strong induction over the checker's measure), above; the two-measure laws remain.**
 - **Variable divisors.** `digits`/`digit_sum` recurse on `div(n, b)` with the base `b` a parameter;
   the guard `b < 2 ⇒ nil` is in the body, so the descent is well-founded, but the checker reads
-  only literal divisors. A floor on the divisor (`b ≥ 2` from the guard) would close it.
+  only literal divisors. → **Built (a divisor's own floor ≥ 2), above: both SOUND on termination and complexity.**
 - **The exhaustive domain.** −4..4 / 0..8 is right for list and string laws; for number theory a
   record-declared sample range (or sampling across magnitudes) would make the generative rung see
-  past the trivial cases without pretending to be a proof.
+  past the trivial cases without pretending to be a proof. → **Built (`--wide`), above.**
 
 ## Reproducing
 

@@ -130,6 +130,10 @@ def gauntlet(name, prove=True):
         r = sh(V, "check-properties", rp, "--body", bp, "--records", OUT, "--generate", "--cases", "400", check=False)
         row["properties_generative"] = [ln.strip() for ln in r.stdout.splitlines()
                                         if any(k in ln for k in ("HELD", "REFUTED", "UNGENERATABLE", "EXHAUSTIVE", "CONSISTENT", "INCONSISTENT"))][:12]
+        # The WIDE pass: sampled across magnitudes (to 2^60) — the evidence the bounded domain cannot give.
+        r = sh(V, "check-properties", rp, "--body", bp, "--records", OUT, "--generate", "--cases", "200", "--wide", check=False)
+        row["properties_wide"] = [ln.strip() for ln in r.stdout.splitlines()
+                                  if any(k in ln for k in ("HELD", "REFUTED", "UNGENERATABLE"))][:12]
         if prove:
             r = sh(V, "prove", rp, "--body", bp, check=False)
             row["prove"] = [ln.strip() for ln in r.stdout.splitlines()
@@ -386,7 +390,9 @@ def main():
           [{"args": [nlit(n)], "result": blit(py_is_prime(n))} for n in
            (0, 1, 2, 3, 4, 9, 37, 561, 1105, 2047, 1373653, 25326001, 3215031751, 1000000007, 3825123056546413051, 2**61 - 1, 9223372036854775783, 9223372036854775781)],
           refinements=[("pre", f"n <= {I64_MAX}")],
-          tags=["predicate/number"], hints=["primality", "miller_rabin"], complexity="O(log n)")
+          # O(n) in the checker's measure: the squaring loop descends `s` by a constant step, and the
+          # checker reads a constant-step recursion as linear in ITS input (it cannot know s ≤ log n).
+          tags=["predicate/number"], hints=["primality", "miller_rabin"], complexity="O(n)")
     gauntlet("is_prime", prove)
     build("no_divisor_from", r"\n d -> case lt d 2 of { true => true; false => case eq (mod n d) 0 of { true => false; false => self n (sub d 1) } }",
           FN([NAT, NAT], BOOL),

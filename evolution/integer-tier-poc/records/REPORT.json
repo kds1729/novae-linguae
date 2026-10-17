@@ -8,7 +8,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -16,7 +16,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
@@ -26,11 +26,17 @@
    "divides_both: CONSISTENT  |  generative: EXHAUSTIVE (80 cases \u2014 bounded domain, no counterexample)",
    "associative: UNVERIFIABLE  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
   ],
+  "properties_wide": [
+   "commutative: CONSISTENT  |  generative: HELD (200 cases)",
+   "right_zero: CONSISTENT  |  generative: HELD (200 cases)",
+   "divides_both: CONSISTENT  |  generative: HELD (200 cases)",
+   "associative: UNVERIFIABLE  |  generative: HELD (200 cases)"
+  ],
   "prove": [
-   "commutative: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
-   "right_zero: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
-   "divides_both: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
-   "associative: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+   "commutative: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` with different measures (`b` and `a`) \u2014 one induction variable is needed (a law like commutativity needs a lexicographic or sum measure this rung does not have)",
+   "right_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
+   "divides_both: UNKNOWN      numeric induction on `b` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
+   "associative: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` with different measures (`c` and `b`) \u2014 one induction variable is needed (a law like commutativity needs a lexicographic or sum measure this rung does not have)"
   ]
  },
  {
@@ -43,20 +49,24 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
-   "termination": "UNVERIFIABLE",
-   "complexity": "UNVERIFIABLE"
+   "termination": "SOUND",
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:nat-result (\u2265 0)": "no list-typed quantified variable to induct on (use the first-order prover)",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
    "multiple_of_both: CONSISTENT  |  generative: EXHAUSTIVE (64 cases \u2014 bounded domain, no counterexample)",
    "commutative: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "multiple_of_both: CONSISTENT  |  generative: HELD (191 cases)",
+   "commutative: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "multiple_of_both: UNSUPPORTED  application with no resolvable head",
@@ -95,19 +105,22 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
-   "complexity": "UNVERIFIABLE"
+   "termination": "SOUND",
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
    "bezout_identity: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "bezout_identity: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "bezout_identity: UNSUPPORTED  application with no resolvable head"
@@ -123,16 +136,16 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
-   "complexity": "UNVERIFIABLE"
+   "termination": "SOUND",
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> Sum",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
   }
  },
  {
@@ -145,19 +158,22 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
-   "complexity": "UNVERIFIABLE"
+   "termination": "SOUND",
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
    "inverse_identity: CONSISTENT  |  generative: EXHAUSTIVE (72 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "inverse_identity: CONSISTENT  |  generative: HELD (196 cases)"
   ],
   "prove": [
    "inverse_identity: UNSUPPORTED  application with no resolvable head"
@@ -187,6 +203,10 @@
   "properties_generative": [
    "congruent_to_plain_sum: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)",
    "commutative: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "congruent_to_plain_sum: CONSISTENT  |  generative: HELD (198 cases)",
+   "commutative: CONSISTENT  |  generative: HELD (198 cases)"
   ],
   "prove": [
    "congruent_to_plain_sum: UNKNOWN      solver could not decide",
@@ -218,6 +238,10 @@
    "congruent_to_plain_product: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)",
    "commutative: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
   ],
+  "properties_wide": [
+   "congruent_to_plain_product: CONSISTENT  |  generative: HELD (198 cases)",
+   "commutative: CONSISTENT  |  generative: HELD (198 cases)"
+  ],
   "prove": [
    "congruent_to_plain_product: UNKNOWN      solver could not decide",
    "commutative: PROVED       holds for all inputs (unsat negation)"
@@ -248,6 +272,10 @@
    "period_two: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
    "alternates: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
   ],
+  "properties_wide": [
+   "period_two: CONSISTENT  |  generative: HELD (200 cases)",
+   "alternates: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
   "prove": [
    "period_two: PROVED       holds for all inputs (unsat negation)",
    "alternates: PROVED       holds for all inputs (unsat negation)"
@@ -262,7 +290,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:post[0]": "UNVERIFIABLE",
+   "refinement:post[0]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -270,7 +298,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int, int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:post[0]": "application with no resolvable head",
+   "refinement:post[0]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(n)` (inferred O(n))"
   }
@@ -284,7 +312,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:post[0]": "UNVERIFIABLE",
+   "refinement:post[0]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -292,7 +320,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int, int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:post[0]": "application with no resolvable head",
+   "refinement:post[0]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   }
@@ -307,19 +335,22 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
-   "complexity": "UNVERIFIABLE"
+   "termination": "SOUND",
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
   },
   "properties_generative": [
    "fast_equals_naive: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "fast_equals_naive: CONSISTENT  |  generative: HELD (73 cases)"
   ],
   "prove": [
    "fast_equals_naive: UNSUPPORTED  application with no resolvable head"
@@ -334,8 +365,8 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:post[0]": "UNVERIFIABLE",
-   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "refinement:post[0]": "SOUND",
+   "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -343,8 +374,8 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:post[0]": "application with no resolvable head",
-   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "refinement:post[0]": "",
+   "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
@@ -352,9 +383,13 @@
    "square_root_of_square: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
    "floor_bounds: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
   ],
+  "properties_wide": [
+   "square_root_of_square: CONSISTENT  |  generative: HELD (200 cases)",
+   "floor_bounds: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
   "prove": [
-   "square_root_of_square: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
-   "floor_bounds: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+   "square_root_of_square: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` with a compound term at the measure position (induction needs the measure to be a quantified variable or a literal)",
+   "floor_bounds: PROVED       by numeric induction on `n` (strong induction over the measure; unsat)"
   ]
  },
  {
@@ -389,7 +424,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -397,8 +432,8 @@
    "typecheck": "(int, int, int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n)`, not established: applies `fn_61f00798cc15868bd0e932d80c236a77b979ce22c2c7720abe87cb6ddb4c7733` to an argument whose size is not bounded by the input (var) \u2014 its class cannot be re-expressed in n"
   }
  },
  {
@@ -433,7 +468,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -441,8 +476,8 @@
    "typecheck": "(int, int, int, List(int)) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n)`, not established: applies the fn_ref `fn_9e1d4e1f9fe7e33885418220cf7cdf38c75b9636016cb4e9e9f75236ee83a19d` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   }
  },
  {
@@ -455,7 +490,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -463,8 +498,8 @@
    "typecheck": "(int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n)`, not established: applies the fn_ref `fn_66f1365fcc88225f651bb33dc6376d1bffc28ff925b5f808a5330923f3fa2cf7` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   }
  },
  {
@@ -499,7 +534,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -507,8 +542,8 @@
    "typecheck": "(int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n)`, not established: applies `fn_696a9e62eb92dc4088b98fcfcd34478e406398af4161faf8f8ba7f09e8366c75` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   }
  },
  {
@@ -521,7 +556,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -529,11 +564,14 @@
    "typecheck": "(int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n)`, not established: applies the fn_ref `fn_d6af9003a5e655df9597ad7c1936af6238fa7e51f0b6e77d81d6361c06fc5fcf` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
    "miller_rabin_agrees_with_trial: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "miller_rabin_agrees_with_trial: CONSISTENT  |  generative: HELD (137 cases)"
   ],
   "prove": [
    "miller_rabin_agrees_with_trial: UNSUPPORTED  application with no resolvable head"
@@ -549,16 +587,16 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
-   "complexity": "UNVERIFIABLE"
+   "termination": "SOUND",
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int, int, int) -> Sum",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
   }
  },
  {
@@ -571,19 +609,22 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
-   "complexity": "UNVERIFIABLE"
+   "termination": "SOUND",
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int, int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
    "solves_both_congruences: CONSISTENT  |  generative: HELD (399 cases)"
+  ],
+  "properties_wide": [
+   "solves_both_congruences: CONSISTENT  |  generative: HELD (195 cases)"
   ],
   "prove": [
    "solves_both_congruences: UNSUPPORTED  application with no resolvable head"
@@ -599,16 +640,16 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
-   "complexity": "UNVERIFIABLE"
+   "termination": "SOUND",
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: no single argument position provably descends in every self-call (structural `tail`; a guarded constant decrement \u2014 `gt(p, lit)`-guarded `sub(p, c)`, or a nat's non-zero-guarded `sub(p, 1)`; a halving `div(p, ",
-   "complexity": "declared `O(log n)`, not established: a self-call's recursion argument is not a recognized structural/numeric descent"
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
   }
  },
  {
@@ -643,7 +684,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -651,11 +692,14 @@
    "typecheck": "(int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(log n)`, not established: applies `fn_4c57b69b1cb566fbf428bddbf2fb7a8fa10632460ff29f3a7d397016bb149983` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
    "digits_then_from_digits: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "digits_then_from_digits: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "digits_then_from_digits: UNSUPPORTED  application with no resolvable head"
@@ -671,22 +715,25 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
-   "termination": "UNVERIFIABLE",
-   "complexity": "UNVERIFIABLE"
+   "termination": "SOUND",
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
-   "termination": "declared `always`, not proven: no single argument position provably descends in every self-call (structural `tail`; a guarded constant decrement \u2014 `gt(p, lit)`-guarded `sub(p, c)`, or a nat's non-zero-guarded `sub(p, 1)`; a halving `div(p, ",
-   "complexity": "declared `O(log n)`, not established: a self-call's recursion argument is not a recognized structural/numeric descent"
+   "refinement:nat-result (\u2265 0)": "numeric induction did not close (the step needs a lemma, or the arithmetic is nonlinear)",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
    "sum_bounded_by_value: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
   ],
+  "properties_wide": [
+   "sum_bounded_by_value: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
   "prove": [
-   "sum_bounded_by_value: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+   "sum_bounded_by_value: UNKNOWN      numeric induction on `n` did not close (the step needs a lemma, or the arithmetic is nonlinear)"
   ]
  },
  {
@@ -706,7 +753,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "refinement:nat-result (\u2265 0)": "numeric induction did not close (the step needs a lemma, or the arithmetic is nonlinear)",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(n)` (inferred O(n))"
   },
@@ -715,10 +762,15 @@
    "pascal: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "choose_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
   ],
+  "properties_wide": [
+   "symmetry: CONSISTENT  |  generative: HELD (19 cases)",
+   "pascal: CONSISTENT  |  generative: HELD (41 cases)",
+   "choose_zero: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
   "prove": [
-   "symmetry: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
-   "pascal: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
-   "choose_zero: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+   "symmetry: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` with a compound term at the measure position (induction needs the measure to be a quantified variable or a literal)",
+   "pascal: UNSUPPORTED  recursive body \u2014 numeric induction: the law applies `self` with a compound term at the measure position (induction needs the measure to be a quantified variable or a literal)",
+   "choose_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)"
   ]
  },
  {
@@ -783,8 +835,8 @@
    "typecheck": "(List(int), int) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(n log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "declared `always`, not proven: no single argument position provably descends in every self-call (structural `tail`; a guarded constant decrement \u2014 `gt(p, lit)`-guarded `sub(p, c)`, or a nat's non-zero-guarded `sub(p, 1)`; a halving `div(p, ",
+   "complexity": "declared `O(n log n)`, not established: applies `fn_73769062b1965eb41b3bb42d85535d3fd68b0450cfb4b9396744e60d11c393d7` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   }
  },
  {
@@ -805,8 +857,8 @@
    "typecheck": "(List(int)) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(n log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "declared `always`, not proven: applies `fn_81d8af646046b7e93ce6ab9c7816d6333196a6e313e7bd76fcff54a45d6fab8f`, whose own termination is not provable",
+   "complexity": "declared `O(n log n)`, not established: applies the fn_ref `fn_81d8af646046b7e93ce6ab9c7816d6333196a6e313e7bd76fcff54a45d6fab8f` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   }
  },
  {
@@ -849,8 +901,8 @@
    "typecheck": "(List(int)) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(n log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "declared `always`, not proven: applies `fn_f943ae1e0e77b72773f6d41cafd351c533a6bc682ee8f8102773a573031237cc`, whose own termination is not provable",
+   "complexity": "declared `O(n log n)`, not established: applies the fn_ref `fn_f943ae1e0e77b72773f6d41cafd351c533a6bc682ee8f8102773a573031237cc` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   }
  },
  {
@@ -877,8 +929,11 @@
   "properties_generative": [
    "length_is_min: CONSISTENT  |  generative: HELD (400 cases)"
   ],
+  "properties_wide": [
+   "length_is_min: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
   "prove": [
-   "length_is_min: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+   "length_is_min: UNSUPPORTED  recursive body \u2014 numeric induction: the body's recursion has no provable numeric measure (structural list recursion, or termination not established)"
   ]
  },
  {
@@ -892,7 +947,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -900,13 +955,16 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n)`, not established: self-calls descend on different parameters (no single measure)"
+   "complexity": "within declared `O(n)` (inferred O(n))"
   },
   "properties_generative": [
    "length_is_n: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
   ],
+  "properties_wide": [
+   "length_is_n: CONSISTENT  |  generative: HELD (7 cases)"
+  ],
   "prove": [
-   "length_is_n: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+   "length_is_n: UNSUPPORTED  recursive body \u2014 numeric induction: predicate uses list/structural operator `null` (out of fragment)"
   ]
  },
  {
@@ -918,7 +976,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -926,7 +984,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:nat-result (\u2265 0)": "application with no resolvable head",
+   "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
@@ -934,9 +992,13 @@
    "at_least_n: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
    "under_twice_n: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
   ],
+  "properties_wide": [
+   "at_least_n: CONSISTENT  |  generative: HELD (200 cases)",
+   "under_twice_n: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
   "prove": [
-   "at_least_n: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)",
-   "under_twice_n: UNSUPPORTED  body is recursive (refers to `self`): the first-order prover inlines non-recursive bodies only \u2014 a law about a recursive function needs the inductive backend (structural list recursion) or a domain-qualified equivalence claim (numeric induction)"
+   "at_least_n: PROVED       by numeric induction on `n` (strong induction over the measure; unsat)",
+   "under_twice_n: PROVED       by numeric induction on `n` (strong induction over the measure; unsat)"
   ]
  },
  {
@@ -957,8 +1019,8 @@
    "typecheck": "(List(int), List(int)) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: applies a higher-order/opaque callee `<unknown>` (its termination is unchecked)",
-   "complexity": "declared `O(n log n)`, not established: applies a higher-order/opaque callee `<unknown>` (its cost is unchecked)"
+   "termination": "declared `always`, not proven: applies `fn_f943ae1e0e77b72773f6d41cafd351c533a6bc682ee8f8102773a573031237cc`, whose own termination is not provable",
+   "complexity": "declared `O(n log n)`, not established: applies `fn_cf0cca543c5eb5050ab83f1c515cc0747a60b2fe64ed76243294714941b6ddd9` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   }
  }
 ]
