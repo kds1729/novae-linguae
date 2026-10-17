@@ -422,7 +422,7 @@ fn lower_self(body: &J) -> Result<SelfDef> {
         Some(r) => r,
         None => sort_of(inner, &env, None)?,
     };
-    let body_smt = lower(inner, &mut env, None)?;
+    let body_smt = lower_body(inner, &mut env)?;
     Ok(SelfDef { params, param_sorts, ret, body_smt })
 }
 
@@ -535,6 +535,132 @@ thread_local! {
     /// WERE passed (the integer-tier module's `digits_roundtrip` read that false instruction).
     static CALLEE_REFUSALS: std::cell::RefCell<BTreeMap<String, String>> = const { std::cell::RefCell::new(BTreeMap::new()) };
     static CALLEES_USED: std::cell::RefCell<BTreeSet<String>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+    /// Every application of a linked callee the current lowering emitted (target → lowered argument
+    /// terms): its contract is instantiated at each (see `callee_preamble`) beside the quantified
+    /// axioms — nonlinear consequences (`isqrt(n·n) = n` from `r² ≤ x < (r+1)²`) close on the
+    /// instances where the quantifiers leave z3 at unknown (measured 2026-10-17).
+    static CALLEE_APPS: std::cell::RefCell<BTreeMap<String, Vec<Vec<String>>>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+thread_local! {
+    /// Applications are recorded only while the OBLIGATION's predicate is lowered — its argument
+    /// terms are over the declared constants. A body's applications (lowered in parameter scope,
+    /// then instantiated by `let`) and a contract's own (in a quantifier's scope) are not.
+    static CALLEE_APPS_ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Whether contracts are also stated as QUANTIFIED axioms (the default). The second rung of a
+    /// ladder turns them off: with nonlinear consequences z3 answers unknown on the quantified
+    /// form even when the instances alone are unsat in 10 ms (`isqrt(n·n) = n`; measured). The
+    /// instances are consequences of the axioms, so the instances-only certificate is as sound.
+    static CONTRACT_QUANTIFIERS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Run `f` with the contracts' quantified axioms suppressed (instances only).
+fn without_contract_quantifiers<T>(f: impl FnOnce() -> T) -> T {
+    let prev = CONTRACT_QUANTIFIERS.with(|q| q.replace(false));
+    let out = f();
+    CONTRACT_QUANTIFIERS.with(|q| q.set(prev));
+    out
+}
+
+/// Lower an obligation's predicate with callee-application recording on.
+fn lower_goal(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfDef>) -> Result<String> {
+    let prev = CALLEE_APPS_ENABLED.with(|e| e.replace(true));
+    let out = lower(node, env, self_def);
+    CALLEE_APPS_ENABLED.with(|e| e.set(prev));
+    out
+}
+
+thread_local! {
+    /// The callee applications inside the function's own (inlined) body, in PARAMETER scope —
+    /// recorded while `lower_self` lowers it, then instantiated at every `self` application the
+    /// goal makes (`let` over the parameters), so a checker record's `case ext_gcd(a, b) of …`
+    /// sees `ext_gcd`'s Bézout post at exactly `(a, b)`.
+    static BODY_APPS: std::cell::RefCell<Vec<(String, Vec<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static BODY_APPS_ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Lower the function's own body with its callee applications recorded (parameter scope).
+fn lower_body(node: &J, env: &mut BTreeMap<String, Sort>) -> Result<String> {
+    BODY_APPS.with(|b| b.borrow_mut().clear());
+    let prev = BODY_APPS_ENABLED.with(|e| e.replace(true));
+    let out = lower(node, env, None);
+    BODY_APPS_ENABLED.with(|e| e.set(prev));
+    out
+}
+
+fn take_body_apps() -> Vec<(String, Vec<String>)> {
+    BODY_APPS.with(|b| std::mem::take(&mut *b.borrow_mut()))
+}
+
+fn record_callee_app(target: &str, args: &[String]) {
+    if BODY_APPS_ENABLED.with(|e| e.get()) {
+        BODY_APPS.with(|b| b.borrow_mut().push((target.to_string(), args.to_vec())));
+        return;
+    }
+    if !CALLEE_APPS_ENABLED.with(|e| e.get()) {
+        return;
+    }
+    push_callee_app(target, args);
+}
+
+/// Record a callee application in goal scope unconditionally.
+fn push_callee_app(target: &str, args: &[String]) {
+    CALLEE_APPS.with(|a| {
+        let mut a = a.borrow_mut();
+        let apps = a.entry(target.to_string()).or_default();
+        if !apps.iter().any(|x| x == args) {
+            apps.push(args.to_vec());
+        }
+    });
+}
+
+fn take_callee_apps() -> BTreeMap<String, Vec<Vec<String>>> {
+    CALLEE_APPS.with(|a| std::mem::take(&mut *a.borrow_mut()))
+}
+
+/// A law about `self` decided from `self`'s OWN certified contract — its proved postconditions and
+/// laws (re-derived by the linked view, the way a callee's are), with `self` an uninterpreted
+/// function and the contract instantiated at the law's applications. The rung for a law outside
+/// every induction principle whose truth is a consequence of facts already proved about the
+/// function: `isqrt(n·n) = n` from the floor bounds. Sound as a callee contract is — only proved
+/// facts enter, and a satisfiable negation is UNKNOWN (the function is uninterpreted). The law's
+/// variables fed to `nat` parameters are domain-qualified, as in `prove_property_in_domain`.
+pub fn prove_from_self_contract(
+    prop_expr: &J,
+    target: &str,
+    contract: CalleeContract,
+    nat_positions: &BTreeSet<usize>,
+    solver: &str,
+) -> (ProofOutcome, Option<Certificate>) {
+    let law = uncurry(prop_expr);
+    let vars: Vec<String> = law.get("vars").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    let Some(pred) = law.get("body") else { return (ProofOutcome::Unsupported("`forall` has no body".into()), None) };
+    let mut guards: Vec<J> = Vec::new();
+    for call in collect_self_applications(pred) {
+        for (i, a) in call.iter().enumerate() {
+            if nat_positions.contains(&i) {
+                if let Some(v) = var_name(a) {
+                    if vars.iter().any(|x| x == v) && !guards.iter().any(|g| g.pointer("/args/0/name").and_then(|n| n.as_str()) == Some(v)) {
+                        guards.push(serde_json::json!({ "kind": "app", "op": "ge", "args": [{ "kind": "var", "name": v }, { "kind": "lit", "value": 0 }] }));
+                    }
+                }
+            }
+        }
+    }
+    let pred = law_about(pred, target);
+    let body = if guards.is_empty() {
+        pred
+    } else {
+        let conj = if guards.len() == 1 { guards.remove(0) } else { serde_json::json!({ "kind": "app", "op": "and", "args": guards }) };
+        serde_json::json!({ "kind": "app", "op": "or", "args": [{ "kind": "app", "op": "not", "args": [conj] }, pred] })
+    };
+    let law = serde_json::json!({ "kind": "forall", "vars": vars, "body": body });
+    let mut contracts = CALLEE_CONTRACTS.with(|c| c.borrow().clone());
+    contracts.insert(target.to_string(), contract);
+    let prev = set_callee_contracts(contracts);
+    let out = prove_property_in_domain(&law, None, &BTreeSet::new(), solver);
+    set_callee_contracts(prev);
+    out
 }
 
 /// Install the callee contracts the next proofs may use (replacing any), returning the previous set so
@@ -573,12 +699,20 @@ fn take_callees_used() -> BTreeSet<String> {
 }
 
 /// The SMT preamble for every callee the lowering just used: its declaration and its contract axioms.
-fn callee_preamble() -> Result<(String, bool)> {
+/// Returns the declarations + quantified axioms (emitted before the obligation's constants), the
+/// contract INSTANCES at the obligation's applications (emitted after them — they mention the
+/// constants), and whether any callee was used.
+fn callee_preamble() -> Result<(String, String, bool)> {
     let used = take_callees_used();
+    let apps = take_callee_apps();
     let any = !used.is_empty();
     let mut out = String::new();
+    let mut inst = String::new();
     for target in used {
         let Some(c) = callee_contract(&target) else { continue };
+        // The applications of this callee the obligation makes: each contract fact is also stated at
+        // them explicitly (below), so the solver need not instantiate a quantifier to use it.
+        let at: Vec<Vec<String>> = apps.get(&target).cloned().unwrap_or_default().into_iter().filter(|a| a.len() == c.params.len()).collect();
         out.push_str(&format!(
             "(declare-fun {} ({}) {})\n",
             c.symbol,
@@ -611,7 +745,12 @@ fn callee_preamble() -> Result<(String, bool)> {
             if c.params.is_empty() {
                 out.push_str(&format!("(assert (=> {ante_smt} {body}))\n"));
             } else {
-                out.push_str(&format!(";; certified contract of {target}\n(assert (forall ({binders}) (=> {ante_smt} {body})))\n"));
+                if CONTRACT_QUANTIFIERS.with(|q| q.get()) {
+                    out.push_str(&format!(";; certified contract of {target}\n(assert (forall ({binders}) (=> {ante_smt} {body})))\n"));
+                }
+                for args in &at {
+                    inst.push_str(&format!("(assert {})\n", let_params(&c.params, args, &format!("(=> {ante_smt} {body})"))));
+                }
             }
         }
         // Proved laws: `forall vars. P` with `self` read as the callee, guarded to the callee's nat
@@ -646,12 +785,30 @@ fn callee_preamble() -> Result<(String, bool)> {
                 1 => format!("(=> {} {body})", guards[0]),
                 _ => format!("(=> (and {}) {body})", guards.join(" ")),
             };
-            out.push_str(&format!(";; certified law of {target}\n(assert (forall ({lbinders}) {guarded}))\n"));
+            if CONTRACT_QUANTIFIERS.with(|q| q.get()) {
+                out.push_str(&format!(";; certified law of {target}\n(assert (forall ({lbinders}) {guarded}))\n"));
+            }
+            // The law's instance at each application the obligation makes, when one of the law's
+            // own applications of the callee fixes every law variable (distinct variables covering
+            // them): the variables take the obligation's argument terms, positionally.
+            let fixing = collect_self_applications_of(&pred, &target).into_iter().find(|call| {
+                let names: Vec<&str> = call.iter().filter_map(|a| var_name(a)).collect();
+                names.len() == call.len()
+                    && names.iter().collect::<BTreeSet<_>>().len() == names.len()
+                    && vars.iter().all(|v| names.contains(&v.as_str()))
+            });
+            if let Some(call) = fixing {
+                let names: Vec<String> = call.iter().filter_map(|a| var_name(a).map(String::from)).collect();
+                for args in &at {
+                    inst.push_str(&format!("(assert {})\n", let_params(&names, args, &guarded)));
+                }
+            }
         }
     }
     // Lowering the axioms marked the callee used again; the preamble is complete, so clear.
     take_callees_used();
-    Ok((out, any))
+    take_callee_apps();
+    Ok((out, inst, any))
 }
 
 /// Sort returned by `op` given the sorts of its operands are well-formed.
@@ -1051,6 +1208,7 @@ fn lower_app(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfD
         }
         let lowered = lower_args(env, &args)?;
         mark_callee_used(&op);
+        record_callee_app(&op, &lowered);
         return Ok(if lowered.is_empty() { c.symbol.clone() } else { format!("({} {})", c.symbol, lowered.join(" ")) });
     }
 
@@ -1313,6 +1471,7 @@ pub fn build_certificate(prop_expr: &J, body: Option<&J>) -> Result<Certificate>
 /// nat → nat` would be asked to hold where `gcd`'s contract says nothing — measured: a timeout).
 pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_positions: &BTreeSet<usize>) -> Result<Certificate> {
     take_callees_used(); // a failed earlier lowering must not leak its callees into this certificate
+    take_callee_apps();
     reset_list_emission();
     // Normalize away curried application spines first, so surface-parsed properties/bodies
     // (juxtaposition parses curried) analyze identically to AST-authored flat ones.
@@ -1349,11 +1508,27 @@ pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_pos
     if psort != Sort::Bool {
         bail!("property body is not a boolean predicate");
     }
-    let pred_smt = lower(pred, &mut env, self_def.as_ref())?;
+    let pred_smt = lower_goal(pred, &mut env, self_def.as_ref())?;
+    // The body's callee applications, at every `self` application the goal makes: the parameters
+    // bound to the goal's argument terms, so the contract instances land where the inlined body
+    // applies the callee (the first-order twin of the induction rung's unfolding instances).
+    let body_apps = take_body_apps();
+    if let (Some(sd), false) = (&self_def, body_apps.is_empty()) {
+        for call in collect_self_applications(pred) {
+            if call.len() != sd.params.len() {
+                continue;
+            }
+            let Ok(terms) = call.iter().map(|a| lower(a, &mut env.clone(), self_def.as_ref())).collect::<Result<Vec<_>>>() else { continue };
+            for (target, args) in &body_apps {
+                let scoped: Vec<String> = args.iter().map(|a| let_params(&sd.params, &terms, a)).collect();
+                push_callee_app(target, &scoped);
+            }
+        }
+    }
 
     let mut out = String::new();
     out.push_str("(set-logic ALL)\n");
-    let (callees, uses_callees) = callee_preamble()?;
+    let (callees, callee_insts, uses_callees) = callee_preamble()?;
     out.push_str(&callees);
     if let Some(sd) = &self_def {
         let params = sd
@@ -1385,6 +1560,7 @@ pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_pos
     for v in &nat_vars {
         out.push_str(&format!("(assert (>= {v} 0))\n"));
     }
+    out.push_str(&callee_insts);
     // Assert the negation of the law: unsat ⇒ the law holds for all inputs.
     out.push_str(&format!("(assert (not {pred_smt}))\n"));
     out.push_str("(check-sat)\n");
@@ -1535,6 +1711,19 @@ pub fn prove_property_in_domain(
     match build_certificate_in_domain(prop_expr, body, self_nat_positions) {
         Err(e) => (ProofOutcome::Unsupported(format!("{e:#}")), None),
         Ok(cert) => match run_solver(&cert, solver) {
+            // The contract ladder: an obligation over linked callees that z3 cannot decide WITH the
+            // quantified contract axioms is retried with the contracts stated only at its own
+            // applications (their instances — weaker, so as sound), which is where nonlinear
+            // consequences close.
+            Ok(ProofOutcome::Unknown) if cert.uses_callees => {
+                match without_contract_quantifiers(|| build_certificate_in_domain(prop_expr, body, self_nat_positions)) {
+                    Ok(cert2) => match run_solver(&cert2, solver) {
+                        Ok(ProofOutcome::Proved) => (ProofOutcome::Proved, Some(cert2)),
+                        _ => (ProofOutcome::Unknown, Some(cert)),
+                    },
+                    Err(_) => (ProofOutcome::Unknown, Some(cert)),
+                }
+            }
             Ok(outcome) => (outcome, Some(cert)),
             Err(e) => (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert)),
         },
@@ -1778,6 +1967,7 @@ pub fn prove_by_numeric_induction(
 
 fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &BTreeSet<usize>, with_ih: bool) -> Result<(Certificate, String)> {
     take_callees_used();
+    take_callee_apps();
     reset_list_emission();
     // Lists lower in THIS rung (the first-order prover keeps refusing them, so a plain list law
     // still reaches the structural backend): a recursion over the integers that builds or reads a
@@ -1846,7 +2036,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     if sort_of(pred, &env, Some(&sd))? != Sort::Bool {
         bail!("property body is not a boolean predicate");
     }
-    let pred_smt = lower(pred, &mut env, Some(&sd))?;
+    let pred_smt = lower_goal(pred, &mut env, Some(&sd))?;
 
     // The induction hypothesis: the law over primed variables, at smaller measures.
     let prime = |v: &str| format!("{v}__ih");
@@ -1873,7 +2063,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
         sd.param_sorts.iter().map(|s| s.smt()).collect::<Vec<_>>().join(" "),
         sd.ret.smt()
     ));
-    let (callees, uses_callees) = callee_preamble()?;
+    let (callees, callee_insts, uses_callees) = callee_preamble()?;
     out.push_str(&callees);
     for v in &vars {
         out.push_str(&format!("(declare-const {v} {})\n", var_sorts[v].smt()));
@@ -1885,6 +2075,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
         mark_list_def("all_nat");
         out.push_str(&format!("(assert (all_nat {v}))\n"));
     }
+    out.push_str(&callee_insts);
     // IH — only when there is a measure to induct on (a law with a literal at the measure position is
     // decided by the unfolding below alone). One variable: `floor ≤ m' < m`. A sum of nat variables:
     // `Σ v' < Σ v` (each v' ≥ 0 — well-founded over the nats).
@@ -2501,6 +2692,61 @@ mod tests {
         let (out, _, _) = prove_by_numeric_induction(&law_len(op("add", vec![v("n"), lit(1)])), Some(&body), &nats, solver);
         assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
         set_self_type(prev);
+    }
+
+    #[test]
+    fn self_contract_rung_decides_consequences_of_proved_facts() {
+        let Some(solver) = solver() else { return };
+        // isqrt's certified contract: result ≥ 0, result² ≤ n, result ≤ n (posts) and the proved
+        // floor-bounds law n < 0 ∨ (self(n)² ≤ n ∧ n < (self(n)+1)²).
+        let result = || v("result");
+        let floor_bounds = law(&["n"], op("or", vec![op("lt", vec![v("n"), lit(0)]), op("and", vec![
+            op("le", vec![op("mul", vec![self_app(vec![v("n")]), self_app(vec![v("n")])]), v("n")]),
+            op("lt", vec![v("n"), op("mul", vec![op("add", vec![self_app(vec![v("n")]), lit(1)]), op("add", vec![self_app(vec![v("n")]), lit(1)])])])])]));
+        let contract = CalleeContract {
+            symbol: "callee_isqrt".into(), params: vec!["n".into()], param_sorts: vec![Sort::Int], ret: Sort::Int, pres: vec![],
+            posts: vec![op("ge", vec![result(), lit(0)]), op("le", vec![op("mul", vec![result(), result()]), v("n")]), op("le", vec![result(), v("n")])],
+            laws: vec![floor_bounds], nat_positions: [0].into(),
+        };
+        let target = "fn_isqrt_test";
+        let nats: BTreeSet<usize> = [0].into();
+        // n < 0 ∨ isqrt(n·n) = n — outside every induction principle, a consequence of the contract.
+        let square = |rhs: J| law(&["n"], op("or", vec![op("lt", vec![v("n"), lit(0)]), op("eq", vec![self_app(vec![op("mul", vec![v("n"), v("n")])]), rhs])]));
+        let (out, cert) = prove_from_self_contract(&square(v("n")), target, contract.clone(), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        let smt = cert.unwrap().smt;
+        // The contract is instantiated at the law's application (a `let` binding n to n·n), not only quantified.
+        assert!(smt.contains("(let ((n (* n n)))"), "{smt}");
+        // The false `isqrt(n·n) = n + 1` is never proved — and never refuted (self is uninterpreted).
+        let (out, _) = prove_from_self_contract(&square(op("add", vec![v("n"), lit(1)])), target, contract, &nats, solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+    }
+
+    #[test]
+    fn body_callee_applications_get_contract_instances_at_the_goal() {
+        let Some(solver) = solver() else { return };
+        // A checker record: \a b -> eq(callee(a, b), add(a, b)), where the callee's certified post
+        // (over nats) is `result = a + b`. Its law `forall a b. self(a, b) = true` holds on the
+        // callee's domain — the instance of the post at the body's application decides it.
+        let target = "fn_sum_test";
+        let callee_app = json!({ "kind": "app", "op": target, "args": [v("a"), v("b")] });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }],
+            "body": op("eq", vec![callee_app, op("add", vec![v("a"), v("b")])]) });
+        let contract = CalleeContract {
+            symbol: "callee_sum".into(), params: vec!["a".into(), "b".into()], param_sorts: vec![Sort::Int, Sort::Int], ret: Sort::Int,
+            pres: vec![], posts: vec![op("eq", vec![v("result"), op("add", vec![v("a"), v("b")])])], laws: vec![], nat_positions: [0, 1].into(),
+        };
+        let prev = set_callee_contracts([(target.to_string(), contract)].into_iter().collect());
+        let law = law(&["a", "b"], op("eq", vec![self_app(vec![v("a"), v("b")]), json!({ "kind": "lit", "value": true })]));
+        // Over the nat domain (the record's parameters typed nat): PROVED.
+        let (out, cert) = prove_property_in_domain(&law, Some(&body), &[0usize, 1].into(), solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        let smt = cert.unwrap().smt;
+        assert!(smt.contains("(let ((a (let ((a a) (b b)) a))"), "the body's application is instantiated at the goal's: {smt}");
+        // Over all ints the callee's contract says nothing: UNKNOWN, never a false PROVED (nor REFUTED).
+        let (out, _) = prove_property_in_domain(&law, Some(&body), &BTreeSet::new(), solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+        set_callee_contracts(prev);
     }
 
     #[test]

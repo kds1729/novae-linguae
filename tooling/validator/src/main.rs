@@ -1819,6 +1819,18 @@ fn cmd_prove(
         nl_validator::set_callee_contracts(v.contracts_for(b));
         nl_validator::set_callee_refusals(v.refusals_for(b));
     }
+    // The view that can compute THIS record's own contract (the self-contract rung below): the
+    // linked one, else a one-record view of the record and body in hand.
+    let own_maps: Option<(std::collections::HashMap<String, serde_json::Value>, std::collections::HashMap<String, serde_json::Value>)> = match (&maps, &body_ast) {
+        (None, Some(b)) => {
+            let h = value.get("hash").and_then(|h| h.as_str()).unwrap_or_default().to_string();
+            let bh = value.get("body_hash").and_then(|h| h.as_str()).unwrap_or_default().to_string();
+            Some(([(h, value.clone())].into_iter().collect(), [(bh, b.clone())].into_iter().collect()))
+        }
+        _ => None,
+    };
+    let own_view = own_maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, solver));
+    let contract_view = view.as_ref().or(own_view.as_ref());
     nl_validator::set_self_type(value.pointer("/signature/type").cloned());
     let props = value.get("properties").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     if props.is_empty() {
@@ -1970,6 +1982,34 @@ fn cmd_prove(
                     format!("NO-SOLVER    `{solver}` not found; certificate emitted, re-check elsewhere")
                 }
                 ProofOutcome::Unsupported(why) => format!("UNSUPPORTED  {why}"),
+            }
+        };
+        // The last rung: a law outside every induction principle may follow from facts already
+        // PROVED about the function — its certified contract (posts + laws, re-derived by the
+        // linked view), with `self` uninterpreted and the contract instantiated at the law's
+        // applications (`isqrt(n·n) = n` from the floor bounds). The record's own address names it;
+        // without `--records` the view is the record and body in hand.
+        let label = if label.starts_with("PROVED") {
+            label
+        } else {
+            let own = value.get("hash").and_then(|h| h.as_str()).map(String::from);
+            let contract = match (&own, contract_view.as_ref()) {
+                (Some(h), Some(v)) => v.contract(h),
+                _ => None,
+            };
+            match (own, contract) {
+                (Some(h), Some(c)) => {
+                    let nats = nl_validator::nat_param_positions(&value);
+                    let (sout, scert) = nl_validator::prove_from_self_contract(expr, &h, c, &nats, solver);
+                    if let Some(c) = &scert {
+                        write_cert(".contract", &c.smt)?;
+                    }
+                    match sout {
+                        ProofOutcome::Proved => "PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)".to_string(),
+                        _ => label,
+                    }
+                }
+                _ => label,
             }
         };
         println!("{name}: {label}");

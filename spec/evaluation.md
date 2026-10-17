@@ -583,6 +583,30 @@ PROVED by induction on `n`; `from_digits ≥ 0` SOUND by induction on the struct
 strengthening `≥ 1` and the Int-element variant stay UNKNOWN; the first-order prover still reports a
 list law UNSUPPORTED.
 
+**Contracts instantiated, and a law decided from the function's own contract (2026-10-17, the
+sixth follow-up).** A callee's certified contract entered an obligation as quantified axioms only.
+Two measurements moved it: `isqrt(n·n) = n` is a consequence of `isqrt`'s proved floor bounds
+`r² ≤ x < (r+1)²`, and over the quantified form z3 answers *unknown* (nonlinear arithmetic under
+quantifiers) while the same facts stated at the one application the law makes — `x := n·n` — are
+unsat in 10 ms; and a checker record's `case ext_gcd(a, b) of (g, (x, y)) ⇒ a·x + b·y = g` applies
+its callee inside the BODY, in parameter scope, where no instance could reach. So (1) every
+contract fact — posts, and laws whose own `self` application fixes all their variables — is stated
+as an INSTANCE at each application the obligation makes, beside the quantified axiom: the
+obligation's own applications, plus the inlined body's applications at every `self` application
+the goal makes (`let` over the parameters, the induction rung's unfolding discipline); (2) the
+contract ladder: an obligation over linked callees z3 cannot decide with the quantified axioms is
+retried with the instances alone (consequences of the axioms — weaker, so as sound); (3) the
+**self-contract rung**, the last on the ladder in `prove`: a law outside every induction
+principle is decided from the function's OWN certified contract — its proved postconditions and
+laws, re-derived by the linked view exactly as a callee's are (without `--records`, a one-record
+view of the record and body in hand), with `self` uninterpreted under that contract, instantiated
+at the law's applications, and the law's variables fed to `nat` parameters domain-qualified.
+Nothing unproved enters, so the rung is as sound as composition by contract; a satisfiable
+negation is UNKNOWN. Measured: `isqrt(n·n) = n` PROVED from the contract; the checker law
+`bezout_holds` proves on the callee's domain (`a, b ≥ 0`, the nat-qualified law) and stays UNKNOWN
+over all ints — ext_gcd's post is certified for nats, and the prover will not extend it; the
+false `isqrt(n·n) = n + 1` stays UNKNOWN (never REFUTED).
+
 ## Semantic equivalence
 
 `nl-validator equiv` decides whether two functions compute the same thing — `∀x. f(x) = g(x)` over the
