@@ -110,10 +110,13 @@ run end-to-end (principle 4). `nl-validator run --records <dir>` builds the link
 and resolves both a record's `body_hash` and its `fn_ref` arguments.
 
 **Scope (v0.1, honest).** Integers are 128-bit and `nat` is a non-negative `int`. Most builtins are
-pure; the effectful ones (`print` → `io.console`, `rand` → `random`, `now` → `time`, `sleep` →
-`time` — `sleep : int → unit` pauses a LIVE evaluation for that many milliseconds, at most 60 000
-per call, so a bounded poll over an asynchronous service can pace itself; a replay does not wait —
-`panic` → `panic`) are gated by a capability sandbox (see **Effect enforcement** below). The evaluator does not enforce exhaustiveness or types;
+pure; the effectful ones (`print` → `io.console`, `rand` → `random`, `now` → `time` — `now : a →
+int` reads the wall clock as Unix epoch MILLISECONDS live, and a replay returns the recorded
+instant, so a time-budgeted poll (wait until a service's `RetryAfter`) is expressible and still
+deterministic on replay; `sleep` → `time` — `sleep : int → unit` pauses a LIVE evaluation for
+that many milliseconds, at most 60 000 per call, so a bounded poll over an asynchronous service
+can pace itself; a replay does not wait — `panic` → `panic`) are gated by a capability sandbox
+(see **Effect enforcement** below). The evaluator does not enforce exhaustiveness or types;
 those are the checker's job.
 
 ## Type checking
@@ -603,7 +606,14 @@ grant still means any host), and an `http` header value — or, since 2026-10-06
 "set password" call) — may carry a **`{{secret:NAME}}` placeholder** substituted from
 operator-supplied `--secret NAME=VALUE` values only inside the live effect — the trace records the
 placeholder (the symbolic body), never the credential, so replay needs no secrets
-(spec/agent-loop.md §Scope has the doctrine). GW17 (2026-07-13) extended the scope grammar past
+(spec/agent-loop.md §Scope has the doctrine). The OUTBOUND mirror (2026-10-17, the
+aws-ecosystem-poc redaction rule): `eval --redact VALUE=PLACEHOLDER` rewrites every occurrence of
+an observed value — an account id, a resource ARN — in the trace's details and results and in the
+printed result, after the live effect and before anything is recorded, so a service-assigned
+identity never enters an observation; an equal-length placeholder keeps length-dependent
+computations consistent, and `run` on the record minted from the redacted trace is the
+consistency check (replay must reproduce the redacted result — it does whenever the body treats
+the value opaquely). GW17 (2026-07-13) extended the scope grammar past
 the host: a grant scope may carry a **path prefix** (`net.write@api.example.com/v0/things`) and
 **fs grants scope by path** the same way (`fs.read@/data`), matched SEGMENT-ALIGNED at the effect
 boundary (`/v0` covers `/v0/things`, never `/v0things`; query/fragment/port stripped) — one rule

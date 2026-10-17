@@ -119,8 +119,11 @@ python3 smithy_ingest.py examples/item-rpc.smithy.json --out /tmp/recs \
 [`examples/item-rpc.smithy.json`](examples/item-rpc.smithy.json) is the model of the in-repo
 [fake service](../fake-service/)'s `/rpc`: four operations covering every row of the decision
 table (`ListItems` readonly/no-required, `GetItem` readonly/required with a 404 error shape,
-`PutItem` mutating/required, `ResetAll` mutating/no-required). `tests/` gates against it and against
-two lying services: 27 tests, `python3 -m unittest discover -s tests`.
+`PutItem` mutating/required, `ResetAll` mutating/no-required). The same `/rpc` also serves a
+`CloudApiService.*` **Cloud Control stand-in** (asynchronous create/delete with request tokens
+and a `RetryAfter` hint, completing after `--cc-polls` status reads) — the deterministic half of
+the aws-ecosystem-poc's paced polling. `tests/` gates against both and against two lying
+services: 29 tests, `python3 -m unittest discover -s tests`.
 
 ## Measured on the real models (offline licensing, 2026-10-06)
 

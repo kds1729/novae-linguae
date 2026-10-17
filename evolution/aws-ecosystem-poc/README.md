@@ -1,26 +1,34 @@
 # A whole cloud ecosystem provisioned, operated and torn down through records and checked plans
 
-- **Status:** absorbed (2026-10-06). The module's language-level conclusions are in the tree:
-  the awsJson adapter [`tooling/nl-ingest-smithy`](../../tooling/nl-ingest-smithy/) (GW19 in
-  `spec/expressiveness.md`), the `sleep` builtin, secret placeholders in request bodies, and the
-  evaluator's 60 s control-plane timeout. The provisioning vocabulary itself (96 hand-authored
-  records over Cloud Control, ECS, SSM and ECR) is the operator's and is published to the commons
-  only in its account-free subset (41 records, with bodies, traces and signed certifications, on Arca); the remainder stays with the
-  operator by the `aws-sdk-poc` ARN boundary.
+- **Status:** absorbed (2026-10-06; the three open questions closed 2026-10-17, below). The
+  module's language-level conclusions are in the tree: the awsJson adapter
+  [`tooling/nl-ingest-smithy`](../../tooling/nl-ingest-smithy/) (GW19 in
+  `spec/expressiveness.md`), the `sleep` builtin, secret placeholders in request bodies, the
+  evaluator's 60 s control-plane timeout, and — from the follow-up — a real clock behind `now`,
+  the outbound `eval --redact` rule, composed probes in `check-plan`, and a Cloud Control stand-in
+  in the fake service. The provisioning vocabulary (96 hand-authored records over Cloud Control,
+  ECS, SSM and ECR, now 128 with the pacing and probe records) is the operator's; since
+  2026-10-17 the WHOLE vocabulary is on Arca in redacted form (bodies, traces, signed
+  certifications) — the `aws-sdk-poc` ARN boundary is kept by redaction rather than by holding
+  records back.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-10-06, last updated 2026-10-06
-- **Scope:** `tooling/nl-ingest-smithy` (new), `tooling/fake-service` (a `/rpc` surface),
-  `tooling/validator` (`sleep`; body placeholders; timeout), `spec/evaluation.md`,
-  `spec/expressiveness.md` (GW19); read against `spec/world-state.md` (`check-plan`) and
+- **Dates:** first published 2026-10-06, last updated 2026-10-17
+- **Scope:** `tooling/nl-ingest-smithy` (new), `tooling/fake-service` (a `/rpc` surface; 2026-10-17
+  a `CloudApiService.*` Cloud Control stand-in with request tokens and `RetryAfter`),
+  `tooling/validator` (`sleep`; body placeholders; timeout; 2026-10-17 `now` as the epoch-ms
+  clock, `eval --redact`, `check-plan --probe` over composed probe bodies), `spec/evaluation.md`,
+  `spec/world-state.md` (probes, audits), `spec/expressiveness.md` (GW19); read against
   `evolution/aws-sdk-poc`.
-- **Provenance:** upstream commit `6f5c9a5` (the tree at the end of the day); AWS service models
-  from `aws/api-models-aws` at commit `7eb6ab98` (ECS 2014-11-13, ECR 2015-09-21, Cloud Map
-  2017-03-14, Global Accelerator 2018-08-08, Cloud Control 2021-09-30; `smithy-cli` 1.73.0 was
-  used only to measure that the awsJson models do NOT project to OpenAPI); one AWS account, two
-  regions (us-east-1, us-west-2), everything built and destroyed within one day
-  (2026-10-06 ~07:30–12:30 EDT); a local SigV4-signing proxy as the records' `base`.
+- **Provenance:** upstream commit `6f5c9a5` (the tree at the end of the first day) and the
+  2026-10-17 follow-up commit; AWS service models from `aws/api-models-aws` at commit `7eb6ab98`
+  (ECS 2014-11-13, ECR 2015-09-21, Cloud Map 2017-03-14, Global Accelerator 2018-08-08, Cloud
+  Control 2021-09-30; `smithy-cli` 1.73.0 was used only to measure that the awsJson models do NOT
+  project to OpenAPI); one AWS account, two regions (us-east-1, us-west-2), everything built and
+  destroyed within one day (2026-10-06 ~07:30–12:30 EDT); a local SigV4-signing proxy as the
+  records' `base`. The follow-up ran against the same account, empty, on 2026-10-17 (two
+  throw-away VPCs created and deleted; nothing else touched).
 - **Resolution:** absorbed — see Status. No proposals: every language-level question this run
-  raised was settled by measurement in-tree the same day.
+  raised was settled by measurement in-tree, on the day or in the follow-up.
 
 ## Summary
 
@@ -143,21 +151,87 @@ the 60 s timeout, the adapter's request-refusal rule, effect-mode projections, t
 note). The duplicate-distribution incident was a record defect (a flat lookup of a nested
 field), fixed by `cc_find_nested`; the duplicate was disabled and deleted.
 
-## Open questions
+## Follow-up (2026-10-17): the three open questions, closed
 
-- A poll budget as a *time* rather than a step count (finding 11): the records pass a depth;
-  Cloud Control's `RetryAfter` hint in the `ProgressEvent` is the principled input and is
-  currently ignored.
-- Observation probes (`check-plan --probe`) against the ecosystem's `requires` were not run;
-  the teardown audit was done with the AWS API directly. Running the probes would close that gap
-  in-language.
-- The ARN boundary is coarse: 55 of the 96 records are held back only because an observed
-  value in an example or a trace carries an ARN or the account id; a redaction rule for
-  observed values would let the whole vocabulary publish.
+Each was a measurement first and a change second. Everything below ran against the real account
+(empty since the teardown) through the same signing proxy; the fake service's new Cloud Control
+stand-in carried the deterministic halves.
+
+### Measured
+
+**`RetryAfter`, re-read from the 2026-10-06 run traces** (85 step traces polling 92 requests):
+37 requests carry the hint. In 24 of them it is ONE fixed instant restated on every poll; in 13
+(the long operations — RDS, CloudFront, Global Accelerator) it advances across polls (3–60
+distinct values). It first appears on the SECOND status read in 32 of 37 requests (never on the
+create/delete response itself), and the fixed-step records polled a mean of 12.7 times per
+hinted request, i.e. ~30 s of 3 s polls before the first hint passed. Live on 2026-10-17 (a VPC
+create): `IN_PROGRESS` (no hint) → `IN_PROGRESS` (no hint) → wait 3.0 s (default) → hint +10.6 s
+→ wait 8.2 s → `SUCCESS`: two polls where the old record made five. A first draft that waited
+`max(0, hint − now)` re-polled at 0 ms twice once the hint had passed — a stale hint collapses
+the budget — so the rule is: past or absent hint ⇒ the default interval.
+
+**The in-language teardown audit**: 28 probe records (one per world-state class, each the FIND
+half of its delete record, `: base name … → int`, all observed live answering 404), an audit plan
+of 62 `absent` assumptions over 28 classes derived mechanically from the four teardown plans'
+`ensures`, zero steps. `check-plan --probe …` × 28: **62/62 OBSERVED, exit 0** — the account holds
+nothing of the ecosystem, decided by the language's own machinery. Negative control: two
+throw-away VPCs created (through the paced create), two extra `absent` assumptions → **2
+PROBE-REFUTED, exit 1**, the right two; deleted (through the paced delete) → **64/64 OBSERVED**.
+The probes are composed records (they apply the vocabulary's finders by `fn_ref`); the checker
+had never linked a probe body — the first run failed `cannot apply unresolved fn_ref` — fixed
+in-tree (the resolver is installed over the plan's records view).
+
+**Redaction**: of 128 records (96 + 2 pacing + 2 paced mutations + 28 probes), **58** carry the
+account's identity in an observed value (55 of the original 96; 3 new probes — listing security
+groups returns the default groups' `OwnerId`, and ECR's not-found message names the registry)
+and **14 more** change by dependency. Four rules (the account id → `123456789012`; three IAM
+unique ids → equal-length placeholders). **72 re-minted in dependency order, 72/72 certify and
+replay from the redacted traces**, nothing identity-bearing left in any file. Six of the 41
+records published on 2026-10-06 referenced held-back records by address — they were on Arca with
+dangling `fn_ref`s (the gate does not resolve `fn_ref` targets; a dark target weakens only its
+own candidate) — and now carry superseding re-issues. Three teardown records referenced an
+ORPHANED address: `build_teardown_records.py` re-minted the shared `cc_delete` for every group,
+so the global group's records pointed at a version the region build overwrote (they ran on
+2026-10-06 because the file still existed then); re-linked.
+
+### Argued
+
+- **A poll budget is a depth bound times a service hint.** `depth` stays the termination
+  certificate (structural descent); the hint supplies the time. The float timestamp is turned
+  into whole seconds in-language (`to_string` → `str_split "."` → `parse_int`) — float→int
+  conversion is not a builtin, and this is the honest workaround, recorded rather than pulled.
+- **An audit is a plan with no steps.** Assumptions are the place testimony enters; probing all
+  of them IS the audit, and `check-plan`'s own verdict vocabulary (OBSERVED / PROBE-REFUTED)
+  reports it. The plan schema's `steps.minItems: 1` means an audit cannot be published as a
+  `plan_` artifact yet — a monotone loosening, left for a driver.
+- **Redaction belongs at the effect boundary, as the mirror of secrets.** `--secret` keeps an
+  operator value out of the request record; `--redact` keeps a service-assigned value out of the
+  response record. Both act after the live effect and before anything is recorded; equal-length
+  placeholders keep length-dependent computations consistent; replay agreeing with the redacted
+  result is the proof that the body treated the value opaquely (72/72 here). The post-hoc
+  re-mint of already-observed traces is operator machinery (`redact_records.py`), and the
+  cascade it needed — re-link dependents, supersede what was published — is the ordinary
+  cost_sweep shape.
+- **Probes over JSON-RPC are `net.write` by the method rule** (every call is a POST). "Read-only"
+  is the operator's declaration through the grant, exactly as `--readonly` is for the adapter;
+  the effect name cannot carry it.
+
+### Still open
+
+- Time-based budgets for the delete half of the vocabulary: only `cc_delete_paced` exists; the
+  typed `delete_*` records still apply the fixed-step `cc_delete`. Re-linking them is a re-mint
+  with re-observation (each example deletes), so it waits for the next build.
+- Mid-plan probing and the `plan_` schema loosening remain as `spec/world-state.md` states them.
 
 ## Reproducing
 
 The adapter's offline and fake-service results need no credentials (`tooling/nl-ingest-smithy`,
-`python3 -m unittest discover -s tests`). The live results need an AWS account, a signing proxy,
-and a permissions boundary covering the services named above; the operator's builders
-(`build_*_records.py`, `make_plan.py`, `run_plan.py`) are not in this repository.
+`python3 -m unittest discover -s tests` — the Cloud Control stand-in's asynchronous lifecycle and
+`RetryAfter` are pinned there too; `python3 tooling/fake-service/fake_service.py --cc-polls 2
+--cc-retry-after 1.0` serves it for a paced poll to run against). The live results need an AWS
+account, a signing proxy, and a permissions boundary covering the services named above; the
+operator's builders (`build_*_records.py`, `make_plan.py`, `run_plan.py`, and from the follow-up
+`build_pacing_records.py`, `build_probe_records.py`, `make_audit_plan.py`, `redact_records.py`)
+are not in this repository. The redacted vocabulary on Arca is discoverable by its tags
+(`io/network/http/cloudcontrol-create-paced`, `query/lookup/aws-probe-<class>`, …); every record
+there replays its worked example offline.

@@ -94,7 +94,29 @@ header, and the HTTP status carrying no verb semantics at all:
     contract the adapter's observation gate relies on. An unknown target answers
     `UnknownOperationException`; a non-JSON body `SerializationException`.
 
+The same `/rpc` endpoint also carries a behavioural stand-in for AWS **Cloud Control** (the
+aws-ecosystem-poc thread): `X-Amz-Target: CloudApiService.<Operation>` with
+`application/x-amz-json-1.0`. Resources live in memory, keyed by (TypeName, Identifier); the
+identifier is DERIVED from the desired state (sha256 prefix — server-chosen yet deterministic,
+the GW14 rule). Every mutation is ASYNCHRONOUS the way the real service is: it answers a
+`ProgressEvent` with `OperationStatus: IN_PROGRESS`, a `RequestToken`, and a `RetryAfter`
+timestamp (epoch seconds, fractional — the hint a paced poll must honor); the request completes
+after `--cc-polls` status reads (default 2), each of which restates `RetryAfter` until SUCCESS.
+
+    CreateResource {TypeName, DesiredState}       -> ProgressEvent (IN_PROGRESS, RequestToken, RetryAfter)
+    DeleteResource {TypeName, Identifier}         -> ProgressEvent (IN_PROGRESS, …); the resource is gone when
+                                                     the request reaches SUCCESS, not before
+    GetResourceRequestStatus {RequestToken}       -> ProgressEvent (IN_PROGRESS + RetryAfter, then SUCCESS with
+                                                     Identifier); unknown token -> RequestTokenNotFoundException 404
+    GetResource {TypeName, Identifier}            -> {TypeName, ResourceDescription: {Identifier, Properties: "<json>"}};
+                                                     absent -> ResourceNotFoundException 404
+    ListResources {TypeName}                      -> {TypeName, ResourceDescriptions: [{Identifier, Properties}]}
+
+    `--cc-retry-after` is the seconds added to the clock for RetryAfter (default 1.0, so a paced
+    poll waits about a second per read; the real service hints ~30 s).
+
     python3 fake_service.py [--port 8878] [--token test-token] [--oauth-client id:secret]
+                            [--cc-polls 2] [--cc-retry-after 1.0]
 """
 
 import argparse
@@ -243,12 +265,22 @@ _RPC_REQUIRED = {"ListItems": (), "GetItem": ("name",), "PutItem": ("name", "bod
 _RPC_FIXED_ITEMS = {"rpc-widget": {"name": "rpc-widget", "body": "blue", "version": 1, "kind": "WIDGET",
                                    "owner": {"id": "u1"}}}
 
+# The Cloud Control stand-in: target prefix + the required members of each operation it carries.
+CC_SERVICE = "CloudApiService"
+_CC_REQUIRED = {"CreateResource": ("TypeName", "DesiredState"), "DeleteResource": ("TypeName", "Identifier"),
+                "GetResourceRequestStatus": ("RequestToken",), "GetResource": ("TypeName", "Identifier"),
+                "ListResources": ("TypeName",)}
+
 
 class Handler(BaseHTTPRequestHandler):
     store = {}
     things = {}
     notes = {}
     rpc_items = {k: dict(v) for k, v in _RPC_FIXED_ITEMS.items()}
+    cc_resources = {}   # (TypeName, Identifier) -> properties dict
+    cc_requests = {}    # RequestToken -> {"op", "TypeName", "Identifier", "polls_left"}
+    cc_polls = 2        # status reads before a request completes
+    cc_retry_after = 1.0  # seconds the RetryAfter hint lies ahead of the clock
     token = "test-token"
     api_key = "test-token"  # the X-Api-Key credential; main() defaults it to --token
     oauth_client = ("gw13-client", "gw13-secret")
@@ -282,6 +314,82 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(status, json.dumps({"__type": typ, "message": message}).encode(),
                     headers=[("x-amzn-ErrorType", typ)])
 
+    def _cc_progress(self, token):
+        """One status read of an asynchronous Cloud Control request: IN_PROGRESS with a fresh
+        RetryAfter hint until the configured number of reads is spent, then SUCCESS (a delete's
+        resource disappears exactly then — a GetResource between the two still finds it)."""
+        import time
+        req = self.cc_requests[token]
+        ev = {"TypeName": req["TypeName"], "Identifier": req["Identifier"], "RequestToken": token,
+              "Operation": req["op"], "EventTime": round(time.time(), 3)}
+        if req["polls_left"] > 0:
+            req["polls_left"] -= 1
+            ev["OperationStatus"] = "IN_PROGRESS"
+            ev["RetryAfter"] = round(time.time() + self.cc_retry_after, 3)
+        else:
+            ev["OperationStatus"] = "SUCCESS"
+            if req["op"] == "DELETE":
+                self.cc_resources.pop((req["TypeName"], req["Identifier"]), None)
+        return ev
+
+    def _cc(self, op, inp):
+        """The Cloud Control stand-in (see the module docstring). Required members are already
+        checked; identifiers are derived from the desired state; mutations are asynchronous."""
+        import time
+        if op == "CreateResource":
+            try:
+                desired = json.loads(inp["DesiredState"])
+            except (TypeError, ValueError):
+                self._rpc_error(400, "ValidationException", "DesiredState is not a JSON document")
+                return
+            if not isinstance(desired, dict):
+                self._rpc_error(400, "ValidationException", "DesiredState is not a JSON object")
+                return
+            short = inp["TypeName"].rsplit("::", 1)[-1].lower()
+            ident = f"{short}-{hashlib.sha256(json.dumps(desired, sort_keys=True).encode()).hexdigest()[:12]}"
+            props = dict(desired)
+            props["Identifier"] = ident
+            self.cc_resources[(inp["TypeName"], ident)] = props
+            seed = inp["TypeName"] + "|" + ident + "|create"
+            token = "req-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
+            self.cc_requests[token] = {"op": "CREATE", "TypeName": inp["TypeName"], "Identifier": ident,
+                                       "polls_left": self.cc_polls}
+            ev = {"TypeName": inp["TypeName"], "Identifier": ident, "RequestToken": token, "Operation": "CREATE",
+                  "OperationStatus": "IN_PROGRESS", "EventTime": round(time.time(), 3),
+                  "RetryAfter": round(time.time() + self.cc_retry_after, 3)}
+            self._reply(200, json.dumps({"ProgressEvent": ev}).encode())
+        elif op == "DeleteResource":
+            key = (inp["TypeName"], inp["Identifier"])
+            if key not in self.cc_resources:
+                self._rpc_error(404, "ResourceNotFoundException", f"no {key[0]} {key[1]!r}")
+                return
+            seed = key[0] + "|" + key[1] + "|delete|" + repr(time.time())
+            token = "req-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
+            self.cc_requests[token] = {"op": "DELETE", "TypeName": key[0], "Identifier": key[1],
+                                       "polls_left": self.cc_polls}
+            ev = {"TypeName": key[0], "Identifier": key[1], "RequestToken": token, "Operation": "DELETE",
+                  "OperationStatus": "IN_PROGRESS", "EventTime": round(time.time(), 3),
+                  "RetryAfter": round(time.time() + self.cc_retry_after, 3)}
+            self._reply(200, json.dumps({"ProgressEvent": ev}).encode())
+        elif op == "GetResourceRequestStatus":
+            token = inp["RequestToken"]
+            if token not in self.cc_requests:
+                self._rpc_error(404, "RequestTokenNotFoundException", f"no request {token!r}")
+                return
+            self._reply(200, json.dumps({"ProgressEvent": self._cc_progress(token)}).encode())
+        elif op == "GetResource":
+            key = (inp["TypeName"], inp["Identifier"])
+            props = self.cc_resources.get(key)
+            if props is None:
+                self._rpc_error(404, "ResourceNotFoundException", f"no {key[0]} {key[1]!r}")
+                return
+            self._reply(200, json.dumps({"TypeName": key[0], "ResourceDescription": {
+                "Identifier": key[1], "Properties": json.dumps(props)}}).encode())
+        else:  # ListResources
+            descs = [{"Identifier": ident, "Properties": json.dumps(props)}
+                     for (tn, ident), props in sorted(self.cc_resources.items()) if tn == inp["TypeName"]]
+            self._reply(200, json.dumps({"TypeName": inp["TypeName"], "ResourceDescriptions": descs}).encode())
+
     def _rpc(self):
         """awsJson1_1: the operation is the `X-Amz-Target` header's suffix, the body its input.
         Validation (required members) happens BEFORE any effect — a rejected call changes
@@ -295,6 +403,16 @@ class Handler(BaseHTTPRequestHandler):
             self._rpc_error(400, "SerializationException", "body is not JSON")
             return
         prefix, _, op = target.rpartition(".")
+        if prefix == CC_SERVICE and op in _CC_REQUIRED:
+            if not isinstance(inp, dict):
+                self._rpc_error(400, "SerializationException", "input is not an object")
+                return
+            missing = [m for m in _CC_REQUIRED[op] if m not in inp]
+            if missing:
+                self._rpc_error(400, "ValidationException", f"missing required member(s): {', '.join(missing)}")
+                return
+            self._cc(op, inp)
+            return
         if prefix != RPC_SERVICE or op not in _RPC_REQUIRED:
             self._rpc_error(400, "UnknownOperationException", f"unknown target {target!r}")
             return
@@ -591,10 +709,16 @@ def main():
                          "a client's PER-SCHEME credential binding)")
     ap.add_argument("--oauth-client", default="gw13-client:gw13-secret",
                     help="the client-credentials pair /token accepts, as id:secret")
+    ap.add_argument("--cc-polls", type=int, default=2,
+                    help="Cloud Control stand-in: status reads before an asynchronous request reaches SUCCESS")
+    ap.add_argument("--cc-retry-after", type=float, default=1.0,
+                    help="Cloud Control stand-in: seconds the RetryAfter hint lies ahead of the clock")
     args = ap.parse_args()
     Handler.token = args.token
     Handler.api_key = args.api_key if args.api_key is not None else args.token
     Handler.oauth_client = tuple(args.oauth_client.split(":", 1))
+    Handler.cc_polls = args.cc_polls
+    Handler.cc_retry_after = args.cc_retry_after
     HTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
 
 

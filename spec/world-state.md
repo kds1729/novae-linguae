@@ -117,7 +117,20 @@ access fact, not a world observation). A confirmed assumption is reported as OBS
 must not run, whatever the symbolic verdict was); inconclusive and unprobed assumptions stay
 testimony, stated as such. Probes never rescue an UNVERIFIABLE plan (they check what the plan
 *states*, not what it forgot to state) and are skipped for a symbolically REJECTED one (it must
-not run regardless of what the world says).
+not run regardless of what the world says). A probe may itself be a COMPOSED record (a finder
+applied by `fn_ref`): the checker links probe bodies through the same records view the plan was
+checked against (2026-10-17, measured on the aws-ecosystem-poc probes — every Cloud Control probe
+composes the vocabulary's finders). Note the method rule: over an awsJson/JSON-RPC surface every
+call is a POST, so a probe's declared effect is `net.write` even though what it DOES is a read;
+"read-only" is then the operator's declaration (the grant), not the effect name — the same
+measurement `nl-ingest-smithy --readonly` records.
+
+**An audit is a plan of assumptions and no steps.** Stating every resource a teardown ensured
+absent as an `absent` assumption and probing it decides, in-language, whether the world is clean
+(every assumption OBSERVED) or names the leftover (PROBE-REFUTED) — the aws-ecosystem-poc
+teardown audit (62 assumptions over 28 classes). `check-plan` accepts the zero-step local form;
+the plan SCHEMA requires at least one step, so an audit is not yet publishable as a `plan_`
+artifact (a monotone loosening, pending a driver).
 
 ## Deliberately out of v0.1
 

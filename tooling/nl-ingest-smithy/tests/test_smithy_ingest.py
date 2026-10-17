@@ -443,5 +443,96 @@ class CliTest(unittest.TestCase):
         self.assertEqual(list(Path(tmp).iterdir()), [])
 
 
+class CloudControlStandInTest(unittest.TestCase):
+    """The fake service's Cloud Control surface (aws-ecosystem-poc): asynchronous mutations with
+    request tokens and a `RetryAfter` hint, completing after a fixed number of status reads."""
+
+    PORT = 18894
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = f"http://127.0.0.1:{cls.PORT}"
+        cls.svc = subprocess.Popen([sys.executable, str(FAKE), "--port", str(cls.PORT), "--cc-polls", "2",
+                                    "--cc-retry-after", "0.5"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(f"{cls.base}/health", timeout=0.2)
+                break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("fake service did not come up")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.svc.terminate()
+        cls.svc.wait()
+
+    def _cc(self, op, inp):
+        req = urllib.request.Request(f"{self.base}/rpc", data=json.dumps(inp).encode(), method="POST",
+                                     headers={"X-Amz-Target": f"CloudApiService.{op}",
+                                              "Content-Type": "application/x-amz-json-1.0"})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def test_lifecycle_is_asynchronous_with_retry_after(self):
+        desired = json.dumps({"CidrBlock": "10.99.0.0/16", "Tags": [{"Key": "Name", "Value": "nl-fake"}]})
+        t0 = time.time()
+        st, out = self._cc("CreateResource", {"TypeName": "AWS::EC2::VPC", "DesiredState": desired})
+        self.assertEqual(st, 200)
+        ev = out["ProgressEvent"]
+        self.assertEqual(ev["OperationStatus"], "IN_PROGRESS")
+        self.assertTrue(ev["Identifier"].startswith("vpc-"))
+        self.assertIsInstance(ev["RetryAfter"], float)       # epoch seconds, fractional — the AWS shape
+        self.assertGreater(ev["RetryAfter"], t0)
+        self.assertLess(ev["RetryAfter"], t0 + 2)
+        token, ident = ev["RequestToken"], ev["Identifier"]
+        # Deterministic identity: the same desired state names the same resource (GW14 rule).
+        st, again = self._cc("CreateResource", {"TypeName": "AWS::EC2::VPC", "DesiredState": desired})
+        self.assertEqual(again["ProgressEvent"]["Identifier"], ident)
+        # The resource is readable while the request is in flight; two reads stay IN_PROGRESS
+        # (each restating RetryAfter), the third completes.
+        st, got = self._cc("GetResource", {"TypeName": "AWS::EC2::VPC", "Identifier": ident})
+        self.assertEqual(st, 200)
+        self.assertEqual(json.loads(got["ResourceDescription"]["Properties"])["CidrBlock"], "10.99.0.0/16")
+        statuses = []
+        for _ in range(3):
+            st, p = self._cc("GetResourceRequestStatus", {"RequestToken": token})
+            statuses.append(p["ProgressEvent"]["OperationStatus"])
+            if p["ProgressEvent"]["OperationStatus"] == "IN_PROGRESS":
+                self.assertIn("RetryAfter", p["ProgressEvent"])
+            else:
+                self.assertNotIn("RetryAfter", p["ProgressEvent"])
+        self.assertEqual(statuses, ["IN_PROGRESS", "IN_PROGRESS", "SUCCESS"])
+        st, lst = self._cc("ListResources", {"TypeName": "AWS::EC2::VPC"})
+        self.assertEqual([d["Identifier"] for d in lst["ResourceDescriptions"]], [ident])
+        # Delete: asynchronous too, and the resource is still there until the request SUCCEEDS.
+        st, d = self._cc("DeleteResource", {"TypeName": "AWS::EC2::VPC", "Identifier": ident})
+        self.assertEqual(d["ProgressEvent"]["OperationStatus"], "IN_PROGRESS")
+        st, _ = self._cc("GetResource", {"TypeName": "AWS::EC2::VPC", "Identifier": ident})
+        self.assertEqual(st, 200)
+        for _ in range(3):
+            st, p = self._cc("GetResourceRequestStatus", {"RequestToken": d["ProgressEvent"]["RequestToken"]})
+        self.assertEqual(p["ProgressEvent"]["OperationStatus"], "SUCCESS")
+        st, err = self._cc("GetResource", {"TypeName": "AWS::EC2::VPC", "Identifier": ident})
+        self.assertEqual((st, err["__type"]), (404, "ResourceNotFoundException"))
+        st, lst = self._cc("ListResources", {"TypeName": "AWS::EC2::VPC"})
+        self.assertEqual(lst["ResourceDescriptions"], [])
+
+    def test_refusals_precede_effects(self):
+        st, err = self._cc("GetResourceRequestStatus", {"RequestToken": "req-nope"})
+        self.assertEqual((st, err["__type"]), (404, "RequestTokenNotFoundException"))
+        st, err = self._cc("CreateResource", {"TypeName": "AWS::Logs::LogGroup"})
+        self.assertEqual((st, err["__type"]), (400, "ValidationException"))
+        st, lst = self._cc("ListResources", {"TypeName": "AWS::Logs::LogGroup"})
+        self.assertEqual(lst["ResourceDescriptions"], [])      # the refused create created nothing
+        st, err = self._cc("DeleteResource", {"TypeName": "AWS::Logs::LogGroup", "Identifier": "absent"})
+        self.assertEqual((st, err["__type"]), (404, "ResourceNotFoundException"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -207,6 +207,17 @@ enum Commands {
         /// secret it never enters a record or the trace, and replay needs no identity. Repeatable.
         #[arg(long = "oauth")]
         oauth: Vec<String>,
+        /// Redact an OBSERVED value before it is recorded (`VALUE=PLACEHOLDER`): every occurrence
+        /// of VALUE in the trace's details and results, and in the printed result, is replaced by
+        /// PLACEHOLDER. The live effect still sees and sends the real value; the recorded
+        /// observation never carries it. The outbound mirror of --secret: a secret keeps an
+        /// operator value out of the REQUEST record, a redaction keeps a service-assigned value
+        /// (an account id, a resource ARN) out of the RESPONSE record. An equal-length placeholder
+        /// keeps length-dependent computations consistent; `run` on the record minted from the
+        /// redacted trace is the consistency check (replay must reproduce the redacted result).
+        /// Repeatable.
+        #[arg(long = "redact")]
+        redact: Vec<String>,
         /// Replay a recorded effect trace (a trace artifact from --trace-out, or a legacy bare
         /// JSON array): effectful builtins return their recorded results instead of performing
         /// real I/O — deterministic re-execution (P5).
@@ -983,12 +994,12 @@ fn main() -> ExitCode {
         Commands::CheckProperties { record, body, generate, cases } => {
             (cmd_check_properties(&record, body.as_ref(), generate.then_some(cases)), true)
         }
-        Commands::Eval { body, args, grants, secrets, oauth, replay, trace_out, records } => {
-            match parse_secrets(&secrets).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
-                Ok((s, o)) => {
+        Commands::Eval { body, args, grants, secrets, oauth, redact, replay, trace_out, records } => {
+            match parse_secrets(&secrets).and_then(|s| Ok((s, parse_oauth(&oauth)?, parse_redactions(&redact)?))) {
+                Ok((s, o, r)) => {
                     nl_validator::set_effect_secrets(s);
                     nl_validator::set_effect_oauth(o);
-                    (cmd_eval(&body, &args, &grants, replay.as_ref(), trace_out.as_ref(), records.as_ref()), false)
+                    (cmd_eval(&body, &args, &grants, &r, replay.as_ref(), trace_out.as_ref(), records.as_ref()), false)
                 }
                 Err(e) => (Err(e), false),
             }
@@ -1355,6 +1366,10 @@ fn cmd_check_plan(
     let mut probe_confirmed_all = false;
     if !probes.is_empty() && !matches!(report.outcome, nl_validator::PlanOutcome::Rejected(_)) {
         let parsed = parse_secrets(secrets)?;
+        // A probe may be a COMPOSED record (a finder applied by fn_ref): link it through the
+        // same records view the plan was checked against, so composition evaluates exactly as
+        // `run --records` / `--node` would.
+        nl_validator::set_resolver(bodies.clone());
         let mut exec = |body: &serde_json::Value, args: &[serde_json::Value]| -> Result<i64> {
             nl_validator::set_effect_grants(grants.iter().cloned());
             nl_validator::set_effect_secrets(parsed.clone());
@@ -1366,7 +1381,9 @@ fn cmd_check_plan(
                 .and_then(|v| v.as_i64())
                 .ok_or_else(|| anyhow::anyhow!("probe did not return an int status: {result}"))
         };
-        let pr = nl_validator::probe_assumptions(&plan, &records, &bodies, &probes, &mut exec)?;
+        let pr = nl_validator::probe_assumptions(&plan, &records, &bodies, &probes, &mut exec);
+        nl_validator::clear_resolver();
+        let pr = pr?;
         for l in &pr.lines {
             println!("{l}");
         }
@@ -2625,10 +2642,46 @@ fn cmd_orchestrate_verified(
     }
 }
 
+/// Parse repeated `--redact VALUE=PLACEHOLDER` flags (the value may not be empty; the placeholder
+/// may — an empty placeholder deletes the value, which is rarely what a consistent record wants,
+/// so it is allowed but not encouraged).
+fn parse_redactions(raw: &[String]) -> Result<Vec<(String, String)>> {
+    raw.iter()
+        .map(|s| {
+            let (value, placeholder) = s
+                .split_once('=')
+                .ok_or_else(|| anyhow!("--redact expects VALUE=PLACEHOLDER, got `{s}`"))?;
+            if value.is_empty() {
+                return Err(anyhow!("--redact expects a non-empty VALUE, got `{s}`"));
+            }
+            Ok((value.to_string(), placeholder.to_string()))
+        })
+        .collect()
+}
+
+/// Apply the redaction rules to every string leaf of a JSON value, in place. Rules apply in the
+/// order given; a placeholder that itself contains a later rule's value is redacted again (so
+/// order the rules from the most specific value to the least).
+fn redact_json(v: &mut serde_json::Value, rules: &[(String, String)]) {
+    match v {
+        serde_json::Value::String(s) => {
+            for (value, placeholder) in rules {
+                if s.contains(value.as_str()) {
+                    *s = s.replace(value.as_str(), placeholder);
+                }
+            }
+        }
+        serde_json::Value::Array(xs) => xs.iter_mut().for_each(|x| redact_json(x, rules)),
+        serde_json::Value::Object(m) => m.values_mut().for_each(|x| redact_json(x, rules)),
+        _ => {}
+    }
+}
+
 fn cmd_eval(
     body: &PathBuf,
     args: &[PathBuf],
     grants: &[String],
+    redactions: &[(String, String)],
     replay: Option<&PathBuf>,
     trace_out: Option<&PathBuf>,
     records: Option<&PathBuf>,
@@ -2654,10 +2707,18 @@ fn cmd_eval(
         nl_validator::set_effect_replay(arr.clone());
     }
     let result = nl_validator::eval_body(&body, &argv);
-    let trace = nl_validator::take_effect_trace();
+    let mut trace = nl_validator::take_effect_trace();
     nl_validator::clear_effects();
     nl_validator::clear_resolver();
-    let result = result?;
+    let mut result = result?;
+    if !redactions.is_empty() {
+        // Redaction happens AFTER the live effects and BEFORE anything is recorded or printed:
+        // the service saw the real values, the observation never carries them. Applied to the
+        // trace (details + results) and to the result alike, so a record minted from the pair
+        // stays replay-consistent whenever the body treats the redacted value opaquely.
+        redact_json(&mut result, redactions);
+        trace.iter_mut().for_each(|ev| redact_json(ev, redactions));
+    }
     println!("{}", serde_json::to_string_pretty(&result)?);
     if let Some(out) = trace_out {
         // Written as a first-class trace ARTIFACT — self-describing (principle 1), self-addressing
@@ -2928,5 +2989,41 @@ mod arity_tests {
         assert_eq!(type_arity(r#"{"kind":"builtin","name":"int"}"#), Some(0));
         // A v0.1 surface string / unparseable type is unknown — None (caller keeps it, never prunes).
         assert_eq!(type_arity("nat -> int"), None);
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::{parse_redactions, redact_json};
+
+    #[test]
+    fn redaction_rewrites_every_string_leaf_and_nothing_else() {
+        let rules = parse_redactions(&["776492485702=123456789012".to_string(), "AROA3JSUPBRDL7Y2JM3AZ=AROA00000000000000001".to_string()]).unwrap();
+        let mut trace = serde_json::json!({
+            "effect": "net.write",
+            "detail": { "body": "{\"Identifier\":\"arn:aws:iam::776492485702:role/x\"}", "status": 200 },
+            "result": { "kind": "record", "fields": [
+                { "name": "body", "value": { "kind": "string", "value": "{\"Arn\":\"arn:aws:iam::776492485702:role/x\",\"RoleId\":\"AROA3JSUPBRDL7Y2JM3AZ\"}" } },
+                { "name": "n", "value": { "kind": "int", "value": 776492485702_i64 } }
+            ] }
+        });
+        redact_json(&mut trace, &rules);
+        let text = trace.to_string();
+        assert!(!text.contains("776492485702:role"), "the account id is gone from every string leaf");
+        assert!(text.contains("arn:aws:iam::123456789012:role/x"));
+        assert!(text.contains("AROA00000000000000001") && !text.contains("AROA3JSUPBRDL7Y2JM3AZ"));
+        // Numbers are not strings: a numeric leaf is left alone (redaction is a text rule over
+        // observed text, never a reinterpretation of values).
+        assert_eq!(trace["result"]["fields"][1]["value"]["value"], 776492485702_i64);
+        assert_eq!(trace["detail"]["status"], 200);
+    }
+
+    #[test]
+    fn redaction_flags_must_name_a_value() {
+        assert!(parse_redactions(&["novalue".to_string()]).is_err());
+        assert!(parse_redactions(&["=placeholder".to_string()]).is_err());
+        // The placeholder may legitimately contain `=`; only the first one splits.
+        let r = parse_redactions(&["a=b=c".to_string()]).unwrap();
+        assert_eq!(r, vec![("a".to_string(), "b=c".to_string())]);
     }
 }

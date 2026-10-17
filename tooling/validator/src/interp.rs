@@ -1446,7 +1446,18 @@ fn run_builtin(name: &str, a: Vec<Val>) -> Result<Val> {
             let n = as_int(&a[0])?;
             effect_op("random", json!({ "bound": n.to_string() }), || Ok(Val::Int(effect_rand(n)?)))?
         }
-        "now" => effect_op("time", json!({}), || Ok(Val::Int(0)))?,
+        "now" => {
+            // time: the wall clock as Unix epoch MILLISECONDS — the reading a time-budgeted poll
+            // needs (Cloud Control's `RetryAfter` is an absolute instant; the wait is the
+            // difference). Recorded like every effect; a replay returns the recorded instant.
+            effect_op("time", json!({}), || {
+                let ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i128)
+                    .unwrap_or(0);
+                Ok(Val::Int(ms))
+            })?
+        }
         "sleep" => {
             // time: pause the LIVE evaluation for `ms` milliseconds — the pacing a bounded poll
             // over an asynchronous service needs (Cloud Control's request tokens, the AWS
@@ -2489,15 +2500,23 @@ mod tests {
         let unary = |op: &str| json!({ "kind": "lambda", "params": [{ "name": "x" }],
             "body": { "kind": "app", "fn": { "kind": "var", "name": op }, "args": [{ "kind": "var", "name": "x" }] } });
 
-        // now → time: ungranted rejected; granted returns a fixed reading + traces `time`.
+        // now → time: ungranted rejected; granted returns the epoch-millisecond clock + traces `time`.
         set_effect_grants(Vec::<String>::new());
         assert!(eval_body(&unary("now"), &[nat(1)]).is_err());
         clear_effects();
         set_effect_grants(vec!["time".to_string()]);
-        assert_eq!(eval_body(&unary("now"), &[nat(1)]).unwrap(), json!({ "kind": "int", "value": 0 }));
+        let reading = eval_body(&unary("now"), &[nat(1)]).unwrap();
+        assert_eq!(reading["kind"], "int");
+        let ms = reading["value"].as_i64().expect("epoch milliseconds as an int");
+        assert!(ms > 1_700_000_000_000, "now reads the real clock in milliseconds, got {ms}");
         let trace = take_effect_trace();
         clear_effects();
         assert_eq!(trace[0]["effect"], "time");
+        // Replay returns the RECORDED instant, not the clock.
+        set_effect_replay(vec![json!({ "effect": "time", "detail": {}, "result": { "kind": "int", "value": 12345 } })]);
+        assert_eq!(eval_body(&unary("now"), &[nat(1)]).unwrap(), json!({ "kind": "int", "value": 12345 }));
+        clear_effect_replay();
+        clear_effects();
 
         // panic → panic: gated, and aborts even when granted.
         set_effect_grants(Vec::<String>::new());
