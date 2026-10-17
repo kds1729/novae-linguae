@@ -215,7 +215,11 @@ at the floor suffices; a VARIABLE divisor counts when its own floor is ≥ 2), o
 `mod(_, p)` with floor ≥ 1 (the remainder is in `[0, p)`). **Composition by content address** is folded
 over a linked view (`--records`): a `fn_ref` callee whose OWN body provably terminates — re-derived,
 transitively, never read from its declaration — is one more terminating step rather than an opaque
-call (a cycle through addresses stays unresolved). Verdicts: **SOUND** (declared
+call (a cycle through addresses stays unresolved). A recursion on the COMPONENTS of a callee's tuple
+result (`ntt_rec` on the halves `ntt_split` returns) is well-founded when the callee's own body shows
+each component strictly shorter than its list input — a `tail^k` recursion, `k ≥ 2`, consing at most
+`k − 1` elements per component per step, so a component is at most `n − ⌊n/k⌋` long — and the guards
+in force establish `length ≥ k` (the FALSE arm of `null(tail^(k−1)(p))`). Verdicts: **SOUND** (declared
 `always`, verified), **VERIFIED** (provably always but declared weaker, so the declaration could be
 strengthened), or **UNVERIFIABLE** (declared `always`, not provable by this structural analysis). There is
 no refutation path — structural analysis cannot disprove termination, only fail to prove it.
@@ -243,8 +247,18 @@ when `m = O(n)`). A callee's RESULT counts as size-bounded when a **certified fa
 postcondition `result < p` / `result <= p` that `check-refinement` proves on the linked view (so
 `mod_pow`'s `0 ≤ result < m`, proved by numeric induction, lets its result feed the next callee), or a
 list result the output-size analysis bounds linearly in the input (a halving recursion consing O(1)
-per level — `digits` — is Θ(log n) ≤ Θ(n)). A component of a callee's TUPLE result carries no such
-fact and stays unbounded. Because a
+per level — `digits` — is Θ(log n) ≤ Θ(n)). A callee's TUPLE result is size-bounded when its
+components provably SHRINK (the shrinking-callee descent above: a self-call on such a component is a
+HALVING descent of the parameter the callee was applied to, so `ntt_rec` reads as
+`T(n) = 2T(n/2) + O(n)`) — and the names a `case` binds from a size-bounded scrutinee are size-bounded
+too. A function's OWN recursive result is size-bounded when its declared list result is at most linear
+in its input, which the output-size analysis establishes for a two-way halving recursion whose per-level
+material is O(1): the components a **preserving** callee returns (a `tail^k` recursion on its list
+parameters consing at most `k` elements per component per step — `ntt_butterfly`'s, each no longer than
+the list it was applied to) count as the recurrence's carried terms when each is used at most once and
+bound by a distinct recursive result, so `append lo hi` in `ntt_rec` is `S(n) = 2S(n/2) + O(1) = Θ(n)`.
+Only then does the butterfly applied to `self ev`/`self od` fold, and the whole NTT chain certifies
+`O(n log n)`. A `mod` by a literal is bounded whatever its dividend (`w·w mod P`). Because a
 declared `O(f)` is an *upper-bound* claim, the check compares the inferred sound bound `O(g)` to it: `g ≤ f`
 → **SOUND** (or **VERIFIED** when `g` is provably tighter, so the declaration could be strengthened); `g > f`
 or a **higher-order / opaque** body (`map`/`filter`/`fold`, applying a parameter or `fn_ref`) → **UNVERIFIABLE**;
@@ -363,6 +377,16 @@ quantifies over `String`, not `Int`); the tool asserts the **negation** of the l
   from ours on negatives (mapping them would be unsound); higher-order arguments, recursion, opaque
   callees). Reported honestly, never silently "proved" — the same boundary the generative checker
   draws as UNGENERATABLE.
+
+**Tuples and sums are SMT datatypes** (2026-10-17). A function whose result is a tuple (`ext_gcd`'s
+`(g, (x, y))`) or a sum (`mod_inverse`'s `Maybe int`) lowers against datatypes registered from the
+DECLARED types — the function's own signature (installed for the proof) and its callees' contracts —
+so tuple construction and destructuring patterns, variant construction and matching, and the
+`fst`/`snd` projections become constructors, accessors and testers; every certificate declares the
+datatypes it uses. A bare variant (`Just(e)`) takes the unique registered sum carrying its tag; an
+ambiguity refuses. This is what lets a contract be stated about a tuple result (`ext_gcd`'s Bézout
+identity, `fst(result) == a·fst(snd(result)) + b·snd(snd(result))`) and a checker record match a
+callee's `Maybe` result. Lists stay with the inductive backend.
 
 `prove` ranges a law over the function's **declared domain** (2026-10-17): a law variable the law
 feeds to a `nat`-typed parameter of `self` is asserted `≥ 0`, as the generative checker already

@@ -109,6 +109,8 @@ pub struct LinkedView<'a> {
     cx: std::cell::RefCell<HashMap<String, Option<crate::Class>>>,
     bounds: std::cell::RefCell<HashMap<String, Option<Vec<usize>>>>,
     contracts: std::cell::RefCell<HashMap<String, Option<crate::CalleeContract>>>,
+    shrink: std::cell::RefCell<HashMap<String, Option<u32>>>,
+    preserve: std::cell::RefCell<HashMap<String, Option<Vec<usize>>>>,
     in_progress: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
@@ -122,8 +124,30 @@ impl<'a> LinkedView<'a> {
             cx: Default::default(),
             bounds: Default::default(),
             contracts: Default::default(),
+            shrink: Default::default(),
+            preserve: Default::default(),
             in_progress: Default::default(),
         }
+    }
+
+    /// `complexity::component_preserve` of the callee's body (memoized).
+    pub fn preserve(&self, target: &str) -> Option<Vec<usize>> {
+        if let Some(v) = self.preserve.borrow().get(target) {
+            return v.clone();
+        }
+        let out = self.callee(target).and_then(|(_, body)| crate::complexity::component_preserve(body));
+        self.preserve.borrow_mut().insert(target.to_string(), out.clone());
+        out
+    }
+
+    /// `complexity::component_shrink` of the callee's body (memoized).
+    pub fn shrink(&self, target: &str) -> Option<u32> {
+        if let Some(v) = self.shrink.borrow().get(target) {
+            return *v;
+        }
+        let out = self.callee(target).and_then(|(_, body)| crate::complexity::component_shrink(body));
+        self.shrink.borrow_mut().insert(target.to_string(), out);
+        out
     }
 
     /// The callee's parameter positions whose values bound its RESULT, from certified facts only: a
@@ -149,7 +173,7 @@ impl<'a> LinkedView<'a> {
             // A list result at most linear in the input bounds itself by the whole input.
             if let Some(rt) = unwrap_result_type(sig_type) {
                 if crate::complexity::is_list_type(&rt) {
-                    return match analyze_output_size(&rt, body) {
+                    return match crate::complexity::analyze_output_size_linked(&rt, body, Some(self)) {
                         crate::OutputSize::Const => Some(vec![]),
                         crate::OutputSize::Linear => Some((0..params.len()).collect()),
                         _ => None,
@@ -211,9 +235,8 @@ impl<'a> LinkedView<'a> {
             }
         };
         let nat = crate::terminate::nat_param_positions(rec);
-        let lookup = |t: &str| self.terminates(t);
         let out = matches!(
-            crate::terminate::analyze_termination_linked(body, &nat, Some(&lookup)),
+            crate::terminate::analyze_termination_linked(body, &nat, Some(self)),
             crate::terminate::TerminationOutcome::Always
         );
         self.in_progress.borrow_mut().remove(target);
@@ -231,10 +254,13 @@ impl<'a> LinkedView<'a> {
             return None;
         }
         let out = match self.callee(target) {
-            Some((_, body)) => match crate::complexity::analyze_complexity_linked(body, Some(self)) {
-                crate::complexity::ComplexityOutcome::Bound(c) => Some(c),
-                _ => None,
-            },
+            Some((rec, body)) => {
+                let rt = rec.pointer("/signature/type").and_then(unwrap_result_type);
+                match crate::complexity::analyze_complexity_typed(body, rt.as_ref(), Some(self)) {
+                    crate::complexity::ComplexityOutcome::Bound(c) => Some(c),
+                    _ => None,
+                }
+            }
             None => None,
         };
         self.in_progress.borrow_mut().remove(&key);
@@ -265,14 +291,7 @@ impl<'a> LinkedView<'a> {
                 .unwrap_or_default();
             let sig_type = rec.pointer("/signature/type")?;
             let fn_ty = if sig_type.get("kind").and_then(|k| k.as_str()) == Some("forall") { sig_type.get("body")? } else { sig_type };
-            let sort_of_type = |t: &J| -> Option<crate::Sort> {
-                match crate::builtin_type_name(t) {
-                    Some("int") | Some("nat") => Some(crate::Sort::Int),
-                    Some("bool") => Some(crate::Sort::Bool),
-                    Some("string") => Some(crate::Sort::Str),
-                    _ => None,
-                }
-            };
+            let sort_of_type = crate::prove::sort_of_type;
             let param_tys = fn_ty.get("params").and_then(|p| p.as_array())?;
             if param_tys.len() != params.len() {
                 return None;
@@ -291,9 +310,11 @@ impl<'a> LinkedView<'a> {
                 .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("post"))
                 .filter_map(|r| r.get("expr").cloned())
                 .collect();
-            // Prove the callee's contract — posts AND laws — with ITS callees' contracts installed.
+            // Prove the callee's contract — posts AND laws — with ITS callees' contracts installed and
+            // its own declared type in force (tuple/sum sorts come from the signature).
             let deps = self.contracts_for(body);
             let prev = crate::set_callee_contracts(deps);
+            let prev_ty = crate::prove::set_self_type(Some(sig_type.clone()));
             let reports = check_refinements(sig_type, &refinements, body, &self.solver);
             let laws: Vec<J> = rec
                 .get("properties")
@@ -307,6 +328,7 @@ impl<'a> LinkedView<'a> {
                         || matches!(crate::prove_by_numeric_induction(law, Some(body), &nat_positions, &self.solver).0, crate::ProofOutcome::Proved)
                 })
                 .collect();
+            crate::prove::set_self_type(prev_ty);
             crate::set_callee_contracts(prev);
             let sound = |label: &str| reports.iter().any(|r| r.label == label && matches!(r.outcome, RefinementOutcome::Sound));
             let mut posts: Vec<J> = declared_posts
@@ -366,10 +388,54 @@ impl crate::complexity::LinkedCallees for LinkedView<'_> {
     fn result_bounded_by(&self, target: &str) -> Option<Vec<usize>> {
         LinkedView::result_bounded_by(self, target)
     }
+    fn components_shrink_by(&self, target: &str) -> Option<u32> {
+        self.shrink(target)
+    }
+    fn components_preserved_by(&self, target: &str) -> Option<Vec<usize>> {
+        self.preserve(target)
+    }
 }
 
-/// The parameters an upper-bound postcondition names: `result < p`, `result <= p`, or a conjunction
-/// containing such (the reserved `result` on the left, a variable on the right).
+impl crate::terminate::LinkedTermination for LinkedView<'_> {
+    fn terminates(&self, target: &str) -> Option<bool> {
+        LinkedView::terminates(self, target)
+    }
+    fn components_shrink_by(&self, target: &str) -> Option<u32> {
+        self.shrink(target)
+    }
+}
+
+/// The variables of a predicate term whose VALUE is linear in them: variables, literals, `add`/`sub`/
+/// `min`/`max`/`div`/`mod` over such, `mul` with a literal operand. `None` for anything else (a product
+/// of two variables, an application).
+fn linear_vars(node: &J) -> Option<Vec<String>> {
+    match node.get("kind").and_then(|k| k.as_str()) {
+        Some("var") => node.get("name").and_then(|n| n.as_str()).map(|n| vec![n.to_string()]),
+        Some("lit") => Some(vec![]),
+        Some("app") => {
+            let op = node.get("op").and_then(|o| o.as_str())?;
+            let args = node.get("args").and_then(|a| a.as_array())?;
+            let lit = |n: &J| n.get("kind").and_then(|k| k.as_str()) == Some("lit");
+            let ok = match op {
+                "add" | "sub" | "min" | "max" | "div" | "mod" | "neg" | "abs" => true,
+                "mul" => args.len() == 2 && (lit(&args[0]) || lit(&args[1])),
+                _ => false,
+            };
+            if !ok {
+                return None;
+            }
+            let mut out = Vec::new();
+            for a in args {
+                out.extend(linear_vars(a)?);
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
+/// The parameters an upper-bound postcondition names: `result < p`, `result <= p` (or a size-linear
+/// expression over parameters), or a conjunction containing such (the reserved `result` on the left).
 fn upper_bound_params(post: &J) -> Vec<String> {
     let mut out = Vec::new();
     fn go(node: &J, out: &mut Vec<String>) {
@@ -381,11 +447,9 @@ fn upper_bound_params(post: &J) -> Vec<String> {
                 let is_result = args[0].get("kind").and_then(|k| k.as_str()) == Some("var")
                     && args[0].get("name").and_then(|n| n.as_str()) == Some("result");
                 if is_result {
-                    if let Some(p) = (args[1].get("kind").and_then(|k| k.as_str()) == Some("var"))
-                        .then(|| args[1].get("name").and_then(|n| n.as_str()))
-                        .flatten()
-                    {
-                        out.push(p.to_string());
+                    // `result <= p`, or `result <= 2 * n + 1`: any size-linear expression over variables.
+                    if let Some(vs) = linear_vars(&args[1]) {
+                        out.extend(vs);
                     }
                 }
             }
@@ -420,7 +484,6 @@ pub fn certify_record_linked(
     solver: &str,
 ) -> Certification {
     let view = bodies.map(|b| LinkedView::new(records, b, solver));
-    let term_lookup = |t: &str| view.as_ref().and_then(|v| v.terminates(t));
     let sig = record.pointer("/signature");
     let mut checks: Vec<CertCheck> = Vec::new();
 
@@ -509,7 +572,7 @@ pub fn certify_record_linked(
 
     // 4. Termination.
     let declared_term = sig.and_then(|s| s.get("terminates")).and_then(|t| t.as_str()).unwrap_or("unknown");
-    let term_cb: Option<crate::terminate::CalleeTerminates<'_>> = view.as_ref().map(|_| &term_lookup as crate::terminate::CalleeTerminates<'_>);
+    let term_cb: Option<crate::terminate::CalleeTerminates<'_>> = view.as_ref().map(|v| v as crate::terminate::CalleeTerminates<'_>);
     match crate::terminate::analyze_termination_linked(body, &crate::terminate::nat_param_positions(record), term_cb) {
         TerminationOutcome::Always if declared_term == "always" => {
             checks.push(CertCheck::new("termination", "SOUND", "provably always-terminates", false))
@@ -527,7 +590,8 @@ pub fn certify_record_linked(
 
     // 5. Complexity + structured cost.
     let cx_cb: Option<crate::complexity::CalleeComplexity<'_>> = view.as_ref().map(|v| v as crate::complexity::CalleeComplexity<'_>);
-    let complexity = crate::complexity::analyze_complexity_linked(body, cx_cb);
+    let result_ty = record.pointer("/signature/type").and_then(unwrap_result_type);
+    let complexity = crate::complexity::analyze_complexity_typed(body, result_ty.as_ref(), cx_cb);
     match sig.and_then(|s| s.get("complexity")).and_then(|c| c.as_str()) {
         Some(d) => {
             let (v, detail) = time_verdict_parts(d, &complexity);

@@ -44,7 +44,7 @@
 //! approximated in that one `n`.
 
 use serde_json::Value as J;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A complexity class `O(n^deg · (log n)^logs)`, or `exp` for any exponential (`O(2ⁿ)` and above). Covers the
 /// schema's `time` classes and the shapes the recurrence analysis produces.
@@ -312,6 +312,239 @@ pub trait LinkedCallees {
     /// The callee's parameter positions whose VALUES bound its result (empty = a constant bound), or
     /// `None` when nothing certified bounds the result.
     fn result_bounded_by(&self, target: &str) -> Option<Vec<usize>>;
+    /// For a callee returning a TUPLE OF LISTS built by a `tail^k` recursion (`ntt_split`): the `k` by
+    /// which every component is shorter than the input (each component ≤ n − ⌊n/k⌋, so strictly shorter
+    /// once n ≥ k) — re-derived from the callee's body (`component_shrink`). `None` otherwise.
+    fn components_shrink_by(&self, target: &str) -> Option<u32>;
+    /// For a callee returning a TUPLE OF LISTS by a `tail^k` recursion on its list parameters
+    /// (`ntt_butterfly`): the parameter positions each component is NO LONGER than (plus a constant) —
+    /// re-derived from the callee's body (`component_preserve`). `None` otherwise.
+    fn components_preserved_by(&self, target: &str) -> Option<Vec<usize>>;
+}
+
+/// Does `body` return a tuple of lists each at most as long as (a constant plus) EVERY list parameter
+/// it descends? Recognized shape: every self-call applies `tail^k_i` to parameter `i` at its own
+/// position (the preserved positions, `k_i ≥ 1`); the recursive result is destructured by a tuple
+/// pattern; every tuple component the body returns is a `cons` chain ending in `nil` (constant
+/// material, a base arm) or in a pattern-bound component with at most `min k_i` conses per step. Then
+/// component ≤ k·⌊n_i/k⌋ + c ≤ n_i + c for each preserved `i`. Returns those positions.
+pub fn component_preserve(body: &J) -> Option<Vec<usize>> {
+    let params = lambda_params(body)?;
+    let inner = body.get("body")?;
+    let mut calls: Vec<Vec<J>> = Vec::new();
+    collect_self_call_args(inner, &mut calls);
+    if calls.is_empty() {
+        return None;
+    }
+    let mut positions = Vec::new();
+    let mut k_min: Option<u32> = None;
+    for (i, p) in params.iter().enumerate() {
+        let mut k_i: Option<u32> = None;
+        let every = calls.iter().all(|args| match args.get(i).and_then(tail_depth) {
+            Some((q, d)) if q == *p => match k_i {
+                None => {
+                    k_i = Some(d);
+                    true
+                }
+                Some(e) => e == d,
+            },
+            _ => false,
+        });
+        if let (true, Some(d)) = (every, k_i) {
+            positions.push(i);
+            k_min = Some(k_min.map_or(d, |m: u32| m.min(d)));
+        }
+    }
+    let k = k_min?;
+    fn ok(node: &J, k: u32, rec_vars: &[String]) -> bool {
+        match node.get("kind").and_then(|k| k.as_str()) {
+            Some("tuple") => {
+                let Some(elems) = node.get("elems").and_then(|e| e.as_array()) else { return false };
+                elems.iter().all(|e| match cons_chain(e) {
+                    Some((_, None)) => true, // constant material (a base arm)
+                    Some((count, Some(v))) => rec_vars.iter().any(|r| *r == v) && count <= k,
+                    None => false,
+                })
+            }
+            Some("case") => {
+                let Some(scrut) = node.get("scrutinee") else { return false };
+                let Some(arms) = node.get("arms").and_then(|a| a.as_array()) else { return false };
+                let is_self_scrut = self_call_args(scrut).is_some();
+                arms.iter().all(|arm| {
+                    let Some(body) = arm.get("body") else { return false };
+                    let mut bound: Vec<String> = rec_vars.to_vec();
+                    if is_self_scrut {
+                        if arm.pointer("/pattern/kind").and_then(|x| x.as_str()) != Some("tuple") {
+                            return false;
+                        }
+                        collect_binds(arm.get("pattern").unwrap(), &mut bound);
+                    }
+                    ok(body, k, &bound)
+                })
+            }
+            Some("let") => node.get("body").is_some_and(|b| ok(b, k, rec_vars)),
+            _ => false,
+        }
+    }
+    ok(inner, k, &[]).then_some(positions)
+}
+
+/// How many times the variable `name` occurs free-ish in `node` (patterns skipped; shadowing ignored —
+/// the caller treats a `let` of the same name as unbounding it).
+fn count_uses(node: &J, name: &str) -> u32 {
+    match node {
+        J::Object(m) => {
+            if m.get("kind").and_then(|k| k.as_str()) == Some("var") {
+                return (m.get("name").and_then(|n| n.as_str()) == Some(name)) as u32;
+            }
+            m.iter().filter(|(k, _)| *k != "pattern").map(|(_, v)| count_uses(v, name)).sum()
+        }
+        J::Array(xs) => xs.iter().map(|v| count_uses(v, name)).sum(),
+        _ => 0,
+    }
+}
+
+/// Does `body` — a lambda over a list parameter — return a tuple of lists each STRICTLY shorter than
+/// the input (for inputs of length ≥ k)? Recognized shape, conservatively: every self-call descends the
+/// same parameter by `tail^k`, `k ≥ 2`; the recursive result is destructured by a tuple pattern; every
+/// tuple component the body returns is a `cons` chain ending in `nil` or a pattern-bound component
+/// variable, with at most `k − 1` conses per step and, in a base arm guarded `length ≤ j` (the TRUE arm
+/// of `null(tail^j(p))`), at most `j` conses. Then each component obeys S(n) ≤ (n mod k) +
+/// (k − 1)·⌊n/k⌋ = n − ⌊n/k⌋ < n for n ≥ k. Returns `k`.
+pub fn component_shrink(body: &J) -> Option<u32> {
+    let params = lambda_params(body)?;
+    let inner = body.get("body")?;
+    // Every self-call: tail^k of one parameter, the same k ≥ 2.
+    let mut calls: Vec<Vec<J>> = Vec::new();
+    collect_self_call_args(inner, &mut calls);
+    if calls.is_empty() {
+        return None;
+    }
+    let mut k: Option<(String, u32)> = None;
+    for args in &calls {
+        let desc = args.iter().find_map(|a| tail_depth(a));
+        match (desc, &k) {
+            (Some((p, d)), None) if d >= 2 && params.contains(&p) => k = Some((p, d)),
+            (Some((p, d)), Some((q, e))) if p == *q && d == *e => {}
+            _ => return None,
+        }
+    }
+    let (p, k) = k?;
+    // Walk the body: base arms carry a length bound from `null(tail^j(p))` TRUE arms; recursive arms carry
+    // the pattern variables bound from the self-call's tuple result.
+    fn ok(node: &J, p: &str, k: u32, max_len: Option<u32>, rec_vars: &[String]) -> bool {
+        match node.get("kind").and_then(|k| k.as_str()) {
+            Some("tuple") => {
+                let Some(elems) = node.get("elems").and_then(|e| e.as_array()) else { return false };
+                elems.iter().all(|e| match cons_chain(e) {
+                    Some((count, None)) => max_len.is_some_and(|m| count <= m) || (count == 0),
+                    Some((count, Some(v))) => rec_vars.iter().any(|r| *r == v) && count <= k - 1,
+                    None => false,
+                })
+            }
+            Some("case") => {
+                let Some(scrut) = node.get("scrutinee") else { return false };
+                let Some(arms) = node.get("arms").and_then(|a| a.as_array()) else { return false };
+                // `null(tail^j(p))`: the true arm knows length ≤ j.
+                let null_bound: Option<u32> = match app_spine(scrut) {
+                    Some((op, args)) if op == "null" && args.len() == 1 => match tail_depth(&args[0]) {
+                        Some((q, j)) if q == p => Some(j),
+                        None if args[0].get("name").and_then(|n| n.as_str()) == Some(p) => Some(0),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let is_self_scrut = self_call_args(scrut).is_some();
+                arms.iter().all(|arm| {
+                    let Some(body) = arm.get("body") else { return false };
+                    let pat_true = arm.pointer("/pattern/value/value").and_then(|b| b.as_bool());
+                    let mut bound: Vec<String> = rec_vars.to_vec();
+                    if is_self_scrut {
+                        if arm.pointer("/pattern/kind").and_then(|x| x.as_str()) != Some("tuple") {
+                            return false;
+                        }
+                        collect_binds(arm.get("pattern").unwrap(), &mut bound);
+                    }
+                    let m = match (null_bound, pat_true) {
+                        (Some(j), Some(true)) => Some(j),
+                        _ => max_len,
+                    };
+                    ok(body, p, k, m, &bound)
+                })
+            }
+            Some("let") => node.get("body").is_some_and(|b| ok(b, p, k, max_len, rec_vars)),
+            _ => false,
+        }
+    }
+    ok(inner, &p, k, None, &[]).then_some(k)
+}
+
+/// `cons(_, cons(_, … tail))`: the number of conses and the tail variable (`None` for `nil`).
+fn cons_chain(node: &J) -> Option<(u32, Option<String>)> {
+    if node.get("kind").and_then(|k| k.as_str()) == Some("var") {
+        let n = node.get("name").and_then(|n| n.as_str())?;
+        return Some((0, if n == "nil" { None } else { Some(n.to_string()) }));
+    }
+    match app_spine(node) {
+        Some((op, args)) if op == "cons" && args.len() == 2 => {
+            let (c, t) = cons_chain(&args[1])?;
+            Some((c + 1, t))
+        }
+        _ => None,
+    }
+}
+
+fn collect_binds(pat: &J, out: &mut Vec<String>) {
+    match pat {
+        J::Object(m) => {
+            if m.get("kind").and_then(|k| k.as_str()) == Some("bind") {
+                if let Some(n) = m.get("name").and_then(|n| n.as_str()) {
+                    out.push(n.to_string());
+                }
+            }
+            m.values().for_each(|v| collect_binds(v, out));
+        }
+        J::Array(xs) => xs.iter().for_each(|v| collect_binds(v, out)),
+        _ => {}
+    }
+}
+
+fn collect_self_call_args(node: &J, out: &mut Vec<Vec<J>>) {
+    if let Some(args) = self_call_args(node) {
+        out.push(args.clone());
+        for a in &args {
+            collect_self_call_args(a, out);
+        }
+        return;
+    }
+    match node {
+        J::Object(m) => m.iter().filter(|(k, _)| *k != "pattern").for_each(|(_, v)| collect_self_call_args(v, out)),
+        J::Array(xs) => xs.iter().for_each(|v| collect_self_call_args(v, out)),
+        _ => {}
+    }
+}
+
+/// `tail^k(var p)` with `k ≥ 1`: the parameter and the depth.
+fn tail_depth(arg: &J) -> Option<(String, u32)> {
+    let mut node = arg;
+    let mut k = 0;
+    while head_op(node) == Some("tail") {
+        node = node.get("args").and_then(|a| a.as_array()).and_then(|a| a.first())?;
+        k += 1;
+    }
+    if k >= 1 && node.get("kind").and_then(|k| k.as_str()) == Some("var") {
+        return node.get("name").and_then(|n| n.as_str()).map(|n| (n.to_string(), k));
+    }
+    None
+}
+
+/// A self-call argument that is a COMPONENT of a shrinking callee's result (bound by the tuple pattern
+/// of `case callee(p) of (ev, od) => …`): a halving descent of `p`.
+fn component_descent(arg: &J, comps: &BTreeMap<String, String>) -> Option<(String, Descent)> {
+    if arg.get("kind").and_then(|k| k.as_str()) != Some("var") {
+        return None;
+    }
+    comps.get(arg.get("name")?.as_str()?).map(|p| (p.clone(), Descent::Halving))
 }
 
 pub type CalleeComplexity<'a> = &'a dyn LinkedCallees;
@@ -330,21 +563,33 @@ const SIZE_BOUNDED_OPS: &[&str] = &[
 /// literal, a tuple of such, a size-bounded op over such, or a `fn_ref` callee's result that a CERTIFIED
 /// fact bounds by size-bounded arguments? A recursive result or a pattern-bound name is not (nothing
 /// bounds `self(…)`'s magnitude, and a tuple component came from a callee).
-fn size_bounded(arg: &J, bound: &BTreeSet<String>, callee: Option<CalleeComplexity<'_>>) -> bool {
+/// Is `arg` size-bounded by the parameters (`bound`)? Inside a function whose OWN list result is at most linear in its input
+/// (`self_linear`): then a recursive result is size-bounded too (`ntt_rec` feeds its halves' transforms
+/// to the butterfly).
+fn size_bounded_in(arg: &J, bound: &BTreeSet<String>, callee: Option<CalleeComplexity<'_>>, self_linear: bool) -> bool {
+    let size_bounded = |a: &J, b: &BTreeSet<String>, c: Option<CalleeComplexity<'_>>| size_bounded_in(a, b, c, self_linear);
     match arg.get("kind").and_then(|k| k.as_str()) {
         Some("var") => arg.get("name").and_then(|n| n.as_str()).is_some_and(|n| bound.contains(n) || n == "nil"),
         Some("lit") => true,
         Some("tuple") => arg.get("elems").and_then(|e| e.as_array()).is_some_and(|es| es.iter().all(|e| size_bounded(e, bound, callee))),
-        Some("app") if self_call_args(arg).is_some() => false,
+        Some("app") if self_call_args(arg).is_some() => {
+            self_linear && self_call_args(arg).is_some_and(|sargs| sargs.iter().all(|a| size_bounded(a, bound, callee)))
+        }
         Some("app") => {
             if let Some((target, cargs)) = crate::terminate::fn_ref_spine(arg) {
                 // A proved `result < p` (or a list result at most linear in its input) makes the callee's
-                // result as bounded as the arguments that bound it.
+                // result as bounded as the arguments that bound it; a SHRINKING callee's tuple (each
+                // component strictly shorter than its list input) is bounded by all of its arguments.
+                if callee.and_then(|c| c.components_shrink_by(&target)).is_some() {
+                    return cargs.iter().all(|a| size_bounded(a, bound, callee));
+                }
                 return callee
                     .and_then(|c| c.result_bounded_by(&target))
                     .is_some_and(|idxs| idxs.iter().all(|i| cargs.get(*i).is_some_and(|a| size_bounded(a, bound, callee))));
             }
             match app_spine(arg) {
+                // `mod(x, k)` with a literal modulus is bounded by the constant whatever `x` is (`w2 = w·w mod P`).
+                Some((op, args)) if op == "mod" && args.len() == 2 && args[1].get("kind").and_then(|k| k.as_str()) == Some("lit") => true,
                 Some((op, args)) if op == "mul" && args.len() == 2 => {
                     let lit = |n: &J| n.get("kind").and_then(|k| k.as_str()) == Some("lit");
                     (lit(&args[0]) || lit(&args[1])) && args.iter().all(|a| size_bounded(a, bound, callee))
@@ -360,7 +605,9 @@ fn size_bounded(arg: &J, bound: &BTreeSet<String>, callee: Option<CalleeComplexi
 /// The first opaque (higher-order / unrecognized-application) reason in `node`, if any. A `self`-call,
 /// a recognized first-order builtin application, and — over a linked view — a `fn_ref` callee with an
 /// inferred class applied to size-bounded arguments are fine; anything else applied is opaque.
-fn find_opaque(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeSet<String>) -> Option<String> {
+fn find_opaque_in(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeSet<String>, self_linear: bool) -> Option<String> {
+    let find_opaque = |n: &J, c: Option<CalleeComplexity<'_>>, b: &BTreeSet<String>| find_opaque_in(n, c, b, self_linear);
+    let size_bounded = |a: &J, b: &BTreeSet<String>, c: Option<CalleeComplexity<'_>>| size_bounded_in(a, b, c, self_linear);
     if self_call_args(node).is_some() {
         // still descend into the call's arguments below
     } else if let Some((target, cargs)) = crate::terminate::fn_ref_spine(node) {
@@ -408,6 +655,34 @@ fn find_opaque(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeSet<
         }
         return node.get("body").and_then(|b| find_opaque(b, callee, &inner));
     }
+    if node.get("kind").and_then(|k| k.as_str()) == Some("case") {
+        // Destructuring a size-bounded value yields size-bounded parts: the arms' pattern names join
+        // the bound set (`case split(xs) of (ev, od) => …` over a shrinking callee).
+        if let Some(s) = node.get("scrutinee") {
+            if let Some(why) = find_opaque(s, callee, bound) {
+                return Some(why);
+            }
+            let scrut_bounded = size_bounded(s, bound, callee);
+            for arm in node.get("arms").and_then(|a| a.as_array()).cloned().unwrap_or_default() {
+                let mut inner = bound.clone();
+                if let Some(pat) = arm.get("pattern") {
+                    let mut names = Vec::new();
+                    collect_binds(pat, &mut names);
+                    for n in names {
+                        if scrut_bounded {
+                            inner.insert(n);
+                        } else {
+                            inner.remove(&n);
+                        }
+                    }
+                }
+                if let Some(why) = arm.get("body").and_then(|b| find_opaque(b, callee, &inner)) {
+                    return Some(why);
+                }
+            }
+            return None;
+        }
+    }
     match node {
         J::Object(m) => {
             for (k, v) in m {
@@ -427,22 +702,44 @@ fn find_opaque(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeSet<
 
 /// Collect every `self`-call's descent (of its descending argument). A `None` entry marks a self-call whose
 /// arguments contain no recognized descent — the recursion is not provably well-founded.
-fn collect_self_descents(node: &J, facts: &[crate::terminate::Guard], out: &mut Vec<Vec<(String, Descent)>>) {
+#[allow(clippy::too_many_arguments)]
+fn collect_self_descents(
+    node: &J,
+    facts: &[crate::terminate::Guard],
+    comps: &BTreeMap<String, String>,
+    callee: Option<CalleeComplexity<'_>>,
+    params: &[String],
+    out: &mut Vec<Vec<(String, Descent)>>,
+) {
     if let Some(sargs) = self_call_args(node) {
         // EVERY argument that strictly decreases a parameter (append-style spectators don't); the caller
         // intersects across self-calls to find the one measure — a call may shrink two parameters
         // (`pad_to`: the list AND the count) while another shrinks only the count. A `div(p, q)` by a
-        // VARIABLE divisor halves only under a guard that floors `q` at 2 — the facts in force decide.
-        out.push(sargs.iter().filter_map(|a| arg_descent(a).or_else(|| variable_divisor_descent(a, facts))).collect());
+        // VARIABLE divisor halves only under a guard that floors `q` at 2 — the facts in force decide. A
+        // component of a shrinking callee's result (`ntt_split`'s halves) is a halving descent of the
+        // parameter the callee was applied to.
+        out.push(
+            sargs
+                .iter()
+                .filter_map(|a| arg_descent(a).or_else(|| variable_divisor_descent(a, facts)).or_else(|| component_descent(a, comps)))
+                .collect(),
+        );
         for a in &sargs {
-            collect_self_descents(a, facts, out);
+            collect_self_descents(a, facts, comps, callee, params, out);
         }
         return;
     }
     if node.get("kind").and_then(|k| k.as_str()) == Some("case") {
         if let Some(s) = node.get("scrutinee") {
-            collect_self_descents(s, facts, out);
+            collect_self_descents(s, facts, comps, callee, params, out);
             let (tf, ff) = crate::terminate::arm_facts(s);
+            // `case callee(p) of (a, b) => …` over a shrinking callee: a and b are components of p.
+            let shrink_of: Option<String> = crate::terminate::fn_ref_spine(s).and_then(|(target, cargs)| {
+                let q = cargs.first()?.get("name")?.as_str()?.to_string();
+                (cargs.first()?.get("kind")?.as_str()? == "var" && params.contains(&q)
+                    && callee.and_then(|c| c.components_shrink_by(&target)).is_some_and(|k| k >= 2))
+                    .then_some(q)
+            });
             for arm in node.get("arms").and_then(|a| a.as_array()).cloned().unwrap_or_default() {
                 let pat = arm.pointer("/pattern/value/value").and_then(|v| v.as_bool());
                 let mut inner: Vec<crate::terminate::Guard> = facts.to_vec();
@@ -451,8 +748,18 @@ fn collect_self_descents(node: &J, facts: &[crate::terminate::Guard], out: &mut 
                     Some(false) => inner.extend(ff.iter().cloned()),
                     None => {}
                 }
+                let mut comps2 = comps.clone();
+                if let (Some(q), Some(pat)) = (&shrink_of, arm.get("pattern")) {
+                    if pat.get("kind").and_then(|k| k.as_str()) == Some("tuple") {
+                        let mut names = Vec::new();
+                        collect_binds(pat, &mut names);
+                        for n in names {
+                            comps2.insert(n, q.clone());
+                        }
+                    }
+                }
                 if let Some(b) = arm.get("body") {
-                    collect_self_descents(b, &inner, out);
+                    collect_self_descents(b, &inner, &comps2, callee, params, out);
                 }
             }
             return;
@@ -464,10 +771,10 @@ fn collect_self_descents(node: &J, facts: &[crate::terminate::Guard], out: &mut 
                 if k == "pattern" {
                     continue;
                 }
-                collect_self_descents(v, facts, out);
+                collect_self_descents(v, facts, comps, callee, params, out);
             }
         }
-        J::Array(items) => items.iter().for_each(|v| collect_self_descents(v, facts, out)),
+        J::Array(items) => items.iter().for_each(|v| collect_self_descents(v, facts, comps, callee, params, out)),
         _ => {}
     }
 }
@@ -572,6 +879,13 @@ pub fn analyze_complexity(body: &J) -> ComplexityOutcome {
 /// (analyzed, never declared), so composition by content address is a step of that cost — provided the
 /// callee's arguments are size-bounded by our input (else the class cannot be re-expressed in `n`).
 pub fn analyze_complexity_linked(body: &J, callee: Option<CalleeComplexity<'_>>) -> ComplexityOutcome {
+    analyze_complexity_typed(body, None, callee)
+}
+
+/// [`analyze_complexity_linked`] knowing the function's DECLARED result type: when it is a list the
+/// output-size analysis says is at most linear in the input, the function's own recursive results count
+/// as size-bounded arguments (a callee applied to them folds).
+pub fn analyze_complexity_typed(body: &J, result_ty: Option<&J>, callee: Option<CalleeComplexity<'_>>) -> ComplexityOutcome {
     let Some(params) = lambda_params(body) else {
         return ComplexityOutcome::Opaque("body is not a `lambda`".into());
     };
@@ -579,12 +893,16 @@ pub fn analyze_complexity_linked(body: &J, callee: Option<CalleeComplexity<'_>>)
         return ComplexityOutcome::Opaque("lambda has no body".into());
     };
     let bound: BTreeSet<String> = params.iter().cloned().collect();
-    if let Some(why) = find_opaque(inner, callee, &bound) {
+    let self_linear = result_ty.is_some_and(|rt| {
+        let rt = crate::fold_canonical_type_refs(rt);
+        is_list_type(&rt) && matches!(list_output_size_linked(&params, inner, callee), OutputSize::Const | OutputSize::Linear)
+    });
+    if let Some(why) = find_opaque_in(inner, callee, &bound, self_linear) {
         return ComplexityOutcome::Opaque(why);
     }
 
     let mut descents: Vec<Vec<(String, Descent)>> = Vec::new();
-    collect_self_descents(inner, &[], &mut descents);
+    collect_self_descents(inner, &[], &BTreeMap::new(), callee, &params, &mut descents);
 
     if descents.is_empty() {
         // Non-recursive over the first-order fragment: constant number of ops on O(n)-bounded data.
@@ -702,21 +1020,94 @@ fn is_scalar_type(ty: &J) -> bool {
 /// `+1` in [`list_output_size`]); every non-recursive list expression is at most Θ(n) (degree 1), since no
 /// first-order builtin expands a list super-linearly. `cons` adds one element (the tail's degree carries);
 /// `append`/`reverse` take the max/same; `case` arms are mutually exclusive (max).
-fn list_size_degree(node: &J) -> u32 {
+fn list_size_degree(node: &J, callee: Option<CalleeComplexity<'_>>) -> u32 {
+    list_size_degree_in(node, &BTreeSet::new(), &BTreeSet::new(), callee)
+}
+
+/// [`list_size_degree`] with `small` = the list variables a dominating `null(tail^j p)` TRUE arm has
+/// shown to hold at most `j` elements (a base case returning its own short input is O(1) material), and
+/// `carried` = pattern-bound components of a PRESERVING callee's tuple, each no longer than a distinct
+/// recursive result it was applied to (they are the recurrence's carried terms, degree 0, provided each
+/// is used at most once — `case butterfly(self ev, self od) of (lo, hi) => append lo hi`).
+fn list_size_degree_in(node: &J, small: &BTreeSet<String>, carried: &BTreeSet<String>, callee: Option<CalleeComplexity<'_>>) -> u32 {
+    let list_size_degree = |n: &J| list_size_degree_in(n, small, carried, callee);
     if self_call_args(node).is_some() {
         return 0; // the carried recursion term
     }
     match node.get("kind").and_then(|k| k.as_str()) {
         Some("var") => {
             // `nil` is the empty-list constant (degree 0); any other list-typed variable is a Θ(n) list.
-            if node.get("name").and_then(|n| n.as_str()) == Some("nil") { 0 } else { 1 }
+            let name = node.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            if name == "nil" || small.contains(name) || carried.contains(name) { 0 } else { 1 }
         }
         Some("lit") | Some("list") => 0, // a literal / fixed-size list
-        Some("case") => node
-            .get("arms")
-            .and_then(|a| a.as_array())
-            .map(|a| a.iter().map(|arm| arm.get("body").map(list_size_degree).unwrap_or(0)).max().unwrap_or(0))
-            .unwrap_or(0),
+        Some("let") => {
+            // The body decides the list; the bound name is no longer known small/carried.
+            let name = node.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let mut s2 = small.clone();
+            let mut c2 = carried.clone();
+            s2.remove(name);
+            c2.remove(name);
+            node.get("body").map(|b| list_size_degree_in(b, &s2, &c2, callee)).unwrap_or(1)
+        }
+        Some("case") => {
+            // `case null(tail^j p) of true => …`: in the TRUE arm `p` has at most j elements.
+            let short: Option<String> = node.get("scrutinee").and_then(|s| {
+                if head_op(s) != Some("null") {
+                    return None;
+                }
+                let a = s.get("args")?.as_array()?.first()?;
+                if a.get("kind")?.as_str()? == "var" {
+                    return a.get("name")?.as_str().map(String::from);
+                }
+                tail_depth(a).map(|(p, _)| p)
+            });
+            // `case F(self a, self b) of (lo, hi) => …` over a PRESERVING callee: the distinct self-call
+            // arguments at F's preserved positions each bound one component.
+            let avail: usize = node
+                .get("scrutinee")
+                .and_then(|s| {
+                    let (target, cargs) = crate::terminate::fn_ref_spine(s)?;
+                    let positions = callee?.components_preserved_by(&target)?;
+                    let mut distinct: Vec<&J> = Vec::new();
+                    for i in positions {
+                        if let Some(a) = cargs.get(i) {
+                            if self_call_args(a).is_some() && !distinct.contains(&a) {
+                                distinct.push(a);
+                            }
+                        }
+                    }
+                    Some(distinct.len())
+                })
+                .unwrap_or(0);
+            node.get("arms")
+                .and_then(|a| a.as_array())
+                .map(|a| {
+                    a.iter()
+                        .map(|arm| {
+                            let is_true = arm.pointer("/pattern/value/value").and_then(|v| v.as_bool()) == Some(true);
+                            let mut inner = small.clone();
+                            if let (true, Some(p)) = (is_true, &short) {
+                                inner.insert(p.clone());
+                            }
+                            let mut c2 = carried.clone();
+                            let body = arm.get("body");
+                            if avail > 0 && arm.pointer("/pattern/kind").and_then(|x| x.as_str()) == Some("tuple") {
+                                let mut names = Vec::new();
+                                collect_binds(arm.get("pattern").unwrap(), &mut names);
+                                let uses: Vec<u32> = names.iter().map(|n| body.map(|b| count_uses(b, n)).unwrap_or(0)).collect();
+                                let used = uses.iter().filter(|u| **u >= 1).count();
+                                if uses.iter().all(|u| *u <= 1) && used <= avail {
+                                    c2.extend(names);
+                                }
+                            }
+                            body.map(|b| list_size_degree_in(b, &inner, &c2, callee)).unwrap_or(0)
+                        })
+                        .max()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        }
         Some("app") => match app_spine(node) {
             Some((op, sargs)) => match op.as_str() {
                 "cons" => sargs.get(1).map(list_size_degree).unwrap_or(0),
@@ -755,22 +1146,27 @@ fn choose_measure(descents: &[Vec<(String, Descent)>], params: &[String]) -> Opt
 }
 
 /// Infer a sound upper bound on the size of a **list-returning** body's result.
-fn list_output_size(params: &[String], inner: &J) -> OutputSize {
-    if find_opaque(inner, None, &params.iter().cloned().collect()).is_some() {
+fn list_output_size_linked(params: &[String], inner: &J, callee: Option<CalleeComplexity<'_>>) -> OutputSize {
+    // The opaque check here asks only whether every applied callee is RESOLVED (its result size is then
+    // read as linear in its size-bounded arguments); a self result inside is fine for a size analysis.
+    if find_opaque_in(inner, callee, &params.iter().cloned().collect(), true).is_some() {
         return OutputSize::Unknown; // a map/filter/fold/opaque build — can't see the result's size
     }
     let mut descents: Vec<Vec<(String, Descent)>> = Vec::new();
-    collect_self_descents(inner, &[], &mut descents);
+    collect_self_descents(inner, &[], &BTreeMap::new(), callee, params, &mut descents);
     if descents.is_empty() {
         // Non-recursive list expression: at most Θ(n) (Const for nil/literal).
-        return OutputSize::from_degree(list_size_degree(inner));
+        return OutputSize::from_degree(list_size_degree(inner, callee));
     }
     if !single_param_constant_recursion(&descents, params) {
         // A HALVING recursion that conses O(1) material per level builds Θ(log n) ≤ Θ(n) elements
         // (`digits`: one digit per halving) — Linear is the sound coarse class. Anything else
         // (mixed / non-structural / expanding per level) is outside the S(n)=S(n−1)+chunk shape.
+        // A HALVING recursion that conses O(1) material per level (`digits`) builds Θ(log n); a TWO-WAY
+        // halving recursion that only appends its two results (`ntt_rec`) builds S(n) = 2S(n/2) + O(1) =
+        // Θ(n). Both are Linear, the sound coarse class.
         let halving = matches!(choose_measure(&descents, params), Some((_, kinds)) if kinds.iter().all(|k| *k == Descent::Halving));
-        if halving && path_self_count(inner) <= 1 && list_size_degree(inner) == 0 {
+        if halving && path_self_count(inner) <= 2 && list_size_degree(inner, callee) == 0 {
             return OutputSize::Linear;
         }
         return OutputSize::Unknown;
@@ -780,7 +1176,7 @@ fn list_output_size(params: &[String], inner: &J) -> OutputSize {
     }
     // S(n) = S(n−1) + chunk(n): the per-step non-recursive list material has degree `list_size_degree`
     // (self-calls count 0), and summing it over the n levels adds one to the degree.
-    OutputSize::from_degree(list_size_degree(inner).saturating_add(1))
+    OutputSize::from_degree(list_size_degree(inner, callee).saturating_add(1))
 }
 
 /// Infer a sound upper bound on how a function's result size grows with its input, given its declared
@@ -788,6 +1184,12 @@ fn list_output_size(params: &[String], inner: &J) -> OutputSize {
 /// polymorphic (type-variable) or otherwise-unrecognized result is `Unknown` (its size could be as large
 /// as the input — never claimed smaller).
 pub fn analyze_output_size(result_ty: &J, body: &J) -> OutputSize {
+    analyze_output_size_linked(result_ty, body, None)
+}
+
+/// [`analyze_output_size`] over a linked view (an applied callee's result reads as linear in its
+/// size-bounded arguments).
+pub fn analyze_output_size_linked(result_ty: &J, body: &J, callee: Option<CalleeComplexity<'_>>) -> OutputSize {
     // A `ref` to a canonical builtin type artifact IS the builtin (the v0.2 fold) — normalize so
     // e.g. a ref-spelled scalar result is recognized as `Const` rather than falling to `Unknown`.
     let result_ty = &crate::fold_canonical_type_refs(result_ty);
@@ -796,7 +1198,7 @@ pub fn analyze_output_size(result_ty: &J, body: &J) -> OutputSize {
     if is_scalar_type(result_ty) {
         OutputSize::Const
     } else if is_list_type(result_ty) {
-        list_output_size(&params, inner)
+        list_output_size_linked(&params, inner, callee)
     } else {
         OutputSize::Unknown
     }
@@ -951,6 +1353,149 @@ mod tests {
     }
 
     // ---- halving recursion ----
+
+    /// ntt_split: \xs -> case null(xs) of true -> (nil, nil) | false -> case null(tail xs) of
+    ///   true -> (cons(head xs, nil), nil) | false -> case self(tail(tail xs)) of (ev, od) -> (cons(head xs, ev), cons(head(tail xs), od))
+    fn split_body(second_cons: bool) -> J {
+        let hd = app("head", vec![v("xs")]);
+        let hd2 = app("head", vec![app("tail", vec![v("xs")])]);
+        let rec = self_call(vec![app("tail", vec![app("tail", vec![v("xs")])])]);
+        let od_elem = if second_cons { app("cons", vec![hd2.clone(), app("cons", vec![hd2.clone(), v("od")])]) } else { app("cons", vec![hd2, v("od")]) };
+        let step = json!({ "kind": "case", "scrutinee": rec, "arms": [{
+            "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "ev" }, { "kind": "bind", "name": "od" }] },
+            "body": { "kind": "tuple", "elems": [app("cons", vec![hd.clone(), v("ev")]), od_elem] } }] });
+        let one = json!({ "kind": "tuple", "elems": [app("cons", vec![hd, v("nil")]), v("nil")] });
+        let empty = json!({ "kind": "tuple", "elems": [v("nil"), v("nil")] });
+        lambda(&["xs"], case2(app("null", vec![v("xs")]), empty, case2(app("null", vec![app("tail", vec![v("xs")])]), one, step)))
+    }
+
+    struct Shrinks;
+    impl LinkedCallees for Shrinks {
+        fn class_of(&self, _: &str) -> Option<Class> {
+            Some(Class::poly(1))
+        }
+        fn result_bounded_by(&self, _: &str) -> Option<Vec<usize>> {
+            None
+        }
+        fn components_shrink_by(&self, _: &str) -> Option<u32> {
+            Some(2)
+        }
+        fn components_preserved_by(&self, _: &str) -> Option<Vec<usize>> {
+            Some(vec![0, 1])
+        }
+    }
+
+    /// ntt_butterfly: \e o wk w -> case null e of true -> (nil, nil) | false -> case null o of true -> (nil, nil)
+    ///   | false -> case self(tail e, tail o, wk, w) of (lo, hi) -> (cons(head e, lo), cons(head o, hi))
+    fn butterfly_body(double_cons: bool) -> J {
+        let rec = self_call(vec![app("tail", vec![v("e")]), app("tail", vec![v("o")]), v("wk"), v("w")]);
+        let lo = app("cons", vec![app("head", vec![v("e")]), v("lo")]);
+        let hi = if double_cons {
+            app("cons", vec![app("head", vec![v("o")]), app("cons", vec![app("head", vec![v("o")]), v("hi")])])
+        } else {
+            app("cons", vec![app("head", vec![v("o")]), v("hi")])
+        };
+        let step = json!({ "kind": "case", "scrutinee": rec, "arms": [{
+            "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "lo" }, { "kind": "bind", "name": "hi" }] },
+            "body": { "kind": "tuple", "elems": [lo, hi] } }] });
+        let empty = json!({ "kind": "tuple", "elems": [v("nil"), v("nil")] });
+        lambda(&["e", "o", "wk", "w"], case2(app("null", vec![v("e")]), empty.clone(), case2(app("null", vec![v("o")]), empty, step)))
+    }
+
+    #[test]
+    fn a_tail_recursion_with_one_cons_per_component_preserves_its_list_inputs() {
+        assert_eq!(component_preserve(&butterfly_body(false)), Some(vec![0, 1]));
+        // Two conses per step onto one component: that component may outgrow the input — refused.
+        assert_eq!(component_preserve(&butterfly_body(true)), None);
+        // The deinterleave preserves (and shrinks) its one list input.
+        assert_eq!(component_preserve(&split_body(false)), Some(vec![0]));
+        // Two conses per TWO tail steps still preserves (it just no longer shrinks).
+        assert_eq!(component_preserve(&split_body(true)), Some(vec![0]));
+    }
+
+    #[test]
+    fn appending_a_preserving_callees_components_of_two_halves_is_a_linear_output() {
+        // ntt_rec's shape: case split(xs) of (ev, od) => case F(self ev, self od) of (lo, hi) => append lo hi.
+        let fref = |s: &str| json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", s.repeat(32)) } });
+        let list_int = json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "builtin", "name": "int" }] });
+        let shape = |result: J| {
+            let f = json!({ "kind": "app", "fn": fref("ef"), "args": [self_call(vec![v("ev")]), self_call(vec![v("od")])] });
+            let inner = json!({ "kind": "case", "scrutinee": f, "arms": [{
+                "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "lo" }, { "kind": "bind", "name": "hi" }] },
+                "body": result }] });
+            let split = json!({ "kind": "app", "fn": fref("cd"), "args": [v("xs")] });
+            let rec = json!({ "kind": "case", "scrutinee": split, "arms": [{
+                "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "ev" }, { "kind": "bind", "name": "od" }] },
+                "body": inner }] });
+            lambda(&["xs"], case2(app("null", vec![app("tail", vec![v("xs")])]), v("xs"), rec))
+        };
+        let good = shape(app("append", vec![v("lo"), v("hi")]));
+        assert_eq!(analyze_output_size_linked(&list_int, &good, Some(&Shrinks)), OutputSize::Linear);
+        match analyze_complexity_typed(&good, Some(&list_int), Some(&Shrinks)) {
+            ComplexityOutcome::Bound(c) => assert_eq!(c, Class { deg: 1, logs: 1, exp: false }),
+            other => panic!("{other:?}"),
+        }
+        // Using one component twice doubles the material: S(n) = 2S(n/2) + S(n/2)… — not linear, Unknown.
+        let twice = shape(app("append", vec![app("append", vec![v("lo"), v("lo")]), v("hi")]));
+        assert_eq!(analyze_output_size_linked(&list_int, &twice, Some(&Shrinks)), OutputSize::Unknown);
+        // Without the view nothing is known about F's components.
+        assert_eq!(analyze_output_size_linked(&list_int, &good, None), OutputSize::Unknown);
+    }
+
+    #[test]
+    fn a_tail2_split_shrinks_its_components_and_drives_a_halving_descent() {
+        // The deinterleave: each component gets ONE cons per two tail steps — strictly shorter for n ≥ 2.
+        assert_eq!(component_shrink(&split_body(false)), Some(2));
+        // Two conses onto one component per step: that component may be as long as the input — refused.
+        assert_eq!(component_shrink(&split_body(true)), None);
+        // A caller recursing on the components of a shrinking callee (linked view): T(n) = 2T(n/2) + O(n).
+        let callee = json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", "cd".repeat(32)) } });
+        let split = json!({ "kind": "app", "fn": callee, "args": [v("xs")] });
+        let rec = json!({ "kind": "case", "scrutinee": split, "arms": [{
+            "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "ev" }, { "kind": "bind", "name": "od" }] },
+            "body": app("append", vec![self_call(vec![v("ev")]), self_call(vec![v("od")])]) }] });
+        let body = lambda(&["xs"], case2(app("null", vec![app("tail", vec![v("xs")])]), v("xs"), rec));
+        match analyze_complexity_linked(&body, Some(&Shrinks)) {
+            ComplexityOutcome::Bound(c) => assert_eq!(c, Class { deg: 1, logs: 1, exp: false }),
+            other => panic!("{other:?}"),
+        }
+        // Without the view the components are opaque.
+        assert!(matches!(analyze_complexity(&body), ComplexityOutcome::Opaque(_)));
+    }
+
+    #[test]
+    fn a_callee_applied_to_a_recursive_result_folds_when_the_own_output_is_linear() {
+        // \xs -> case null(tail xs) of true -> xs | false -> case split(xs) of (ev, od) -> cons(g(self ev), self od)
+        // The output is a two-way halving build of O(1) material per level: S(n) = 2S(n/2) + O(1) = Θ(n),
+        // so the recursive result `self ev` is size-bounded and `g`'s O(m) reads as O(n): T = 2T(n/2) + O(n).
+        let split_ref = json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", "cd".repeat(32)) } });
+        let g_ref = json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", "ef".repeat(32)) } });
+        let split = json!({ "kind": "app", "fn": split_ref, "args": [v("xs")] });
+        let g_of_rec = json!({ "kind": "app", "fn": g_ref, "args": [self_call(vec![v("ev")])] });
+        let rec = json!({ "kind": "case", "scrutinee": split, "arms": [{
+            "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "ev" }, { "kind": "bind", "name": "od" }] },
+            "body": app("cons", vec![g_of_rec, self_call(vec![v("od")])]) }] });
+        let body = lambda(&["xs"], case2(app("null", vec![app("tail", vec![v("xs")])]), v("xs"), rec));
+        let list_int = json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "builtin", "name": "int" }] });
+        assert_eq!(analyze_output_size_linked(&list_int, &body, Some(&Shrinks)), OutputSize::Linear);
+        match analyze_complexity_typed(&body, Some(&list_int), Some(&Shrinks)) {
+            ComplexityOutcome::Bound(c) => assert_eq!(c, Class { deg: 1, logs: 1, exp: false }),
+            other => panic!("{other:?}"),
+        }
+        // Without the declared result type nothing bounds `self ev`: the fold refuses.
+        match analyze_complexity_linked(&body, Some(&Shrinks)) {
+            ComplexityOutcome::Opaque(why) => assert!(why.contains("not bounded"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        // A callee's output (degree-1 material) appended per level is NOT a linear build — the output
+        // stays Unknown and the fold still refuses with the type.
+        let rec2 = json!({ "kind": "case", "scrutinee": json!({ "kind": "app", "fn": json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", "cd".repeat(32)) } }), "args": [v("xs")] }), "arms": [{
+            "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "ev" }, { "kind": "bind", "name": "od" }] },
+            "body": app("append", vec![json!({ "kind": "app", "fn": json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", "ef".repeat(32)) } }), "args": [self_call(vec![v("ev")])] }), self_call(vec![v("od")])]) }] });
+        let body2 = lambda(&["xs"], case2(app("null", vec![app("tail", vec![v("xs")])]), v("xs"), rec2));
+        assert_eq!(analyze_output_size_linked(&list_int, &body2, Some(&Shrinks)), OutputSize::Unknown);
+        assert!(matches!(analyze_complexity_typed(&body2, Some(&list_int), Some(&Shrinks)), ComplexityOutcome::Opaque(_)));
+    }
 
     #[test]
     fn euclid_mod_recursion_is_log() {

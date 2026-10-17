@@ -30,7 +30,7 @@ pub mod proptest;
 pub mod prove;
 pub use prove::{
     build_certificate, build_certificate_in_domain, prove_by_numeric_induction, prove_property, prove_property_in_domain,
-    set_callee_contracts, type_mentions_float, CalleeContract,
+    set_callee_contracts, set_self_type, sort_of_type, type_mentions_float, CalleeContract,
     Certificate, ProofOutcome, Sort,
 };
 
@@ -62,12 +62,12 @@ pub use refine::{check_nat_refinement, check_refinements, RefinementOutcome, Ref
 pub mod terminate;
 pub use terminate::{
     analyze_termination, analyze_termination_linked, analyze_termination_typed, induction_measure, nat_param_positions,
-    CalleeTerminates, Measure, TerminationOutcome,
+    CalleeTerminates, LinkedTermination, Measure, TerminationOutcome,
 };
 
 pub mod complexity;
 pub use complexity::{
-    analyze_complexity, analyze_complexity_linked, analyze_output_size, parse_class, parse_output_size, CalleeComplexity, Class, ComplexityOutcome, LinkedCallees,
+    analyze_complexity, analyze_complexity_linked, analyze_complexity_typed, analyze_output_size, analyze_output_size_linked, component_preserve, component_shrink, parse_class, parse_output_size, CalleeComplexity, Class, ComplexityOutcome, LinkedCallees,
     OutputSize,
 };
 

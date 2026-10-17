@@ -186,8 +186,10 @@ pub fn check_refinements(sig_type: &J, refinements: &[J], body: &J, solver: &str
         }
     }
 
-    // The nat-typed parameter positions bound the numeric-induction rung's measure below.
+    // The nat-typed parameter positions bound the numeric-induction rung's measure below; the declared
+    // type supplies the prover's parameter/result sorts (tuples and sums are datatypes).
     let nat_positions = crate::terminate::nat_positions_of_type(sig_type);
+    let prev_ty = crate::prove::set_self_type(Some(sig_type.clone()));
     let mut reports: Vec<RefinementReport> = Vec::new();
     // Declared postconditions.
     for (i, post) in refinements
@@ -231,6 +233,7 @@ pub fn check_refinements(sig_type: &J, refinements: &[J], body: &J, solver: &str
         });
     }
 
+    crate::prove::set_self_type(prev_ty);
     if reports.is_empty() {
         return one("refinements".into(), RefinementOutcome::NotApplicable);
     }

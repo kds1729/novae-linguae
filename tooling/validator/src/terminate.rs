@@ -253,6 +253,9 @@ pub(crate) enum Guard {
     /// and only for a unit decrement (`sub(p, 1)` keeps the value a nat; a larger step could
     /// tunnel below zero and recurse forever).
     NonZero(String),
+    /// `length(p) ≥ m` holds — the FALSE arm of `null(tail^(m−1)(p))`: what makes a component of a
+    /// shrinking callee's result (shorter than `p` once `length(p) ≥ k`) a well-founded descent.
+    MinLength(String, u32),
 }
 
 /// The facts a boolean scrutinee establishes for its `true` and `false` arms respectively.
@@ -260,6 +263,18 @@ pub(crate) fn arm_facts(scrutinee: &J) -> (Vec<Guard>, Vec<Guard>) {
     let Some((op, args)) = app_spine(scrutinee) else {
         return (vec![], vec![]);
     };
+    // `null(tail^j(p))`: the FALSE arm knows length(p) ≥ j + 1.
+    if op == "null" && args.len() == 1 {
+        if let Some((p, j)) = tail_descent(&args[0]) {
+            return (vec![], vec![Guard::MinLength(p, j as u32 + 1)]);
+        }
+        if args[0].get("kind").and_then(|k| k.as_str()) == Some("var") {
+            if let Some(p) = args[0].get("name").and_then(|n| n.as_str()) {
+                return (vec![], vec![Guard::MinLength(p.to_string(), 1)]);
+            }
+        }
+        return (vec![], vec![]);
+    }
     if args.len() != 2 {
         return (vec![], vec![]);
     }
@@ -356,7 +371,15 @@ pub struct Measure {
 /// A linked view of other records, for folding a `fn_ref` callee into the analysis: does the callee
 /// (itself analyzed, transitively) provably terminate? `None` = unresolvable (no records view, or a
 /// cycle) — the application stays opaque.
-pub type CalleeTerminates<'a> = &'a dyn Fn(&str) -> Option<bool>;
+pub trait LinkedTermination {
+    /// Does the callee at `target` provably terminate (its own analysis, over the same view)?
+    fn terminates(&self, target: &str) -> Option<bool>;
+    /// For a callee returning a tuple of lists each strictly shorter than its list input (for inputs of
+    /// length ≥ k) — re-derived from its body — the `k`; see `complexity::component_shrink`.
+    fn components_shrink_by(&self, target: &str) -> Option<u32>;
+}
+
+pub type CalleeTerminates<'a> = &'a dyn LinkedTermination;
 
 struct Ctx<'a> {
     params: &'a [String],
@@ -364,11 +387,18 @@ struct Ctx<'a> {
     callee: Option<CalleeTerminates<'a>>,
 }
 
+/// Pattern variables bound as COMPONENTS of a shrinking callee's result: name → (the list parameter the
+/// callee was applied to, the callee's `k`). Such a component is a well-founded descent of that parameter
+/// wherever the guards establish `length ≥ k`.
+type Components = std::collections::BTreeMap<String, (String, u32)>;
+
+#[allow(clippy::too_many_arguments)]
 fn walk(
     node: &J,
     ctx: &Ctx,
     shadowed: &std::collections::BTreeSet<String>,
     facts: &[Guard],
+    comps: &Components,
     descents: &mut Vec<std::collections::BTreeMap<usize, DescentKind>>,
     opaque: &mut Option<String>,
 ) {
@@ -388,6 +418,13 @@ fn walk(
             if tail_descent(a).is_some_and(|(p, _)| p == *pj) {
                 call_descents.insert(j, DescentKind::Structural);
                 continue;
+            }
+            // A component of a shrinking callee's result, where the guards say the input is long enough.
+            if let Some((q, k)) = a.get("name").and_then(|n| n.as_str()).and_then(|n| comps.get(n)) {
+                if q == pj && facts.iter().any(|g| matches!(g, Guard::MinLength(v, m) if v == q && *m >= *k)) {
+                    call_descents.insert(j, DescentKind::Structural);
+                    continue;
+                }
             }
             // The floor a GUARD establishes for a parameter (the tightest one in force), and the
             // floor nat typing adds under a non-zero guard (`p ≥ 0` by type, so `p != 0` ⇒ `p ≥ 1`).
@@ -432,7 +469,7 @@ fn walk(
         }
         descents.push(call_descents);
         for a in &sargs {
-            walk(a, ctx, shadowed, facts, descents, opaque);
+            walk(a, ctx, shadowed, facts, comps, descents, opaque);
         }
         return;
     }
@@ -442,10 +479,10 @@ fn walk(
             // vouch that IT terminates (analyzed, not declared) — then the application is one more
             // terminating first-order step and only its arguments need walking.
             if let Some((target, cargs)) = fn_ref_spine(node) {
-                match ctx.callee.and_then(|f| f(&target)) {
+                match ctx.callee.and_then(|c| c.terminates(&target)) {
                     Some(true) => {
                         for a in &cargs {
-                            walk(a, ctx, shadowed, facts, descents, opaque);
+                            walk(a, ctx, shadowed, facts, comps, descents, opaque);
                         }
                         return;
                     }
@@ -476,7 +513,7 @@ fn walk(
         // A `let` rebinding a parameter name SHADOWS it for the rest of the body.
         Some("let") => {
             if let Some(v) = node.get("value") {
-                walk(v, ctx, shadowed, facts, descents, opaque);
+                walk(v, ctx, shadowed, facts, comps, descents, opaque);
             }
             let mut inner = shadowed.clone();
             if let Some(n) = node.get("name").and_then(|n| n.as_str()) {
@@ -485,7 +522,7 @@ fn walk(
                 }
             }
             if let Some(b) = node.get("body") {
-                walk(b, ctx, &inner, facts, descents, opaque);
+                walk(b, ctx, &inner, facts, comps, descents, opaque);
             }
         }
         // A nested lambda's parameters shadow too.
@@ -497,16 +534,30 @@ fn walk(
                 }
             }
             if let Some(b) = node.get("body") {
-                walk(b, ctx, &inner, facts, descents, opaque);
+                walk(b, ctx, &inner, facts, comps, descents, opaque);
             }
         }
         // A `case` over a boolean guard: each arm walks under the facts its pattern establishes
         // (and under any names its pattern binds, which shadow).
         Some("case") => {
             if let Some(scrutinee) = node.get("scrutinee") {
-                walk(scrutinee, ctx, shadowed, facts, descents, opaque);
+                walk(scrutinee, ctx, shadowed, facts, comps, descents, opaque);
             }
             let (true_facts, false_facts) = node.get("scrutinee").map(arm_facts).unwrap_or_default();
+            // `case callee(p) of (a, b) => …` over a shrinking callee (linked view): a and b are
+            // components of p, shorter than it once the guards say length(p) ≥ k.
+            let shrink_of: Option<(String, u32)> = node.get("scrutinee").and_then(fn_ref_spine).and_then(|(target, cargs)| {
+                let first = cargs.first()?;
+                if first.get("kind").and_then(|k| k.as_str()) != Some("var") {
+                    return None;
+                }
+                let q = first.get("name")?.as_str()?.to_string();
+                if !ctx.params.contains(&q) || shadowed.contains(&q) {
+                    return None;
+                }
+                let k = ctx.callee.and_then(|c| c.components_shrink_by(&target))?;
+                (k >= 2).then_some((q, k))
+            });
             for arm in node.get("arms").and_then(|a| a.as_array()).into_iter().flatten() {
                 let mut arm_facts_ctx = facts.to_vec();
                 match arm.pointer("/pattern/value/value").and_then(|b| b.as_bool()) {
@@ -518,10 +569,18 @@ fn walk(
                 if let Some(p) = arm.get("pattern") {
                     pattern_binds(p, &mut binds);
                 }
+                let mut inner_comps = comps.clone();
+                if let (Some((q, k)), Some(p)) = (&shrink_of, arm.get("pattern")) {
+                    if p.get("kind").and_then(|x| x.as_str()) == Some("tuple") {
+                        for n in &binds {
+                            inner_comps.insert(n.clone(), (q.clone(), *k));
+                        }
+                    }
+                }
                 let mut inner = shadowed.clone();
                 inner.extend(binds.into_iter().filter(|n| ctx.params.contains(n)));
                 if let Some(body) = arm.get("body") {
-                    walk(body, ctx, &inner, &arm_facts_ctx, descents, opaque);
+                    walk(body, ctx, &inner, &arm_facts_ctx, &inner_comps, descents, opaque);
                 }
             }
         }
@@ -532,10 +591,10 @@ fn walk(
                     if k == "pattern" {
                         continue; // patterns bind, they don't compute
                     }
-                    walk(v, ctx, shadowed, facts, descents, opaque);
+                    walk(v, ctx, shadowed, facts, comps, descents, opaque);
                 }
             }
-            J::Array(items) => items.iter().for_each(|v| walk(v, ctx, shadowed, facts, descents, opaque)),
+            J::Array(items) => items.iter().for_each(|v| walk(v, ctx, shadowed, facts, comps, descents, opaque)),
             _ => {}
         },
     }
@@ -639,7 +698,7 @@ fn descent_analysis(
     let mut descents: Vec<std::collections::BTreeMap<usize, DescentKind>> = Vec::new();
     let mut opaque: Option<String> = None;
     let ctx = Ctx { params: &params, nat_positions, callee };
-    walk(inner, &ctx, &std::collections::BTreeSet::new(), &[], &mut descents, &mut opaque);
+    walk(inner, &ctx, &std::collections::BTreeSet::new(), &[], &Components::new(), &mut descents, &mut opaque);
 
     if let Some(why) = opaque {
         return Err(why);
@@ -818,6 +877,39 @@ mod tests {
         assert_eq!(analyze_termination_typed(&body, &nats), TerminationOutcome::Always);
         // Plain ints: a negative b has no floor — the remainder jumps above it. UNKNOWN.
         assert!(matches!(analyze_termination_typed(&body, &Default::default()), TerminationOutcome::Unknown(_)));
+    }
+
+    struct SplitView;
+    impl LinkedTermination for SplitView {
+        fn terminates(&self, _: &str) -> Option<bool> {
+            Some(true)
+        }
+        fn components_shrink_by(&self, _: &str) -> Option<u32> {
+            Some(2)
+        }
+    }
+
+    #[test]
+    fn recursion_on_a_shrinking_callees_components_terminates_under_the_length_guard() {
+        // \xs -> case null(tail xs) of true -> xs | false -> case split(xs) of (ev, od) -> append(self(ev), self(od))
+        let callee = json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", "cd".repeat(32)) } });
+        let split = json!({ "kind": "app", "fn": callee, "args": [v("xs")] });
+        let rec = json!({ "kind": "case", "scrutinee": split, "arms": [{
+            "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "ev" }, { "kind": "bind", "name": "od" }] },
+            "body": app("append", vec![
+                json!({ "kind": "app", "op": "self", "args": [v("ev")] }),
+                json!({ "kind": "app", "op": "self", "args": [v("od")] })]) }] });
+        let guarded = lambda(&["xs"], json!({ "kind": "case",
+            "scrutinee": app("null", vec![app("tail", vec![v("xs")])]),
+            "arms": [{ "pattern": lit_b(true), "body": v("xs") }, { "pattern": lit_b(false), "body": rec.clone() }] }));
+        assert_eq!(analyze_termination_linked(&guarded, &Default::default(), Some(&SplitView)), TerminationOutcome::Always);
+        // Without the length ≥ 2 guard a one-element input's components are not shorter: UNKNOWN.
+        let unguarded = lambda(&["xs"], json!({ "kind": "case",
+            "scrutinee": app("null", vec![v("xs")]),
+            "arms": [{ "pattern": lit_b(true), "body": v("xs") }, { "pattern": lit_b(false), "body": rec }] }));
+        assert!(matches!(analyze_termination_linked(&unguarded, &Default::default(), Some(&SplitView)), TerminationOutcome::Unknown(_)));
+        // Without the view the callee is opaque.
+        assert!(matches!(analyze_termination_typed(&guarded, &Default::default()), TerminationOutcome::Unknown(_)));
     }
 
     #[test]

@@ -33,16 +33,207 @@ pub enum Sort {
     Int,
     Bool,
     Str,
+    /// A declared SMT datatype — a tuple or a sum (`Maybe`, `Result`, …) — by its index in the
+    /// per-thread datatype registry (`sort_of_type` registers; `datatype_preamble` declares).
+    Data(u16),
 }
 
 impl Sort {
-    fn smt(self) -> &'static str {
+    fn smt(self) -> String {
         match self {
-            Sort::Int => "Int",
-            Sort::Bool => "Bool",
-            Sort::Str => "String",
+            Sort::Int => "Int".into(),
+            Sort::Bool => "Bool".into(),
+            Sort::Str => "String".into(),
+            Sort::Data(i) => format!("dt{i}"),
         }
     }
+}
+
+// --- datatypes (tuples and sums as SMT datatypes) ----------------------------------------------------
+//
+// The fragment's values were Int/Bool/String. A record whose result is a TUPLE (`ext_gcd`'s
+// `(g, (x, y))`) or a SUM (`mod_inverse`'s `Maybe int`) could neither state a contract about it nor
+// be lowered. Both now map to SMT datatypes, registered per thread from the DECLARED types (the
+// function's own signature, a callee's contract) — tuple construction and destructuring patterns,
+// variant construction and matching, and the `fst`/`snd` projections lower to constructors,
+// accessors and testers; every certificate declares the datatypes it uses.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Datatype {
+    Tuple(Vec<Sort>),
+    /// Variants in declaration order, each with its optional payload sort.
+    Sum(Vec<(String, Option<Sort>)>),
+}
+
+thread_local! {
+    static DATATYPES: std::cell::RefCell<Vec<Datatype>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The declared type of the function under proof (`signature.type`), when the caller supplies it:
+    /// parameter and result sorts come from it rather than from usage inference.
+    static SELF_TYPE: std::cell::RefCell<Option<J>> = const { std::cell::RefCell::new(None) };
+}
+
+fn register_datatype(d: Datatype) -> Sort {
+    DATATYPES.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(|x| *x == d) {
+            return Sort::Data(i as u16);
+        }
+        r.push(d);
+        Sort::Data((r.len() - 1) as u16)
+    })
+}
+
+fn datatype(i: u16) -> Option<Datatype> {
+    DATATYPES.with(|r| r.borrow().get(i as usize).cloned())
+}
+
+/// The SMT sort of a TYPE expression: builtins to the base sorts, tuples and sums to registered
+/// datatypes (nested types register inner-first). `None` for anything else (lists, maps, type
+/// variables, functions) — out of the fragment.
+pub fn sort_of_type(ty: &J) -> Option<Sort> {
+    let ty = crate::fold_canonical_type_refs(ty);
+    match ty.get("kind").and_then(|k| k.as_str()) {
+        Some("builtin") => match crate::builtin_type_name(&ty) {
+            Some("int") | Some("nat") => Some(Sort::Int),
+            Some("bool") => Some(Sort::Bool),
+            Some("string") => Some(Sort::Str),
+            _ => None,
+        },
+        Some("ref") => match crate::builtin_type_name(&ty) {
+            Some("int") | Some("nat") => Some(Sort::Int),
+            Some("bool") => Some(Sort::Bool),
+            Some("string") => Some(Sort::Str),
+            _ => None,
+        },
+        Some("tuple") => {
+            let elems: Vec<Sort> = ty.get("elems")?.as_array()?.iter().map(sort_of_type).collect::<Option<_>>()?;
+            Some(register_datatype(Datatype::Tuple(elems)))
+        }
+        Some("sum") => {
+            let mut variants: Vec<(String, Option<Sort>)> = Vec::new();
+            for v in ty.get("variants")?.as_array()? {
+                let tag = v.get("tag")?.as_str()?.to_string();
+                let payload = match v.get("type") {
+                    Some(t) => Some(sort_of_type(t)?),
+                    None => None,
+                };
+                variants.push((tag, payload));
+            }
+            Some(register_datatype(Datatype::Sum(variants)))
+        }
+        _ => None,
+    }
+}
+
+/// Install (or clear) the declared type of the function under proof; returns the previous value.
+pub fn set_self_type(ty: Option<J>) -> Option<J> {
+    SELF_TYPE.with(|t| std::mem::replace(&mut *t.borrow_mut(), ty))
+}
+
+/// The declared parameter and result sorts of the function under proof, when a type was supplied
+/// and it is a function type of the given arity (each sort `None` where out of the fragment).
+fn declared_self_sorts(arity: usize) -> Option<(Vec<Option<Sort>>, Option<Sort>)> {
+    let ty = SELF_TYPE.with(|t| t.borrow().clone())?;
+    let fn_ty = if ty.get("kind").and_then(|k| k.as_str()) == Some("forall") { ty.get("body")?.clone() } else { ty };
+    if fn_ty.get("kind").and_then(|k| k.as_str()) != Some("fn") {
+        return None;
+    }
+    let params = fn_ty.get("params")?.as_array()?;
+    if params.len() != arity {
+        return None;
+    }
+    Some((params.iter().map(sort_of_type).collect(), fn_ty.get("result").and_then(sort_of_type)))
+}
+
+/// The registered SUM datatype carrying `tag` (with a payload of this sort, when given) — the sort a
+/// bare variant construction `Just(e)` / `None` takes. Ambiguity (two registered sums share the tag)
+/// refuses: a constructor alone does not name its type.
+fn sum_sort_with_tag(tag: &str, payload: Option<Sort>) -> Result<Sort> {
+    let hits: Vec<u16> = DATATYPES.with(|r| {
+        r.borrow()
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| match d {
+                Datatype::Sum(vs) => vs.iter().any(|(t, p)| t == tag && (payload.is_none() || *p == payload)),
+                _ => false,
+            })
+            .map(|(i, _)| i as u16)
+            .collect()
+    });
+    match hits.as_slice() {
+        [i] => Ok(Sort::Data(*i)),
+        [] => bail!("variant `{tag}` belongs to no declared sum type in scope (declare the function's type, or the callee's)"),
+        _ => bail!("variant `{tag}` is ambiguous between several declared sum types"),
+    }
+}
+
+/// The datatype declarations every certificate carries (all registered — a declaration an obligation
+/// does not use is harmless, and nested tuples are registered inner-first, so the order is valid).
+fn datatype_preamble() -> String {
+    DATATYPES.with(|r| {
+        let mut out = String::new();
+        for (i, d) in r.borrow().iter().enumerate() {
+            match d {
+                Datatype::Tuple(elems) => {
+                    let fields = elems.iter().enumerate().map(|(j, s)| format!("(dt{i}_{j} {})", s.smt())).collect::<Vec<_>>().join(" ");
+                    out.push_str(&format!("(declare-datatype dt{i} ((mk_dt{i} {fields})))\n"));
+                }
+                Datatype::Sum(vs) => {
+                    let ctors = vs
+                        .iter()
+                        .map(|(t, p)| match p {
+                            Some(s) => format!("(dt{i}_{t} (dt{i}_{t}_v {}))", s.smt()),
+                            None => format!("(dt{i}_{t})"),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    out.push_str(&format!("(declare-datatype dt{i} ({ctors}))\n"));
+                }
+            }
+        }
+        out
+    })
+}
+
+/// Prepend the datatype declarations to a finished certificate (after `set-logic`).
+fn with_datatypes(smt: String) -> String {
+    let dts = datatype_preamble();
+    if dts.is_empty() {
+        smt
+    } else {
+        smt.replacen("(set-logic ALL)\n", &format!("(set-logic ALL)\n{dts}"), 1)
+    }
+}
+
+/// Bind a destructuring PATTERN against a scrutinee term of a known sort: the names it binds, each
+/// with the accessor term that selects it and its sort. `bind` names the whole term; a `tuple`
+/// pattern selects components; `wildcard` binds nothing.
+fn bind_pattern(pat: &J, term: &str, sort: Sort, out: &mut Vec<(String, String, Sort)>) -> Result<()> {
+    match pat.get("kind").and_then(|k| k.as_str()) {
+        Some("wildcard") => Ok(()),
+        Some("bind") => {
+            let name = pat.get("name").and_then(|n| n.as_str()).ok_or_else(|| anyhow!("bind has no name"))?;
+            out.push((name.to_string(), term.to_string(), sort));
+            Ok(())
+        }
+        Some("tuple") => {
+            let Sort::Data(i) = sort else { bail!("tuple pattern against a non-tuple sort") };
+            let Some(Datatype::Tuple(elems)) = datatype(i) else { bail!("tuple pattern against a non-tuple sort") };
+            let pats = pat.get("elems").and_then(|e| e.as_array()).ok_or_else(|| anyhow!("tuple pattern has no elems"))?;
+            if pats.len() != elems.len() {
+                bail!("tuple pattern arity {} against a {}-tuple", pats.len(), elems.len());
+            }
+            for (j, (sub, es)) in pats.iter().zip(elems.iter()).enumerate() {
+                bind_pattern(sub, &format!("(dt{i}_{j} {term})"), *es, out)?;
+            }
+            Ok(())
+        }
+        other => bail!("unsupported pattern `{other:?}` inside a destructuring pattern (out of fragment)"),
+    }
+}
+
+fn wrap_lets(bindings: &[(String, String, Sort)], body: String) -> String {
+    bindings.iter().rev().fold(body, |acc, (n, t, _)| format!("(let (({n} {t})) {acc})"))
 }
 
 /// The result of attempting to prove one property.
@@ -107,13 +298,22 @@ fn lower_self(body: &J) -> Result<SelfDef> {
              domain-qualified equivalence claim (numeric induction)"
         );
     }
-    // Infer parameter sorts from body usage (the same walk the law-side inference uses — it reads
-    // both the op and fn/var application spellings), defaulting to Int.
+    // Parameter sorts: the DECLARED type when supplied (tuples and sums have no usage signature), else
+    // inferred from body usage (the same walk the law-side inference uses — it reads both the op and
+    // fn/var application spellings), defaulting to Int.
+    let declared = declared_self_sorts(params.len());
     let mut inferred: BTreeMap<String, Option<Sort>> = params.iter().map(|p| (p.clone(), None)).collect();
     visit_for_sorts(inner, &params, &mut inferred, None)?;
-    let param_sorts: Vec<Sort> = params.iter().map(|p| inferred[p].unwrap_or(Sort::Int)).collect();
+    let param_sorts: Vec<Sort> = params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| declared.as_ref().and_then(|d| d.0[i]).or(inferred[p]).unwrap_or(Sort::Int))
+        .collect();
     let mut env: BTreeMap<String, Sort> = params.iter().cloned().zip(param_sorts.iter().copied()).collect();
-    let ret = sort_of(inner, &env, None)?;
+    let ret = match declared.as_ref().and_then(|d| d.1) {
+        Some(r) => r,
+        None => sort_of(inner, &env, None)?,
+    };
     let body_smt = lower(inner, &mut env, None)?;
     Ok(SelfDef { params, param_sorts, ret, body_smt })
 }
@@ -383,13 +583,57 @@ fn sort_of(node: &J, env: &BTreeMap<String, Sort>, self_def: Option<&SelfDef>) -
             sort_of(node.get("body").ok_or_else(|| anyhow!("let has no body"))?, &e2, self_def)
         }
         "case" => {
-            // Sort of the first arm's body (all arms share a sort if well-formed).
+            // Sort of the first arm's body (all arms share a sort if well-formed), under the names its
+            // pattern binds (a tuple destructure, a variant payload, a bind of the scrutinee).
             let arms = node.get("arms").and_then(|a| a.as_array()).ok_or_else(|| anyhow!("case has no arms"))?;
             let arm = arms.first().ok_or_else(|| anyhow!("case has no arms"))?;
-            sort_of(arm.get("body").ok_or_else(|| anyhow!("arm has no body"))?, env, self_def)
+            let scrut = node.get("scrutinee").ok_or_else(|| anyhow!("case has no scrutinee"))?;
+            let mut e2 = env.clone();
+            if let Some(pat) = arm.get("pattern") {
+                let ssort = sort_of(scrut, env, self_def)?;
+                let mut binds = Vec::new();
+                match pat.get("kind").and_then(|k| k.as_str()) {
+                    Some("variant") => {
+                        if let (Some(sub), Sort::Data(i)) = (pat.get("pattern").or(pat.get("payload")), ssort) {
+                            let tag = pat.get("tag").and_then(|t| t.as_str()).unwrap_or_default();
+                            if let Some(Datatype::Sum(vs)) = datatype(i) {
+                                if let Some((_, Some(ps))) = vs.iter().find(|(t, _)| t == tag) {
+                                    bind_pattern(sub, "_", *ps, &mut binds)?;
+                                }
+                            }
+                        }
+                    }
+                    Some("lit") => {}
+                    _ => bind_pattern(pat, "_", ssort, &mut binds)?,
+                }
+                for (n, _, s) in binds {
+                    e2.insert(n, s);
+                }
+            }
+            sort_of(arm.get("body").ok_or_else(|| anyhow!("arm has no body"))?, &e2, self_def)
+        }
+        "tuple" => {
+            let elems = node.get("elems").and_then(|e| e.as_array()).ok_or_else(|| anyhow!("tuple has no elems"))?;
+            let sorts: Vec<Sort> = elems.iter().map(|e| sort_of(e, env, self_def)).collect::<Result<_>>()?;
+            Ok(register_datatype(Datatype::Tuple(sorts)))
+        }
+        "variant" => {
+            let tag = node.get("tag").and_then(|t| t.as_str()).ok_or_else(|| anyhow!("variant has no tag"))?;
+            let payload = match node.get("payload") {
+                Some(pl) => Some(sort_of(pl, env, self_def)?),
+                None => None,
+            };
+            sum_sort_with_tag(tag, payload)
         }
         "app" => {
             let op = head_op(node).ok_or_else(|| anyhow!("application with no resolvable head"))?;
+            if op == "fst" || op == "snd" {
+                let arg = node.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()).ok_or_else(|| anyhow!("{op} needs an arg"))?;
+                let Sort::Data(i) = sort_of(arg, env, self_def)? else { bail!("{op} applied to a non-tuple (out of fragment)") };
+                let Some(Datatype::Tuple(elems)) = datatype(i) else { bail!("{op} applied to a non-tuple (out of fragment)") };
+                let j = if op == "fst" { 0 } else { 1 };
+                return elems.get(j).copied().ok_or_else(|| anyhow!("{op} on a tuple with fewer than {} components", j + 1));
+            }
             if op.starts_with("fn_") {
                 return callee_contract(&op).map(|c| c.ret).ok_or_else(|| {
                     anyhow!("applies the fn_ref `{op}` (its certified contract is not available here — pass --records to use it)")
@@ -509,6 +753,20 @@ fn lower(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfDef>)
         }
         "case" => lower_case(node, env, self_def),
         "app" => lower_app(node, env, self_def),
+        "tuple" => {
+            let Sort::Data(i) = sort_of(node, env, self_def)? else { bail!("tuple without a tuple sort") };
+            let elems = node.get("elems").and_then(|e| e.as_array()).ok_or_else(|| anyhow!("tuple has no elems"))?;
+            let lowered: Vec<String> = elems.iter().map(|e| lower(e, env, self_def)).collect::<Result<_>>()?;
+            Ok(format!("(mk_dt{i} {})", lowered.join(" ")))
+        }
+        "variant" => {
+            let Sort::Data(i) = sort_of(node, env, self_def)? else { bail!("variant without a sum sort") };
+            let tag = node.get("tag").and_then(|t| t.as_str()).ok_or_else(|| anyhow!("variant has no tag"))?;
+            match node.get("payload") {
+                Some(pl) => Ok(format!("(dt{i}_{tag} {})", lower(pl, env, self_def)?)),
+                None => Ok(format!("dt{i}_{tag}")),
+            }
+        }
         other => bail!("unsupported expression kind `{other}` (out of fragment)"),
     }
 }
@@ -524,6 +782,7 @@ fn lower_case(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&Self
     // Find a default (wildcard or bind) arm; the rest must carry literal patterns.
     let mut default: Option<String> = None;
     let mut lit_arms: Vec<(String, &J)> = Vec::new(); // (lit-smt, body)
+    let mut variant_arms: Vec<(String, String, String)> = Vec::new(); // (tester, tag, lowered body)
     for arm in arms {
         let pat = arm.get("pattern").ok_or_else(|| anyhow!("arm has no pattern"))?;
         let body = arm.get("body").ok_or_else(|| anyhow!("arm has no body"))?;
@@ -541,8 +800,56 @@ fn lower_case(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&Self
                 let litv = lower_lit(pat.get("value").ok_or_else(|| anyhow!("lit pattern has no value"))?)?;
                 lit_arms.push((litv, body));
             }
+            // A tuple destructure is total: the arm's body under the component bindings is the default.
+            Some("tuple") => {
+                let mut binds = Vec::new();
+                bind_pattern(pat, &scrut_smt, ssort, &mut binds)?;
+                let mut e2 = env.clone();
+                for (n, _, s) in &binds {
+                    e2.insert(n.clone(), *s);
+                }
+                let b = lower(body, &mut e2, self_def)?;
+                default = Some(wrap_lets(&binds, b));
+            }
+            // Variant arms: tester-guarded, the payload bound by its accessor.
+            Some("variant") => {
+                let Sort::Data(i) = ssort else { bail!("variant pattern against a non-sum scrutinee") };
+                let Some(Datatype::Sum(vs)) = datatype(i) else { bail!("variant pattern against a non-sum scrutinee") };
+                let tag = pat.get("tag").and_then(|t| t.as_str()).ok_or_else(|| anyhow!("variant pattern has no tag"))?;
+                let Some((_, payload)) = vs.iter().find(|(t, _)| t == tag) else { bail!("variant `{tag}` is not a constructor of the scrutinee's sum") };
+                let mut binds = Vec::new();
+                if let (Some(sub), Some(ps)) = (pat.get("pattern").or(pat.get("payload")), payload) {
+                    bind_pattern(sub, &format!("(dt{i}_{tag}_v {scrut_smt})"), *ps, &mut binds)?;
+                }
+                let mut e2 = env.clone();
+                for (n, _, s) in &binds {
+                    e2.insert(n.clone(), *s);
+                }
+                let b = wrap_lets(&binds, lower(body, &mut e2, self_def)?);
+                variant_arms.push((format!("((_ is dt{i}_{tag}) {scrut_smt})"), tag.to_string(), b));
+            }
             other => bail!("unsupported case pattern `{other:?}` (out of fragment)"),
         }
+    }
+    // Variant arms fold like literal arms; with no default, the arms must cover every constructor and
+    // the last one is the base.
+    if !variant_arms.is_empty() {
+        let base = match default.take() {
+            Some(d) => d,
+            None => {
+                let Sort::Data(i) = ssort else { unreachable!() };
+                let Some(Datatype::Sum(vs)) = datatype(i) else { unreachable!() };
+                if !vs.iter().all(|(t, _)| variant_arms.iter().any(|(_, tag, _)| tag == t)) {
+                    bail!("non-exhaustive variant case (out of fragment)");
+                }
+                variant_arms.pop().map(|(_, _, b)| b).unwrap()
+            }
+        };
+        let mut acc = base;
+        for (cond, _, b) in variant_arms.into_iter().rev() {
+            acc = format!("(ite {cond} {b} {acc})");
+        }
+        return Ok(acc);
     }
 
     // Establish the base (else) branch. With no explicit default, a boolean scrutinee whose arms cover
@@ -598,6 +905,14 @@ fn lower_app(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfD
         let lowered = lower_args(env, &args)?;
         mark_callee_used(&op);
         return Ok(if lowered.is_empty() { c.symbol.clone() } else { format!("({} {})", c.symbol, lowered.join(" ")) });
+    }
+
+    // Tuple projections: accessors of the argument's tuple datatype.
+    if op == "fst" || op == "snd" {
+        let arg = args.first().ok_or_else(|| anyhow!("{op} needs an arg"))?;
+        let Sort::Data(i) = sort_of(arg, env, self_def)? else { bail!("{op} applied to a non-tuple (out of fragment)") };
+        let j = if op == "fst" { 0 } else { 1 };
+        return Ok(format!("(dt{i}_{j} {})", lower(arg, env, self_def)?));
     }
 
     // self / apply-of-self.
@@ -747,7 +1062,7 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
         // the property reads UNSUPPORTED, not mis-sorted. str_concat/str_length/str_contains are IN
         // the fragment now (the solver's string theory); split/join and the int<->string conversions
         // stay out (no theory counterpart / unsound mapping).
-        if matches!(op.as_str(), "length" | "head" | "tail" | "last" | "init" | "reverse" | "map" | "filter" | "foldl" | "foldr" | "cons" | "append" | "concat" | "null" | "fst" | "snd"
+        if matches!(op.as_str(), "length" | "head" | "tail" | "last" | "init" | "reverse" | "map" | "filter" | "foldl" | "foldr" | "cons" | "append" | "concat" | "null"
             | "str_split" | "str_join" | "to_string" | "parse_int"
             // str_lower stays OUT of the fragment: SMT-LIB has no case-conversion function and
             // encoding the Unicode mapping would be unsound-by-approximation. str_lt is IN (str.<).
@@ -784,9 +1099,14 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
         }
     }
     // Recurse into common subtrees regardless of kind.
-    for key in ["body", "value", "scrutinee"] {
+    for key in ["body", "value", "scrutinee", "payload"] {
         if let Some(child) = node.get(key) {
             visit_for_sorts(child, vars, sorts, self_param_sorts)?;
+        }
+    }
+    if let Some(elems) = node.get("elems").and_then(|e| e.as_array()) {
+        for e in elems {
+            visit_for_sorts(e, vars, sorts, self_param_sorts)?;
         }
     }
     if let Some(arms) = node.get("arms").and_then(|a| a.as_array()) {
@@ -890,7 +1210,7 @@ pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_pos
     out.push_str("(check-sat)\n");
     out.push_str("(get-model)\n");
 
-    Ok(Certificate { smt: out, quantified, uses_self, uses_callees })
+    Ok(Certificate { smt: with_datatypes(out), quantified, uses_self, uses_callees })
 }
 
 fn references_self(node: &J) -> bool {
@@ -1201,11 +1521,20 @@ fn lower_self_uninterpreted(body: &J) -> Result<SelfDef> {
     } else {
         bail!("body is not a lambda");
     };
+    let declared = declared_self_sorts(params.len());
     let mut inferred: BTreeMap<String, Option<Sort>> = params.iter().map(|p| (p.clone(), None)).collect();
     visit_for_sorts(inner, &params, &mut inferred, None)?;
-    let param_sorts: Vec<Sort> = params.iter().map(|p| inferred[p].unwrap_or(Sort::Int)).collect();
+    let param_sorts: Vec<Sort> = params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| declared.as_ref().and_then(|d| d.0[i]).or(inferred[p]).unwrap_or(Sort::Int))
+        .collect();
+    let candidates: Vec<Sort> = match declared.as_ref().and_then(|d| d.1) {
+        Some(r) => vec![r],
+        None => vec![Sort::Int, Sort::Bool, Sort::Str],
+    };
     let mut last_err = None;
-    for cand in [Sort::Int, Sort::Bool, Sort::Str] {
+    for cand in candidates {
         let partial = SelfDef { params: params.clone(), param_sorts: param_sorts.clone(), ret: cand, body_smt: String::new() };
         let mut env: BTreeMap<String, Sort> = params.iter().cloned().zip(param_sorts.iter().copied()).collect();
         match sort_of(inner, &env, Some(&partial)) {
@@ -1396,7 +1725,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     }
     out.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
     let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
-    Ok((Certificate { smt: out, quantified, uses_self: true, uses_callees }, m))
+    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees }, m))
 }
 
 fn smt_int_lit(n: i64) -> String {
@@ -1472,6 +1801,42 @@ mod tests {
     }
     fn op(o: &str, args: Vec<J>) -> J {
         json!({ "kind": "app", "op": o, "args": args })
+    }
+
+    #[test]
+    fn tuples_and_sums_lower_as_datatypes() {
+        let Some(solver) = solver() else { return };
+        // pair: \a b -> (a, b) : (int, int) -> (int, int); law fst(self(a, b)) == a.
+        let pair = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }],
+            "body": { "kind": "tuple", "elems": [v("a"), v("b")] } });
+        let int = json!({ "kind": "builtin", "name": "int" });
+        let pair_ty = json!({ "kind": "fn", "params": [int, int], "result": { "kind": "tuple", "elems": [int, int] } });
+        let prev = set_self_type(Some(pair_ty));
+        let law_fst = law(&["a", "b"], op("eq", vec![op("fst", vec![self_app(vec![v("a"), v("b")])]), v("a")]));
+        let (out, cert) = prove_property(&law_fst, Some(&pair), solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert!(cert.unwrap().smt.contains("(declare-datatype dt"), "the certificate declares the tuple datatype");
+        let law_wrong = law(&["a", "b"], op("eq", vec![op("snd", vec![self_app(vec![v("a"), v("b")])]), v("a")]));
+        assert!(matches!(prove_property(&law_wrong, Some(&pair), solver).0, ProofOutcome::Refuted(_)));
+        // half: \n -> case gt(n, 0) of true -> Just(n) | false -> None : int -> Maybe int, and a caller
+        // matching on it: \n -> case self(n)… — expressed as a refinement-style law on a wrapper body
+        // `\n -> case half(n) of { Just(x) => x; None => 0 }` whose result equals max(n, 0).
+        let maybe_int = json!({ "kind": "sum", "variants": [{ "tag": "Just", "type": int }, { "tag": "None" }] });
+        set_self_type(Some(json!({ "kind": "fn", "params": [int], "result": maybe_int })));
+        let half = json!({ "kind": "lambda", "params": [{ "name": "n" }],
+            "body": { "kind": "case", "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "gt" }, "args": [v("n"), { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+                      "arms": [
+                          { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": { "kind": "variant", "tag": "Just", "payload": v("n") } },
+                          { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": { "kind": "variant", "tag": "None" } }] } });
+        // Law over the sum-valued function: a variant matched back out through a nested body is out of the
+        // predicate grammar, so the checkable law here is equality with itself under the datatype
+        // (exercises variant construction + the declared sum sort end to end).
+        let law_refl = law(&["n"], op("eq", vec![self_app(vec![v("n")]), self_app(vec![v("n")])]));
+        let (out, cert) = prove_property(&law_refl, Some(&half), solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        let smt = cert.unwrap().smt;
+        assert!(smt.contains("_Just (dt") && smt.contains("_None)"), "{smt}");
+        set_self_type(prev);
     }
 
     #[test]

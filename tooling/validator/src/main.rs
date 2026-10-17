@@ -1530,8 +1530,7 @@ fn cmd_check_termination(record: &PathBuf, body: &PathBuf, records: Option<&Path
     let declared = record.pointer("/signature/terminates").and_then(|v| v.as_str()).unwrap_or("unknown");
     let maps = linked_maps(records)?;
     let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, "z3"));
-    let lookup = |t: &str| view.as_ref().and_then(|v| v.terminates(t));
-    let cb: Option<nl_validator::CalleeTerminates<'_>> = view.as_ref().map(|_| &lookup as nl_validator::CalleeTerminates<'_>);
+    let cb: Option<nl_validator::CalleeTerminates<'_>> = view.as_ref().map(|v| v as nl_validator::CalleeTerminates<'_>);
     match nl_validator::analyze_termination_linked(&body, &nl_validator::nat_param_positions(&record), cb) {
         TerminationOutcome::Always => match declared {
             "always" => println!("SOUND        the body provably always terminates (matches declared `always`)"),
@@ -1553,7 +1552,11 @@ fn cmd_check_complexity(record: &PathBuf, body: &PathBuf, records: Option<&PathB
     let maps = linked_maps(records)?;
     let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, "z3"));
     let cb: Option<nl_validator::CalleeComplexity<'_>> = view.as_ref().map(|v| v as nl_validator::CalleeComplexity<'_>);
-    let inferred = nl_validator::analyze_complexity_linked(&body, cb);
+    let result_ty = record.pointer("/signature/type").and_then(|t| {
+        let f = if t.get("kind").and_then(|k| k.as_str()) == Some("forall") { t.get("body")? } else { t };
+        f.get("result").cloned()
+    });
+    let inferred = nl_validator::analyze_complexity_typed(&body, result_ty.as_ref(), cb);
 
     // (1) The flat `signature.complexity` bound.
     let declared = record.pointer("/signature/complexity").and_then(|v| v.as_str());
@@ -1814,6 +1817,7 @@ fn cmd_prove(
     if let (Some(v), Some(b)) = (&view, &body_ast) {
         nl_validator::set_callee_contracts(v.contracts_for(b));
     }
+    nl_validator::set_self_type(value.pointer("/signature/type").cloned());
     let props = value.get("properties").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     if props.is_empty() {
         println!("no properties to prove");
