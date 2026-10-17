@@ -36,6 +36,13 @@ pub enum Sort {
     /// A declared SMT datatype — a tuple or a sum (`Maybe`, `Result`, …) — by its index in the
     /// per-thread datatype registry (`sort_of_type` registers; `datatype_preamble` declares).
     Data(u16),
+    /// A list of integers — the structural backend's `Lst = nil | cons(Int, Lst)` datatype, declared
+    /// here whenever a certificate mentions the sort. Lists are LOWERED only inside the induction rung
+    /// (`lists_in_fragment`): the first-order prover keeps refusing them, so a list law still reaches
+    /// the structural backend; a RECURSIVE function's law or contract that mentions a list goes
+    /// through numeric/structural induction with `length`/`cons`/`head`/`tail`/`null` as the solver's
+    /// own definitions. A callee's contract may carry the sort either way.
+    Lst,
 }
 
 impl Sort {
@@ -45,8 +52,97 @@ impl Sort {
             Sort::Bool => "Bool".into(),
             Sort::Str => "String".into(),
             Sort::Data(i) => format!("dt{i}"),
+            Sort::Lst => {
+                LST_USED.with(|u| u.set(true));
+                "Lst".into()
+            }
         }
     }
+}
+
+thread_local! {
+    /// Whether list operations lower in the current certificate (set by the induction rung only).
+    static LISTS_IN_FRAGMENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Whether the `Lst` sort was emitted into the certificate being built (declare it, then).
+    static LST_USED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The recursive list definitions the certificate's lowering used (`length`, `append`, `reverse`).
+    static LIST_DEFS_USED: std::cell::RefCell<BTreeSet<&'static str>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+fn lists_in_fragment() -> bool {
+    LISTS_IN_FRAGMENT.with(|f| f.get())
+}
+
+/// Admit list operations for the rest of the current certificate; restores the previous setting on
+/// drop (so an early `?` return leaves the first-order prover's refusal in force).
+struct ListsGuard(bool);
+impl Drop for ListsGuard {
+    fn drop(&mut self) {
+        LISTS_IN_FRAGMENT.with(|f| f.set(self.0));
+    }
+}
+fn admit_lists() -> ListsGuard {
+    ListsGuard(LISTS_IN_FRAGMENT.with(|f| f.replace(true)))
+}
+
+fn mark_list_def(name: &'static str) {
+    LIST_DEFS_USED.with(|d| {
+        d.borrow_mut().insert(name);
+    });
+}
+
+/// Forget the list-emission marks of a previous certificate (called where a certificate starts).
+fn reset_list_emission() {
+    LST_USED.with(|u| u.set(false));
+    LIST_DEFS_USED.with(|d| d.borrow_mut().clear());
+}
+
+/// The `Lst` datatype and the recursive list definitions a certificate used, in dependency order
+/// (`reverse` is defined through `append`). Empty when the certificate never mentioned a list.
+fn list_preamble() -> String {
+    if !LST_USED.with(|u| u.get()) && LIST_DEFS_USED.with(|d| d.borrow().is_empty()) {
+        return String::new();
+    }
+    let used = LIST_DEFS_USED.with(|d| d.borrow().clone());
+    let mut out = String::from("(declare-datatypes ((Lst 0)) (((nil) (cons (hd Int) (tl Lst)))))\n");
+    if used.contains("length") {
+        out.push_str("(define-fun-rec length ((xs Lst)) Int (ite ((_ is nil) xs) 0 (+ 1 (length (tl xs)))))\n");
+    }
+    if used.contains("append") || used.contains("reverse") {
+        out.push_str("(define-fun-rec append ((xs Lst) (ys Lst)) Lst (ite ((_ is nil) xs) ys (cons (hd xs) (append (tl xs) ys))))\n");
+    }
+    if used.contains("reverse") {
+        out.push_str("(define-fun-rec reverse ((xs Lst)) Lst (ite ((_ is nil) xs) nil (append (reverse (tl xs)) (cons (hd xs) nil))))\n");
+    }
+    if used.contains("all_nat") {
+        out.push_str("(define-fun-rec all_nat ((xs Lst)) Bool (ite ((_ is nil) xs) true (and (>= (hd xs) 0) (all_nat (tl xs)))))\n");
+    }
+    out
+}
+
+/// The parameter positions of the function under proof typed `List nat`: their elements are
+/// bounded below by type (the list analogue of `nat_positions_of_type`), stated as `all_nat` on the
+/// law variables fed to them — `from_digits ≥ 0` is false over Int-element lists and true over its
+/// declared domain.
+fn nat_list_param_positions() -> BTreeSet<usize> {
+    let Some(ty) = SELF_TYPE.with(|t| t.borrow().clone()) else { return BTreeSet::new() };
+    let fn_ty = if ty.get("kind").and_then(|k| k.as_str()) == Some("forall") { ty.get("body").cloned().unwrap_or(J::Null) } else { ty };
+    fn_ty
+        .get("params")
+        .and_then(|p| p.as_array())
+        .map(|ps| {
+            ps.iter()
+                .enumerate()
+                .filter(|(_, p)| {
+                    let p = crate::fold_canonical_type_refs(p);
+                    p.get("kind").and_then(|k| k.as_str()) == Some("apply")
+                        && p.get("ctor").and_then(crate::builtin_type_name) == Some("List")
+                        && p.get("args").and_then(|a| a.as_array()).is_some_and(|a| a.len() == 1 && crate::builtin_type_name(&a[0]) == Some("nat"))
+                })
+                .map(|(i, _)| i)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // --- datatypes (tuples and sums as SMT datatypes) ----------------------------------------------------
@@ -120,6 +216,16 @@ pub fn sort_of_type(ty: &J) -> Option<Sort> {
                 variants.push((tag, payload));
             }
             Some(register_datatype(Datatype::Sum(variants)))
+        }
+        // `List int` / `List nat`: the structural backend's `Lst` (Int elements only — the one
+        // element sort the list definitions are stated over).
+        Some("apply") if crate::builtin_type_name(ty.get("ctor")?) == Some("List") => {
+            let args = ty.get("args")?.as_array()?;
+            if args.len() == 1 && sort_of_type(&args[0]) == Some(Sort::Int) {
+                Some(Sort::Lst)
+            } else {
+                None
+            }
         }
         _ => None,
     }
@@ -195,9 +301,11 @@ fn datatype_preamble() -> String {
     })
 }
 
-/// Prepend the datatype declarations to a finished certificate (after `set-logic`).
+/// Prepend the datatype declarations to a finished certificate (after `set-logic`): the list
+/// datatype and definitions first (a tuple may carry a list), then the tuples and sums.
 fn with_datatypes(smt: String) -> String {
-    let dts = datatype_preamble();
+    let dts = datatype_preamble(); // may mention `Lst` (marks it used) — so the list preamble is read after
+    let dts = format!("{}{dts}", list_preamble());
     if dts.is_empty() {
         smt
     } else {
@@ -324,8 +432,10 @@ fn lower_self(body: &J) -> Result<SelfDef> {
 /// `((f a) b)` — into flat applications `f(a, b)`, so the translator sees one head with all its
 /// arguments (the same normalization the termination/complexity analyzers apply). Purely
 /// structural; `apply`-spines and everything else pass through untouched. Children are rewritten
-/// first, so one flattening step per node suffices (the loop is defensive).
-fn uncurry(node: &J) -> J {
+/// first, so one flattening step per node suffices (the loop is defensive). Shared with the
+/// structural-induction backend, whose entry points normalize the same way (a surface-parsed
+/// cons-recursive body read UNSUPPORTED there — "application with no resolvable head" — until it did).
+pub(crate) fn uncurry(node: &J) -> J {
     match node {
         J::Object(m) => {
             let mut out = serde_json::Map::new();
@@ -420,6 +530,10 @@ fn law_about(node: &J, target: &str) -> J {
 
 thread_local! {
     static CALLEE_CONTRACTS: std::cell::RefCell<BTreeMap<String, CalleeContract>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+    /// Why a linked callee has NO usable contract (unresolvable, sorts outside the fragment, a
+    /// cycle) — so the refusal names the real reason instead of "pass --records" when the records
+    /// WERE passed (the integer-tier module's `digits_roundtrip` read that false instruction).
+    static CALLEE_REFUSALS: std::cell::RefCell<BTreeMap<String, String>> = const { std::cell::RefCell::new(BTreeMap::new()) };
     static CALLEES_USED: std::cell::RefCell<BTreeSet<String>> = const { std::cell::RefCell::new(BTreeSet::new()) };
 }
 
@@ -429,8 +543,23 @@ pub fn set_callee_contracts(contracts: BTreeMap<String, CalleeContract>) -> BTre
     CALLEE_CONTRACTS.with(|c| std::mem::replace(&mut *c.borrow_mut(), contracts))
 }
 
+/// Install the stated reasons for the linked callees that yielded no contract (see
+/// `LinkedView::refusals_for`), returning the previous map. Installed beside the contracts.
+pub fn set_callee_refusals(refusals: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    CALLEE_REFUSALS.with(|c| std::mem::replace(&mut *c.borrow_mut(), refusals))
+}
+
 fn callee_contract(target: &str) -> Option<CalleeContract> {
     CALLEE_CONTRACTS.with(|c| c.borrow().get(target).cloned())
+}
+
+/// The refusal for a callee without a contract: the linked view's stated reason when records were
+/// supplied, else the instruction to supply them.
+fn no_contract_reason(target: &str) -> String {
+    match CALLEE_REFUSALS.with(|c| c.borrow().get(target).cloned()) {
+        Some(why) => format!("applies the fn_ref `{target}` without a usable contract: {why}"),
+        None => format!("applies the fn_ref `{target}` (its certified contract is not available here — pass --records to use it)"),
+    }
 }
 
 fn mark_callee_used(target: &str) {
@@ -532,6 +661,9 @@ fn op_result_sort(op: &str) -> Option<Sort> {
         "eq" | "neq" | "lt" | "le" | "gt" | "ge" | "and" | "or" | "xor" | "not" | "str_contains"
         | "str_lt" => Sort::Bool,
         "str_concat" => Sort::Str,
+        "length" | "head" if lists_in_fragment() => Sort::Int,
+        "null" if lists_in_fragment() => Sort::Bool,
+        "cons" | "tail" | "append" | "reverse" if lists_in_fragment() => Sort::Lst,
         _ => return None,
     })
 }
@@ -569,11 +701,16 @@ fn sort_of(node: &J, env: &BTreeMap<String, Sort>, self_def: Option<&SelfDef>) -
             Some("int") | Some("nat") => Ok(Sort::Int),
             Some("bool") => Ok(Sort::Bool),
             Some("string") => Ok(Sort::Str),
+            Some("list") if lists_in_fragment() => Ok(Sort::Lst),
             other => bail!("unsupported literal kind: {other:?}"),
         },
         "var" => {
             let name = node.get("name").and_then(|n| n.as_str()).unwrap_or_default();
-            env.get(name).copied().ok_or_else(|| anyhow!("free variable `{name}` (out of fragment)"))
+            match env.get(name).copied() {
+                Some(s) => Ok(s),
+                None if name == "nil" && lists_in_fragment() => Ok(Sort::Lst),
+                None => bail!("free variable `{name}` (out of fragment)"),
+            }
         }
         "let" => {
             let mut e2 = env.clone();
@@ -635,9 +772,7 @@ fn sort_of(node: &J, env: &BTreeMap<String, Sort>, self_def: Option<&SelfDef>) -
                 return elems.get(j).copied().ok_or_else(|| anyhow!("{op} on a tuple with fewer than {} components", j + 1));
             }
             if op.starts_with("fn_") {
-                return callee_contract(&op).map(|c| c.ret).ok_or_else(|| {
-                    anyhow!("applies the fn_ref `{op}` (its certified contract is not available here — pass --records to use it)")
-                });
+                return callee_contract(&op).map(|c| c.ret).ok_or_else(|| anyhow!("{}", no_contract_reason(&op)));
             }
             if op == "id" {
                 return sort_of(&node.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()).cloned()
@@ -670,6 +805,7 @@ pub(crate) fn lit_kind(value: &J) -> Option<&'static str> {
             Some("bool") => Some("bool"),
             Some("string") => Some("string"),
             Some("float") => Some("float"),
+            Some("list") => Some("list"),
             _ => None,
         },
         J::Bool(_) => Some("bool"),
@@ -680,7 +816,7 @@ pub(crate) fn lit_kind(value: &J) -> Option<&'static str> {
 }
 
 /// The payload of a literal in either spelling (the structured form's `value`, or the bare literal itself).
-fn lit_payload(value: &J) -> &J {
+pub(crate) fn lit_payload(value: &J) -> &J {
     if value.is_object() {
         value.get("value").unwrap_or(value)
     } else {
@@ -708,6 +844,15 @@ fn lower_lit(raw: &J) -> Result<String> {
         Some("string") => {
             let s = value.get("value").and_then(|v| v.as_str()).ok_or_else(|| anyhow!("string literal has no value"))?;
             Ok(smt_string_lit(s))
+        }
+        // A list literal (the structured value form) is a cons spine ending in nil.
+        Some("list") if lists_in_fragment() => {
+            let elems = raw.get("elems").and_then(|e| e.as_array()).cloned().unwrap_or_default();
+            let mut acc = "nil".to_string();
+            for e in elems.iter().rev() {
+                acc = format!("(cons {} {acc})", lower_lit(e)?);
+            }
+            Ok(acc)
         }
         other => bail!("unsupported literal kind: {other:?}"),
     }
@@ -737,6 +882,8 @@ fn lower(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfDef>)
             let name = node.get("name").and_then(|n| n.as_str()).unwrap_or_default();
             if env.contains_key(name) {
                 Ok(name.to_string())
+            } else if name == "nil" && lists_in_fragment() {
+                Ok("nil".to_string())
             } else {
                 bail!("free variable `{name}` (out of fragment)")
             }
@@ -897,7 +1044,7 @@ fn lower_app(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfD
     // contract (axioms emitted by `callee_preamble`), when the linked view supplied one.
     if op.starts_with("fn_") {
         let Some(c) = callee_contract(&op) else {
-            bail!("applies the fn_ref `{op}` (its certified contract is not available here — pass --records to use it)");
+            bail!("{}", no_contract_reason(&op));
         };
         if args.len() != c.params.len() {
             bail!("`{op}` applied to {} args, expects {}", args.len(), c.params.len());
@@ -968,6 +1115,24 @@ fn lower_app(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfD
         // GW4 tier-2: SMT-LIB `str.<` is strict lexicographic order over code points — exactly our
         // `str_lt` semantics (the canonical-map-key order). Argument order agrees (no swap).
         "str_lt" => Ok(format!("(str.< {} {})", lower(args[0], env, self_def)?, lower(args[1], env, self_def)?)),
+        // Lists (the induction rung only): the datatype's constructors, selectors and tester, and the
+        // recursive definitions the structural backend states (`list_preamble`).
+        "cons" if lists_in_fragment() => Ok(format!("(cons {} {})", lower(args[0], env, self_def)?, lower(args[1], env, self_def)?)),
+        "head" if lists_in_fragment() => Ok(format!("(hd {})", lower(args[0], env, self_def)?)),
+        "tail" if lists_in_fragment() => Ok(format!("(tl {})", lower(args[0], env, self_def)?)),
+        "null" if lists_in_fragment() => Ok(format!("((_ is nil) {})", lower(args[0], env, self_def)?)),
+        "length" if lists_in_fragment() => {
+            mark_list_def("length");
+            Ok(format!("(length {})", lower(args[0], env, self_def)?))
+        }
+        "append" if lists_in_fragment() => {
+            mark_list_def("append");
+            Ok(format!("(append {} {})", lower(args[0], env, self_def)?, lower(args[1], env, self_def)?))
+        }
+        "reverse" if lists_in_fragment() => {
+            mark_list_def("reverse");
+            Ok(format!("(reverse {})", lower(args[0], env, self_def)?))
+        }
         other => bail!("unsupported operator `{other}` (out of fragment)"),
     }
 }
@@ -993,8 +1158,10 @@ fn evident_sort(node: &J) -> Option<Sort> {
             Some("int") | Some("nat") => Some(Sort::Int),
             Some("bool") => Some(Sort::Bool),
             Some("string") => Some(Sort::Str),
+            Some("list") if lists_in_fragment() => Some(Sort::Lst),
             _ => None,
         },
+        Some("var") if node.get("name").and_then(|n| n.as_str()) == Some("nil") && lists_in_fragment() => Some(Sort::Lst),
         Some("app") => op_result_sort(&head_op(node)?),
         _ => None,
     }
@@ -1040,6 +1207,7 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
             "add" | "sub" | "mul" | "neg" | "abs" | "min" | "max" | "mod" | "div" | "lt" | "le" | "gt" | "ge" => Some(Sort::Int),
             "and" | "or" | "xor" | "not" => Some(Sort::Bool),
             "str_concat" | "str_length" | "str_contains" | "str_lt" | "str_lower" | "url_encode" => Some(Sort::Str),
+            "length" | "head" | "tail" | "null" | "reverse" | "append" if lists_in_fragment() => Some(Sort::Lst),
             _ => None, // eq/neq/apply/self/id: don't constrain directly
         };
         if let Some(s) = operand_sort {
@@ -1047,6 +1215,15 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
                 if let Some(n) = var_name(a) {
                     constrain(n, s, vars, sorts)?;
                 }
+            }
+        }
+        // `cons(h, t)`: an Int head onto a list tail.
+        if op == "cons" && lists_in_fragment() {
+            if let Some(n) = args.first().and_then(|a| var_name(a)) {
+                constrain(n, Sort::Int, vars, sorts)?;
+            }
+            if let Some(n) = args.get(1).and_then(|a| var_name(a)) {
+                constrain(n, Sort::Lst, vars, sorts)?;
             }
         }
         // eq/neq don't fix a sort themselves, but if one side's sort is evident (a literal or a
@@ -1062,7 +1239,9 @@ fn visit_for_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Optio
         // the property reads UNSUPPORTED, not mis-sorted. str_concat/str_length/str_contains are IN
         // the fragment now (the solver's string theory); split/join and the int<->string conversions
         // stay out (no theory counterpart / unsound mapping).
-        if matches!(op.as_str(), "length" | "head" | "tail" | "last" | "init" | "reverse" | "map" | "filter" | "foldl" | "foldr" | "cons" | "append" | "concat" | "null"
+        let list_core = matches!(op.as_str(), "length" | "head" | "tail" | "reverse" | "cons" | "append" | "null");
+        if (list_core && !lists_in_fragment())
+            || matches!(op.as_str(), "last" | "init" | "map" | "filter" | "foldl" | "foldr" | "concat"
             | "str_split" | "str_join" | "to_string" | "parse_int"
             // str_lower stays OUT of the fragment: SMT-LIB has no case-conversion function and
             // encoding the Unicode mapping would be unsound-by-approximation. str_lt is IN (str.<).
@@ -1134,6 +1313,7 @@ pub fn build_certificate(prop_expr: &J, body: Option<&J>) -> Result<Certificate>
 /// nat → nat` would be asked to hold where `gcd`'s contract says nothing — measured: a timeout).
 pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_positions: &BTreeSet<usize>) -> Result<Certificate> {
     take_callees_used(); // a failed earlier lowering must not leak its callees into this certificate
+    reset_list_emission();
     // Normalize away curried application spines first, so surface-parsed properties/bodies
     // (juxtaposition parses curried) analyze identically to AST-authored flat ones.
     let prop_expr = &uncurry(prop_expr);
@@ -1531,6 +1711,7 @@ fn lower_self_uninterpreted(body: &J) -> Result<SelfDef> {
         .collect();
     let candidates: Vec<Sort> = match declared.as_ref().and_then(|d| d.1) {
         Some(r) => vec![r],
+        None if lists_in_fragment() => vec![Sort::Int, Sort::Bool, Sort::Str, Sort::Lst],
         None => vec![Sort::Int, Sort::Bool, Sort::Str],
     };
     let mut last_err = None;
@@ -1597,6 +1778,12 @@ pub fn prove_by_numeric_induction(
 
 fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &BTreeSet<usize>, with_ih: bool) -> Result<(Certificate, String)> {
     take_callees_used();
+    reset_list_emission();
+    // Lists lower in THIS rung (the first-order prover keeps refusing them, so a plain list law
+    // still reaches the structural backend): a recursion over the integers that builds or reads a
+    // list (`pad_to`), or a structural recursion whose contract is numeric (`from_digits ≥ 0`),
+    // inducts over its measure with the list definitions as the solver's own.
+    let _lists = admit_lists();
     let prop_expr = &uncurry(prop_expr);
     let body = body.map(uncurry).ok_or_else(|| anyhow!("numeric induction needs the body"))?;
     if prop_expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
@@ -1633,6 +1820,20 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
             }
         }
     }
+    // … and one fed to a `List nat` parameter ranges over lists of nats (`all_nat`).
+    let nat_list_positions = nat_list_param_positions();
+    let mut nat_list_vars: BTreeSet<String> = BTreeSet::new();
+    for call in collect_self_applications(pred) {
+        for (i, a) in call.iter().enumerate() {
+            if nat_list_positions.contains(&i) {
+                if let Some(v) = var_name(a) {
+                    if vars.iter().any(|x| x == v) {
+                        nat_list_vars.insert(v.to_string());
+                    }
+                }
+            }
+        }
+    }
     let spec = measure_spec(pred, measure.position, &vars, &nat_vars)?;
     let m = match &spec {
         MeasureSpec::Var(v) => v.clone(),
@@ -1656,10 +1857,17 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
 
     let mut out = String::new();
     out.push_str("(set-logic ALL)\n");
-    out.push_str(&format!(
-        ";; numeric induction on `{m}` (measure position {}, floor {}): self is uninterpreted, its defining\n;; equation instantiated at every application the law makes and at the recursive calls inside them.\n",
-        measure.position, measure.floor
-    ));
+    if measure.structural {
+        out.push_str(&format!(
+            ";; structural induction on `{m}` (measure position {}: the list every recursive call tails): self is\n;; uninterpreted, its defining equation instantiated at every application the law makes and at the\n;; recursive calls inside them; the hypothesis is instantiated at each tail-descending call.\n",
+            measure.position
+        ));
+    } else {
+        out.push_str(&format!(
+            ";; numeric induction on `{m}` (measure position {}, floor {}): self is uninterpreted, its defining\n;; equation instantiated at every application the law makes and at the recursive calls inside them.\n",
+            measure.position, measure.floor
+        ));
+    }
     out.push_str(&format!(
         "(declare-fun self ({}) {})\n",
         sd.param_sorts.iter().map(|s| s.smt()).collect::<Vec<_>>().join(" "),
@@ -1673,10 +1881,24 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     for v in &nat_vars {
         out.push_str(&format!("(assert (>= {v} 0))\n"));
     }
+    for v in &nat_list_vars {
+        mark_list_def("all_nat");
+        out.push_str(&format!("(assert (all_nat {v}))\n"));
+    }
     // IH — only when there is a measure to induct on (a law with a literal at the measure position is
     // decided by the unfolding below alone). One variable: `floor ≤ m' < m`. A sum of nat variables:
     // `Σ v' < Σ v` (each v' ≥ 0 — well-founded over the nats).
+    if measure.structural && matches!(spec, MeasureSpec::Sum(_)) {
+        bail!("the law applies `self` at several measures of a structural (list) recursion — a sum of lengths is not a supported measure");
+    }
     let ih_order: Option<Vec<String>> = match &spec {
+        // A structural measure gets NO quantified hypothesis: a guard `length(m') < length(m)` over
+        // the recursive `length` definition is exactly what z3 cannot discharge (measured: the
+        // `from_digits ≥ 0` obligation closes in 10 ms without that guard and times out with it).
+        // The hypothesis is stated instead as explicit INSTANCES at the body's tail-descending
+        // recursive calls, guarded by the descended list being a cons — the form in which the
+        // termination checker proved the descent (below, with the defining-equation instances).
+        MeasureSpec::Var(_) if measure.structural => None,
         MeasureSpec::Var(m) => Some(vec![format!("(>= {} {})", prime(m), smt_int_lit(measure.floor)), format!("(< {} {m})", prime(m))]),
         MeasureSpec::Sum(vs) => {
             let sum = |f: &dyn Fn(&str) -> String| if vs.len() == 1 { f(&vs[0]) } else { format!("(+ {})", vs.iter().map(|v| f(v)).collect::<Vec<_>>().join(" ")) };
@@ -1688,6 +1910,9 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
         let ih_binders = vars.iter().map(|v| format!("({} {})", prime(v), var_sorts[v].smt())).collect::<Vec<_>>().join(" ");
         for v in &nat_vars {
             ih_guards.push(format!("(>= {} 0)", prime(v)));
+        }
+        for v in &nat_list_vars {
+            ih_guards.push(format!("(all_nat {})", prime(v)));
         }
         out.push_str(&format!(
             "(assert (forall ({ih_binders}) (=> (and {}) {pred_ih_smt})))\n",
@@ -1720,6 +1945,58 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
             let instantiated = let_params(&sd.params, &terms, &eq);
             if seen.insert(instantiated.clone()) {
                 out.push_str(&format!("(assert {instantiated})\n"));
+            }
+            // The structural induction hypothesis, as an instance at this recursive call: when the
+            // law applies `self` to distinct law variables and the call tails the measure parameter
+            // (`self(b, tail(ds))`), `P[vars := the call's arguments]` holds provided the list it
+            // tails is a cons (so the selector names a proper substructure — on `nil`, `tl` is an
+            // unconstrained value and the instance would be unsound), under the domain facts at
+            // the instance. Exactly the strong structural induction principle, instantiated.
+            if measure.structural && with_ih {
+                let law_vars: Option<Vec<&str>> = call.iter().map(|a| var_name(a)).collect();
+                let Some(law_vars) = law_vars else { continue };
+                let distinct = law_vars.iter().collect::<BTreeSet<_>>().len() == law_vars.len();
+                if !distinct || !law_vars.iter().all(|v| vars.iter().any(|x| x == v)) {
+                    continue;
+                }
+                let Some((p, k)) = crate::terminate::tail_descent(&rc[measure.position]) else { continue };
+                if p != sd.params[measure.position] {
+                    continue;
+                }
+                let measure_term = &terms[measure.position];
+                let cons_guards: Vec<String> = (0..k)
+                    .map(|j| {
+                        let mut t = measure_term.clone();
+                        for _ in 0..j {
+                            t = format!("(tl {t})");
+                        }
+                        format!("(not ((_ is nil) {t}))")
+                    })
+                    .collect();
+                let mut domain_guards: Vec<String> = Vec::new();
+                for (i, v) in law_vars.iter().enumerate() {
+                    if nat_vars.contains(*v) {
+                        domain_guards.push(format!("(>= {} 0)", rterms[i]));
+                    }
+                    if nat_list_vars.contains(*v) {
+                        domain_guards.push(format!("(all_nat {})", rterms[i]));
+                    }
+                }
+                let binds = law_vars.iter().zip(&rterms).map(|(v, r)| format!("({v} {r})")).collect::<Vec<_>>().join(" ");
+                let inst = format!("(let ({binds}) {pred_smt})");
+                let inst = match domain_guards.len() {
+                    0 => inst,
+                    1 => format!("(=> {} {inst})", domain_guards[0]),
+                    _ => format!("(=> (and {}) {inst})", domain_guards.join(" ")),
+                };
+                let inst = let_params(&sd.params, &terms, &inst);
+                let inst = match cons_guards.len() {
+                    1 => format!("(=> {} {inst})", cons_guards[0]),
+                    _ => format!("(=> (and {}) {inst})", cons_guards.join(" ")),
+                };
+                if seen.insert(inst.clone()) {
+                    out.push_str(&format!(";; induction hypothesis at the recursive call {inner_app}\n(assert {inst})\n"));
+                }
             }
         }
     }
@@ -2160,5 +2437,95 @@ mod tests {
                 { "kind": "var", "name": "n" }] } });
         let (o2, _) = prove_property(&refuted, Some(&double_body()), solver);
         assert!(matches!(o2, ProofOutcome::Refuted(_)), "expected REFUTED, got {o2:?}");
+    }
+
+    fn ty_list(elem: &str) -> J {
+        json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "builtin", "name": elem }] })
+    }
+    fn ty_fn(params: Vec<J>, result: J) -> J {
+        json!({ "kind": "fn", "params": params, "result": result })
+    }
+    fn ty(n: &str) -> J {
+        json!({ "kind": "builtin", "name": n })
+    }
+    fn case_bool(scrut: J, on_true: J, on_false: J) -> J {
+        json!({ "kind": "case", "scrutinee": scrut, "arms": [
+            { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": on_true },
+            { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": on_false }] })
+    }
+
+    /// pad_to: \xs n -> case gt(n, 0) of true -> case null(xs) of true -> cons(0, self(nil, sub(n, 1)))
+    /// | false -> cons(head(xs), self(tail(xs), sub(n, 1))) | false -> nil — a NUMERIC recursion that
+    /// builds a list (the integer-tier module's record).
+    fn pad_to_body() -> J {
+        let n1 = op("sub", vec![v("n"), slit(1)]);
+        json!({ "kind": "lambda", "params": [{ "name": "xs" }, { "name": "n" }], "body":
+            case_bool(op("gt", vec![v("n"), slit(0)]),
+                case_bool(op("null", vec![v("xs")]),
+                    op("cons", vec![slit(0), self_app(vec![v("nil"), n1.clone()])]),
+                    op("cons", vec![op("head", vec![v("xs")]), self_app(vec![op("tail", vec![v("xs")]), n1])])),
+                v("nil")) })
+    }
+
+    /// from_digits: \b ds -> case null(ds) of true -> 0 | false -> add(head(ds), mul(b, self(b, tail(ds))))
+    /// — a STRUCTURAL recursion (on its second parameter) with a numeric contract.
+    fn from_digits_body() -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "b" }, { "name": "ds" }], "body":
+            case_bool(op("null", vec![v("ds")]),
+                slit(0),
+                op("add", vec![op("head", vec![v("ds")]), op("mul", vec![v("b"), self_app(vec![v("b"), op("tail", vec![v("ds")])])])])) })
+    }
+    /// A structured (body-form) integer literal — the termination checker reads guards and descents
+    /// in this spelling; `lit` above is the predicate form.
+    fn slit(n: i64) -> J {
+        json!({ "kind": "lit", "value": { "kind": "int", "value": n } })
+    }
+
+    #[test]
+    fn lists_lower_in_the_induction_rung_only() {
+        let Some(solver) = solver() else { return };
+        let body = pad_to_body();
+        // forall xs n. lt(n, 0) or length(self(xs, n)) == n
+        let law_len = |rhs: J| law(&["xs", "n"], op("or", vec![op("lt", vec![v("n"), lit(0)]), op("eq", vec![op("length", vec![self_app(vec![v("xs"), v("n")])]), rhs])]));
+        // The first-order prover still refuses list operators (so a list law reaches the structural backend).
+        assert!(matches!(prove_property(&law_len(v("n")), Some(&body), solver).0, ProofOutcome::Unsupported(_)));
+        let prev = set_self_type(Some(ty_fn(vec![ty_list("int"), ty("nat")], ty_list("int"))));
+        let nats: BTreeSet<usize> = [1].into();
+        // Induction on `n` with the list in play: PROVED, the certificate declaring the list datatype.
+        let (out, cert, m) = prove_by_numeric_induction(&law_len(v("n")), Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert_eq!(m.as_deref(), Some("n"));
+        let smt = cert.unwrap().smt;
+        assert!(smt.contains("(declare-datatypes ((Lst 0))") && smt.contains("(define-fun-rec length") && smt.contains("(declare-const xs Lst)"), "{smt}");
+        // The false law `length(self(xs, n)) == n + 1` is never proved.
+        let (out, _, _) = prove_by_numeric_induction(&law_len(op("add", vec![v("n"), lit(1)])), Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+        set_self_type(prev);
+    }
+
+    #[test]
+    fn structural_measure_induction_states_the_declared_element_domain() {
+        let Some(solver) = solver() else { return };
+        let body = from_digits_body();
+        let nats: BTreeSet<usize> = [0].into();
+        let nonneg = law(&["b", "ds"], op("ge", vec![self_app(vec![v("b"), v("ds")]), lit(0)]));
+        // Over `List nat`: PROVED by induction on the structure of `ds` — the hypothesis instantiated at
+        // the tail-descending call, the element domain stated as `all_nat`, no quantified hypothesis.
+        let prev = set_self_type(Some(ty_fn(vec![ty("nat"), ty_list("nat")], ty("nat"))));
+        let (out, cert, m) = prove_by_numeric_induction(&nonneg, Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert_eq!(m.as_deref(), Some("ds"));
+        let smt = cert.unwrap().smt;
+        assert!(smt.contains("(define-fun-rec all_nat") && smt.contains("(assert (all_nat ds))") && !smt.contains("(forall ((b__ih"), "{smt}");
+        assert!(smt.contains("(=> (not ((_ is nil) ds))"), "{smt}");
+        // The false strengthening `self(b, ds) >= 1` is never proved.
+        let (out, _, _) = prove_by_numeric_induction(&law(&["b", "ds"], op("ge", vec![self_app(vec![v("b"), v("ds")]), lit(1)])), Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+        // Over `List int` the same law is FALSE (ds = [-1]): the element domain is not stated, UNKNOWN.
+        set_self_type(Some(ty_fn(vec![ty("nat"), ty_list("int")], ty("int"))));
+        let (out, cert, _) = prove_by_numeric_induction(&nonneg, Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+        assert!(!cert.unwrap().smt.contains("all_nat"));
+        set_self_type(prev);
     }
 }

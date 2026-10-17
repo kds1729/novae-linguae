@@ -1474,6 +1474,7 @@ fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str, records:
     let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, solver));
     if let Some(v) = &view {
         nl_validator::set_callee_contracts(v.contracts_for(&body));
+        nl_validator::set_callee_refusals(v.refusals_for(&body));
     }
     let sig_type = record
         .pointer("/signature/type")
@@ -1816,6 +1817,7 @@ fn cmd_prove(
     let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, solver));
     if let (Some(v), Some(b)) = (&view, &body_ast) {
         nl_validator::set_callee_contracts(v.contracts_for(b));
+        nl_validator::set_callee_refusals(v.refusals_for(b));
     }
     nl_validator::set_self_type(value.pointer("/signature/type").cloned());
     let props = value.get("properties").and_then(|v| v.as_array()).cloned().unwrap_or_default();
@@ -1892,15 +1894,32 @@ fn cmd_prove(
                         lemmas.join(", ")
                     )
                 }
-                InductionOutcome::Failed(why) => format!("NOT-PROVED   induction did not close: {why}"),
-                InductionOutcome::Unknown => "UNKNOWN      induction step needs a lemma we lack (solver undecided)".to_string(),
+                // The structural backend inducts on the leading list variable. A law whose recursion
+                // measures elsewhere (`pad_to` counts `n` down while consing) is the measure-induction
+                // rung's — which lowers lists — so that rung gets its turn before UNKNOWN is final.
+                out @ (InductionOutcome::Failed(_) | InductionOutcome::Unknown) => {
+                    let nats = nl_validator::nat_param_positions(&value);
+                    let (nout, ncert, measure) =
+                        nl_validator::prove_by_numeric_induction(expr, body_ast.as_ref(), &nats, solver);
+                    if let Some(c) = &ncert {
+                        write_cert(".induction", &c.smt)?;
+                    }
+                    match (nout, out) {
+                        (ProofOutcome::Proved, _) => format!(
+                            "PROVED       by induction on `{}` (strong induction over the measure; unsat)",
+                            measure.as_deref().unwrap_or("?")
+                        ),
+                        (_, InductionOutcome::Failed(why)) => format!("NOT-PROVED   induction did not close: {why}"),
+                        _ => "UNKNOWN      induction step needs a lemma we lack (solver undecided)".to_string(),
+                    }
+                }
                 InductionOutcome::NoSolver => {
                     no_solver = true;
                     format!("NO-SOLVER    `{solver}` not found; obligations emitted, re-check elsewhere")
                 }
                 // Neither list engine applies: a law about a RECURSIVE function over the integers
                 // gets the numeric rung — strong induction over the body's own measure.
-                InductionOutcome::Unsupported(_) => {
+                InductionOutcome::Unsupported(why_s) => {
                     let nats = nl_validator::nat_param_positions(&value);
                     let (nout, ncert, measure) =
                         nl_validator::prove_by_numeric_induction(expr, body_ast.as_ref(), &nats, solver);
@@ -1920,11 +1939,13 @@ fn cmd_prove(
                             no_solver = true;
                             format!("NO-SOLVER    `{solver}` not found; induction obligation emitted, re-check elsewhere")
                         }
-                        // No engine applies: for a recursive body the numeric rung's reason is the
-                        // specific one; otherwise the first-order reason (the more general one).
+                        // No engine applies: for a recursive body BOTH induction rungs' reasons are
+                        // the specific ones (a list recursion's refusal lives in the structural one —
+                        // reporting the numeric reason alone hid a lowering gap for a whole module);
+                        // otherwise the first-order reason (the more general one).
                         ProofOutcome::Unsupported(why_n) => match &outcome {
                             ProofOutcome::Unsupported(why) if why.contains("body is recursive") => {
-                                format!("UNSUPPORTED  recursive body — numeric induction: {why_n}")
+                                format!("UNSUPPORTED  recursive body — structural induction: {why_s}; numeric induction: {why_n}")
                             }
                             ProofOutcome::Unsupported(why) => format!("UNSUPPORTED  {why}"),
                             _ => "UNSUPPORTED".to_string(),

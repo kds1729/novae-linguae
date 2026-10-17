@@ -269,7 +269,14 @@ fn decide(goal: &J, body: Option<&J>, solver: &str, nat_positions: &std::collect
                 // A satisfiable induction base is a concrete short input on which the body breaks the contract.
                 InductionOutcome::Failed(model) => RefinementOutcome::Violated(model),
                 InductionOutcome::NoSolver => RefinementOutcome::NoSolver,
-                InductionOutcome::Unknown => RefinementOutcome::Unverifiable("induction did not close".into()),
+                // The structural backend inducts on the leading list; a contract whose recursion
+                // measures elsewhere (`pad_to` counts `n` down with the list in play) still has the
+                // measure-induction rung, which now lowers lists.
+                InductionOutcome::Unknown => match crate::prove::prove_by_numeric_induction(goal, body, nat_positions, solver).0 {
+                    ProofOutcome::Proved => RefinementOutcome::Sound,
+                    ProofOutcome::NoSolver => RefinementOutcome::NoSolver,
+                    _ => RefinementOutcome::Unverifiable("induction did not close".into()),
+                },
                 // Neither list engine applies: a contract on a RECURSIVE function over the integers
                 // gets the numeric rung — strong induction over the body's own measure.
                 InductionOutcome::Unsupported(why) => {

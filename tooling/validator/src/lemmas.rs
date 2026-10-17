@@ -43,6 +43,16 @@ fn eq(a: J, b: J) -> J {
 /// on the first two — the recursive discharge in [`crate::induct`] resolves that dependency tree.
 pub fn catalog() -> Vec<Lemma> {
     vec![
+        // length(xs) >= 0  — a length is a nat. Any bound on a recursion's output length against a
+        // SPECTATOR list needs it in the base case (`length(self(nil, ys)) <= length(ys)` is
+        // `0 <= length(ys)`, which no unfolding of a symbolic `ys` yields).
+        Lemma {
+            name: "length_nonneg",
+            stmt: forall(
+                &["xs"],
+                app("ge", vec![app("length", vec![var("xs")]), json!({ "kind": "lit", "value": 0 })]),
+            ),
+        },
         // append(xs, nil) = xs  — right identity of append.
         Lemma {
             name: "append_nil",

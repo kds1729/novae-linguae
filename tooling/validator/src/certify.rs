@@ -313,6 +313,7 @@ impl<'a> LinkedView<'a> {
             // Prove the callee's contract — posts AND laws — with ITS callees' contracts installed and
             // its own declared type in force (tuple/sum sorts come from the signature).
             let deps = self.contracts_for(body);
+            let prev_refusals = crate::prove::set_callee_refusals(self.refusals_for(body));
             let prev = crate::set_callee_contracts(deps);
             let prev_ty = crate::prove::set_self_type(Some(sig_type.clone()));
             let reports = check_refinements(sig_type, &refinements, body, &self.solver);
@@ -326,10 +327,14 @@ impl<'a> LinkedView<'a> {
                 .filter(|law| {
                     matches!(crate::prove_property(law, Some(body), &self.solver).0, crate::ProofOutcome::Proved)
                         || matches!(crate::prove_by_numeric_induction(law, Some(body), &nat_positions, &self.solver).0, crate::ProofOutcome::Proved)
+                        // A list law a bare structural induction closes (`scale_mod` preserves
+                        // length) is a contract too — the lemma search is skipped here (cost).
+                        || matches!(crate::prove_by_induction(law, Some(body), &self.solver).0, crate::InductionOutcome::Proved)
                 })
                 .collect();
             crate::prove::set_self_type(prev_ty);
             crate::set_callee_contracts(prev);
+            crate::prove::set_callee_refusals(prev_refusals);
             let sound = |label: &str| reports.iter().any(|r| r.label == label && matches!(r.outcome, RefinementOutcome::Sound));
             let mut posts: Vec<J> = declared_posts
                 .iter()
@@ -362,6 +367,35 @@ impl<'a> LinkedView<'a> {
         let mut targets = std::collections::BTreeSet::new();
         fn_ref_targets(body, &mut targets);
         targets.into_iter().filter_map(|t| self.contract(&t).map(|c| (t, c))).collect()
+    }
+
+    /// For every `fn_ref` callee of `body` that yields NO contract, the stated reason — installed
+    /// beside the contracts (`prove::set_callee_refusals`) so a proof that applies such a callee
+    /// refuses with it rather than with "pass --records".
+    pub fn refusals_for(&self, body: &J) -> std::collections::BTreeMap<String, String> {
+        let mut targets = std::collections::BTreeSet::new();
+        fn_ref_targets(body, &mut targets);
+        targets
+            .into_iter()
+            .filter(|t| self.contract(t).is_none())
+            .map(|t| {
+                let why = match self.callee(&t) {
+                    None => "it is not among the supplied records (or has no body there)".to_string(),
+                    Some((rec, _)) => {
+                        let sig = rec.pointer("/signature/type").cloned().unwrap_or(J::Null);
+                        let fn_ty = if sig.get("kind").and_then(|k| k.as_str()) == Some("forall") { sig.get("body").cloned().unwrap_or(J::Null) } else { sig.clone() };
+                        let param_ok = fn_ty.get("params").and_then(|p| p.as_array()).is_some_and(|ps| ps.iter().all(|p| crate::prove::sort_of_type(p).is_some()));
+                        let ret_ok = fn_ty.get("result").is_some_and(|r| crate::prove::sort_of_type(r).is_some());
+                        if !param_ok || !ret_ok {
+                            "its signature leaves the prover's fragment (a list-, map-, function- or type-variable-typed parameter or result)".to_string()
+                        } else {
+                            "its contract is being computed (a dependency cycle)".to_string()
+                        }
+                    }
+                };
+                (t, why)
+            })
+            .collect()
     }
 }
 
@@ -549,9 +583,13 @@ pub fn certify_record_linked(
         let refinements: Vec<J> =
             record.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
         let prev = view.as_ref().map(|v| crate::set_callee_contracts(v.contracts_for(body)));
+        let prev_refusals = view.as_ref().map(|v| crate::prove::set_callee_refusals(v.refusals_for(body)));
         let reports = check_refinements(sig_type, &refinements, body, solver);
         if let Some(p) = prev {
             crate::set_callee_contracts(p);
+        }
+        if let Some(p) = prev_refusals {
+            crate::prove::set_callee_refusals(p);
         }
         for r in reports {
             let (v, hard): (&'static str, bool) = match &r.outcome {

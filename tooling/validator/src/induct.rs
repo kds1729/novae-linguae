@@ -652,10 +652,13 @@ fn lower_case(node: &J, env: &BTreeMap<String, String>) -> Result<String> {
 
 /// Lower a value-expression AST (literals, including list literals → cons spine).
 fn lower_value(value: &J) -> Result<String> {
-    match value.get("kind").and_then(|k| k.as_str()) {
-        Some("bool") => Ok(value.get("value").and_then(|v| v.as_bool()).unwrap_or(false).to_string()),
+    // Both literal spellings: a body's structured `{kind: "nat", value: 1}` and a predicate's bare
+    // `0` / `true` (the property sub-language's form — `pad_to`'s `lt(n, 0)` read "unsupported
+    // literal kind: None" until the bare form was admitted here, as prove.rs always has).
+    match crate::prove::lit_kind(value) {
+        Some("bool") => Ok(crate::prove::lit_payload(value).as_bool().unwrap_or(false).to_string()),
         Some("int") | Some("nat") => {
-            let v = value.get("value").ok_or_else(|| anyhow!("literal has no value"))?;
+            let v = crate::prove::lit_payload(value);
             let n: i128 = if let Some(i) = v.as_i64() {
                 i as i128
             } else if let Some(s) = v.as_str() {
@@ -1053,6 +1056,7 @@ fn tail_depth(node: &J) -> usize {
 /// lemmas) and no base case refutes, the verdict is UNKNOWN — never a false verdict.
 pub fn prove_equiv_by_induction(body_f: &J, body_g: &J, solver: &str) -> InductionOutcome {
     use crate::prove::{run_smt, SatAnswer};
+    let (body_f, body_g) = (&crate::prove::uncurry(body_f), &crate::prove::uncurry(body_g));
 
     // Lower both functions and read the (shared, positional) parameter sorts off `f`. Both functions are
     // applied to the same argument tuple, so a sort disagreement makes the SMT sort-check fail and report
@@ -1461,7 +1465,9 @@ fn declare_free(var_sorts: &BTreeMap<String, Sort3>, induction_var: &str) -> Str
 /// Build the base + step induction obligations for a `forall <list> …` law. Err if the goal is outside
 /// the supported recursive fragment (the caller maps that to UNSUPPORTED).
 pub fn build_induction(prop_expr: &J, body: Option<&J>) -> Result<InductionCertificate> {
-    build_obligations(prop_expr, body, &[])
+    let prop_expr = &crate::prove::uncurry(prop_expr);
+    let body_flat = body.map(crate::prove::uncurry);
+    build_obligations(prop_expr, body_flat.as_ref(), &[])
 }
 
 /// Like [`build_induction`], but each entry of `lemmas` (a proved `forall` law) is emitted as a
@@ -1518,6 +1524,12 @@ fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<I
     }
 
     let uses_fold = used.contains("foldl") || used.contains("foldr");
+    // A user-defined recursion may change a spectator at its recursive call (`pointwise_mod` tails
+    // BOTH lists; `pad_to` counts `n` down), so the ground hypothesis at the fixed free constants
+    // misses the instance the step needs — the same shape as `foldl`'s accumulator. The generalized
+    // hypothesis is the structural induction hypothesis itself, so it is added for every `self` law
+    // too (measured: the carried-spectator cases still close by the ground instance).
+    let generalize_ih = uses_fold || self_def.is_some();
     // `self`'s definition comes after the list-op defs it may call (SMT-LIB needs definitions first).
     let prelude = format!("{}{}", build_prelude(&used, &map_fn, &filter_pred), self_def.unwrap_or_default());
     let free = declare_free(&var_sorts, &induction_var);
@@ -1543,7 +1555,7 @@ fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<I
         // is only the hypothesis at the fixed free constants. Added only for fold laws; it never weakens
         // the easy cases (the ground IH still drives them), and it is sound (it is exactly the structural
         // induction hypothesis `forall others. P(t, others)`).
-        let qih = if uses_fold {
+        let qih = if generalize_ih {
             let binders: Vec<String> = var_sorts
                 .iter()
                 .filter(|(v, _)| **v != induction_var)
@@ -1662,6 +1674,11 @@ fn discharge(cert: &InductionCertificate, solver: &str, secs: u64) -> InductionO
 /// Attempt to prove a law by structural induction with a *single* unfold + IH (no lemma discovery).
 /// Out-of-fragment goals yield `Unsupported`. A step that needs an auxiliary lemma reports `Unknown`.
 pub fn prove_by_induction(prop_expr: &J, body: Option<&J>, solver: &str) -> (InductionOutcome, Option<InductionCertificate>) {
+    // Surface-parsed laws and bodies arrive as curried spines (`((cons h) t)`); the lowering reads one
+    // head with all its arguments, so normalize first — as every other entry point below does.
+    let prop_expr = &crate::prove::uncurry(prop_expr);
+    let body_flat = body.map(crate::prove::uncurry);
+    let body = body_flat.as_ref();
     let cert = match build_induction(prop_expr, body) {
         Err(e) => return (InductionOutcome::Unsupported(format!("{e:#}")), None),
         Ok(c) => c,
@@ -1685,9 +1702,11 @@ pub fn prove_by_induction_with_lemmas(
     solver: &str,
     max_depth: usize,
 ) -> (InductionOutcome, Option<InductionCertificate>) {
+    let prop_expr = &crate::prove::uncurry(prop_expr);
+    let body_flat = body.map(crate::prove::uncurry);
     let mut in_progress = Vec::new();
     let mut memo = Memo::new();
-    prove_rec(prop_expr, body, solver, max_depth, false, &mut in_progress, &mut memo)
+    prove_rec(prop_expr, body_flat.as_ref(), solver, max_depth, false, &mut in_progress, &mut memo)
 }
 
 /// Like [`prove_by_induction_with_lemmas`], but when the curated catalog can't close the goal it falls
@@ -1701,9 +1720,11 @@ pub fn prove_by_induction_with_exploration(
     solver: &str,
     max_depth: usize,
 ) -> (InductionOutcome, Option<InductionCertificate>) {
+    let prop_expr = &crate::prove::uncurry(prop_expr);
+    let body_flat = body.map(crate::prove::uncurry);
     let mut in_progress = Vec::new();
     let mut memo = Memo::new();
-    prove_rec(prop_expr, body, solver, max_depth, true, &mut in_progress, &mut memo)
+    prove_rec(prop_expr, body_flat.as_ref(), solver, max_depth, true, &mut in_progress, &mut memo)
 }
 
 /// A proved candidate lemma: its statement (to assume as an axiom) plus its full sub-proof tree
@@ -2188,6 +2209,7 @@ fn eval_int_point(body: &J, n: i64) -> Option<J> {
 /// mis-guarded diverging point undecidable rather than wrong.
 pub fn prove_equiv_on_int_ge(body_f: &J, body_g: &J, c: i64, solver: &str) -> InductionOutcome {
     use crate::prove::{run_smt, SatAnswer};
+    let (body_f, body_g) = (&crate::prove::uncurry(body_f), &crate::prove::uncurry(body_g));
 
     let mut recursive = [false, false];
     for (i, (body, side)) in [(body_f, "left"), (body_g, "right")].into_iter().enumerate() {

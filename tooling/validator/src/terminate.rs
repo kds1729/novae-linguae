@@ -116,7 +116,7 @@ fn self_call_args(node: &J) -> Option<Vec<J>> {
 }
 
 /// If `arg` is `tail^k(var p)` (`k ≥ 1`) — a strict structural descent of a variable — return `(p, k)`.
-fn tail_descent(arg: &J) -> Option<(String, usize)> {
+pub(crate) fn tail_descent(arg: &J) -> Option<(String, usize)> {
     let mut node = arg;
     let mut k = 0;
     while node.get("op").and_then(|o| o.as_str()) == Some("tail")
@@ -360,12 +360,15 @@ pub enum DescentKind {
 }
 
 /// The well-founded measure a recursive body descends on — the one argument position every
-/// `self`-call provably shrinks — with the floor it is bounded below by. Numeric only (the input a
-/// strong induction over the integers can range over); `None` when no single numeric position descends.
+/// `self`-call provably shrinks — with the floor it is bounded below by. Numeric (the parameter
+/// itself, bounded by `floor`) or structural (`structural`: the parameter is a list every call
+/// tails — the measure is its `length`, floor 0). `None` when no single position descends the same
+/// way in every call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Measure {
     pub position: usize,
     pub floor: i64,
+    pub structural: bool,
 }
 
 /// A linked view of other records, for folding a `fn_ref` callee into the analysis: does the callee
@@ -667,7 +670,9 @@ pub fn analyze_termination_linked(
 /// unprovable one.
 pub fn induction_measure(body: &J, nat_positions: &std::collections::BTreeSet<usize>) -> Option<Measure> {
     let common = descent_analysis(body, nat_positions, None).ok()??;
-    common.into_iter().find_map(|(position, kinds)| {
+    // A numeric position first (the historical principle), else a position every call descends
+    // structurally; a position mixing the two kinds across calls is no single measure.
+    let numeric = common.iter().find_map(|(position, kinds)| {
         let floors: Option<Vec<i64>> = kinds
             .iter()
             .map(|k| match k {
@@ -675,7 +680,13 @@ pub fn induction_measure(body: &J, nat_positions: &std::collections::BTreeSet<us
                 DescentKind::Structural => None,
             })
             .collect();
-        floors.and_then(|fs| fs.into_iter().min()).map(|floor| Measure { position, floor })
+        floors.and_then(|fs| fs.into_iter().min()).map(|floor| Measure { position: *position, floor, structural: false })
+    });
+    numeric.or_else(|| {
+        common
+            .iter()
+            .find(|(_, kinds)| !kinds.is_empty() && kinds.iter().all(|k| matches!(k, DescentKind::Structural)))
+            .map(|(position, _)| Measure { position: *position, floor: 0, structural: true })
     })
 }
 

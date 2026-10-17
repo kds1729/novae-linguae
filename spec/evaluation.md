@@ -428,7 +428,7 @@ re-checkable certificate.
 Where one unfold of the definitions plus the IH does not close the step — a law that needs an auxiliary
 lemma, classically `reverse(reverse(xs)) = xs` — the prover does not give up. It selects relevant lemmas
 from a **curated catalog** of standard list-algebra laws (`lemmas.rs`: `append_nil`, `append_assoc`,
-`reverse_append`, `length_append`, `map_append`, `filter_append`), **proves each one by induction first**
+`reverse_append`, `length_append`, `map_append`, `filter_append`, `length_nonneg`), **proves each one by induction first**
 — recursively, since lemmas depend on one another: `reverse_append` rests on `append_assoc` + `append_nil`
 — and then re-runs the stalled obligation with the proved lemmas asserted as universally-quantified axioms.
 `reverse(reverse(xs)) = xs` is now **PROVED**, discovering `reverse_append` (and transitively
@@ -515,7 +515,12 @@ ordinary induction hypothesis; `foldl` threads its accumulator, so for fold laws
 asserts the hypothesis **generalized over the non-induction variables** (`forall others. P(t, others)`),
 which the solver instantiates at the changed accumulator. Demonstrated live: both `foldr` and `foldl`
 are **proved to distribute over `append`** (`fold(f, z, append(xs, ys)) = …`), each certificate
-re-checking.
+re-checking. A law about a user-defined `self` gets the same generalized hypothesis (2026-10-17): a
+recursion may change a spectator at its recursive call — `pointwise_mod` tails BOTH lists — and the
+ground hypothesis at the fixed free constants misses the instance the step needs; the carried-spectator
+cases still close by the ground instance, measured. Surface-parsed laws and bodies (curried
+application spines, bare literals) are normalized at the backend's entry, as the first-order prover
+always did — until they were, every surface-authored cons-recursive body read UNSUPPORTED here.
 
 `map`/`filter` exploration (the SMT backend models their function argument as an uninterpreted symbol
 and rarely discharges such laws even when handed the lemma) remains future work.
@@ -544,11 +549,39 @@ without it unsat), then the hypothesis is added. A law that applies `self` at **
 (commutativity, associativity, Pascal's rule) inducts on the **sum** of the quantified nat variables
 its measure arguments mention — well-founded over the nats, and the hypothesis then covers every
 application whose measure arguments add up to less; a variable not nat-constrained refuses, stated.
-Out of scope: structural list recursion (the backend above), tuples/lists/`fn_ref`s in the body
-(out of the fragment). Measured on the integer-tier records: `count(n) = n`, `2·Σn = n(n+1)`,
+Out of scope: `fn_ref`s in the body beyond their certified contracts (the composing rung below).
+Measured on the integer-tier records: `count(n) = n`, `2·Σn = n(n+1)`,
 `isqrt`'s floor bound and `0 ≤ mod_pow < m` prove; `gcd ≥ 0`, `isqrt ≥ 0`, `next_pow2 ≥ n` prove;
 the binomial's non-negativity and the digit-sum bound do not close (nonlinear steps); the false laws
 tried stay UNKNOWN.
+
+**Lists in this rung, and the structural measure (2026-10-17, the integer-tier module's fifth
+follow-up).** Two shapes fell between the rungs: a recursion over an INTEGER that builds or reads a
+list (`pad_to xs n` counts `n` down while consing — its length law inducts on `n`, which the
+structural backend cannot do, and lists were out of this rung's fragment), and a structural
+recursion with a NUMERIC contract (`from_digits : nat → List nat → nat`'s `result ≥ 0` — a
+`head` in the step, no numeric measure). So this rung lowers lists — the structural backend's
+`Lst = nil | cons(Int, Lst)` datatype with `length`/`append`/`reverse` as the solver's own recursive
+definitions and `cons`/`head`/`tail`/`null` as its constructors, selectors and tester — while the
+**first-order prover keeps refusing them**, so a plain list law still reaches the structural backend
+first (that ordering is what keeps every earlier list proof on its proven path). The measure may now
+be **structural**: when every recursive call tails the same list parameter the termination checker
+reports that position (`Measure::structural`), and the induction is over it. Its hypothesis is NOT
+the quantified form with a guard `length(m') < length(m)`: over the recursive `length` definition
+that guard is exactly what z3 cannot discharge (measured on `from_digits`: the obligation closes in
+10 ms without the guard and times out with it). It is stated as explicit **instances** at each
+tail-descending recursive call — `P[vars := the call's arguments]`, guarded by the descended list
+being a cons (on `nil` the selector `tl` names an unconstrained value and the instance would be
+unsound) and by the domain facts at the instance — the form in which the checker proved the
+descent, and exactly the strong structural induction principle instantiated. The declared element
+domain is stated too: a law variable fed to a `List nat` parameter is asserted `all_nat` (every
+element `≥ 0`), the list analogue of a `nat` parameter's `≥ 0` — `from_digits ≥ 0` is FALSE over
+Int-element lists (`ds = [−1]`) and SOUND over its declared domain, and the certificate shows which.
+The ladder on the CLI and in `check-refinement` runs this rung after a structural induction that
+ended UNKNOWN as well as after one that refused. Measured: `pad_to`'s `length(self(xs, n)) = n`
+PROVED by induction on `n`; `from_digits ≥ 0` SOUND by induction on the structure of `ds`; the false
+strengthening `≥ 1` and the Int-element variant stay UNKNOWN; the first-order prover still reports a
+list law UNSUPPORTED.
 
 ## Semantic equivalence
 
