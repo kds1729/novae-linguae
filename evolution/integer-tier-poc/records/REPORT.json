@@ -84,7 +84,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:refinements": "N/A",
+   "refinement:post[0]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -92,7 +92,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> (int, (int, int))",
    "effects": "effects [] \u2286 declared",
-   "refinement:refinements": "",
+   "refinement:post[0]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   }
@@ -125,7 +125,7 @@
    "bezout_identity: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "bezout_identity: UNSUPPORTED  applies the fn_ref `fn_ff6d219fd84cca952f3d37f1091735807bb08c3bb9952d0b23a886e5a7499533` (its certified contract is not available here \u2014 pass --records to use it)"
+   "bezout_identity: UNKNOWN      solver could not decide"
   ]
  },
  {
@@ -178,7 +178,7 @@
    "inverse_identity: CONSISTENT  |  generative: HELD (196 cases)"
   ],
   "prove": [
-   "inverse_identity: UNSUPPORTED  applies the fn_ref `fn_f374139fbbda299d7aff62b9f8cd9632cb897daec769458d4a9ce9b37d65ca95` (its certified contract is not available here \u2014 pass --records to use it)"
+   "inverse_identity: UNKNOWN      solver could not decide"
   ]
  },
  {
@@ -666,7 +666,7 @@
    "solves_both_congruences: CONSISTENT  |  generative: HELD (195 cases)"
   ],
   "prove": [
-   "solves_both_congruences: UNSUPPORTED  applies the fn_ref `fn_a61b26500d0cc09e333561268c4eb71a2b84c8cf535bf5b5fab57cdf37e78fb6` (its certified contract is not available here \u2014 pass --records to use it)"
+   "solves_both_congruences: UNKNOWN      solver could not decide"
   ]
  },
  {
@@ -898,15 +898,15 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
-   "typecheck": "(List(int), int, int) -> List(int)",
+   "typecheck": "(List(int), int) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n log n)`, not established: applies `fn_73769062b1965eb41b3bb42d85535d3fd68b0450cfb4b9396744e60d11c393d7` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "within declared `O(n log n)` (inferred O(n log n))"
   }
  },
  {
@@ -920,7 +920,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -928,7 +928,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n log n)`, not established: applies the fn_ref `fn_dde56182045924264e16345e2dc7c73afef34949c1c882f4628b2938238d84d1` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "within declared `O(n log n)` (inferred O(n log n))"
   }
  },
  {
@@ -973,7 +973,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -981,7 +981,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n log n)`, not established: applies `fn_c7bf02595d4efae5b0f5fdcc346209a5c0c6bf6bb7728b9e11e5dc36f8155401` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "within declared `O(n log n)` (inferred O(n log n))"
   }
  },
  {
@@ -995,7 +995,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -1003,7 +1003,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n log n)`, not established: applies the fn_ref `fn_96d2df36bc9e05e592d25f5e09d4fd259688a0fc5ba5b2716d81be2abd74e355` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "within declared `O(n log n)` (inferred O(n log n))"
   }
  },
  {
@@ -1077,6 +1077,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
    "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
@@ -1085,6 +1086,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int) -> int",
    "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
    "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
@@ -1113,7 +1115,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -1121,7 +1123,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n log n)`, not established: applies `fn_cf0cca543c5eb5050ab83f1c515cc0747a60b2fe64ed76243294714941b6ddd9` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "within declared `O(n log n)` (inferred O(n log n))"
   }
  }
 ]

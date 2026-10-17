@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_6fe3a56d334f9eb9aa79a01a65df67ec1c260781cc661012259791a642d57fef",
+ "hash": "fn_74736373b3d293b19365e19e792010258ca99c32562db9ed199a9e4712ee615f",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -156,7 +156,55 @@
   "capabilities": [],
   "complexity": "O(log n)",
   "effects": [],
-  "refinements": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "result"
+      },
+      {
+       "args": [
+        {
+         "kind": "lit",
+         "value": 1
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "lit",
+             "value": 2
+            },
+            {
+             "kind": "var",
+             "name": "n"
+            }
+           ],
+           "kind": "app",
+           "op": "mul"
+          },
+          {
+           "kind": "lit",
+           "value": 1
+          }
+         ],
+         "kind": "app",
+         "op": "sub"
+        }
+       ],
+       "kind": "app",
+       "op": "max"
+      }
+     ],
+     "kind": "app",
+     "op": "le"
+    },
+    "kind": "post"
+   }
+  ],
   "terminates": "always",
   "type": {
    "kind": "fn",

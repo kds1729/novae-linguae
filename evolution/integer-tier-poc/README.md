@@ -5,10 +5,11 @@
   widened, and — from the follow-up — callee folding over a linked view, a numeric-induction rung
   in the prover, variable divisors, and magnitude-wide sampling (`tooling/validator`); the records
   published to the commons with signed certifications. The 41 records and their builder live here
-  (`records/`, `build_records.py`) — reproducible with no credential. Final tally (second follow-up):
-  41/41 certify, termination SOUND on all 41, complexity on 36, 16 contracts and 13 laws proved — two of
-  them (`lcm`'s) through `gcd`'s certified contract rather than its body — and 31 laws held both over the
-  bounded domain and across magnitudes.
+  (`records/`, `build_records.py`) — reproducible with no credential. Final tally (fourth follow-up):
+  41/41 certify, termination AND complexity SOUND on all 41 (the NTT chain at `O(n log n)`, with no
+  fuel parameter), 18 contracts and 13 laws proved — `lcm`'s through `gcd`'s certified contract,
+  `ext_gcd`'s Bézout identity over a tuple result — and 31 laws held both over the bounded domain and
+  across magnitudes.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
 - **Dates:** first published 2026-10-17, last updated 2026-10-17
 - **Scope:** `tooling/validator` (`interp.rs` arithmetic + comparison + recursion depth,
@@ -362,7 +363,7 @@ already samples them. With both: PROVED in well under a second.
   was not stricter, it was asking a different question — and one the composition axioms could not
   answer.
 
-### Still open
+### Still open after the third follow-up (the first two closed in the fourth, below)
 
 - Complexity of the NTT chain: a `strictly-shorter` output-size class (or a provable
   `length(fst(result)) < length(xs)` — predicates would need tuple projection) for `ntt_split`.
@@ -371,6 +372,89 @@ already samples them. With both: PROVED in well under a second.
   prover's sorts grow (tuples and sums as SMT datatypes).
 - The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, the `mod` congruences, the
   equivalence checkers `pow_mod_agree`/`prime_agree`): solver limits, or facts no contract states.
+
+## Fourth follow-up (2026-10-17, same day): the design frontiers
+
+### Measured
+
+**Tuples and sums are SMT datatypes.** The prover registers the DECLARED types — the function's
+own signature, a callee's from its contract — as per-thread datatypes: tuple construction and
+destructuring patterns, variant construction and matching (tester + accessor), and `fst`/`snd`
+lower to constructors and accessors; every certificate declares the datatypes it uses. So a
+contract can be stated about a tuple result and a checker record can match a callee's `Maybe`:
+
+| | before | now |
+|---|---|---|
+| `ext_gcd` Bézout post `fst(result) = a·fst(snd(result)) + b·snd(snd(result))` | unstatable (no tuple projection in predicates) | **SOUND** by numeric induction over the datatype |
+| checker records over tuple/`Maybe` callees (`bezout_holds`, `inverse_holds`, `crt_holds`) | UNSUPPORTED (callee's sort) | reach the solver: **UNKNOWN** (nonlinear — the contract pins `ext_gcd` by its proved Bézout identity, but `a·x + b·y ≡ … mod m` is outside z3's linear core) |
+| refinements | 16 SOUND / 3 UNVERIFIABLE | **18 / 3** — `ext_gcd`'s Bézout post and `next_pow2`'s bound (below); open: `from_digits` (list head), `digit_sum`, `binomial` (nonlinear) |
+| laws, prove | 13 PROVED / 10 UNKNOWN / 8 UNSUPPORTED | **13 / 13 / 5** — UNSUPPORTED is down to the compound-measure `isqrt(n·n) = n`, `digits_roundtrip` (a list-result callee) and the three list-length laws (structural, not numeric, induction) |
+
+**Shrinking-callee descents: the NTT chain without fuel.** `ntt_rec` recurses on the halves
+`ntt_split` returns — not a descent of its own parameter, so the second follow-up carried an explicit
+`levels` counter. Now a recursion on the COMPONENTS of a callee's tuple result is well-founded when
+the callee's own body shows each component strictly shorter than its list input (`component_shrink`:
+a `tail^k` recursion, k ≥ 2, at most k − 1 conses per component per step, so a component is at most
+n − ⌊n/k⌋ long) and the guards in force establish length ≥ k (the FALSE arm of `null(tail xs)`).
+Termination reads it as a structural descent, complexity as a halving one. The `levels` parameter is
+gone; `ntt_rec` is `\xs w -> …` again.
+
+**The last complexity gap: a callee applied to the function's OWN recursive results.** With the
+halves' descent in place, `ntt_rec` still refused: it applies `ntt_butterfly` to `self ev w2` and
+`self od w2`, and nothing bounded the size of a recursive result. Four facts close it, each
+re-derived from bodies on the linked view: (1) a function's recursive result is size-bounded when
+its declared list result is at most linear in its input; (2) the output-size analysis establishes
+that for a two-way halving recursion whose per-level material is O(1), where the components of a
+**preserving** callee — `ntt_butterfly`'s: a `tail^k` recursion on its list parameters consing at
+most k elements per component per step, so each component is no longer than the list it was applied
+to — count as the recurrence's carried terms when each is used at most once and bound by a distinct
+recursive result (`append lo hi` is `S(n) = 2S(n/2) + O(1) = Θ(n)`; `append lo lo` is refused);
+(3) the names a `case` binds from a size-bounded scrutinee are size-bounded (the halves of
+`ntt_split xs`); (4) `w·w mod P` is bounded by the literal modulus whatever `w` is. For
+`convolution` one more: `pad_to xs (next_pow2 m)` needs `next_pow2`'s result bounded, and its
+natural linear bounds `result ≤ 2n + 1` / `result ≤ 2n` do NOT close by induction (the step doubles
+a loose hypothesis); `result ≤ max(1, 2n − 1)` is the inductive form (exact at n = 0) and now reads
+as an upper bound.
+
+| | before | now |
+|---|---|---|
+| complexity | 36 SOUND / 5 UNVERIFIABLE (the NTT chain) | **41 / 0** — `ntt_rec` `T(n) = 2T(n/2) + O(n)`, and `ntt`, `ntt_inverse`, `ntt_roundtrip`, `convolution` fold to `O(n log n)` |
+| termination | 41 SOUND (with `levels`) | **41 SOUND** (without) |
+| everything else | | unchanged: 41/41 run and certify, 28 laws EXHAUSTIVE + 3 HELD, 31/31 HELD wide, no refutation anywhere |
+
+**The nonlinear unknowns are a solver limit, measured.** The Pascal and symmetry induction
+certificates (`prove --smt-out`) were re-run under cvc5 1.3.4 (`--tlimit=60000`): both time out exactly
+as z3 does at 60 s. Two solvers, same silence — recorded, not pursued.
+
+### Argued
+
+- **Declared types are the sort vocabulary.** The prover never guesses a sort from a body: a tuple
+  or sum is an SMT datatype because the SIGNATURE says so (the function's own, or a callee's
+  contract), the same source the type checker holds the body to. That is why a contract about a
+  tuple result composes exactly like one about an Int — it is the same certified fact, one sort
+  wider.
+- **Every size fact is re-derived, never declared.** Shrinking components, preserving components,
+  a linear own-output, a proved upper bound: each is computed from the callee's body on the linked
+  view (memoized, cycle-safe) and feeds the caller's analysis as a fact about that body. A callee
+  re-minted with a body that no longer shrinks silently withdraws the descent and its dependents'
+  verdicts weaken — the discipline of the first follow-up, applied to sizes.
+- **Affine use is the price of carried terms.** Reading a preserving callee's components as the
+  recurrence's carried terms is sound only when each is used at most once and bound by a distinct
+  recursive result; `append lo lo` would double the material per level and `F(self ev, self ev)`
+  would count one half twice. The checker refuses both — the rule is as narrow as the proof.
+- **The inductive form of a bound is not its natural form.** `next_pow2 ≤ 2n + 1` is true and
+  not inductively provable in one step; `≤ max(1, 2n − 1)` is. A record author who wants the bound
+  to compose has to state the invariant the induction can carry, exactly as in a paper proof.
+
+### Still open
+
+- The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, the `mod` congruences, Bézout
+  and CRT as checker laws, `pow_mod_agree`/`prime_agree`): both solvers time out; a lemma rung
+  (stating `mod` distributivity as axioms) is the next lever if a driver appears.
+- `digits_roundtrip` and the three list-length laws: numeric induction is the wrong principle for
+  list-structural recursion; the list-induction backend (`induct.rs`) does not yet read records by
+  `fn_ref`. `from_digits ≥ 0`: a `head` in the inductive step.
+- `isqrt(n·n) = n`: a compound measure (`self` at `n·n`) — needs the two-measure principle.
 
 ## Open questions (as they stood before the follow-up)
 

@@ -15,16 +15,97 @@
         {
          "args": [
           {
-           "kind": "var",
-           "name": "n"
+           "kind": "lit",
+           "value": {
+            "kind": "nat",
+            "value": 998244353
+           }
           }
          ],
          "fn": {
-          "kind": "lit",
-          "value": {
-           "kind": "fn_ref",
-           "target": "fn_b917665637907721091514d4ead89dca3817d9dd6cd5d783cc136a23eeeb2d60"
-          }
+          "args": [
+           {
+            "kind": "lit",
+            "value": {
+             "kind": "nat",
+             "value": 998244351
+            }
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "lit",
+               "value": {
+                "kind": "nat",
+                "value": 998244353
+               }
+              }
+             ],
+             "fn": {
+              "args": [
+               {
+                "args": [
+                 {
+                  "kind": "var",
+                  "name": "n"
+                 }
+                ],
+                "fn": {
+                 "args": [
+                  {
+                   "kind": "lit",
+                   "value": {
+                    "kind": "nat",
+                    "value": 998244352
+                   }
+                  }
+                 ],
+                 "fn": {
+                  "kind": "var",
+                  "name": "div"
+                 },
+                 "kind": "app"
+                },
+                "kind": "app"
+               }
+              ],
+              "fn": {
+               "args": [
+                {
+                 "kind": "lit",
+                 "value": {
+                  "kind": "nat",
+                  "value": 3
+                 }
+                }
+               ],
+               "fn": {
+                "kind": "lit",
+                "value": {
+                 "kind": "fn_ref",
+                 "target": "fn_31c081eb43c203d82f72d6e189d4a35b7d2cb9096a257270d0359223de68da65"
+                }
+               },
+               "kind": "app"
+              },
+              "kind": "app"
+             },
+             "kind": "app"
+            }
+           ],
+           "fn": {
+            "kind": "lit",
+            "value": {
+             "kind": "fn_ref",
+             "target": "fn_31c081eb43c203d82f72d6e189d4a35b7d2cb9096a257270d0359223de68da65"
+            }
+           },
+           "kind": "app"
+          },
+          "kind": "app"
          },
          "kind": "app"
         }
@@ -32,118 +113,16 @@
        "fn": {
         "args": [
          {
-          "args": [
-           {
-            "kind": "lit",
-            "value": {
-             "kind": "nat",
-             "value": 998244353
-            }
-           }
-          ],
-          "fn": {
-           "args": [
-            {
-             "kind": "lit",
-             "value": {
-              "kind": "nat",
-              "value": 998244351
-             }
-            }
-           ],
-           "fn": {
-            "args": [
-             {
-              "args": [
-               {
-                "kind": "lit",
-                "value": {
-                 "kind": "nat",
-                 "value": 998244353
-                }
-               }
-              ],
-              "fn": {
-               "args": [
-                {
-                 "args": [
-                  {
-                   "kind": "var",
-                   "name": "n"
-                  }
-                 ],
-                 "fn": {
-                  "args": [
-                   {
-                    "kind": "lit",
-                    "value": {
-                     "kind": "nat",
-                     "value": 998244352
-                    }
-                   }
-                  ],
-                  "fn": {
-                   "kind": "var",
-                   "name": "div"
-                  },
-                  "kind": "app"
-                 },
-                 "kind": "app"
-                }
-               ],
-               "fn": {
-                "args": [
-                 {
-                  "kind": "lit",
-                  "value": {
-                   "kind": "nat",
-                   "value": 3
-                  }
-                 }
-                ],
-                "fn": {
-                 "kind": "lit",
-                 "value": {
-                  "kind": "fn_ref",
-                  "target": "fn_31c081eb43c203d82f72d6e189d4a35b7d2cb9096a257270d0359223de68da65"
-                 }
-                },
-                "kind": "app"
-               },
-               "kind": "app"
-              },
-              "kind": "app"
-             }
-            ],
-            "fn": {
-             "kind": "lit",
-             "value": {
-              "kind": "fn_ref",
-              "target": "fn_31c081eb43c203d82f72d6e189d4a35b7d2cb9096a257270d0359223de68da65"
-             }
-            },
-            "kind": "app"
-           },
-           "kind": "app"
-          },
-          "kind": "app"
+          "kind": "var",
+          "name": "xs"
          }
         ],
         "fn": {
-         "args": [
-          {
-           "kind": "var",
-           "name": "xs"
-          }
-         ],
-         "fn": {
-          "kind": "lit",
-          "value": {
-           "kind": "fn_ref",
-           "target": "fn_dde56182045924264e16345e2dc7c73afef34949c1c882f4628b2938238d84d1"
-          }
-         },
-         "kind": "app"
+         "kind": "lit",
+         "value": {
+          "kind": "fn_ref",
+          "target": "fn_81d8af646046b7e93ce6ab9c7816d6333196a6e313e7bd76fcff54a45d6fab8f"
+         }
         },
         "kind": "app"
        },

@@ -105,7 +105,7 @@
    }
   }
  ],
- "hash": "fn_ff6d219fd84cca952f3d37f1091735807bb08c3bb9952d0b23a886e5a7499533",
+ "hash": "fn_ed3d6a71091409d9b8d82250722b19eec519ea15f4859374f60f8d90f533eb84",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -122,7 +122,85 @@
   "capabilities": [],
   "complexity": "O(log n)",
   "effects": [],
-  "refinements": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "result"
+        }
+       ],
+       "kind": "app",
+       "op": "fst"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "result"
+              }
+             ],
+             "kind": "app",
+             "op": "snd"
+            }
+           ],
+           "kind": "app",
+           "op": "fst"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "result"
+              }
+             ],
+             "kind": "app",
+             "op": "snd"
+            }
+           ],
+           "kind": "app",
+           "op": "snd"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        }
+       ],
+       "kind": "app",
+       "op": "add"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "post"
+   }
+  ],
   "terminates": "always",
   "type": {
    "kind": "fn",

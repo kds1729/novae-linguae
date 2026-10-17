@@ -264,6 +264,9 @@ def main():
           [{"args": [ilit(240), ilit(46)], "result": tup(ilit(2), tup(ilit(-9), ilit(47)))},
            {"args": [ilit(17), ilit(5)], "result": tup(ilit(1), tup(ilit(-2), ilit(7)))},
            {"args": [ilit(7), ilit(0)], "result": tup(ilit(7), tup(ilit(1), ilit(0)))}],
+          # Bézout as a contract on the tuple result: g = a·x + b·y — the prover reads the tuple as an SMT
+          # datatype, and the law composes into bezout_holds through the certified contract.
+          refinements=[("post", "fst(result) == a * fst(snd(result)) + b * snd(snd(result))")],
           hints=["extended_euclid", "bezout"], complexity="O(log n)")
     gauntlet("ext_gcd", prove)
 
@@ -502,14 +505,17 @@ def main():
           props=[("below_power", "forall n. n < 1 || 2 * self(n) <= n + n")],
           hints=["integer_log2", "bit_length_minus_one"], complexity="O(log n)")
     gauntlet("log2_floor", prove)
-    build("ntt_rec", rf"\xs w levels -> case gt levels 0 of {{ false => xs; true => case {{ntt_split}} xs of {{ (ev, od) => "
-                     rf"let w2 = mod (mul w w) {P_NTT} in case {{ntt_butterfly}} (self ev w2 (sub levels 1)) (self od w2 (sub levels 1)) 1 w of {{ (lo, hi) => append lo hi }} }} }}",
-          FN([LIST(INT), INT, NAT], LIST(INT)),
-          [{"args": [ilist(1, 2, 3, 4), ilit(pow(3, (P_NTT - 1) // 4, P_NTT)), nlit(2)], "result": ilist(*py_ntt([1, 2, 3, 4]))},
-           {"args": [ilist(5), ilit(1), nlit(0)], "result": ilist(5)}],
+    # Recursion on the halves `ntt_split` returns: the checkers read `ntt_split`'s body as returning
+    # components strictly shorter than its input once it has ≥ 2 elements (the `null (tail xs)` guard),
+    # so the recursion is a halving descent of `xs` — termination SOUND, complexity 2T(n/2) + O(n).
+    build("ntt_rec", rf"\xs w -> case null xs of {{ true => nil; false => case null (tail xs) of {{ true => xs; false => case {{ntt_split}} xs of {{ (ev, od) => "
+                     rf"let w2 = mod (mul w w) {P_NTT} in case {{ntt_butterfly}} (self ev w2) (self od w2) 1 w of {{ (lo, hi) => append lo hi }} }} }} }}",
+          FN([LIST(INT), INT], LIST(INT)),
+          [{"args": [ilist(1, 2, 3, 4), ilit(pow(3, (P_NTT - 1) // 4, P_NTT))], "result": ilist(*py_ntt([1, 2, 3, 4]))},
+           {"args": [ilist(5), ilit(1)], "result": ilist(5)}],
           tags=["transform/list"], hints=["number_theoretic_transform_recursive"], complexity="O(n log n)")
     gauntlet("ntt_rec", prove)
-    build("ntt", rf"\xs -> {{ntt_rec}} xs ({{mod_pow}} 3 (div {P_NTT - 1} (length xs)) {P_NTT}) ({{log2_floor}} (length xs))",
+    build("ntt", rf"\xs -> {{ntt_rec}} xs ({{mod_pow}} 3 (div {P_NTT - 1} (length xs)) {P_NTT})",
           FN([LIST(INT)], LIST(INT)),
           [{"args": [ilist(*v)], "result": ilist(*py_ntt(v))} for v in ([1, 2, 3, 4], [1, 0, 0, 0, 0, 0, 0, 0], [5, 6, 7, 8, 9, 10, 11, 12], [1])],
           refinements=[("pre", "length(xs) > 0")],
@@ -524,7 +530,7 @@ def main():
           tags=["transform/list"], hints=["scale_mod_p"], complexity="O(n)")
     gauntlet("scale_mod", prove)
     build("ntt_inverse", rf"\xs -> let n = length xs in let inv_n = {{mod_pow}} n {P_NTT - 2} {P_NTT} in "
-                         rf"{{scale_mod}} ({{ntt_rec}} xs ({{mod_pow}} ({{mod_pow}} 3 (div {P_NTT - 1} n) {P_NTT}) {P_NTT - 2} {P_NTT}) ({{log2_floor}} n)) inv_n",
+                         rf"{{scale_mod}} ({{ntt_rec}} xs ({{mod_pow}} ({{mod_pow}} 3 (div {P_NTT - 1} n) {P_NTT}) {P_NTT - 2} {P_NTT})) inv_n",
           FN([LIST(INT)], LIST(INT)),
           [{"args": [ilist(*py_ntt(v))], "result": ilist(*v)} for v in ([1, 2, 3, 4], [5, 6, 7, 8, 9, 10, 11, 12])],
           refinements=[("pre", "length(xs) > 0")],
@@ -551,6 +557,10 @@ def main():
           FN([NAT], NAT),
           [{"args": [nlit(5)], "result": nlit(8)}, {"args": [nlit(8)], "result": nlit(8)}, {"args": [nlit(1)], "result": nlit(1)}, {"args": [nlit(0)], "result": nlit(1)}],
           props=[("at_least_n", "forall n. self(n) >= n"), ("under_twice_n", "forall n. n < 1 || self(n) < 2 * n")],
+          # The size bound the complexity fold reads for `pad_to xs (next_pow2 …)` in convolution. The
+          # linear forms `result <= 2 * n + 1` / `result <= 2 * n` do NOT close by induction (the step
+          # doubles a loose hypothesis); `max(1, 2n - 1)` is the inductive one (and exact at n = 0).
+          refinements=[("post", "result <= max(1, 2 * n - 1)")],
           hints=["next_power_of_two"], complexity="O(log n)")
     gauntlet("next_pow2", prove)
     build("convolution", r"\xs ys -> let n = {next_pow2} (sub (add (length xs) (length ys)) 1) in "
