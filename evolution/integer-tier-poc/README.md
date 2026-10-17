@@ -602,7 +602,7 @@ is lists). `lcm`'s `multiple_of_both` needs `gcd` divides both arguments, itself
   are both legitimate records; the law that bridges them has to say on which domain it claims,
   and the prover holds it to the callee's certificate rather than extending the certificate.
 
-### Still open
+### Still open after the sixth follow-up (the last closed in the seventh, below)
 
 - The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, `digit_sum ≥ 0`, the `mod`
   congruences, `gcd` divides both): both solvers time out; a lemma rung (stating `mod`
@@ -611,6 +611,60 @@ is lists). `lcm`'s `multiple_of_both` needs `gcd` divides both arguments, itself
 - `pow_mod_agree` / `prime_agree`: numeric two-recursive equivalence (the equivalence prover
   inducts over lists); `digits_roundtrip`: definitional unfolding of callees under an induction
   on a law variable.
+
+## Seventh follow-up (2026-10-17, same day): induction through a callee's definition
+
+### Measured
+
+| law | before | now |
+|---|---|---|
+| `digits_roundtrip`: `from_digits(b, digits(b, n)) = n` | UNKNOWN (the callees' contracts say nothing that decides it) | **PROVED** by induction on `n` through `digits`' definition, 5.8 s |
+| `bezout_holds`: `self(a, b)` over ALL ints | UNKNOWN (the post is certified for nats) | **PROVED** by unfolding alone: two levels of `ext_gcd`'s definition put the recursive call on `(b, a mod b)` then `(a mod b, b mod (a mod b))` — non-negative by Euclidean `mod` — where the nat-certified Bézout post applies; the `b = 0` and `a mod b = 0` arms are literal |
+
+Totals: laws **20 PROVED / 12 UNKNOWN / 0 UNSUPPORTED** (was 18 / 14 / 0) — the
+checker law the previous follow-up left UNKNOWN by design closes too, not by extending the
+contract but by reaching the domain where it holds; everything else unchanged (41/41 run, certify, terminate, complexity; refinements 19 / 2).
+
+**The proof the record could not state.** `digits_roundtrip` is not recursive, so none of the
+induction rungs applied to it, and composition by contract could not reach it: `digits` carries
+no postcondition that relates it to `from_digits`, and no contract could — the fact is the
+recursion itself, `digits(b, n) = cons(n mod b, digits(b, n div b))` for `b ≥ 2, n ≥ 1`, and
+`from_digits` consuming that cons. So the rung inlines the checker (as the first-order prover
+does), unfolds each callee's defining equation at the applications the goal makes and one level
+deeper at the recursive calls inside (the numeric rung's discipline), and inducts on the law
+variable that reaches a recursive callee's measure position — `n`, through `digits`, whose
+measure the termination checker already knows. The hypothesis is an instance at `digits`'
+recursive argument `n div b`, guarded by `1 ≤ n div b < n`; with it, `n mod b + b · (n div b) =
+n` closes the step and `digits(b, 0) = nil`, `from_digits(b, nil) = 0` the base. Measured, once
+more: that instance is unsat in 14 ms; the same hypothesis quantified times out — and so does
+the callee's quantified `from_digits ≥ 0` axiom beside it, so the contract ladder (quantified,
+then instances only) runs in this rung too. The false round-trip `… = n + 1` stays UNKNOWN.
+
+### Argued
+
+- **A contract is a summary; a definition is the thing.** Composition by contract lets a
+  dependent be verified without re-proving its callees, and the previous follow-up showed what
+  that costs: a law whose truth is not SUMMARIZED by any certified post cannot be reached. This
+  rung reaches it by re-deriving the callees' definitions from their bodies over the linked view —
+  the same re-derivation discipline as termination and complexity folding — so the proof depends
+  on exactly what the callee IS, at its address, never on a declaration.
+- **Four rungs, one idiom.** Unfoldings at the recursive calls, the structural hypothesis at the
+  tail descents, contracts at the applications, and now a callee's definition and the hypothesis
+  at ITS recursive call: each a quantified statement instantiated at the points the proof uses,
+  each measured against the quantified form first.
+
+### Still open
+
+- The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, `digit_sum ≥ 0`, the `mod`
+  congruences, `gcd` divides both): both solvers time out; a lemma rung (stating `mod`
+  distributivity as axioms) is the next lever if a driver appears.
+- `Maybe`-valued contracts for `mod_inverse` and `crt2` (authoring; measured by hand: the
+  `Just(x) ⇒ a·x ≡ 1 (mod m)` post from `ext_gcd`'s Bézout identity is satisfiable without
+  `m ≥ 2` and times out with it — nonlinear `mod`).
+- `pow_mod_agree` / `prime_agree`: numeric two-recursive equivalence (both sides recurse on `e`
+  / `n` with different strides; the equivalence prover inducts over lists). The rung above
+  reaches ONE recursive callee's measure; a law comparing two needs their definitions unfolded
+  in lockstep — the two-recursive principle, numerically.
 
 ## Open questions (as they stood before the follow-up)
 

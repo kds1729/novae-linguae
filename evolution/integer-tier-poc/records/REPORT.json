@@ -127,7 +127,7 @@
    "bezout_identity_nat: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "bezout_identity: UNKNOWN      solver could not decide",
+   "bezout_identity: PROVED       by induction through the callees' definitions, on `<unfolding>` (unsat)",
    "bezout_identity_nat: PROVED       holds for all inputs (unsat negation)"
   ]
  },
@@ -744,7 +744,7 @@
    "digits_then_from_digits: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "digits_then_from_digits: UNKNOWN      solver could not decide"
+   "digits_then_from_digits: PROVED       by induction through the callees' definitions, on `n (through `fn_23994af4\u2026`)` (unsat)"
   ]
  },
  {

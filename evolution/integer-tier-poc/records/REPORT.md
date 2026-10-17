@@ -3,7 +3,7 @@
 | `gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | commutative=EXHAUSTIVE; right_zero=EXHAUSTIVE; divides_both=EXHAUSTIVE; associative=EXHAUSTIVE | commutative=PROVED; right_zero=PROVED; divides_both=UNKNOWN; associative=UNKNOWN |
 | `lcm` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | multiple_of_both=EXHAUSTIVE; commutative=EXHAUSTIVE | multiple_of_both=UNKNOWN; commutative=PROVED |
 | `ext_gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
-| `bezout_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | bezout_identity=EXHAUSTIVE; bezout_identity_nat=EXHAUSTIVE | bezout_identity=UNKNOWN; bezout_identity_nat=PROVED |
+| `bezout_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | bezout_identity=EXHAUSTIVE; bezout_identity_nat=EXHAUSTIVE | bezout_identity=PROVED; bezout_identity_nat=PROVED |
 | `mod_inverse` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `inverse_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | inverse_identity=EXHAUSTIVE | inverse_identity=UNKNOWN |
 | `mod_add` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | congruent_to_plain_sum=EXHAUSTIVE; commutative=EXHAUSTIVE | congruent_to_plain_sum=UNKNOWN; commutative=PROVED |
@@ -26,7 +26,7 @@
 | `crt_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | solves_both_congruences=HELD | solves_both_congruences=UNKNOWN |
 | `digits` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `from_digits` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | — | — |
-| `digits_roundtrip` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | digits_then_from_digits=EXHAUSTIVE | digits_then_from_digits=UNKNOWN |
+| `digits_roundtrip` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | digits_then_from_digits=EXHAUSTIVE | digits_then_from_digits=PROVED |
 | `digit_sum` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=UNVERIFIABLE | SOUND | SOUND | sum_bounded_by_value=EXHAUSTIVE | sum_bounded_by_value=UNKNOWN |
 | `binomial` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=UNVERIFIABLE | SOUND | SOUND | symmetry=EXHAUSTIVE; pascal=EXHAUSTIVE; choose_zero=EXHAUSTIVE | symmetry=UNKNOWN; pascal=UNKNOWN; choose_zero=PROVED |
 | `ntt_split` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
