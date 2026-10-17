@@ -17,7 +17,8 @@ from [Releases](https://github.com/kds1729/novae-linguae/releases) — CI-built,
 against each, checksum-verified by the script; anything else: `cd tooling/validator; cargo build
 --release` with stable Rust — the script finds that build). It canonicalizes, hashes, signs, type-checks, proves, certifies, runs,
 and replays every artifact the project defines. Everything below is that one binary plus a
-stdlib-only Python script.
+stdlib-only Python script, and everything the script writes — the binary, the records, the loop's
+files — goes into `.quickstart/` inside the clone (ignored by git).
 
 ## 2. A real API becomes verified functions
 
@@ -73,15 +74,27 @@ testimony; the trace is theirs — that is the honest scope, and it is stated).
 ## What to try next
 
 - **Your own API.** Save its introspection result (`evolution/graphql-poc/repro/introspection_query.json`
-  is the query) and run the adapter against it; or an OpenAPI 3 description through
-  `tooling/nl-ingest-openapi/openapi_ingest.py`. The adapter tells you, loudly, what it refuses
-  and why — that list is the interesting part.
+  is the query; follow redirects — `curl -L`) and run the adapter against it; or an OpenAPI 3
+  description through `tooling/nl-ingest-openapi/openapi_ingest.py`. The adapter tells you, loudly,
+  what it refuses and why — that list is the interesting part. A field with several optional
+  arguments (`person(id, personID)`) is observed with ONE of them (`--observe-arg person.id=…`);
+  the server's own error comes back verbatim, with the arguments the adapter sent. Each record's
+  discovery tag is `parse/<lowercase-hyphenated-field>` (`countryCapital` → `parse/country-capital`)
+  and its argument order is the record's `signature` (base URL first, then the observed arguments)
+  — both are in the `.v0.2.json` the adapter prints next to each record.
 - **Publish and be verified.** `python3 tooling/commons-node/publish_records.py records/` posts
   your bodies, traces and records to a node's `/v0/records` in the right order (Arca's gate
   accepts any well-formed artifact; `201 stored` is new, `200 stored:false` means it already had
-  it — publishing is idempotent). Add `--sign <seed>` to certify and publish certifications too.
-  Then `orchestrate --node … --intent <your record's tag>` and `verify-claim` the resulting
-  assert from another machine — the stranger's check. Or run your own node:
+  it — publishing is idempotent). Add `--sign <seed>` to certify and publish certifications too:
+  without one, every consumer re-certifies your record itself (`--require-certified` does, locally);
+  with one, a consumer whose policy trusts your certifier can rely on your signed `cert_…` instead.
+  **A public node is append-only and world-visible: what you publish stays, under its address,
+  with no delete.** Try a throwaway set against your own node first if that matters. Then
+  `orchestrate --node … --verify --require-certified --intent <your record's tag> --arg <base.json>
+  --arg <id.json> --grant net.read@<host> --seed <any string> --publish` — each `--arg` is a file
+  holding a value expression (`{"kind":"string","value":"https://…"}`; `quickstart.sh` shows the
+  exact lines) and `--seed` is the identity that signs the published assert — and `verify-claim`
+  the resulting assert from another machine — the stranger's check. Or run your own node:
   `tooling/commons-node/` is a `docker compose up`.
 - **Read the design.** [README.md](README.md) is the manifesto and status; `spec/` is normative;
   `evolution/` is evidence — three real APIs, with the numbers and the parts that did not work.

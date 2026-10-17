@@ -51,6 +51,14 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
 
 - The adapters find the binary in this order: sibling `cargo build`, then the one `quickstart.sh`
   fetched into `.quickstart/`, then `NL_VALIDATOR`. After the quickstart you need no env var.
+  `.quickstart/` (the binary, the records, the loop's files) lives inside the clone and is ignored.
+- `orchestrate --publish` needs `--seed <string>` (the signer of the published assert) and `--arg`
+  takes a FILE holding a value expression, `{"kind":"string","value":"…"}` — not the bare value.
+- A record's discovery tag is in its `intent_tags` (adapters derive `parse/<lowercase-hyphenated-
+  field>`), its argument order in its `signature`. The adapters print the record's file, not these.
+- Publishing to a public node is permanent: append-only, world-visible, no delete. `--sign` is what
+  lets a consumer rely on YOUR certification instead of re-certifying (which `--require-certified`
+  always can, locally).
 - `POST /v0/records` answers `201 {stored:true}` for new, `200 {stored:false}` for already
   held — idempotent, not a rejection. Rejections are `4xx {error}`.
 - `nl-validator certify <record>` needs `--body <body> --records <dir>`; the adapters print

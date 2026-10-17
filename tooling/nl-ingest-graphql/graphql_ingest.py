@@ -795,7 +795,12 @@ def main(argv=None):
             observed[key] = (os.path.join(a.out, f"trace-{sanitize_hint(p['name'])}-0.json") if ok
                              else (p["name"], res))
         if not ok:
-            print(f"{p['name']}: observation-gate=FAIL {res}")
+            # The server's error verbatim, PLUS what was sent: a field with several optional arguments
+            # (`person(id, personID)`) fails with the server's "must provide id or …" and the reader
+            # needs to see which argument the observation carried (a stranger lost 54 of 60 records
+            # to that before the hint existed).
+            sent = f" (sent arguments: {json.dumps(p['args'], sort_keys=True)})" if p["args"] else ""
+            print(f"{p['name']}: observation-gate=FAIL {res}{sent}")
             ok_all = False
             continue
         made += 1
