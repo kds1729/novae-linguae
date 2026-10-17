@@ -63,7 +63,7 @@ pub use terminate::{
 
 pub mod complexity;
 pub use complexity::{
-    analyze_complexity, analyze_complexity_linked, analyze_output_size, parse_class, parse_output_size, CalleeComplexity, Class, ComplexityOutcome,
+    analyze_complexity, analyze_complexity_linked, analyze_output_size, parse_class, parse_output_size, CalleeComplexity, Class, ComplexityOutcome, LinkedCallees,
     OutputSize,
 };
 

@@ -104,20 +104,87 @@ pub fn certify_record(record: &J, body: &J, records: &HashMap<String, J>, solver
 pub struct LinkedView<'a> {
     records: &'a HashMap<String, J>,
     bodies: &'a HashMap<String, J>,
+    solver: String,
     term: std::cell::RefCell<HashMap<String, Option<bool>>>,
     cx: std::cell::RefCell<HashMap<String, Option<crate::Class>>>,
+    bounds: std::cell::RefCell<HashMap<String, Option<Vec<usize>>>>,
     in_progress: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
 impl<'a> LinkedView<'a> {
-    pub fn new(records: &'a HashMap<String, J>, bodies: &'a HashMap<String, J>) -> Self {
+    pub fn new(records: &'a HashMap<String, J>, bodies: &'a HashMap<String, J>, solver: &str) -> Self {
         LinkedView {
             records,
             bodies,
+            solver: solver.to_string(),
             term: Default::default(),
             cx: Default::default(),
+            bounds: Default::default(),
             in_progress: Default::default(),
         }
+    }
+
+    /// The callee's parameter positions whose values bound its RESULT, from certified facts only: a
+    /// declared postcondition `result < p` / `result <= p` (alone or inside a conjunction) that
+    /// `check-refinement` PROVES here, or a list result the output-size analysis bounds linearly in
+    /// the input (then every parameter). `None` when nothing certified bounds it.
+    pub fn result_bounded_by(&self, target: &str) -> Option<Vec<usize>> {
+        if let Some(v) = self.bounds.borrow().get(target) {
+            return v.clone();
+        }
+        let key = format!("bounds:{target}");
+        if !self.in_progress.borrow_mut().insert(key.clone()) {
+            return None;
+        }
+        let out = self.callee(target).and_then(|(rec, body)| {
+            let params: Vec<String> = body
+                .get("params")
+                .and_then(|p| p.as_array())
+                .map(|ps| ps.iter().filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from)).collect())
+                .unwrap_or_default();
+            let sig_type = rec.pointer("/signature/type")?;
+            let refinements: Vec<J> = rec.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+            // A list result at most linear in the input bounds itself by the whole input.
+            if let Some(rt) = unwrap_result_type(sig_type) {
+                if crate::complexity::is_list_type(&rt) {
+                    return match analyze_output_size(&rt, body) {
+                        crate::OutputSize::Const => Some(vec![]),
+                        crate::OutputSize::Linear => Some((0..params.len()).collect()),
+                        _ => None,
+                    };
+                }
+            }
+            // A proved `result < p` / `result <= p`.
+            let posts: Vec<&J> = refinements
+                .iter()
+                .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("post"))
+                .filter_map(|r| r.get("expr"))
+                .collect();
+            if posts.is_empty() {
+                return None;
+            }
+            let reports = check_refinements(sig_type, &refinements, body, &self.solver);
+            let mut idxs: Vec<usize> = Vec::new();
+            for (i, post) in posts.iter().enumerate() {
+                let sound = reports
+                    .iter()
+                    .any(|r| r.label == format!("post[{i}]") && matches!(r.outcome, RefinementOutcome::Sound));
+                if !sound {
+                    continue;
+                }
+                for p in upper_bound_params(post) {
+                    if let Some(j) = params.iter().position(|q| *q == p) {
+                        if !idxs.contains(&j) {
+                            idxs.push(j);
+                        }
+                    }
+                }
+            }
+            (!idxs.is_empty()).then_some(idxs)
+        });
+        self.in_progress.borrow_mut().remove(&key);
+        self.bounds.borrow_mut().insert(target.to_string(), out.clone());
+        out
     }
 
     fn callee(&self, target: &str) -> Option<(&'a J, &'a J)> {
@@ -162,19 +229,66 @@ impl<'a> LinkedView<'a> {
             return None;
         }
         let out = match self.callee(target) {
-            Some((_, body)) => {
-                let lookup = |t: &str| self.complexity(t);
-                match crate::complexity::analyze_complexity_linked(body, Some(&lookup)) {
-                    crate::complexity::ComplexityOutcome::Bound(c) => Some(c),
-                    _ => None,
-                }
-            }
+            Some((_, body)) => match crate::complexity::analyze_complexity_linked(body, Some(self)) {
+                crate::complexity::ComplexityOutcome::Bound(c) => Some(c),
+                _ => None,
+            },
             None => None,
         };
         self.in_progress.borrow_mut().remove(&key);
         self.cx.borrow_mut().insert(target.to_string(), out);
         out
     }
+}
+
+impl crate::complexity::LinkedCallees for LinkedView<'_> {
+    fn class_of(&self, target: &str) -> Option<crate::Class> {
+        self.complexity(target)
+    }
+    fn result_bounded_by(&self, target: &str) -> Option<Vec<usize>> {
+        LinkedView::result_bounded_by(self, target)
+    }
+}
+
+/// The parameters an upper-bound postcondition names: `result < p`, `result <= p`, or a conjunction
+/// containing such (the reserved `result` on the left, a variable on the right).
+fn upper_bound_params(post: &J) -> Vec<String> {
+    let mut out = Vec::new();
+    fn go(node: &J, out: &mut Vec<String>) {
+        let op = node.get("op").and_then(|o| o.as_str()).unwrap_or_default();
+        let args = node.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+        match op {
+            "and" => args.iter().for_each(|a| go(a, out)),
+            "lt" | "le" if args.len() == 2 => {
+                let is_result = args[0].get("kind").and_then(|k| k.as_str()) == Some("var")
+                    && args[0].get("name").and_then(|n| n.as_str()) == Some("result");
+                if is_result {
+                    if let Some(p) = (args[1].get("kind").and_then(|k| k.as_str()) == Some("var"))
+                        .then(|| args[1].get("name").and_then(|n| n.as_str()))
+                        .flatten()
+                    {
+                        out.push(p.to_string());
+                    }
+                }
+            }
+            "gt" | "ge" if args.len() == 2 => {
+                // `p > result` / `p >= result`, mirrored.
+                let is_result = args[1].get("kind").and_then(|k| k.as_str()) == Some("var")
+                    && args[1].get("name").and_then(|n| n.as_str()) == Some("result");
+                if is_result {
+                    if let Some(p) = (args[0].get("kind").and_then(|k| k.as_str()) == Some("var"))
+                        .then(|| args[0].get("name").and_then(|n| n.as_str()))
+                        .flatten()
+                    {
+                        out.push(p.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    go(post, &mut out);
+    out
 }
 
 /// [`certify_record`] with an optional LINKED view (`bodies` = [`crate::build_link_map`] of the records
@@ -187,9 +301,8 @@ pub fn certify_record_linked(
     bodies: Option<&HashMap<String, J>>,
     solver: &str,
 ) -> Certification {
-    let view = bodies.map(|b| LinkedView::new(records, b));
+    let view = bodies.map(|b| LinkedView::new(records, b, solver));
     let term_lookup = |t: &str| view.as_ref().and_then(|v| v.terminates(t));
-    let cx_lookup = |t: &str| view.as_ref().and_then(|v| v.complexity(t));
     let sig = record.pointer("/signature");
     let mut checks: Vec<CertCheck> = Vec::new();
 
@@ -289,7 +402,7 @@ pub fn certify_record_linked(
     }
 
     // 5. Complexity + structured cost.
-    let cx_cb: Option<crate::complexity::CalleeComplexity<'_>> = view.as_ref().map(|_| &cx_lookup as crate::complexity::CalleeComplexity<'_>);
+    let cx_cb: Option<crate::complexity::CalleeComplexity<'_>> = view.as_ref().map(|v| v as crate::complexity::CalleeComplexity<'_>);
     let complexity = crate::complexity::analyze_complexity_linked(body, cx_cb);
     match sig.and_then(|s| s.get("complexity")).and_then(|c| c.as_str()) {
         Some(d) => {

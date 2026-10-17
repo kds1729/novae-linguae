@@ -1515,7 +1515,7 @@ fn cmd_check_termination(record: &PathBuf, body: &PathBuf, records: Option<&Path
     let body = nl_validator::read_json(body)?;
     let declared = record.pointer("/signature/terminates").and_then(|v| v.as_str()).unwrap_or("unknown");
     let maps = linked_maps(records)?;
-    let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b));
+    let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, "z3"));
     let lookup = |t: &str| view.as_ref().and_then(|v| v.terminates(t));
     let cb: Option<nl_validator::CalleeTerminates<'_>> = view.as_ref().map(|_| &lookup as nl_validator::CalleeTerminates<'_>);
     match nl_validator::analyze_termination_linked(&body, &nl_validator::nat_param_positions(&record), cb) {
@@ -1537,9 +1537,8 @@ fn cmd_check_complexity(record: &PathBuf, body: &PathBuf, records: Option<&PathB
     let record = nl_validator::read_json(record)?;
     let body = nl_validator::read_json(body)?;
     let maps = linked_maps(records)?;
-    let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b));
-    let lookup = |t: &str| view.as_ref().and_then(|v| v.complexity(t));
-    let cb: Option<nl_validator::CalleeComplexity<'_>> = view.as_ref().map(|_| &lookup as nl_validator::CalleeComplexity<'_>);
+    let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, "z3"));
+    let cb: Option<nl_validator::CalleeComplexity<'_>> = view.as_ref().map(|v| v as nl_validator::CalleeComplexity<'_>);
     let inferred = nl_validator::analyze_complexity_linked(&body, cb);
 
     // (1) The flat `signature.complexity` bound.

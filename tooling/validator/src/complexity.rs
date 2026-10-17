@@ -302,9 +302,19 @@ fn arg_descent(arg: &J) -> Option<(String, Descent)> {
     tail_descent(arg).or_else(|| numeric_descent(arg))
 }
 
-/// A linked view of other records, for folding a `fn_ref` callee's cost: the callee's own inferred
-/// class (analyzed, never read from its declaration), or `None` when unresolvable.
-pub type CalleeComplexity<'a> = &'a dyn Fn(&str) -> Option<Class>;
+/// A linked view of other records, for folding a `fn_ref` callee's cost — and its RESULT'S size, when a
+/// certified fact bounds it (a proved postcondition `result < p`, or a list result at most linear in
+/// its input), so a callee's result can itself be a size-bounded argument to the next callee.
+/// Everything is analyzed/proved from the callee's own body, never read from its declaration.
+pub trait LinkedCallees {
+    /// The callee's own inferred complexity class, or `None` when unresolvable.
+    fn class_of(&self, target: &str) -> Option<Class>;
+    /// The callee's parameter positions whose VALUES bound its result (empty = a constant bound), or
+    /// `None` when nothing certified bounds the result.
+    fn result_bounded_by(&self, target: &str) -> Option<Vec<usize>>;
+}
+
+pub type CalleeComplexity<'a> = &'a dyn LinkedCallees;
 
 /// Ops whose RESULT is no larger than the sum of their inputs' sizes (values linear in the input): a
 /// callee applied to such arguments runs in its class measured in OUR `n`. `mul` is admitted only
@@ -317,22 +327,32 @@ const SIZE_BOUNDED_OPS: &[&str] = &[
 ];
 
 /// Is `arg`'s VALUE bounded by the input size — a parameter (or a `let` name bound to such a value), a
-/// literal, a tuple of such, or a size-bounded op over such? A recursive result or a pattern-bound
-/// name is not (nothing bounds `self(…)`'s magnitude, and a tuple component came from a callee).
-fn size_bounded(arg: &J, bound: &BTreeSet<String>) -> bool {
+/// literal, a tuple of such, a size-bounded op over such, or a `fn_ref` callee's result that a CERTIFIED
+/// fact bounds by size-bounded arguments? A recursive result or a pattern-bound name is not (nothing
+/// bounds `self(…)`'s magnitude, and a tuple component came from a callee).
+fn size_bounded(arg: &J, bound: &BTreeSet<String>, callee: Option<CalleeComplexity<'_>>) -> bool {
     match arg.get("kind").and_then(|k| k.as_str()) {
         Some("var") => arg.get("name").and_then(|n| n.as_str()).is_some_and(|n| bound.contains(n) || n == "nil"),
         Some("lit") => true,
-        Some("tuple") => arg.get("elems").and_then(|e| e.as_array()).is_some_and(|es| es.iter().all(|e| size_bounded(e, bound))),
+        Some("tuple") => arg.get("elems").and_then(|e| e.as_array()).is_some_and(|es| es.iter().all(|e| size_bounded(e, bound, callee))),
         Some("app") if self_call_args(arg).is_some() => false,
-        Some("app") => match app_spine(arg) {
-            Some((op, args)) if op == "mul" && args.len() == 2 => {
-                let lit = |n: &J| n.get("kind").and_then(|k| k.as_str()) == Some("lit");
-                (lit(&args[0]) || lit(&args[1])) && args.iter().all(|a| size_bounded(a, bound))
+        Some("app") => {
+            if let Some((target, cargs)) = crate::terminate::fn_ref_spine(arg) {
+                // A proved `result < p` (or a list result at most linear in its input) makes the callee's
+                // result as bounded as the arguments that bound it.
+                return callee
+                    .and_then(|c| c.result_bounded_by(&target))
+                    .is_some_and(|idxs| idxs.iter().all(|i| cargs.get(*i).is_some_and(|a| size_bounded(a, bound, callee))));
             }
-            Some((op, args)) => SIZE_BOUNDED_OPS.contains(&op.as_str()) && args.iter().all(|a| size_bounded(a, bound)),
-            None => false,
-        },
+            match app_spine(arg) {
+                Some((op, args)) if op == "mul" && args.len() == 2 => {
+                    let lit = |n: &J| n.get("kind").and_then(|k| k.as_str()) == Some("lit");
+                    (lit(&args[0]) || lit(&args[1])) && args.iter().all(|a| size_bounded(a, bound, callee))
+                }
+                Some((op, args)) => SIZE_BOUNDED_OPS.contains(&op.as_str()) && args.iter().all(|a| size_bounded(a, bound, callee)),
+                None => false,
+            }
+        }
         _ => false,
     }
 }
@@ -344,9 +364,9 @@ fn find_opaque(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeSet<
     if self_call_args(node).is_some() {
         // still descend into the call's arguments below
     } else if let Some((target, cargs)) = crate::terminate::fn_ref_spine(node) {
-        match callee.and_then(|f| f(&target)) {
+        match callee.and_then(|c| c.class_of(&target)) {
             Some(_) => {
-                if let Some(a) = cargs.iter().find(|a| !size_bounded(a, bound)) {
+                if let Some(a) = cargs.iter().find(|a| !size_bounded(a, bound, callee)) {
                     return Some(format!(
                         "applies `{target}` to an argument whose size is not bounded by the input ({}) — its class cannot be re-expressed in n",
                         a.get("kind").and_then(|k| k.as_str()).unwrap_or("?")
@@ -380,7 +400,7 @@ fn find_opaque(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeSet<
         }
         let mut inner = bound.clone();
         if let (Some(n), Some(v)) = (node.get("name").and_then(|n| n.as_str()), node.get("value")) {
-            if size_bounded(v, bound) {
+            if size_bounded(v, bound, callee) {
                 inner.insert(n.to_string());
             } else {
                 inner.remove(n);
@@ -497,7 +517,7 @@ fn path_work(node: &J, callee: Option<CalleeComplexity<'_>>) -> Class {
     // Composition by content address: the callee's own class (in our n — `find_opaque` has already
     // required size-bounded arguments) is this step's work, beside the work of building the arguments.
     if let Some((target, cargs)) = crate::terminate::fn_ref_spine(node) {
-        let own = callee.and_then(|f| f(&target)).unwrap_or(Class::CONST);
+        let own = callee.and_then(|c| c.class_of(&target)).unwrap_or(Class::CONST);
         return cargs.iter().map(|a| path_work(a, callee)).fold(own, Class::max);
     }
     if node.get("kind").and_then(|k| k.as_str()) == Some("case") {
@@ -661,7 +681,7 @@ pub fn parse_output_size(s: &str) -> OutputSize {
 }
 
 /// Whether a type-expr denotes a `List` (builtin `List`, or `apply(List, …)`).
-fn is_list_type(ty: &J) -> bool {
+pub(crate) fn is_list_type(ty: &J) -> bool {
     match ty.get("kind").and_then(|k| k.as_str()) {
         Some("builtin") => ty.get("name").and_then(|n| n.as_str()) == Some("List"),
         Some("apply") => ty.pointer("/ctor/name").and_then(|n| n.as_str()) == Some("List"),
@@ -746,7 +766,14 @@ fn list_output_size(params: &[String], inner: &J) -> OutputSize {
         return OutputSize::from_degree(list_size_degree(inner));
     }
     if !single_param_constant_recursion(&descents, params) {
-        return OutputSize::Unknown; // halving / mixed / non-structural — outside the S(n)=S(n−1)+chunk shape
+        // A HALVING recursion that conses O(1) material per level builds Θ(log n) ≤ Θ(n) elements
+        // (`digits`: one digit per halving) — Linear is the sound coarse class. Anything else
+        // (mixed / non-structural / expanding per level) is outside the S(n)=S(n−1)+chunk shape.
+        let halving = matches!(choose_measure(&descents, params), Some((_, kinds)) if kinds.iter().all(|k| *k == Descent::Halving));
+        if halving && path_self_count(inner) <= 1 && list_size_degree(inner) == 0 {
+            return OutputSize::Linear;
+        }
+        return OutputSize::Unknown;
     }
     if path_self_count(inner) >= 2 {
         return OutputSize::Unknown; // two builds appended per step could expand super-polynomially

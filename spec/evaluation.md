@@ -225,7 +225,12 @@ guarded ≥ 2, or Euclid's `mod(_, p)` — Lamé's bound) → `O(log n)` / `O(n 
 (`--records`) a `fn_ref` callee's own inferred class is the cost of applying it, provided every argument's
 VALUE is size-bounded by the input (parameters, literals, and `add`/`sub`/`div`/`mod`/`length`/… over them —
 not a product of two inputs, not a recursive result: a callee's `O(m)` is re-expressible in our `n` only
-when `m = O(n)`). Because a
+when `m = O(n)`). A callee's RESULT counts as size-bounded when a **certified fact** bounds it: a declared
+postcondition `result < p` / `result <= p` that `check-refinement` proves on the linked view (so
+`mod_pow`'s `0 ≤ result < m`, proved by numeric induction, lets its result feed the next callee), or a
+list result the output-size analysis bounds linearly in the input (a halving recursion consing O(1)
+per level — `digits` — is Θ(log n) ≤ Θ(n)). A component of a callee's TUPLE result carries no such
+fact and stays unbounded. Because a
 declared `O(f)` is an *upper-bound* claim, the check compares the inferred sound bound `O(g)` to it: `g ≤ f`
 → **SOUND** (or **VERIFIED** when `g` is provably tighter, so the declaration could be strengthened); `g > f`
 or a **higher-order / opaque** body (`map`/`filter`/`fold`, applying a parameter or `fn_ref`) → **UNVERIFIABLE**;
@@ -489,10 +494,15 @@ left uninterpreted; then the negated law is checked. **UNSAT ⇒ PROVED by numer
 SAT is **not** a refutation — away from the instantiated points the uninterpreted `self` is
 under-constrained, so a model may be spurious — and is reported UNKNOWN; neither direction can
 mis-verdict. A law whose `self` applications all put a LITERAL at the measure position (`count(0) = 0`)
-needs no hypothesis: the instantiated equation alone decides it (unfolding). Out of scope, stated:
-a law applying `self` at two different measures (commutativity's shape needs a lexicographic or sum
-measure this rung lacks), structural list recursion (the backend above), tuples/lists/`fn_ref`s in
-the body (out of the fragment). Measured on the integer-tier records: `count(n) = n`, `2·Σn = n(n+1)`,
+needs no hypothesis: the instantiated equation alone decides it (unfolding). The rung is a **ladder**:
+unfolding alone is tried FIRST (the instantiated equations without any hypothesis — measured, that
+is what proves `gcd(a, b) = gcd(b, a)`: with the quantified hypothesis present z3 answers unknown,
+without it unsat), then the hypothesis is added. A law that applies `self` at **several measures**
+(commutativity, associativity, Pascal's rule) inducts on the **sum** of the quantified nat variables
+its measure arguments mention — well-founded over the nats, and the hypothesis then covers every
+application whose measure arguments add up to less; a variable not nat-constrained refuses, stated.
+Out of scope: structural list recursion (the backend above), tuples/lists/`fn_ref`s in the body
+(out of the fragment). Measured on the integer-tier records: `count(n) = n`, `2·Σn = n(n+1)`,
 `isqrt`'s floor bound and `0 ≤ mod_pow < m` prove; `gcd ≥ 0`, `isqrt ≥ 0`, `next_pow2 ≥ n` prove;
 the binomial's non-negativity and the digit-sum bound do not close (nonlinear steps); the false laws
 tried stay UNKNOWN.

@@ -833,11 +833,24 @@ pub fn prove_property(prop_expr: &J, body: Option<&J>, solver: &str) -> (ProofOu
 // position (the variable the induction is on); the law and body must lower to the Int/Bool/String
 // fragment (tuples, lists, fn_refs refuse — honestly, as UNSUPPORTED).
 
-/// Where the measure sits in a law: the quantified variable at the descending position of the `self`
-/// applications. `Ok(None)` when every application puts a LITERAL there (`self(a, 0)`): no induction
-/// variable, and none needed — the instantiated defining equation alone decides the law (unfolding).
-fn measure_variable(pred: &J, position: usize, vars: &[String]) -> Result<Option<String>> {
-    let mut found: Option<String> = None;
+/// What the induction ranges over, read off the law's `self` applications at the body's measure position.
+enum MeasureSpec {
+    /// One quantified variable sits at the measure position of every application: strong induction on it.
+    Var(String),
+    /// Every application puts a LITERAL there (`self(a, 0)`): no induction variable, and none needed —
+    /// the instantiated defining equation alone decides the law (unfolding).
+    Literal,
+    /// Different variables, or compound terms, at the measure position (`gcd(a, b) = gcd(b, a)`,
+    /// `C(n+1, k+1) = C(n, k) + C(n, k+1)`): strong induction on the SUM of the quantified nat variables
+    /// those terms mention — well-founded over the nats, and the hypothesis then covers every
+    /// application whose measure arguments add up to less.
+    Sum(Vec<String>),
+}
+
+fn measure_spec(pred: &J, position: usize, vars: &[String], nat_vars: &BTreeSet<String>) -> Result<MeasureSpec> {
+    let mut direct: BTreeSet<String> = BTreeSet::new();
+    let mut compound = false;
+    let mut mentioned: BTreeSet<String> = BTreeSet::new();
     let mut any = false;
     for call in collect_self_applications(pred) {
         any = true;
@@ -847,21 +860,55 @@ fn measure_variable(pred: &J, position: usize, vars: &[String]) -> Result<Option
         if arg.get("kind").and_then(|k| k.as_str()) == Some("lit") {
             continue;
         }
-        let Some(v) = var_name(arg) else {
-            bail!("the law applies `self` with a compound term at the measure position (induction needs the measure to be a quantified variable or a literal)");
-        };
-        if !vars.iter().any(|x| x == v) {
-            bail!("the measure argument `{v}` is not a quantified variable of the law");
+        let in_arg = quantified_vars_in(arg, vars);
+        if in_arg.is_empty() {
+            bail!("the law applies `self` with a measure argument that mentions no quantified variable");
         }
-        match &found {
-            Some(prev) if prev != v => bail!("the law applies `self` with different measures (`{prev}` and `{v}`) — one induction variable is needed (a law like commutativity needs a lexicographic or sum measure this rung does not have)"),
-            _ => found = Some(v.to_string()),
+        mentioned.extend(in_arg.iter().cloned());
+        match var_name(arg) {
+            Some(v) if vars.iter().any(|x| x == v) => {
+                direct.insert(v.to_string());
+            }
+            _ => compound = true,
         }
     }
     if !any {
         bail!("the law does not apply `self`");
     }
-    Ok(found)
+    if mentioned.is_empty() {
+        return Ok(MeasureSpec::Literal);
+    }
+    if !compound && direct.len() == 1 {
+        return Ok(MeasureSpec::Var(direct.into_iter().next().unwrap()));
+    }
+    let not_nat: Vec<&String> = mentioned.iter().filter(|v| !nat_vars.contains(*v)).collect();
+    if !not_nat.is_empty() {
+        bail!(
+            "the law applies `self` at several measures ({}), so the induction needs their SUM, but {} not nat-constrained (fed to a `nat` parameter somewhere in the law) — the sum would not be well-founded",
+            mentioned.iter().cloned().collect::<Vec<_>>().join(", "),
+            if not_nat.len() == 1 { format!("`{}` is", not_nat[0]) } else { format!("{} are", not_nat.iter().map(|v| format!("`{v}`")).collect::<Vec<_>>().join(", ")) }
+        );
+    }
+    Ok(MeasureSpec::Sum(mentioned.into_iter().collect()))
+}
+
+/// The quantified variables a predicate term mentions.
+fn quantified_vars_in(node: &J, vars: &[String]) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    fn go(node: &J, vars: &[String], out: &mut BTreeSet<String>) {
+        if let Some(v) = var_name(node) {
+            if vars.iter().any(|x| x == v) {
+                out.insert(v.to_string());
+            }
+        }
+        match node {
+            J::Object(m) => m.values().for_each(|v| go(v, vars, out)),
+            J::Array(xs) => xs.iter().for_each(|v| go(v, vars, out)),
+            _ => {}
+        }
+    }
+    go(node, vars, &mut out);
+    out
 }
 
 /// Every `self` application in a predicate or body AST (both spellings), as its argument list.
@@ -939,7 +986,23 @@ pub fn prove_by_numeric_induction(
     nat_positions: &BTreeSet<usize>,
     solver: &str,
 ) -> (ProofOutcome, Option<Certificate>, Option<String>) {
-    match build_induction_certificate(prop_expr, body, nat_positions) {
+    // A ladder: UNFOLDING alone first (the instantiated defining equations, no hypothesis — enough for
+    // `gcd(a, 0) = a` and, measured, for `gcd(a, b) = gcd(b, a)`, which the quantified hypothesis only
+    // obscures: z3 answers unknown with it and unsat without), then the hypothesis added.
+    let unfolding = match build_induction_certificate(prop_expr, body, nat_positions, false) {
+        Err(e) => return (ProofOutcome::Unsupported(format!("{e:#}")), None, None),
+        Ok(x) => x,
+    };
+    match run_smt(&unfolding.0.smt, solver) {
+        Ok(SatAnswer::Unsat) => {
+            let label = if unfolding.1 == "<unfolding>" { unfolding.1.clone() } else { format!("{} (by unfolding alone)", unfolding.1) };
+            return (ProofOutcome::Proved, Some(unfolding.0), Some(label));
+        }
+        Ok(SatAnswer::NoSolver) => return (ProofOutcome::NoSolver, Some(unfolding.0), Some(unfolding.1)),
+        Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(unfolding.0), Some(unfolding.1)),
+        _ => {}
+    }
+    match build_induction_certificate(prop_expr, body, nat_positions, true) {
         Err(e) => (ProofOutcome::Unsupported(format!("{e:#}")), None, None),
         Ok((cert, m)) => match run_smt(&cert.smt, solver) {
             Ok(SatAnswer::Unsat) => (ProofOutcome::Proved, Some(cert), Some(m)),
@@ -951,7 +1014,7 @@ pub fn prove_by_numeric_induction(
     }
 }
 
-fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &BTreeSet<usize>) -> Result<(Certificate, String)> {
+fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &BTreeSet<usize>, with_ih: bool) -> Result<(Certificate, String)> {
     let prop_expr = &uncurry(prop_expr);
     let body = body.map(uncurry).ok_or_else(|| anyhow!("numeric induction needs the body"))?;
     if prop_expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
@@ -975,8 +1038,25 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     if measure.position >= sd.params.len() {
         bail!("measure position out of range");
     }
-    let m_opt = measure_variable(pred, measure.position, &vars)?;
-    let m = m_opt.clone().unwrap_or_else(|| "<unfolding>".to_string());
+    // Domain facts: a law variable fed to a nat-typed `self` parameter ranges over nats.
+    let mut nat_vars: BTreeSet<String> = BTreeSet::new();
+    for call in collect_self_applications(pred) {
+        for (i, a) in call.iter().enumerate() {
+            if nat_positions.contains(&i) {
+                if let Some(v) = var_name(a) {
+                    if vars.iter().any(|x| x == v) {
+                        nat_vars.insert(v.to_string());
+                    }
+                }
+            }
+        }
+    }
+    let spec = measure_spec(pred, measure.position, &vars, &nat_vars)?;
+    let m = match &spec {
+        MeasureSpec::Var(v) => v.clone(),
+        MeasureSpec::Literal => "<unfolding>".to_string(),
+        MeasureSpec::Sum(vs) => vs.join("+"),
+    };
 
     let var_sorts = infer_var_sorts(pred, &vars, Some(&sd.param_sorts))?;
     let mut env: BTreeMap<String, Sort> = var_sorts.clone();
@@ -991,20 +1071,6 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     let pred_ih = crate::equiv::subst_many(pred, &renaming);
     let mut env_ih: BTreeMap<String, Sort> = vars.iter().map(|v| (prime(v), var_sorts[v])).collect();
     let pred_ih_smt = lower(&pred_ih, &mut env_ih, Some(&sd))?;
-
-    // Domain facts: a law variable fed to a nat-typed `self` parameter ranges over nats.
-    let mut nat_vars: BTreeSet<String> = BTreeSet::new();
-    for call in collect_self_applications(pred) {
-        for (i, a) in call.iter().enumerate() {
-            if nat_positions.contains(&i) {
-                if let Some(v) = var_name(a) {
-                    if vars.iter().any(|x| x == v) {
-                        nat_vars.insert(v.to_string());
-                    }
-                }
-            }
-        }
-    }
 
     let mut out = String::new();
     out.push_str("(set-logic ALL)\n");
@@ -1023,11 +1089,19 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     for v in &nat_vars {
         out.push_str(&format!("(assert (>= {v} 0))\n"));
     }
-    // IH — only when there is a measure variable to induct on (a law with a literal at the measure
-    // position is decided by the unfolding below alone).
-    if let Some(m) = &m_opt {
+    // IH — only when there is a measure to induct on (a law with a literal at the measure position is
+    // decided by the unfolding below alone). One variable: `floor ≤ m' < m`. A sum of nat variables:
+    // `Σ v' < Σ v` (each v' ≥ 0 — well-founded over the nats).
+    let ih_order: Option<Vec<String>> = match &spec {
+        MeasureSpec::Var(m) => Some(vec![format!("(>= {} {})", prime(m), smt_int_lit(measure.floor)), format!("(< {} {m})", prime(m))]),
+        MeasureSpec::Sum(vs) => {
+            let sum = |f: &dyn Fn(&str) -> String| if vs.len() == 1 { f(&vs[0]) } else { format!("(+ {})", vs.iter().map(|v| f(v)).collect::<Vec<_>>().join(" ")) };
+            Some(vec![format!("(< {} {})", sum(&|v| prime(v)), sum(&|v| v.to_string()))])
+        }
+        MeasureSpec::Literal => None,
+    };
+    if let (true, Some(mut ih_guards)) = (with_ih, ih_order) {
         let ih_binders = vars.iter().map(|v| format!("({} {})", prime(v), var_sorts[v].smt())).collect::<Vec<_>>().join(" ");
-        let mut ih_guards = vec![format!("(>= {} {})", prime(m), smt_int_lit(measure.floor)), format!("(< {} {m})", prime(m))];
         for v in &nat_vars {
             ih_guards.push(format!("(>= {} 0)", prime(v)));
         }
@@ -1163,10 +1237,18 @@ mod tests {
         let (out, _, m) = prove_by_numeric_induction(&law(&["k"], op("eq", vec![self_app(vec![lit(0)]), lit(0)])), Some(&body), &nats, solver);
         assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
         assert_eq!(m.as_deref(), Some("<unfolding>"));
-        // Two different measures in one law (commutativity's shape) are out of this rung — UNSUPPORTED, stated.
+        // Two different measures in one law (commutativity's shape): the SUM measure `a+b` — here the
+        // law `count(a) = count(b)` is false, so UNKNOWN (never PROVED, never REFUTED).
         let two = law(&["a", "b"], op("eq", vec![self_app(vec![v("a")]), self_app(vec![v("b")])]));
-        let (out, _, _) = prove_by_numeric_induction(&two, Some(&body), &nats, solver);
-        assert!(matches!(out, ProofOutcome::Unsupported(ref why) if why.contains("different measures")), "{out:?}");
+        let (out, _, m) = prove_by_numeric_induction(&two, Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+        assert_eq!(m.as_deref(), Some("a+b"));
+        // The true two-measure law `count(a) + count(b) = count(b) + count(a)` PROVES (unfolding suffices).
+        let sym = law(&["a", "b"], op("eq", vec![
+            op("add", vec![self_app(vec![v("a")]), self_app(vec![v("b")])]),
+            op("add", vec![self_app(vec![v("b")]), self_app(vec![v("a")])])]));
+        let (out, _, _) = prove_by_numeric_induction(&sym, Some(&body), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
         // A non-recursive body has no measure: UNSUPPORTED (the first-order prover owns it).
         let (out, _, _) = prove_by_numeric_induction(&law(&["n"], op("eq", vec![self_app(vec![v("n")]), v("n")])), Some(&double_body()), &Default::default(), solver);
         assert!(matches!(out, ProofOutcome::Unsupported(_)), "{out:?}");
