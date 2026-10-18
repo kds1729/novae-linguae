@@ -30,9 +30,12 @@ pub mod proptest;
 pub mod prove;
 pub use prove::{
     build_certificate, build_certificate_in_domain, prove_by_callee_induction, prove_by_numeric_induction, prove_from_self_contract, prove_property, prove_property_in_domain,
-    set_callee_contracts, set_callee_refusals, set_self_type, sort_of_type, type_mentions_float, CalleeContract,
+    set_callee_contracts, set_callee_refusals, set_self_facts, set_self_type, sort_of_type, type_mentions_float, CalleeContract,
     Certificate, ProofOutcome, Sort,
 };
+/// The Euclidean rung: residue normal forms of a certificate's `mod`/`div` terms as instances
+/// of the division-uniqueness lemma (a retry on UNKNOWN in every proof ladder).
+pub mod euclid;
 
 pub mod lemmas;
 pub mod explore;

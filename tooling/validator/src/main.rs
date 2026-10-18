@@ -1482,7 +1482,10 @@ fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str, records:
     let refinements: Vec<serde_json::Value> =
         record.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
 
-    let reports = nl_validator::check_refinements(sig_type, &refinements, &body, solver);
+    // The phased derivation `certify` and the linked view use (the record's plain-proved laws may
+    // enter a post's induction), so all three agree on what is SOUND.
+    let nat_positions = nl_validator::nat_param_positions(&record);
+    let (reports, _) = nl_validator::certify::derive_self_facts(sig_type, &refinements, &nl_validator::certify::law_exprs(&record), &body, &nat_positions, solver);
     let mut violated = false;
     let mut no_solver = false;
     for r in &reports {
@@ -1802,6 +1805,15 @@ fn cmd_respond(
     Ok(())
 }
 
+/// The label note for a certificate that closed through the Euclidean rung (`euclid`).
+fn euclid_note(cert: Option<&nl_validator::Certificate>) -> &'static str {
+    if cert.is_some_and(|c| c.euclid) {
+        " [with the Euclidean-division lemma instantiated at its mod/div terms]"
+    } else {
+        ""
+    }
+}
+
 fn cmd_prove(
     record: &PathBuf,
     body: Option<&PathBuf>,
@@ -1873,6 +1885,9 @@ fn cmd_prove(
         );
         if let Some(cert) = &cert {
             write_cert("", &cert.smt)?;
+            if cert.euclid {
+                write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
+            }
         }
         // First-order SMT can't reach list/recursion laws — fall back to structural induction
         // (with auxiliary-lemma discovery for laws a single unfold + IH can't close).
@@ -1915,11 +1930,15 @@ fn cmd_prove(
                         nl_validator::prove_by_numeric_induction(expr, body_ast.as_ref(), &nats, solver);
                     if let Some(c) = &ncert {
                         write_cert(".induction", &c.smt)?;
+                        if c.euclid {
+                            write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
+                        }
                     }
                     match (nout, out) {
                         (ProofOutcome::Proved, _) => format!(
-                            "PROVED       by induction on `{}` (strong induction over the measure; unsat)",
-                            measure.as_deref().unwrap_or("?")
+                            "PROVED       by induction on `{}` (strong induction over the measure; unsat){}",
+                            measure.as_deref().unwrap_or("?"),
+                            euclid_note(ncert.as_ref())
                         ),
                         (_, InductionOutcome::Failed(why)) => format!("NOT-PROVED   induction did not close: {why}"),
                         _ => "UNKNOWN      induction step needs a lemma we lack (solver undecided)".to_string(),
@@ -1937,11 +1956,15 @@ fn cmd_prove(
                         nl_validator::prove_by_numeric_induction(expr, body_ast.as_ref(), &nats, solver);
                     if let Some(c) = &ncert {
                         write_cert(".induction", &c.smt)?;
+                        if c.euclid {
+                            write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
+                        }
                     }
                     match nout {
                         ProofOutcome::Proved => format!(
-                            "PROVED       by numeric induction on `{}` (strong induction over the measure; unsat)",
-                            measure.as_deref().unwrap_or("?")
+                            "PROVED       by numeric induction on `{}` (strong induction over the measure; unsat){}",
+                            measure.as_deref().unwrap_or("?"),
+                            euclid_note(ncert.as_ref())
                         ),
                         ProofOutcome::Unknown => format!(
                             "UNKNOWN      numeric induction on `{}` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
@@ -1971,7 +1994,7 @@ fn cmd_prove(
             }
         } else {
             match &outcome {
-                ProofOutcome::Proved => "PROVED       holds for all inputs (unsat negation)".to_string(),
+                ProofOutcome::Proved => format!("PROVED       holds for all inputs (unsat negation){}", euclid_note(cert.as_ref())),
                 ProofOutcome::Refuted(model) => {
                     refuted.push(name.clone());
                     format!("REFUTED      counterexample: {}", if model.is_empty() { "(model)" } else { model })
@@ -2000,12 +2023,22 @@ fn cmd_prove(
             match (own, contract) {
                 (Some(h), Some(c)) => {
                     let nats = nl_validator::nat_param_positions(&value);
+                    // Never the law under proof itself: the view's phase 3 may have proved it from
+                    // the contract already, and a certificate that assumes its own goal is no proof.
+                    let mut c = c;
+                    c.laws.retain(|l| l != expr);
                     let (sout, scert) = nl_validator::prove_from_self_contract(expr, &h, c, &nats, solver);
                     if let Some(c) = &scert {
                         write_cert(".contract", &c.smt)?;
+                        if c.euclid {
+                            write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
+                        }
                     }
                     match sout {
-                        ProofOutcome::Proved => "PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)".to_string(),
+                        ProofOutcome::Proved => format!(
+                            "PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat){}",
+                            euclid_note(scert.as_ref())
+                        ),
                         _ => label,
                     }
                 }
@@ -2021,12 +2054,56 @@ fn cmd_prove(
                 let (cout, ccert, m) = nl_validator::prove_by_callee_induction(expr, b, &nats, &def, solver);
                 if let Some(c) = &ccert {
                     write_cert(".callee-induction", &c.smt)?;
+                    if c.euclid {
+                        write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
+                    }
                 }
                 match cout {
                     ProofOutcome::Proved => format!(
-                        "PROVED       by induction through the callees' definitions, on `{}` (unsat)",
-                        m.as_deref().unwrap_or("?")
+                        "PROVED       by induction through the callees' definitions, on `{}` (unsat){}",
+                        m.as_deref().unwrap_or("?"),
+                        euclid_note(ccert.as_ref())
                     ),
+                    _ => label,
+                }
+            }
+            _ => label,
+        };
+        // And measure induction with the function's OWN certified facts at the instantiated
+        // points — its proved postconditions and other proved laws, as the linked view re-derives
+        // them: a step that needs a proved fact about `self` (`gcd` divides both of its arguments
+        // only because `gcd ≥ 1` is certified; without it the deepest, unconstrained application
+        // can be 0 and `mod` by it says nothing). Installed for this one retry, after the view has
+        // computed the contract — never while it does.
+        let label = match (label.starts_with("PROVED"), body_ast.as_ref()) {
+            (false, Some(b)) => {
+                let own = value.get("hash").and_then(|h| h.as_str()).map(String::from);
+                let contract = match (&own, contract_view.as_ref()) {
+                    (Some(h), Some(v)) => v.contract(h),
+                    _ => None,
+                };
+                match contract {
+                    Some(mut c) if !c.posts.is_empty() || !c.laws.is_empty() => {
+                        c.laws.retain(|l| l != expr); // never the law under proof (see above)
+                        let nats = nl_validator::nat_param_positions(&value);
+                        let prev = nl_validator::set_self_facts(Some(c));
+                        let (nout, ncert, measure) = nl_validator::prove_by_numeric_induction(expr, Some(b), &nats, solver);
+                        nl_validator::set_self_facts(prev);
+                        if let Some(c) = &ncert {
+                            write_cert(".induction-self", &c.smt)?;
+                            if c.euclid {
+                                write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
+                            }
+                        }
+                        match nout {
+                            ProofOutcome::Proved => format!(
+                                "PROVED       by numeric induction on `{}` (strong induction over the measure; unsat){}",
+                                measure.as_deref().unwrap_or("?"),
+                                euclid_note(ncert.as_ref())
+                            ),
+                            _ => label,
+                        }
+                    }
                     _ => label,
                 }
             }

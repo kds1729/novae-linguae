@@ -368,6 +368,10 @@ pub struct Certificate {
     /// UNINTERPRETED function constrained only by that contract, so a satisfiable negation may be a
     /// spurious model: `run_solver` reports it UNKNOWN, never REFUTED.
     pub uses_callees: bool,
+    /// The certificate carries instances of the Euclidean-division uniqueness lemma
+    /// (`euclid::LEMMA_SMT`, discharged by the solver first): the residue normal forms of its
+    /// `mod`/`div` terms. Re-checking it end to end means re-checking the lemma beside it.
+    pub euclid: bool,
 }
 
 // --- self definition ------------------------------------------------------------------------------
@@ -1566,10 +1570,10 @@ pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_pos
     out.push_str("(check-sat)\n");
     out.push_str("(get-model)\n");
 
-    Ok(Certificate { smt: with_datatypes(out), quantified, uses_self, uses_callees })
+    Ok(Certificate { smt: with_datatypes(out), quantified, uses_self, uses_callees, euclid: false })
 }
 
-fn references_self(node: &J) -> bool {
+pub(crate) fn references_self(node: &J) -> bool {
     if var_name(node) == Some("self") {
         return true;
     }
@@ -1708,26 +1712,36 @@ pub fn prove_property_in_domain(
     self_nat_positions: &BTreeSet<usize>,
     solver: &str,
 ) -> (ProofOutcome, Option<Certificate>) {
-    match build_certificate_in_domain(prop_expr, body, self_nat_positions) {
-        Err(e) => (ProofOutcome::Unsupported(format!("{e:#}")), None),
-        Ok(cert) => match run_solver(&cert, solver) {
-            // The contract ladder: an obligation over linked callees that z3 cannot decide WITH the
-            // quantified contract axioms is retried with the contracts stated only at its own
-            // applications (their instances — weaker, so as sound), which is where nonlinear
-            // consequences close.
-            Ok(ProofOutcome::Unknown) if cert.uses_callees => {
-                match without_contract_quantifiers(|| build_certificate_in_domain(prop_expr, body, self_nat_positions)) {
-                    Ok(cert2) => match run_solver(&cert2, solver) {
-                        Ok(ProofOutcome::Proved) => (ProofOutcome::Proved, Some(cert2)),
-                        _ => (ProofOutcome::Unknown, Some(cert)),
-                    },
-                    Err(_) => (ProofOutcome::Unknown, Some(cert)),
-                }
-            }
-            Ok(outcome) => (outcome, Some(cert)),
-            Err(e) => (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert)),
-        },
+    let cert = match build_certificate_in_domain(prop_expr, body, self_nat_positions) {
+        Err(e) => return (ProofOutcome::Unsupported(format!("{e:#}")), None),
+        Ok(c) => c,
+    };
+    match run_solver(&cert, solver) {
+        Ok(ProofOutcome::Unknown) => {}
+        Ok(outcome) => return (outcome, Some(cert)),
+        Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert)),
     }
+    // The contract ladder: an obligation over linked callees that z3 cannot decide WITH the
+    // quantified contract axioms is retried with the contracts stated only at its own
+    // applications (their instances — weaker, so as sound), which is where nonlinear
+    // consequences close.
+    let mut last = cert;
+    if last.uses_callees {
+        if let Ok(cert2) = without_contract_quantifiers(|| build_certificate_in_domain(prop_expr, body, self_nat_positions)) {
+            match run_solver(&cert2, solver) {
+                Ok(ProofOutcome::Proved) => return (ProofOutcome::Proved, Some(cert2)),
+                _ => last = cert2,
+            }
+        }
+    }
+    // The Euclidean rung: the same obligation with the residue normal forms of its `mod`/`div`
+    // terms stated as instances of the division-uniqueness lemma (see `euclid`).
+    if let Some(augmented) = crate::euclid::retry(&last.smt, solver) {
+        last.smt = augmented;
+        last.euclid = true;
+        return (ProofOutcome::Proved, Some(last));
+    }
+    (ProofOutcome::Unknown, Some(last))
 }
 
 // --- numeric induction --------------------------------------------------------------------------------
@@ -1939,8 +1953,11 @@ pub fn prove_by_numeric_induction(
 ) -> (ProofOutcome, Option<Certificate>, Option<String>) {
     // A ladder: UNFOLDING alone first (the instantiated defining equations, no hypothesis — enough for
     // `gcd(a, 0) = a` and, measured, for `gcd(a, b) = gcd(b, a)`, which the quantified hypothesis only
-    // obscures: z3 answers unknown with it and unsat without), then the hypothesis added.
-    let unfolding = match build_induction_certificate(prop_expr, body, nat_positions, false) {
+    // obscures: z3 answers unknown with it and unsat without), then the QUANTIFIED hypothesis, then
+    // the hypothesis as INSTANCES at the recursive calls (the digit-sum bound closes on the
+    // instances and not on the quantifier — measured, the recurring pattern), then the Euclidean
+    // rung over the last certificate.
+    let unfolding = match build_induction_certificate(prop_expr, body, nat_positions, IhMode::Off) {
         Err(e) => return (ProofOutcome::Unsupported(format!("{e:#}")), None, None),
         Ok(x) => x,
     };
@@ -1953,19 +1970,139 @@ pub fn prove_by_numeric_induction(
         Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(unfolding.0), Some(unfolding.1)),
         _ => {}
     }
-    match build_induction_certificate(prop_expr, body, nat_positions, true) {
-        Err(e) => (ProofOutcome::Unsupported(format!("{e:#}")), None, None),
-        Ok((cert, m)) => match run_smt(&cert.smt, solver) {
-            Ok(SatAnswer::Unsat) => (ProofOutcome::Proved, Some(cert), Some(m)),
-            // SAT is not a counterexample: `self` is uninterpreted away from the instantiated points.
-            Ok(SatAnswer::Sat(_)) | Ok(SatAnswer::Unknown) => (ProofOutcome::Unknown, Some(cert), Some(m)),
-            Ok(SatAnswer::NoSolver) => (ProofOutcome::NoSolver, Some(cert), Some(m)),
-            Err(e) => (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert), Some(m)),
-        },
+    let mut last = unfolding;
+    if last.1 != "<unfolding>" {
+        for mode in [IhMode::Quantified, IhMode::Instances] {
+            let (cert, m) = match build_induction_certificate(prop_expr, body, nat_positions, mode) {
+                Err(e) => return (ProofOutcome::Unsupported(format!("{e:#}")), None, None),
+                Ok(x) => x,
+            };
+            if cert.smt == last.0.smt {
+                continue; // nothing new to state at this rung (a structural measure has no quantified form)
+            }
+            match run_smt(&cert.smt, solver) {
+                Ok(SatAnswer::Unsat) => return (ProofOutcome::Proved, Some(cert), Some(m)),
+                // SAT is not a counterexample: `self` is uninterpreted away from the instantiated points.
+                Ok(SatAnswer::Sat(_)) | Ok(SatAnswer::Unknown) => last = (cert, m),
+                Ok(SatAnswer::NoSolver) => return (ProofOutcome::NoSolver, Some(cert), Some(m)),
+                Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert), Some(m)),
+            }
+        }
     }
+    if let Some(augmented) = crate::euclid::retry(&last.0.smt, solver) {
+        last.0.smt = augmented;
+        last.0.euclid = true;
+        return (ProofOutcome::Proved, Some(last.0), Some(last.1));
+    }
+    (ProofOutcome::Unknown, Some(last.0), Some(last.1))
 }
 
-fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &BTreeSet<usize>, with_ih: bool) -> Result<(Certificate, String)> {
+/// How the induction hypothesis enters a measure-induction certificate.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IhMode {
+    /// Not at all: the instantiated defining equations alone (unfolding).
+    Off,
+    /// As the universally quantified statement over smaller measures.
+    Quantified,
+    /// As explicit instances at every recursive call the unfoldings reach, each guarded by the
+    /// measure decrease and the domain facts — the form the solver uses without having to
+    /// instantiate a quantifier over nonlinear terms.
+    Instances,
+}
+
+thread_local! {
+    /// The function's OWN certified facts (its proved postconditions and laws, as a
+    /// `CalleeContract` the linked view re-derived) to state at every `self` application a
+    /// measure-induction certificate makes. Installed by the caller for one retry only — never
+    /// while the linked view is computing that contract (the facts must not assume themselves).
+    static SELF_FACTS: std::cell::RefCell<Option<CalleeContract>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Install (or clear) the function's own certified facts for the measure-induction rung,
+/// returning the previous setting. See `SELF_FACTS`.
+pub fn set_self_facts(facts: Option<CalleeContract>) -> Option<CalleeContract> {
+    SELF_FACTS.with(|s| std::mem::replace(&mut *s.borrow_mut(), facts))
+}
+
+/// The function's own contract instantiated at the given `self` applications (argument terms in
+/// goal scope): each proved postcondition under its antecedent, and each proved law at the
+/// application that fixes its variables. The same rendering as a callee's contract instances.
+fn self_fact_instances(c: &CalleeContract, at: &[Vec<String>], sd: &SelfDef) -> Result<String> {
+    let mut inst = String::new();
+    if c.params.len() != sd.params.len() || at.is_empty() {
+        return Ok(inst);
+    }
+    let mut env: BTreeMap<String, Sort> = c.params.iter().cloned().zip(c.param_sorts.iter().copied()).collect();
+    let app = serde_json::json!({ "kind": "app", "op": "self", "args": c.params.iter().map(|p| serde_json::json!({ "kind": "var", "name": p })).collect::<Vec<_>>() });
+    let subst: BTreeMap<String, J> = [("result".to_string(), app)].into_iter().collect();
+    let mut ante: Vec<String> = Vec::new();
+    for (i, p) in c.params.iter().enumerate() {
+        if c.nat_positions.contains(&i) {
+            ante.push(format!("(>= {p} 0)"));
+        }
+    }
+    for pre in &c.pres {
+        ante.push(lower(pre, &mut env.clone(), Some(sd))?);
+    }
+    let ante_smt = match ante.len() {
+        0 => "true".to_string(),
+        1 => ante[0].clone(),
+        _ => format!("(and {})", ante.join(" ")),
+    };
+    for post in &c.posts {
+        let body = lower(&crate::equiv::subst_many(post, &subst), &mut env, Some(sd))?;
+        for args in at {
+            inst.push_str(&format!(
+                ";; self's certified postcondition at (self {})\n(assert {})\n",
+                args.join(" "),
+                let_params(&c.params, args, &format!("(=> {ante_smt} {body})"))
+            ));
+        }
+    }
+    for law in &c.laws {
+        let law = uncurry(law);
+        let Some(vars_arr) = law.get("vars").and_then(|v| v.as_array()) else { continue };
+        let vars: Vec<String> = vars_arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+        let Some(pred) = law.get("body") else { continue };
+        let Ok(var_sorts) = infer_var_sorts(pred, &vars, Some(&c.param_sorts)) else { continue };
+        let mut lenv: BTreeMap<String, Sort> = var_sorts.clone();
+        let Ok(body) = lower(pred, &mut lenv, Some(sd)) else { continue };
+        let mut guards: Vec<String> = Vec::new();
+        for call in collect_self_applications(pred) {
+            for (i, a) in call.iter().enumerate() {
+                if c.nat_positions.contains(&i) {
+                    if let Some(v) = var_name(a) {
+                        if vars.iter().any(|x| x == v) {
+                            let g = format!("(>= {v} 0)");
+                            if !guards.contains(&g) {
+                                guards.push(g);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let guarded = match guards.len() {
+            0 => body,
+            1 => format!("(=> {} {body})", guards[0]),
+            _ => format!("(=> (and {}) {body})", guards.join(" ")),
+        };
+        let fixing = collect_self_applications(pred).into_iter().find(|call| {
+            let names: Vec<&str> = call.iter().filter_map(|a| var_name(a)).collect();
+            names.len() == call.len() && names.iter().collect::<BTreeSet<_>>().len() == names.len() && vars.iter().all(|v| names.contains(&v.as_str()))
+        });
+        if let Some(call) = fixing {
+            let names: Vec<String> = call.iter().filter_map(|a| var_name(a).map(String::from)).collect();
+            for args in at {
+                inst.push_str(&format!(";; self's certified law at (self {})\n(assert {})\n", args.join(" "), let_params(&names, args, &guarded)));
+            }
+        }
+    }
+    Ok(inst)
+}
+
+fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &BTreeSet<usize>, ih: IhMode) -> Result<(Certificate, String)> {
+    let with_ih = ih != IhMode::Off;
     take_callees_used();
     take_callee_apps();
     reset_list_emission();
@@ -2097,7 +2234,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
         }
         MeasureSpec::Literal => None,
     };
-    if let (true, Some(mut ih_guards)) = (with_ih, ih_order) {
+    if let (IhMode::Quantified, Some(mut ih_guards)) = (ih, ih_order.clone()) {
         let ih_binders = vars.iter().map(|v| format!("({} {})", prime(v), var_sorts[v].smt())).collect::<Vec<_>>().join(" ");
         for v in &nat_vars {
             ih_guards.push(format!("(>= {} 0)", prime(v)));
@@ -2115,6 +2252,9 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     // Defining-equation instantiations: at the law's applications, and at the recursive calls inside them.
     let recursive_calls = collect_self_applications(body.get("body").unwrap_or(&J::Null));
     let mut seen: BTreeSet<String> = BTreeSet::new();
+    // Every `self` application the certificate states, by its argument terms in goal scope — where
+    // the function's own certified facts are instantiated (`SELF_FACTS`).
+    let mut self_apps: Vec<Vec<String>> = Vec::new();
     for call in collect_self_applications(pred) {
         if call.len() != sd.params.len() {
             bail!("self applied to {} args, expects {}", call.len(), sd.params.len());
@@ -2123,6 +2263,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
         let app = format!("(self {})", terms.join(" "));
         if seen.insert(app.clone()) {
             out.push_str(&format!("(assert (= {app} {}))\n", let_params(&sd.params, &terms, &sd.body_smt)));
+            self_apps.push(terms.clone());
         }
         // One level deeper: the body's own recursive calls, at this instantiation.
         let mut penv: BTreeMap<String, Sort> = sd.params.iter().cloned().zip(sd.param_sorts.iter().copied()).collect();
@@ -2136,6 +2277,43 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
             let instantiated = let_params(&sd.params, &terms, &eq);
             if seen.insert(instantiated.clone()) {
                 out.push_str(&format!("(assert {instantiated})\n"));
+            }
+            // The recursive call's arguments in GOAL scope: the parameters substituted by this
+            // application's arguments BEFORE lowering — no `let` over the parameter names, so a law
+            // whose variables permute them cannot be shadowed. (A call reaching a body-local
+            // binding does not lower here and contributes nothing.)
+            let p2a: BTreeMap<String, J> = sd.params.iter().cloned().zip(call.iter().cloned()).collect();
+            let r_goal: Option<Vec<String>> = rc.iter().map(|x| lower(&crate::equiv::subst_many(x, &p2a), &mut env.clone(), Some(&sd)).ok()).collect();
+            if let Some(r) = &r_goal {
+                if !self_apps.contains(r) {
+                    self_apps.push(r.clone());
+                }
+            }
+            // The hypothesis as an INSTANCE at this recursive call: the law over the primed variables,
+            // each bound to the call's argument at its position (the application must put distinct
+            // law variables at every position; variables it leaves out keep their own value), under
+            // exactly the quantified form's guards — the measure decrease and the domain facts.
+            if let (IhMode::Instances, false, Some(guards), Some(r)) = (ih, measure.structural, &ih_order, &r_goal) {
+                let law_vars: Option<Vec<&str>> = call.iter().map(|a| var_name(a)).collect();
+                if let Some(law_vars) = law_vars {
+                    let distinct = law_vars.iter().collect::<BTreeSet<_>>().len() == law_vars.len();
+                    if distinct && law_vars.iter().all(|v| vars.iter().any(|x| x == v)) {
+                        let mut all_guards: Vec<String> = guards.clone();
+                        for v in &nat_vars {
+                            all_guards.push(format!("(>= {} 0)", prime(v)));
+                        }
+                        for v in &nat_list_vars {
+                            all_guards.push(format!("(all_nat {})", prime(v)));
+                        }
+                        let binds = law_vars.iter().zip(r).map(|(v, t)| format!("({} {t})", prime(v))).collect::<Vec<_>>().join(" ");
+                        let inst = format!("(let ({binds}) (=> (and {}) {pred_ih_smt}))", all_guards.join(" "));
+                        let free: Vec<String> = vars.iter().filter(|v| !law_vars.contains(&v.as_str())).map(|v| format!("({} {v})", prime(v))).collect();
+                        let inst = if free.is_empty() { inst } else { format!("(let ({}) {inst})", free.join(" ")) };
+                        if seen.insert(inst.clone()) {
+                            out.push_str(&format!(";; induction hypothesis at the recursive call {inner_app}\n(assert {inst})\n"));
+                        }
+                    }
+                }
             }
             // The structural induction hypothesis, as an instance at this recursive call: when the
             // law applies `self` to distinct law variables and the call tails the measure parameter
@@ -2191,9 +2369,24 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
             }
         }
     }
+    // The function's own certified facts at every application stated above (a retry the caller
+    // installs): a step that needs a proved postcondition about `self` — Euclid's divisibility
+    // needs `gcd ≥ 1`, else the deepest, unconstrained application can be 0 and `mod` by it says
+    // nothing.
+    let mut m = m;
+    if let Some(c) = SELF_FACTS.with(|s| s.borrow().clone()) {
+        let facts = self_fact_instances(&c, &self_apps, &sd)?;
+        if !facts.is_empty() {
+            out.push_str(&facts);
+            m = format!("{m}, with self's certified contract at the instantiated points");
+        }
+    }
+    if ih == IhMode::Instances && !m.starts_with('<') {
+        m = format!("{m} (hypothesis as instances at the recursive calls)");
+    }
     out.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
     let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
-    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees }, m))
+    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees, euclid: false }, m))
 }
 
 // --- induction through a callee's definition --------------------------------------------------------
@@ -2396,7 +2589,7 @@ fn build_callee_induction(
     }
     out.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
     let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
-    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees: true }, m_label))
+    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees: true, euclid: false }, m_label))
 }
 
 /// Prove a law about a NON-recursive function by induction through the definitions of the linked
@@ -2432,6 +2625,15 @@ pub fn prove_by_callee_induction(
                 Ok(SatAnswer::Sat(_)) | Ok(SatAnswer::Unknown) => last = (ProofOutcome::Unknown, Some(cert), Some(m)),
             }
         }
+    }
+    // The Euclidean rung over the last certificate (see `euclid`).
+    if let (ProofOutcome::Unknown, Some(mut cert), m) = last {
+        if let Some(augmented) = crate::euclid::retry(&cert.smt, solver) {
+            cert.smt = augmented;
+            cert.euclid = true;
+            return (ProofOutcome::Proved, Some(cert), m);
+        }
+        return (ProofOutcome::Unknown, Some(cert), m);
     }
     last
 }
@@ -2608,7 +2810,7 @@ mod tests {
         let two = law(&["a", "b"], op("eq", vec![self_app(vec![v("a")]), self_app(vec![v("b")])]));
         let (out, _, m) = prove_by_numeric_induction(&two, Some(&body), &nats, solver);
         assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
-        assert_eq!(m.as_deref(), Some("a+b"));
+        assert!(m.as_deref().is_some_and(|m| m.starts_with("a+b")), "{m:?}"); // the last rung tried names the measure
         // The true two-measure law `count(a) + count(b) = count(b) + count(a)` PROVES (unfolding suffices).
         let sym = law(&["a", "b"], op("eq", vec![
             op("add", vec![self_app(vec![v("a")]), self_app(vec![v("b")])]),
@@ -2623,6 +2825,123 @@ mod tests {
     fn double_body() -> J {
         json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": {
             "kind": "app", "op": "add", "args": [{ "kind": "var", "name": "n" }, { "kind": "var", "name": "n" }] } })
+    }
+
+    /// A typed integer literal, the form the termination checker reads guards from (a bare `lit`
+    /// is fine for the prover, not for the measure).
+    fn ilit(n: i64) -> J {
+        json!({ "kind": "lit", "value": { "kind": "int", "value": n } })
+    }
+
+    /// digit_sum: \b n -> case lt(b, 2) of true -> 0 | false -> case lt(n, 1) of true -> 0 | false -> add(mod(n, b), self(b, div(n, b)))
+    fn digit_sum_body() -> J {
+        let case = |scrutinee: J, t: J, f: J| json!({ "kind": "case", "scrutinee": scrutinee, "arms": [
+            { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": t },
+            { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": f } ] });
+        let step = op("add", vec![op("mod", vec![v("n"), v("b")]), self_app(vec![v("b"), op("div", vec![v("n"), v("b")])])]);
+        json!({ "kind": "lambda", "params": [{ "name": "b" }, { "name": "n" }],
+            "body": case(op("lt", vec![v("b"), ilit(2)]), ilit(0), case(op("lt", vec![v("n"), ilit(1)]), ilit(0), step)) })
+    }
+
+    /// gcd: \a b -> case eq(b, 0) of true -> a | false -> self(b, mod(a, b))
+    fn gcd_body() -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }], "body": { "kind": "case",
+            "scrutinee": op("eq", vec![v("b"), ilit(0)]),
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": v("a") },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": self_app(vec![v("b"), op("mod", vec![v("a"), v("b")])]) } ] } })
+    }
+
+    #[test]
+    fn hypothesis_as_instances_closes_the_digit_sum_bound() {
+        // digit_sum(b, n) <= n over nats: the quantified hypothesis leaves z3 at unknown (a
+        // quantifier over `div`/`mod` terms); the same hypothesis INSTANTIATED at the recursive
+        // call `self(b, n div b)` closes — the third rung of the ladder, and no Euclidean lemma.
+        let Some(solver) = solver() else { return };
+        let nats: BTreeSet<usize> = [0, 1].into();
+        let bound = law(&["b", "n"], op("or", vec![op("lt", vec![v("n"), lit(0)]), op("le", vec![self_app(vec![v("b"), v("n")]), v("n")])]));
+        let (out, cert, m) = prove_by_numeric_induction(&bound, Some(&digit_sum_body()), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        let cert = cert.unwrap();
+        assert!(m.as_deref().unwrap_or("").contains("hypothesis as instances"), "{m:?}");
+        assert!(cert.smt.contains(";; induction hypothesis at the recursive call (self b (div n b))"), "{}", cert.smt);
+        assert!(!cert.smt.contains("(forall ((b__ih Int)"), "the instances rung states no quantified hypothesis");
+        assert!(!cert.euclid);
+        // The false bound `digit_sum(b, n) < n` stays open (never refuted: self is uninterpreted).
+        let wrong = law(&["b", "n"], op("or", vec![op("lt", vec![v("n"), lit(0)]), op("lt", vec![self_app(vec![v("b"), v("n")]), v("n")])]));
+        let (out, _, _) = prove_by_numeric_induction(&wrong, Some(&digit_sum_body()), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+    }
+
+    #[test]
+    fn euclid_divisibility_needs_self_facts_and_the_euclidean_rung() {
+        // gcd divides both arguments (guarded at (0, 0), where `0 mod 0` is undefined): the step
+        // rests on (1) the hypothesis at `self(b, a mod b)`, (2) `a mod g` reduced through `a =
+        // (a div b)·b + (a mod b)` — the Euclidean rung's cross-modulus instance — and (3) gcd's
+        // own certified `result ≥ 1`, without which the deepest, unconstrained application can be
+        // 0 and `mod` by it says nothing. Without (3): UNKNOWN. With it: PROVED, and the
+        // certificate carries the lemma instances.
+        let Some(solver) = solver() else { return };
+        let nats: BTreeSet<usize> = [0, 1].into();
+        let g = self_app(vec![v("a"), v("b")]);
+        let divides = law(&["a", "b"], op("or", vec![
+            op("and", vec![op("eq", vec![v("a"), lit(0)]), op("eq", vec![v("b"), lit(0)])]),
+            op("and", vec![op("eq", vec![op("mod", vec![v("a"), g.clone()]), lit(0)]), op("eq", vec![op("mod", vec![v("b"), g.clone()]), lit(0)])])]));
+        let (out, _, _) = prove_by_numeric_induction(&divides, Some(&gcd_body()), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Unknown), "without self's facts: {out:?}");
+        let positive = CalleeContract {
+            symbol: "self".into(),
+            params: vec!["a".into(), "b".into()],
+            param_sorts: vec![Sort::Int, Sort::Int],
+            ret: Sort::Int,
+            pres: vec![],
+            posts: vec![op("or", vec![
+                op("and", vec![op("lt", vec![v("a"), lit(1)]), op("lt", vec![v("b"), lit(1)])]),
+                op("ge", vec![v("result"), lit(1)])])],
+            laws: vec![],
+            nat_positions: nats.clone(),
+        };
+        let prev = set_self_facts(Some(positive));
+        let (out, cert, m) = prove_by_numeric_induction(&divides, Some(&gcd_body()), &nats, solver);
+        set_self_facts(prev);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        let cert = cert.unwrap();
+        assert!(cert.euclid, "closed through the Euclidean rung");
+        assert!(m.as_deref().unwrap_or("").contains("self's certified contract"), "{m:?}");
+        assert!(cert.smt.contains(";; self's certified postcondition at (self b (mod a b))"), "{}", cert.smt);
+        assert!(cert.smt.contains("instances of `euclid_unique`"), "{}", cert.smt);
+        assert!(cert.smt.contains("(div (div a b) (self a b))"), "the cross-modulus witness: {}", cert.smt);
+        // The unguarded law is NOT proved: at (0, 0) the modulus is 0.
+        let unguarded = law(&["a", "b"], op("and", vec![op("eq", vec![op("mod", vec![v("a"), g.clone()]), lit(0)]), op("eq", vec![op("mod", vec![v("b"), g]), lit(0)])]));
+        let prev = set_self_facts(Some(CalleeContract { symbol: "self".into(), params: vec!["a".into(), "b".into()], param_sorts: vec![Sort::Int, Sort::Int], ret: Sort::Int, pres: vec![], posts: vec![op("or", vec![op("and", vec![op("lt", vec![v("a"), lit(1)]), op("lt", vec![v("b"), lit(1)])]), op("ge", vec![v("result"), lit(1)])])], laws: vec![], nat_positions: nats.clone() }));
+        let (out, _, _) = prove_by_numeric_induction(&unguarded, Some(&gcd_body()), &nats, solver);
+        set_self_facts(prev);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+    }
+
+    #[test]
+    fn the_sum_congruence_closes_through_the_euclidean_rung() {
+        // mod_add's law: (a + b) mod m = ((a mod m) + (b mod m)) mod m, m ≠ 0 — UNKNOWN to the
+        // bare first-order prover (nonlinear `mod`), PROVED with the uniqueness-lemma instances.
+        let Some(solver) = solver() else { return };
+        let body = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }, { "name": "m" }],
+            "body": op("mod", vec![op("add", vec![op("mod", vec![v("a"), v("m")]), op("mod", vec![v("b"), v("m")])]), v("m")]) });
+        let congruence = law(&["a", "b", "m"], op("or", vec![
+            op("eq", vec![v("m"), lit(0)]),
+            op("eq", vec![self_app(vec![v("a"), v("b"), v("m")]), op("mod", vec![op("add", vec![v("a"), v("b")]), v("m")])])]));
+        let (out, cert) = prove_property(&congruence, Some(&body), solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert!(cert.unwrap().euclid);
+        // A false congruence stays UNKNOWN — the instances are true facts and refute nothing,
+        // and a model found with them is still a model (REFUTED would need one the solver
+        // actually produces; with nonlinear `mod` it does not).
+        let wrong = law(&["a", "b", "m"], op("or", vec![
+            op("eq", vec![v("m"), lit(0)]),
+            op("eq", vec![self_app(vec![v("a"), v("b"), v("m")]), op("mod", vec![op("add", vec![v("a"), v("b"), lit(1)]), v("m")])])]));
+        let (out, cert) = prove_property(&wrong, Some(&body), solver);
+        assert!(!matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert!(!cert.unwrap().euclid);
     }
 
     #[test]

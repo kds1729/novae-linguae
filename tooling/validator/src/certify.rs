@@ -319,41 +319,18 @@ impl<'a> LinkedView<'a> {
                 .filter_map(|r| r.get("expr").cloned())
                 .collect();
             // Prove the callee's contract — posts AND laws — with ITS callees' contracts installed and
-            // its own declared type in force (tuple/sum sorts come from the signature).
+            // its own declared type in force (tuple/sum sorts come from the signature), in the
+            // phases of `derive_self_facts` (nothing assumes itself).
             let deps = self.contracts_for(body);
             let prev_refusals = crate::prove::set_callee_refusals(self.refusals_for(body));
             let prev = crate::set_callee_contracts(deps);
             let prev_ty = crate::prove::set_self_type(Some(sig_type.clone()));
-            let reports = check_refinements(sig_type, &refinements, body, &self.solver);
-            let laws: Vec<J> = rec
-                .get("properties")
-                .and_then(|p| p.as_array())
-                .cloned()
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|p| p.get("expr").cloned())
-                .filter(|law| {
-                    matches!(crate::prove_property(law, Some(body), &self.solver).0, crate::ProofOutcome::Proved)
-                        || matches!(crate::prove_by_numeric_induction(law, Some(body), &nat_positions, &self.solver).0, crate::ProofOutcome::Proved)
-                        // A list law a bare structural induction closes (`scale_mod` preserves
-                        // length) is a contract too — the lemma search is skipped here (cost).
-                        || matches!(crate::prove_by_induction(law, Some(body), &self.solver).0, crate::InductionOutcome::Proved)
-                })
-                .collect();
+            let all_laws: Vec<J> = law_exprs(rec);
+            let (reports, laws) = derive_self_facts(sig_type, &refinements, &all_laws, body, &nat_positions, &self.solver);
             crate::prove::set_self_type(prev_ty);
             crate::set_callee_contracts(prev);
             crate::prove::set_callee_refusals(prev_refusals);
-            let sound = |label: &str| reports.iter().any(|r| r.label == label && matches!(r.outcome, RefinementOutcome::Sound));
-            let mut posts: Vec<J> = declared_posts
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| sound(&format!("post[{i}]")))
-                .map(|(_, p)| p.clone())
-                .collect();
-            if sound("nat-result (≥ 0)") {
-                posts.push(serde_json::json!({ "kind": "app", "op": "ge", "args": [
-                    { "kind": "var", "name": "result" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] }));
-            }
+            let posts = sound_posts(&reports, &declared_posts);
             Some(crate::CalleeContract {
                 symbol: format!("callee_{}", &target[3..target.len().min(15)]),
                 params,
@@ -405,6 +382,130 @@ impl<'a> LinkedView<'a> {
             })
             .collect()
     }
+}
+
+/// The `expr` of every law in a record's `properties[]`.
+pub fn law_exprs(rec: &J) -> Vec<J> {
+    rec.get("properties")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|p| p.get("expr").cloned())
+        .collect()
+}
+
+/// The declared postconditions `check-refinement` found SOUND, plus the type-implied `result ≥ 0`
+/// of a `nat` result when that is — the facts a contract may state.
+pub fn sound_posts(reports: &[crate::RefinementReport], declared_posts: &[J]) -> Vec<J> {
+    let sound = |label: &str| reports.iter().any(|r| r.label == label && matches!(r.outcome, RefinementOutcome::Sound));
+    let mut posts: Vec<J> = declared_posts.iter().enumerate().filter(|(i, _)| sound(&format!("post[{i}]"))).map(|(_, p)| p.clone()).collect();
+    if sound("nat-result (≥ 0)") {
+        posts.push(serde_json::json!({ "kind": "app", "op": "ge", "args": [
+            { "kind": "var", "name": "result" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] }));
+    }
+    posts
+}
+
+/// The shape of a function's OWN facts for the measure-induction rung (`prove::set_self_facts`):
+/// `self` with its declared sorts, preconditions and `nat` positions, no posts or laws yet.
+/// `None` when the signature leaves the prover's fragment.
+pub fn self_shape(sig_type: &J, refinements: &[J], body: &J) -> Option<crate::CalleeContract> {
+    let params: Vec<String> = body
+        .get("params")
+        .and_then(|p| p.as_array())
+        .map(|ps| ps.iter().filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from)).collect())
+        .unwrap_or_default();
+    let fn_ty = if sig_type.get("kind").and_then(|k| k.as_str()) == Some("forall") { sig_type.get("body")? } else { sig_type };
+    let param_tys = fn_ty.get("params").and_then(|p| p.as_array())?;
+    if param_tys.len() != params.len() {
+        return None;
+    }
+    let param_sorts: Vec<crate::Sort> = param_tys.iter().map(crate::prove::sort_of_type).collect::<Option<_>>()?;
+    let ret = crate::prove::sort_of_type(fn_ty.get("result")?)?;
+    let pres: Vec<J> = refinements
+        .iter()
+        .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("pre"))
+        .filter_map(|r| r.get("expr").cloned())
+        .collect();
+    Some(crate::CalleeContract {
+        symbol: "self".to_string(),
+        params,
+        param_sorts,
+        ret,
+        pres,
+        posts: vec![],
+        laws: vec![],
+        nat_positions: crate::terminate::nat_positions_of_type(sig_type),
+    })
+}
+
+/// A function's own certified facts, derived in PHASES so that nothing assumes itself:
+///
+/// 1. its laws by the plain rungs — no fact about `self` assumed;
+/// 2. its postconditions (what `check-refinement` reports), with the phase-1 laws stated at the
+///    instantiated points of each induction — a post whose step needs a law (`binomial ≥ 0` needs
+///    `k > n ⇒ C(n, k) = 0`, else the product's second factor is unsigned);
+/// 3. the laws phase 1 left open, with the proved posts and the phase-1 laws — a step that needs
+///    a proved fact about `self` (Euclid's divisibility needs `gcd ≥ 1`).
+///
+/// Each phase assumes only what an earlier one proved, with the callee contracts the caller
+/// installed. Returns the refinement reports and the proved laws; `check-refinement`, `certify`
+/// and the linked view all read the same derivation, so a dependent never sees a fact its
+/// callee's own report does not show.
+pub fn derive_self_facts(
+    sig_type: &J,
+    refinements: &[J],
+    laws: &[J],
+    body: &J,
+    nat_positions: &std::collections::BTreeSet<usize>,
+    solver: &str,
+) -> (Vec<crate::RefinementReport>, Vec<J>) {
+    let shape = self_shape(sig_type, refinements, body);
+    let facts = |posts: Vec<J>, laws: Vec<J>| {
+        shape.clone().map(|mut s| {
+            s.posts = posts;
+            s.laws = laws;
+            s
+        })
+    };
+    // Phase 1.
+    let prev = crate::prove::set_self_facts(None);
+    let plain: Vec<J> = laws
+        .iter()
+        .filter(|law| {
+            matches!(crate::prove_property(law, Some(body), solver).0, crate::ProofOutcome::Proved)
+                || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved)
+                // A list law a bare structural induction closes (`scale_mod` preserves length) is
+                // a contract too — the lemma search is skipped here (cost).
+                || matches!(crate::prove_by_induction(law, Some(body), solver).0, crate::InductionOutcome::Proved)
+        })
+        .cloned()
+        .collect();
+    // Phase 2.
+    crate::prove::set_self_facts(if plain.is_empty() { None } else { facts(vec![], plain.clone()) });
+    let reports = check_refinements(sig_type, refinements, body, solver);
+    let declared_posts: Vec<J> = refinements
+        .iter()
+        .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("post"))
+        .filter_map(|r| r.get("expr").cloned())
+        .collect();
+    let posts = sound_posts(&reports, &declared_posts);
+    // Phase 3 (recursive bodies only — the rung that reads the facts is the induction one).
+    let mut proved = plain.clone();
+    if shape.is_some() && (!posts.is_empty() || !plain.is_empty()) && crate::prove::references_self(body) {
+        crate::prove::set_self_facts(facts(posts, plain.clone()));
+        for law in laws {
+            if proved.contains(law) {
+                continue;
+            }
+            if matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved) {
+                proved.push(law.clone());
+            }
+        }
+    }
+    crate::prove::set_self_facts(prev);
+    (reports, proved)
 }
 
 /// Every `fn_ref` literal target in an AST.
@@ -592,7 +693,10 @@ pub fn certify_record_linked(
             record.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
         let prev = view.as_ref().map(|v| crate::set_callee_contracts(v.contracts_for(body)));
         let prev_refusals = view.as_ref().map(|v| crate::prove::set_callee_refusals(v.refusals_for(body)));
-        let reports = check_refinements(sig_type, &refinements, body, solver);
+        // The same phased derivation the linked view uses for a callee (its own plain-proved laws
+        // may enter a post's induction), so this report and a dependent's view of it agree.
+        let nat_positions = crate::terminate::nat_param_positions(record);
+        let (reports, _) = derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, solver);
         if let Some(p) = prev {
             crate::set_callee_contracts(p);
         }

@@ -626,6 +626,54 @@ Callees stay uninterpreted otherwise; SAT is UNKNOWN. Measured: `digits_roundtri
 `n` through `digits`; the false `… = n + 1` stays UNKNOWN. The rung is the last on `prove`'s
 ladder, after the self-contract rung.
 
+**The Euclidean rung, the hypothesis as instances, and the function's own facts (2026-10-18, the
+eighth follow-up).** Three measurements on the integer tier's open laws, each a rung. (1) **The
+Euclidean rung** (`tooling/validator/src/euclid.rs`): every modular identity the records state —
+the sum and product congruences, `gcd` dividing its arguments, a digit sum bounded by the number
+— is a consequence of one fact, the uniqueness of Euclidean division (`m ≠ 0 ∧ x = q·m + r ∧
+0 ≤ r < |m| ⇒ x div m = q ∧ x mod m = r`), which z3 4.13, z3 4.16 and cvc5 all prove in exactly
+that form (z3 4.16 answers unknown on the `m > 0` form and on `(x + m) mod m = x mod m`) while
+none of them proves a congruence directly: `mod` by a variable is nonlinear and the solver does not
+find the quotient. So the rung computes it: every `(mod t m)`/`(div t m)` in a certificate (`m` not
+a literal) has `t` read as a polynomial over its atoms, each atom replaced by its own decomposition
+`(div y m)·m + (mod y m)`, and `t = P + m·Q` split — the lemma INSTANTIATED at `x = t, q = Q +
+(P div m), r = P mod m` says `t mod m = P mod m`, the ring homomorphism ℤ → ℤ/mℤ at exactly the
+goal's terms; a nested residue `(mod X m)` of a compound `X` is lifted one occurrence per step
+through `(mod X m) = X − m·(X div m)` so both sides reach one canonical residue polynomial; a
+variable the certificate also divides by another modulus is first rewritten by that
+decomposition (`a = (a div b)·b + (a mod b)` before reducing modulo `g` — Euclid's divisibility
+step). The lemma is discharged by the solver first (cached per solver); each instance keeps the
+lemma's premises, so a wrong witness is vacuous, never unsound, and SAT keeps its meaning. A retry
+on UNKNOWN in every ladder (first-order, numeric and callee induction, the self-contract rung,
+refinements); the goal's terms get the cross-modulus variants, hypotheses' terms their plain
+instance only (measured: the full set closes Euclid's divisibility in 18 s, the pruned one in
+0.1 s). (2) **The hypothesis as instances**: the numeric-induction ladder gains a third rung — the
+hypothesis stated at each recursive call the unfoldings reach, each instance bound to the call's
+arguments in goal scope and guarded by the measure decrease and the domain facts — after the
+quantified form; the digit-sum bound and `digit_sum ≥ 0` close there, with no lemma (the
+quantified hypothesis over `div`/`mod` terms leaves z3 at unknown — the pattern measured on every
+rung before). (3) **The function's own certified facts in its inductions**: a step that needs a
+proved fact about `self` — `gcd` divides both of its arguments only because `gcd ≥ 1` is certified;
+without it the deepest, unconstrained application can be 0 and `mod` by it says nothing — gets
+the record's contract (its proved posts and laws, as the linked view re-derives them)
+instantiated at every `self` application the certificate states. Derived in PHASES so that
+nothing assumes itself (`certify::derive_self_facts`): laws by the plain rungs; then posts with
+those laws as facts (`binomial ≥ 0` needs its law `k > n ⇒ C(n, k) = 0`); then the remaining laws
+with the posts and the phase-1 laws — and `check-refinement`, `certify` and the linked view all
+read this one derivation, so a dependent never sees a fact its callee's own report does not show;
+`prove`'s own retry never installs the law under proof. Two measured limits, recorded: a goal whose
+two sides meet at residues the solver forms only through equations (an unfolding equating a
+`self` application with a `mod` term — the fast-exponentiation step `pow(b, 2e) = pow(b, e)²
+mod m`) is out of reach — substituting those equations into the goal was built and measured, and
+the instance set it produces (108 for Euclid's divisibility) leaves z3 at unknown on certificates
+it otherwise closes in 0.1 s: a chain of nonlinear premises is a proof to check stepwise, not one
+query; and a witness that is a combination of a HYPOTHESIS (the Bézout identity's `q = −y − (a mod
+m)·(x div m) + …` for `a·x ≡ 1`) is one the engine does not search for (measured by hand: with that
+one instance z3 closes the modular-inverse law instantly). Also found: the generative checker
+SKIPS a case where the law's evaluation errors (`gcd(0, 0) = 0`, then `0 mod 0`), so the unguarded
+divisibility law read EXHAUSTIVE while the prover's model with the modulus 0 was honest; the law
+is now guarded at `(0, 0)`.
+
 ## Semantic equivalence
 
 `nl-validator equiv` decides whether two functions compute the same thing — `∀x. f(x) = g(x)` over the
