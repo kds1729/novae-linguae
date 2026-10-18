@@ -674,6 +674,37 @@ SKIPS a case where the law's evaluation errors (`gcd(0, 0) = 0`, then `0 mod 0`)
 divisibility law read EXHAUSTIVE while the prover's model with the modulus 0 was honest; the law
 is now guarded at `(0, 0)`.
 
+**The stepwise checker (2026-10-18, the ninth follow-up).** The rung after the one-query
+Euclidean rung, in every ladder (`euclid::retry_stepwise`), for a goal whose residues the two
+sides reach only through the certificate's equations — the fast-exponentiation step. Measured
+first: each Euclidean instance's PREMISE (a ring identity over the solver's `div`/`mod` axioms)
+is unsat in 20 ms when checked with nothing but the declarations and `m ≠ 0`, and unknown beside
+the hypotheses; and with every premise verified the final query was still unknown, because `mod`
+by a variable and products of uninterpreted terms are nonlinear whether or not the proof needs
+their semantics. So: (1) the instances are generated with the certificate's equations (an
+unfolding's `A = E`, a hypothesis's conclusion, the branches of an `ite`) substituted into the
+goal — exact matches to depth 3, then application atoms matched loosely (compound arithmetic
+arguments may differ: `e − 1 = 2·(e div 2)` holds in the odd case), the order being the
+measurement (29 exact instances closed the doubling law, 192 mixed ones did not); (2) each
+premise is its own query (2 s each, 60 s in all; an unverified one is left out, stated); (3) the
+uniqueness lemma and the idempotence lemma `(x mod m) mod m = x mod m` are discharged once per
+solver; (4) the FINAL query states the hypotheses, the verified conclusions as `m ≠ 0 ⇒ …` facts,
+the idempotence lemma at every residue, and the negated goal, with `mod`/`div` by a non-literal
+modulus and products of two or more non-literal factors ABSTRACTED to uninterpreted
+`umod`/`udiv`/`umul` — congruence plus linear arithmetic, decidable, answered in milliseconds
+(unsat with the right instances; SAT, a model and not a timeout, without — which is what made
+the last gap findable). Sound: the abstraction is a sound over-approximation (a model of the
+original interprets the symbols as the real operations), every identity a conclusion rests on
+was verified with the real operations in its own query, nothing is assumed that a query did not
+discharge. The certificate is the final query, the premise script (every `(check-sat)` must
+answer unsat) and the two lemmas. The callee rung, for its part, now states the hypothesis at
+EVERY recursive callee's descent the induction variable reaches, and records the body's callee
+applications at the hypothesis's application so the callees' laws are instantiated there (the
+naive power's doubling law at `e div 2`). Measured: `pow(b, 2e) ≡ pow(b, e)² (mod m)` PROVED by
+numeric induction (156 premises), and `mod_pow(b, e, m) = pow_mod_naive(b, e, m)` PROVED by
+induction through both callees' definitions (251 instances, 250 premises); the false doubling
+`… + 1` stays UNKNOWN.
+
 ## Semantic equivalence
 
 `nl-validator equiv` decides whether two functions compute the same thing — `∀x. f(x) = g(x)` over the

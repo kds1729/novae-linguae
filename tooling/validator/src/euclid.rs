@@ -68,6 +68,205 @@ pub fn lemma_discharged(solver: &str) -> bool {
     ok
 }
 
+/// A residue is its own residue: the second lemma the stepwise checker rests on, discharged by
+/// the solver before its instances are used in the abstracted final query.
+pub const IDEM_SMT: &str = "(set-logic ALL)\n\
+;; a residue is its own residue: m ≠ 0 ⇒ (mod (mod x m) m) = (mod x m)\n\
+(declare-const x Int)\n(declare-const m Int)\n\
+(assert (not (= m 0)))\n(assert (not (= (mod (mod x m) m) (mod x m))))\n(check-sat)\n";
+
+/// Has `solver` proved the idempotence lemma? Cached per solver per thread.
+pub fn idem_discharged(solver: &str) -> bool {
+    let key = format!("idem:{solver}");
+    if let Some(v) = DISCHARGED.with(|d| d.borrow().get(&key).copied()) {
+        return v;
+    }
+    let ok = matches!(run_smt_secs(IDEM_SMT, solver, 5), Ok(SatAnswer::Unsat));
+    DISCHARGED.with(|d| d.borrow_mut().insert(key, ok));
+    ok
+}
+
+/// A stepwise proof: the final query (over uninterpreted `mod`/`div`, with the verified instances'
+/// conclusions as facts), the premise queries as one re-checkable script (every `(check-sat)` in
+/// it must answer unsat), and how many premises verified of how many were generated.
+pub struct Stepwise {
+    pub final_smt: String,
+    pub steps_smt: String,
+    pub verified: usize,
+    pub total: usize,
+}
+
+/// The STEPWISE checker: the rung for a goal whose residues meet only through the certificate's
+/// equations (the fast-exponentiation step), where one query drowns (measured). Three kinds of
+/// query, each decidable in practice: (1) every instance's PREMISE — a ring identity over the
+/// solver's own `div`/`mod` axioms — checked in isolation, with nothing but the declarations and
+/// `m ≠ 0` (measured: the same identity is unsat in 20 ms alone and unknown beside the
+/// hypotheses); (2) the lemma and the idempotence lemma, discharged once per solver; (3) the FINAL
+/// query: the hypotheses, the verified instances' conclusions as facts (`m ≠ 0 ⇒ …`), the
+/// idempotence lemma instantiated at every residue, and the negated goal — with every `mod`/`div`
+/// by a non-literal modulus ABSTRACTED to an uninterpreted function. The abstraction is sound (a
+/// model of the original is a model of the abstraction, so unsat there is unsat here) and makes
+/// the final query congruence plus linear arithmetic, which the solver decides. The instances
+/// come with the certificate's equations substituted into the goal (`instances(_, true)`).
+pub fn retry_stepwise(smt: &str, solver: &str) -> Option<Stepwise> {
+    let insts = instances(smt, true)?;
+    if !lemma_discharged(solver) || !idem_discharged(solver) {
+        return None;
+    }
+    let forms = parse_all(smt).ok()?;
+    let is_form = |f: &S, h: &str| matches!(f, S::List(items) if matches!(items.first(), Some(S::Atom(x)) if x == h));
+    let header: String = forms
+        .iter()
+        .filter(|f| !is_form(f, "assert") && !is_form(f, "check-sat") && !is_form(f, "get-model"))
+        .map(render)
+        .collect::<Vec<_>>()
+        .join("\n");
+    // (1) The premises, each alone.
+    let mut steps = String::new();
+    steps.push_str(";; the Euclidean rung, stepwise: each instance's premise (a ring identity over the solver's div/mod axioms)\n;; checked in isolation; every (check-sat) below must answer unsat for the instance to enter the final query.\n");
+    steps.push_str(&header);
+    steps.push('\n');
+    let mut facts: Vec<(String, String)> = Vec::new();
+    // A budget: a premise the solver cannot verify costs its whole timeout, and a law that is
+    // not going to close must not pay hundreds of them. Past the deadline the remaining
+    // instances are left out (stated in the steps script) and the final query runs on what
+    // verified.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(STEPWISE_BUDGET_SECS);
+    let mut skipped = 0usize;
+    for i in &insts {
+        if std::time::Instant::now() >= deadline {
+            skipped += 1;
+            continue;
+        }
+        let q = format!("{header}\n(assert (not (= {} 0)))\n(assert (not {}))\n(check-sat)\n", i.modulus, i.premise);
+        let ok = matches!(run_smt_secs(&q, solver, STEP_SECS), Ok(SatAnswer::Unsat));
+        steps.push_str(&format!(
+            "(push 1)\n(assert (not (= {} 0)))\n(assert (not {}))\n(check-sat){}\n(pop 1)\n",
+            i.modulus,
+            i.premise,
+            if ok { "" } else { " ; NOT discharged by the proving solver — the instance was left out of the final query" }
+        ));
+        if ok {
+            facts.push((i.modulus.clone(), i.conclusion.clone()));
+        }
+    }
+    if skipped > 0 {
+        steps.push_str(&format!(";; {skipped} instance(s) not attempted: the {STEPWISE_BUDGET_SECS} s budget for premises ran out\n"));
+    }
+    if facts.is_empty() {
+        return None;
+    }
+    // (3) The final query, abstracted.
+    let asserts: Vec<&S> = forms.iter().filter(|f| is_form(f, "assert")).collect();
+    let (goal, hyps) = asserts.split_last()?;
+    let mut fin = String::new();
+    let mut umod_terms: BTreeSet<String> = BTreeSet::new();
+    for f in &forms {
+        if is_form(f, "set-logic") {
+            fin.push_str(&render(f));
+            fin.push_str("\n;; the Euclidean rung, stepwise: mod/div by a non-literal modulus are UNINTERPRETED here (a sound abstraction);\n;; the facts below are the verified instances' conclusions and the idempotence lemma at every residue.\n(declare-fun umod (Int Int) Int)\n(declare-fun udiv (Int Int) Int)\n(declare-fun umul (Int Int) Int)\n");
+        } else if is_form(f, "assert") || is_form(f, "check-sat") || is_form(f, "get-model") {
+            continue;
+        } else {
+            fin.push_str(&render(&abstract_mod(f)));
+            fin.push('\n');
+        }
+    }
+    for h in hyps {
+        let a = abstract_mod(h);
+        collect_umods(&expand(&a, &BTreeMap::new(), &BTreeMap::new(), 0), &mut umod_terms);
+        fin.push_str(&render(&a));
+        fin.push('\n');
+    }
+    for (m, c) in &facts {
+        let c = parse_all(c).ok().and_then(|v| v.into_iter().next())?;
+        let a = abstract_mod(&c);
+        collect_umods(&a, &mut umod_terms);
+        let m = render(&abstract_mod(&parse_all(m).ok().and_then(|v| v.into_iter().next())?));
+        fin.push_str(&format!("(assert (=> (not (= {m} 0)) {}))\n", render(&a)));
+    }
+    let goal_a = abstract_mod(goal);
+    collect_umods(&expand(&goal_a, &BTreeMap::new(), &BTreeMap::new(), 0), &mut umod_terms);
+    for t in &umod_terms {
+        let Some(S::List(items)) = parse_all(t).ok().and_then(|v| v.into_iter().next()) else { continue };
+        let m = render(&items[2]);
+        fin.push_str(&format!("(assert (=> (not (= {m} 0)) (= (umod {t} {m}) {t})))\n"));
+    }
+    fin.push_str(&render(&goal_a));
+    fin.push_str("\n(check-sat)\n");
+    // Debug aid: `NL_EUCLID_DEBUG_DIR=<dir>` writes the final and the steps scripts there whether
+    // or not the final closes (what a re-checker would see on a failure).
+    if let Ok(dir) = std::env::var("NL_EUCLID_DEBUG_DIR") {
+        let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let _ = std::fs::write(format!("{dir}/stepwise-{n}.final.smt2"), &fin);
+        let _ = std::fs::write(format!("{dir}/stepwise-{n}.steps.smt2"), &steps);
+    }
+    match run_smt_secs(&fin, solver, 10) {
+        Ok(SatAnswer::Unsat) => Some(Stepwise { final_smt: fin, steps_smt: steps, verified: facts.len(), total: insts.len() }),
+        _ => None,
+    }
+}
+
+/// `(mod X M)` / `(div X M)` with a non-literal `M` as `(umod X M)` / `(udiv X M)`, and a product
+/// of two or more non-literal factors as nested `(umul a b)` (literal coefficients stay, so the
+/// arithmetic left is linear), throughout. What remains is congruence plus linear arithmetic —
+/// decidable, so the final query answers rather than times out; every identity the instances
+/// rest on was verified with the real operations in its own query. Terms are rendered the same
+/// way on both sides (the engine's canonical monomials, the certificate's own spellings), so the
+/// abstraction keeps matching terms identical.
+fn abstract_mod(s: &S) -> S {
+    match s {
+        S::Atom(_) => s.clone(),
+        S::List(items) => {
+            if items.len() == 3 {
+                if let S::Atom(h) = &items[0] {
+                    if (h == "mod" || h == "div") && !is_literal(&items[2]) {
+                        return S::List(vec![S::Atom(format!("u{h}")), abstract_mod(&items[1]), abstract_mod(&items[2])]);
+                    }
+                }
+            }
+            if matches!(items.first(), Some(S::Atom(h)) if h == "*") {
+                let args: Vec<S> = items[1..].iter().map(abstract_mod).collect();
+                let (lits, non): (Vec<S>, Vec<S>) = args.into_iter().partition(is_literal);
+                if non.len() >= 2 {
+                    let mut t = non[0].clone();
+                    for x in &non[1..] {
+                        t = S::List(vec![S::Atom("umul".into()), t, x.clone()]);
+                    }
+                    if lits.is_empty() {
+                        return t;
+                    }
+                    let mut v = vec![S::Atom("*".into())];
+                    v.extend(lits);
+                    v.push(t);
+                    return S::List(v);
+                }
+                let mut v = vec![S::Atom("*".into())];
+                v.extend(lits);
+                v.extend(non);
+                return S::List(v);
+            }
+            S::List(items.iter().map(abstract_mod).collect())
+        }
+    }
+}
+
+/// Every `(umod X M)` term outside a binder (a term over bound names cannot be instantiated at).
+fn collect_umods(s: &S, out: &mut BTreeSet<String>) {
+    let S::List(items) = s else { return };
+    if let Some(S::Atom(h)) = items.first() {
+        if matches!(h.as_str(), "forall" | "exists" | "lambda" | "let") {
+            return;
+        }
+        if h == "umod" && items.len() == 3 {
+            out.insert(render(s));
+        }
+    }
+    for x in items {
+        collect_umods(x, out);
+    }
+}
+
 /// The rung as a retry: the certificate augmented with the lemma's instances, when the solver has
 /// discharged the lemma, the certificate has `mod`/`div` terms with non-literal moduli, and the
 /// augmented certificate is UNSAT. `None` otherwise (the caller keeps its verdict).
@@ -85,6 +284,35 @@ pub fn retry(smt: &str, solver: &str) -> Option<String> {
 /// The certificate with the uniqueness-lemma instances for its `mod`/`div` terms appended before
 /// `(check-sat)`. `None` when there is nothing to add.
 pub fn augment(smt: &str) -> Option<String> {
+    let out = instances(smt, false)?;
+    let idx = smt.rfind("(check-sat)")?;
+    let mut s = String::with_capacity(smt.len() + out.iter().map(|x| x.text.len() + 1).sum::<usize>() + 128);
+    s.push_str(&smt[..idx]);
+    s.push_str(&format!(";; the Euclidean rung: instances of `{LEMMA_NAME}` (discharged separately) at the certificate's mod/div terms\n"));
+    for i in &out {
+        s.push_str(&i.text);
+        s.push('\n');
+    }
+    s.push_str(&smt[idx..]);
+    Some(s)
+}
+
+/// One lemma instance: the modulus, the identity premise `x = (q·m + r)`, the conclusion, and the
+/// whole assertion as the one-query rung states it.
+#[derive(Clone, Debug)]
+pub struct Instance {
+    pub modulus: String,
+    pub premise: String,
+    pub conclusion: String,
+    pub text: String,
+}
+
+/// The lemma instances for a certificate's `mod`/`div` terms. With `with_variants`, the goal is
+/// also read with the certificate's equations (`A = E` from unfoldings, hypothesis conclusions
+/// and `ite` branches) substituted into it to a small depth — the terms a goal's two sides meet
+/// at when they are formed only through such equations (the fast-exponentiation step). The
+/// variants are for the STEPWISE checker only: in one query they drown the solver (measured).
+pub fn instances(smt: &str, with_variants: bool) -> Option<Vec<Instance>> {
     let forms = parse_all(smt).ok()?;
     let mut defs: BTreeMap<String, (Vec<String>, S)> = BTreeMap::new();
     let mut asserted: Vec<S> = Vec::new();
@@ -129,7 +357,17 @@ pub fn augment(smt: &str) -> Option<String> {
     let mut goal_count = 0;
     let expanded: Vec<S> = asserted.iter().map(|a| expand(a, &BTreeMap::new(), &defs, 0)).collect();
     if let Some(goal) = expanded.last() {
-        collect(goal, &mut candidates, &mut decompositions, &mut mod_keys);
+        if with_variants {
+            let mut equations: Vec<(String, S)> = Vec::new();
+            for e in &expanded {
+                harvest(e, &mut equations, true);
+            }
+            for v in variants(goal, &equations) {
+                collect(&v, &mut candidates, &mut decompositions, &mut mod_keys);
+            }
+        } else {
+            collect(goal, &mut candidates, &mut decompositions, &mut mod_keys);
+        }
         goal_count = candidates.len();
     }
     for e in expanded.iter().rev().skip(1) {
@@ -138,15 +376,16 @@ pub fn augment(smt: &str) -> Option<String> {
     if candidates.is_empty() {
         return None;
     }
-    let mut out: Vec<String> = Vec::new();
+    let max = if with_variants { MAX_INSTANCES_STEPWISE } else { MAX_INSTANCES };
+    let mut out: Vec<Instance> = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     for (i, (t, m)) in candidates.iter().enumerate() {
-        if out.len() >= MAX_INSTANCES {
+        if out.len() >= max {
             break;
         }
         let Some(tp) = to_poly(t) else { continue };
         for inst in instance_chain(t, m, &tp, &BTreeMap::new()) {
-            if seen.insert(inst.clone()) {
+            if seen.insert(inst.text.clone()) {
                 out.push(inst);
             }
         }
@@ -166,11 +405,11 @@ pub fn augment(smt: &str) -> Option<String> {
                 let mut rewrite: BTreeMap<String, Poly> = BTreeMap::new();
                 rewrite.insert(y.clone(), decomposition_of(&S::Atom(y.clone()), n));
                 for inst in instance_chain(t, m, &tp, &rewrite) {
-                    if seen.insert(inst.clone()) {
+                    if seen.insert(inst.text.clone()) {
                         out.push(inst);
                     }
                 }
-                if out.len() >= MAX_INSTANCES {
+                if out.len() >= max {
                     break;
                 }
             }
@@ -179,16 +418,155 @@ pub fn augment(smt: &str) -> Option<String> {
     if out.is_empty() {
         return None;
     }
-    let idx = smt.rfind("(check-sat)")?;
-    let mut s = String::with_capacity(smt.len() + out.iter().map(|x| x.len() + 1).sum::<usize>() + 128);
-    s.push_str(&smt[..idx]);
-    s.push_str(&format!(";; the Euclidean rung: instances of `{LEMMA_NAME}` (discharged separately) at the certificate's mod/div terms\n"));
-    for i in &out {
-        s.push_str(i);
-        s.push('\n');
+    Some(out)
+}
+
+const MAX_INSTANCES_STEPWISE: usize = 512;
+/// Per-premise solver budget (a verifiable premise answers in milliseconds) and the budget for
+/// all of them (measured: the agreement of fast exponentiation verifies 250 premises in ~15 s).
+const STEP_SECS: u64 = 2;
+const STEPWISE_BUDGET_SECS: u64 = 60;
+const VARIANT_DEPTH: usize = 3;
+const MAX_VARIANTS: usize = 256;
+
+const OPS: &[&str] = &["+", "-", "*", "mod", "div", "abs", "=", "<", "<=", ">", ">=", "distinct", "and", "or", "not", "=>", "ite", "let", "forall", "exists", "!", "_", "is", "true", "false"];
+
+/// An application atom: a list whose head is a symbol that is not an operator — `self`, a callee,
+/// a datatype accessor — the kind of term an unfolding equates with an expression.
+fn is_app_atom(s: &S) -> bool {
+    matches!(s, S::List(items) if matches!(items.first(), Some(S::Atom(h)) if !OPS.contains(&h.as_str()) && !h.starts_with('(')))
+}
+
+/// A term's key with its arithmetic arguments normalized (`(self b (- (- (* 2 e) 1) 1) m)` and
+/// `(self b (* 2 (- e 1)) m)` are one application), so an equation about one spelling applies to
+/// the other — the solver identifies them by arithmetic and congruence.
+fn atom_key(s: &S) -> String {
+    match s {
+        S::Atom(_) => render(s),
+        S::List(items) => {
+            let parts: Vec<String> = items
+                .iter()
+                .enumerate()
+                .map(|(i, x)| if i == 0 { render(x) } else { to_poly(x).map(|p| render_poly(&p)).unwrap_or_else(|| atom_key(x)) })
+                .collect();
+            format!("({})", parts.join(" "))
+        }
     }
-    s.push_str(&smt[idx..]);
-    Some(s)
+}
+
+/// Equations `A = E` with `A` an application atom, read positively: top-level, under `=>` (its
+/// consequent), `and`, `or`, and through the branches of an `ite` on the right-hand side.
+fn harvest(s: &S, out: &mut Vec<(String, S)>, positive: bool) {
+    let S::List(items) = s else { return };
+    let Some(S::Atom(h)) = items.first() else { return };
+    match h.as_str() {
+        "=" if items.len() == 3 && positive => {
+            for (a, e) in [(&items[1], &items[2]), (&items[2], &items[1])] {
+                if is_app_atom(a) {
+                    let mut rhs = vec![e.clone()];
+                    let mut i = 0;
+                    while i < rhs.len() {
+                        if let S::List(ri) = &rhs[i] {
+                            if ri.len() == 4 && matches!(&ri[0], S::Atom(x) if x == "ite") {
+                                let (t, f) = (ri[2].clone(), ri[3].clone());
+                                rhs.remove(i);
+                                rhs.push(t);
+                                rhs.push(f);
+                                continue;
+                            }
+                        }
+                        i += 1;
+                    }
+                    for r in rhs {
+                        if !is_app_atom(&r) || atom_key(&r) != atom_key(a) {
+                            out.push((atom_key(a), r));
+                        }
+                    }
+                }
+            }
+        }
+        "=>" if items.len() == 3 => harvest(&items[2], out, positive),
+        "and" | "or" => items[1..].iter().for_each(|x| harvest(x, out, positive)),
+        "not" if items.len() == 2 => harvest(&items[1], out, !positive),
+        _ => {}
+    }
+}
+
+/// The goal with up to `VARIANT_DEPTH` equation substitutions applied, one atom occurrence at a
+/// time, breadth first and capped — the original first, then the variants whose atoms match an
+/// equation EXACTLY (to full depth), then those matched loosely (`keys_may_coincide`), from every
+/// variant so far. The order is the measurement: the loose matches flood the list, and a cap that
+/// cuts an exact one loses the proof (the doubling law closed on 29 exact instances and not on
+/// 192 mixed ones).
+fn variants(goal: &S, eqs: &[(String, S)]) -> Vec<S> {
+    let mut out: Vec<S> = vec![goal.clone()];
+    let mut seen: BTreeSet<String> = [render(goal)].into_iter().collect();
+    for strict in [true, false] {
+        let mut frontier: Vec<S> = out.clone();
+        for _ in 0..VARIANT_DEPTH {
+            let mut next = Vec::new();
+            for g in &frontier {
+                for v in substitute_once(g, eqs, strict) {
+                    if out.len() >= MAX_VARIANTS {
+                        return out;
+                    }
+                    if seen.insert(render(&v)) {
+                        out.push(v.clone());
+                        next.push(v);
+                    }
+                }
+            }
+            frontier = next;
+            if frontier.is_empty() {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Do two application keys name applications the solver may identify — the same head and arity,
+/// each argument either identical or, on at least one side, a compound arithmetic term (whose
+/// equality to the other may hold under the case the solver is in: `e − 1 = 2·(e div 2)` when `e`
+/// is odd)? A variant is only a candidate term — an instance about it is a true fact about that
+/// term, connected to the goal by the solver or not — so matching loosely is safe, only costlier.
+fn keys_may_coincide(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    let (Ok(pa), Ok(pb)) = (parse_all(a), parse_all(b)) else { return false };
+    let (Some(S::List(xa)), Some(S::List(xb))) = (pa.first(), pb.first()) else { return false };
+    if xa.len() != xb.len() || xa.first() != xb.first() {
+        return false;
+    }
+    xa.iter().zip(xb).skip(1).all(|(x, y)| x == y || matches!(x, S::List(_)) || matches!(y, S::List(_)))
+}
+
+/// Every term obtained from `s` by replacing ONE application atom with a term an equation says it
+/// equals — keys equal exactly (`strict`), or as `keys_may_coincide`.
+fn substitute_once(s: &S, eqs: &[(String, S)], strict: bool) -> Vec<S> {
+    let mut out = Vec::new();
+    if is_app_atom(s) {
+        let k = atom_key(s);
+        for (a, e) in eqs {
+            if if strict { a == &k } else { keys_may_coincide(a, &k) } {
+                out.push(e.clone());
+            }
+        }
+    }
+    if let S::List(items) = s {
+        if matches!(items.first(), Some(S::Atom(h)) if matches!(h.as_str(), "forall" | "exists" | "lambda")) {
+            return out;
+        }
+        for (i, x) in items.iter().enumerate() {
+            for v in substitute_once(x, eqs, strict) {
+                let mut items2 = items.clone();
+                items2[i] = v;
+                out.push(S::List(items2));
+            }
+        }
+    }
+    out
 }
 
 // --- s-expressions ------------------------------------------------------------------------------------
@@ -532,7 +910,7 @@ const MAX_CHAIN: usize = 12;
 /// a low-degree identity the solver verifies from its own `div`/`mod` axioms (measured: lifting
 /// everything at once leaves z3 at unknown on a fourth-degree premise; the chain closes).
 /// Empty when nothing decomposes or the algebra overflows.
-fn instance_chain(t: &S, m: &S, tp: &Poly, rewrite: &BTreeMap<String, Poly>) -> Vec<String> {
+fn instance_chain(t: &S, m: &S, tp: &Poly, rewrite: &BTreeMap<String, Poly>) -> Vec<Instance> {
     let mkey = render(m);
     let mut out = Vec::new();
     let Some(mut cur) = apply_rewrite(tp, rewrite) else { return out };
@@ -557,9 +935,10 @@ fn instance_chain(t: &S, m: &S, tp: &Poly, rewrite: &BTreeMap<String, Poly>) -> 
             } else {
                 (format!("(+ {qs} (div {ps} {mkey}))"), format!("(mod {ps} {mkey})"))
             };
-            out.push(format!(
-                "(assert (=> (and (not (= {mkey} 0)) (= {x} (+ (* {qw} {mkey}) {rw})) (>= {rw} 0) (< {rw} (abs {mkey}))) (and (= (div {x} {mkey}) {qw}) (= (mod {x} {mkey}) {rw}))))"
-            ));
+            let premise = format!("(= {x} (+ (* {qw} {mkey}) {rw}))");
+            let conclusion = format!("(and (= (div {x} {mkey}) {qw}) (= (mod {x} {mkey}) {rw}))");
+            let text = format!("(assert (=> (and (not (= {mkey} 0)) {premise} (>= {rw} 0) (< {rw} (abs {mkey}))) {conclusion}))");
+            out.push(Instance { modulus: mkey.clone(), premise, conclusion, text });
         }
         if p.is_empty() || !has_liftable(&p, &mkey) {
             break;
@@ -586,12 +965,19 @@ fn apply_rewrite(tp: &Poly, rewrite: &BTreeMap<String, Poly>) -> Option<Poly> {
     Some(acc)
 }
 
-/// A residue `(mod X m)` whose `X` is compound (`+`, `-`, `*`): the one kind the chain lifts.
+/// A residue `(mod X m)` whose `X` is compound (`+`, `-`, `*`) or a numeral: the kinds the chain
+/// lifts (a numeral's residue lifts to the numeral — `(1 mod m)² mod m = 1 mod m`).
 fn liftable(atom: &str, mkey: &str) -> bool {
     if !is_residue_of(atom, mkey) {
         return false;
     }
-    matches!(parse_all(atom).ok().and_then(|v| v.into_iter().next()), Some(S::List(items)) if matches!(&items[1], S::List(inner) if matches!(inner.first(), Some(S::Atom(h)) if h == "+" || h == "-" || h == "*")))
+    match parse_all(atom).ok().and_then(|v| v.into_iter().next()) {
+        Some(S::List(items)) => match &items[1] {
+            S::List(inner) => matches!(inner.first(), Some(S::Atom(h)) if h == "+" || h == "-" || h == "*"),
+            S::Atom(a) => is_numeral(a),
+        },
+        _ => false,
+    }
 }
 
 fn has_liftable(p: &Poly, mkey: &str) -> bool {
@@ -728,10 +1114,32 @@ mod tests {
     fn dump_augmented() {
         let Ok(p) = std::env::var("NL_EUCLID_DUMP") else { return };
         let smt = std::fs::read_to_string(&p).expect("read");
-        match augment(&smt) {
-            Some(a) => std::fs::write(format!("{p}.euclid"), a).expect("write"),
+        let with_variants = std::env::var("NL_EUCLID_VARIANTS").is_ok();
+        match instances(&smt, with_variants) {
+            Some(insts) => {
+                let idx = smt.rfind("(check-sat)").unwrap();
+                let mut s = smt[..idx].to_string();
+                for i in &insts {
+                    s.push_str(&i.text);
+                    s.push('\n');
+                }
+                s.push_str(&smt[idx..]);
+                std::fs::write(format!("{p}.euclid"), s).expect("write");
+            }
             None => eprintln!("no instances for {p}"),
         }
+    }
+
+    #[test]
+    fn the_final_query_abstracts_mod_div_and_products_consistently() {
+        let s = parse_all("(assert (= (mod (* (self b e m) (mod b m)) m) (+ (* 2 (div e 2)) (* (- 1) x y) (mod e 2))))").unwrap();
+        let a = render(&abstract_mod(&s[0]));
+        assert_eq!(a, "(assert (= (umod (umul (self b e m) (umod b m)) m) (+ (* 2 (div e 2)) (* (- 1) (umul x y)) (mod e 2))))");
+        // Literal moduli and literal coefficients stay real: what is left is linear.
+        assert!(a.contains("(div e 2)") && a.contains("(mod e 2)") && !a.contains("umod e"));
+        let mut acc = BTreeSet::new();
+        collect_umods(&abstract_mod(&s[0]), &mut acc);
+        assert_eq!(acc.len(), 2, "{acc:?}");
     }
 
     #[test]

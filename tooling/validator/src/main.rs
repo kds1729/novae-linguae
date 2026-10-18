@@ -1806,11 +1806,14 @@ fn cmd_respond(
 }
 
 /// The label note for a certificate that closed through the Euclidean rung (`euclid`).
-fn euclid_note(cert: Option<&nl_validator::Certificate>) -> &'static str {
-    if cert.is_some_and(|c| c.euclid) {
-        " [with the Euclidean-division lemma instantiated at its mod/div terms]"
-    } else {
-        ""
+fn euclid_note(cert: Option<&nl_validator::Certificate>) -> String {
+    match cert {
+        Some(c) if c.stepwise.is_some() => {
+            let (v, t) = c.stepwise.unwrap();
+            format!(" [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: {v} of {t} premises verified separately, the final query over uninterpreted mod/div]")
+        }
+        Some(c) if c.euclid => " [with the Euclidean-division lemma instantiated at its mod/div terms]".to_string(),
+        _ => String::new(),
     }
 }
 
@@ -1876,6 +1879,18 @@ fn cmd_prove(
             }
             Ok(())
         };
+        // A certificate the Euclidean rung closed: the lemma(s) it rests on and, stepwise, the
+        // premise queries, written beside it so the proof re-checks end to end.
+        let write_euclid = |write_cert: &dyn Fn(&str, &str) -> Result<()>, c: &nl_validator::Certificate| -> Result<()> {
+            if c.euclid {
+                write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
+            }
+            if let Some(steps) = &c.steps {
+                write_cert(".euclid-steps", steps)?;
+                write_cert(".lemma-mod-idem", nl_validator::euclid::IDEM_SMT)?;
+            }
+            Ok(())
+        };
 
         let (outcome, cert) = nl_validator::prove_property_in_domain(
             expr,
@@ -1885,9 +1900,7 @@ fn cmd_prove(
         );
         if let Some(cert) = &cert {
             write_cert("", &cert.smt)?;
-            if cert.euclid {
-                write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
-            }
+            write_euclid(&write_cert, cert)?;
         }
         // First-order SMT can't reach list/recursion laws — fall back to structural induction
         // (with auxiliary-lemma discovery for laws a single unfold + IH can't close).
@@ -1930,9 +1943,7 @@ fn cmd_prove(
                         nl_validator::prove_by_numeric_induction(expr, body_ast.as_ref(), &nats, solver);
                     if let Some(c) = &ncert {
                         write_cert(".induction", &c.smt)?;
-                        if c.euclid {
-                            write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
-                        }
+                        write_euclid(&write_cert, c)?;
                     }
                     match (nout, out) {
                         (ProofOutcome::Proved, _) => format!(
@@ -1956,9 +1967,7 @@ fn cmd_prove(
                         nl_validator::prove_by_numeric_induction(expr, body_ast.as_ref(), &nats, solver);
                     if let Some(c) = &ncert {
                         write_cert(".induction", &c.smt)?;
-                        if c.euclid {
-                            write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
-                        }
+                        write_euclid(&write_cert, c)?;
                     }
                     match nout {
                         ProofOutcome::Proved => format!(
@@ -2030,9 +2039,7 @@ fn cmd_prove(
                     let (sout, scert) = nl_validator::prove_from_self_contract(expr, &h, c, &nats, solver);
                     if let Some(c) = &scert {
                         write_cert(".contract", &c.smt)?;
-                        if c.euclid {
-                            write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
-                        }
+                        write_euclid(&write_cert, c)?;
                     }
                     match sout {
                         ProofOutcome::Proved => format!(
@@ -2054,9 +2061,7 @@ fn cmd_prove(
                 let (cout, ccert, m) = nl_validator::prove_by_callee_induction(expr, b, &nats, &def, solver);
                 if let Some(c) = &ccert {
                     write_cert(".callee-induction", &c.smt)?;
-                    if c.euclid {
-                        write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
-                    }
+                    write_euclid(&write_cert, c)?;
                 }
                 match cout {
                     ProofOutcome::Proved => format!(
@@ -2091,9 +2096,7 @@ fn cmd_prove(
                         nl_validator::set_self_facts(prev);
                         if let Some(c) = &ncert {
                             write_cert(".induction-self", &c.smt)?;
-                            if c.euclid {
-                                write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
-                            }
+                            write_euclid(&write_cert, c)?;
                         }
                         match nout {
                             ProofOutcome::Proved => format!(

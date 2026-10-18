@@ -372,6 +372,29 @@ pub struct Certificate {
     /// (`euclid::LEMMA_SMT`, discharged by the solver first): the residue normal forms of its
     /// `mod`/`div` terms. Re-checking it end to end means re-checking the lemma beside it.
     pub euclid: bool,
+    /// The STEPWISE Euclidean checker closed it (`euclid::retry_stepwise`): `smt` is then the final
+    /// query over uninterpreted `mod`/`div`, `steps` the premise queries (one script, every
+    /// `(check-sat)` unsat), and `stepwise` = (premises verified, instances generated).
+    pub steps: Option<String>,
+    pub stepwise: Option<(usize, usize)>,
+}
+
+/// The Euclidean rung over a certificate that stayed UNKNOWN: one query with the lemma's
+/// instances, then the stepwise checker. Updates the certificate in place; true when it closed.
+fn euclid_ladder(cert: &mut Certificate, solver: &str) -> bool {
+    if let Some(augmented) = crate::euclid::retry(&cert.smt, solver) {
+        cert.smt = augmented;
+        cert.euclid = true;
+        return true;
+    }
+    if let Some(sw) = crate::euclid::retry_stepwise(&cert.smt, solver) {
+        cert.smt = sw.final_smt;
+        cert.steps = Some(sw.steps_smt);
+        cert.stepwise = Some((sw.verified, sw.total));
+        cert.euclid = true;
+        return true;
+    }
+    false
 }
 
 // --- self definition ------------------------------------------------------------------------------
@@ -1570,7 +1593,7 @@ pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_pos
     out.push_str("(check-sat)\n");
     out.push_str("(get-model)\n");
 
-    Ok(Certificate { smt: with_datatypes(out), quantified, uses_self, uses_callees, euclid: false })
+    Ok(Certificate { smt: with_datatypes(out), quantified, uses_self, uses_callees, euclid: false, steps: None, stepwise: None })
 }
 
 pub(crate) fn references_self(node: &J) -> bool {
@@ -1736,9 +1759,7 @@ pub fn prove_property_in_domain(
     }
     // The Euclidean rung: the same obligation with the residue normal forms of its `mod`/`div`
     // terms stated as instances of the division-uniqueness lemma (see `euclid`).
-    if let Some(augmented) = crate::euclid::retry(&last.smt, solver) {
-        last.smt = augmented;
-        last.euclid = true;
+    if euclid_ladder(&mut last, solver) {
         return (ProofOutcome::Proved, Some(last));
     }
     (ProofOutcome::Unknown, Some(last))
@@ -1989,9 +2010,7 @@ pub fn prove_by_numeric_induction(
             }
         }
     }
-    if let Some(augmented) = crate::euclid::retry(&last.0.smt, solver) {
-        last.0.smt = augmented;
-        last.0.euclid = true;
+    if euclid_ladder(&mut last.0, solver) {
         return (ProofOutcome::Proved, Some(last.0), Some(last.1));
     }
     (ProofOutcome::Unknown, Some(last.0), Some(last.1))
@@ -2386,7 +2405,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     }
     out.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
     let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
-    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees, euclid: false }, m))
+    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees, euclid: false, steps: None, stepwise: None }, m))
 }
 
 // --- induction through a callee's definition --------------------------------------------------------
@@ -2499,28 +2518,44 @@ fn build_callee_induction(
     }
 
     // The induction variable: a law variable the goal feeds to a `self` parameter that the body
-    // passes to a recursive callee at its measure position.
-    let mut induct: Option<(String, usize, String, usize)> = None; // (law var, self param index, callee, measure position)
+    // passes to a recursive callee at its measure position — and EVERY such callee (strong
+    // induction on the one variable covers each callee's descent: `mod_pow` at `e div 2`, the
+    // naive power at `e − 1`, in one law about both).
+    let mut induct_var: Option<(String, usize)> = None; // (law var, self param index)
+    let mut inducts: BTreeMap<String, usize> = BTreeMap::new(); // callee → its measure position
     for (t, args) in &body_apps {
         let Some(m) = defs[t].measure else { continue };
         let Some(p) = args.get(m.position).and_then(|a| var_name(a)) else { continue };
         let Some(i) = sd.params.iter().position(|x| x == p) else { continue };
-        if let Some(v) = goal_calls.iter().find_map(|call| call.get(i).and_then(|a| var_name(a)).filter(|v| vars.iter().any(|x| x == v))) {
-            induct = Some((v.to_string(), i, t.clone(), m.position));
-            break;
+        match &induct_var {
+            None => {
+                if let Some(v) = goal_calls.iter().find_map(|call| call.get(i).and_then(|a| var_name(a)).filter(|v| vars.iter().any(|x| x == v))) {
+                    induct_var = Some((v.to_string(), i));
+                    inducts.insert(t.clone(), m.position);
+                }
+            }
+            Some((_, ii)) if *ii == i => {
+                inducts.insert(t.clone(), m.position);
+            }
+            _ => {}
         }
     }
-    let m_label = induct.as_ref().map(|(v, _, t, _)| format!("{v} (through `{}…`)", &t[..11])).unwrap_or_else(|| "<unfolding>".into());
+    let m_label = induct_var
+        .as_ref()
+        .map(|(v, _)| format!("{v} (through {})", inducts.keys().map(|t| format!("`{}…`", &t[..11])).collect::<Vec<_>>().join(", ")))
+        .unwrap_or_else(|| "<unfolding>".into());
 
     let mut out = String::new();
     out.push_str("(set-logic ALL)\n");
     out.push_str(&format!(";; induction through a callee's definition, on `{m_label}`: self inlined, each linked callee's defining\n;; equation instantiated at the applications the goal makes and at the recursive calls inside them.\n"));
-    let (callees, callee_insts, _) = callee_preamble()?;
-    out.push_str(&callees);
+    // The callee preamble (declarations, contract axioms and their instances) is rendered AFTER
+    // the unfoldings below, which record more applications for it — the callees' laws at the
+    // hypothesis's application (the naive power's doubling law at `e div 2`); it is spliced in here.
+    let mut decls = String::new();
     let params = sd.params.iter().zip(&sd.param_sorts).map(|(p, s)| format!("({p} {})", s.smt())).collect::<Vec<_>>().join(" ");
-    out.push_str(&format!("(define-fun self ({params}) {} {})\n", sd.ret.smt(), sd.body_smt));
+    decls.push_str(&format!("(define-fun self ({params}) {} {})\n", sd.ret.smt(), sd.body_smt));
     for v in &vars {
-        out.push_str(&format!("(declare-const {v} {})\n", var_sorts[v].smt()));
+        decls.push_str(&format!("(declare-const {v} {})\n", var_sorts[v].smt()));
     }
     let mut nat_vars: BTreeSet<String> = BTreeSet::new();
     for call in &goal_calls {
@@ -2535,11 +2570,11 @@ fn build_callee_induction(
         }
     }
     for v in &nat_vars {
-        out.push_str(&format!("(assert (>= {v} 0))\n"));
+        decls.push_str(&format!("(assert (>= {v} 0))\n"));
     }
-    out.push_str(&callee_insts);
 
     // Unfoldings (and hypothesis instances) at every `self` application the goal makes.
+    let mut body_out = String::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     for call in &goal_calls {
         if call.len() != sd.params.len() {
@@ -2556,7 +2591,7 @@ fn build_callee_induction(
             let app = format!("({} {})", c.symbol, a.join(" "));
             let eq = format!("(assert (= {app} {}))\n", let_params(&d.params, &a, &d.body_smt));
             if seen.insert(eq.clone()) {
-                out.push_str(&eq);
+                body_out.push_str(&eq);
             }
             let mut cenv: BTreeMap<String, Sort> = d.params.iter().cloned().zip(c.param_sorts.iter().copied()).collect();
             for rc in &d.rec_calls {
@@ -2567,29 +2602,43 @@ fn build_callee_induction(
                 let inner_app = format!("({} {})", c.symbol, r.join(" "));
                 let eq = format!("(assert {})\n", let_params(&d.params, &a, &format!("(= {inner_app} {})", let_params(&d.params, &r, &d.body_smt))));
                 if seen.insert(eq.clone()) {
-                    out.push_str(&eq);
+                    body_out.push_str(&eq);
                 }
                 // The hypothesis at this recursive call: the law with the induction variable replaced
                 // by the call's measure argument, guarded by `floor ≤ it < the variable` (the callee's
                 // parameter at the measure position is bound to the goal's term for it).
-                if let (true, Some((v, i, it, p))) = (with_ih, induct.as_ref()) {
-                    if it == t && call.get(*i).and_then(|x| var_name(x)) == Some(v.as_str()) {
+                if let (true, Some((v, i)), Some(p)) = (with_ih, induct_var.as_ref(), inducts.get(t)) {
+                    if call.get(*i).and_then(|x| var_name(x)) == Some(v.as_str()) {
                         let m = d.measure.expect("chosen callee has a measure");
                         let smaller = &r[*p];
                         let guard = format!("(and (>= {smaller} {}) (< {smaller} {}))", smt_int_lit(m.floor), d.params[*p]);
                         let ih = format!("(=> {guard} (let (({v} {smaller})) {pred_smt}))");
                         let inst = format!(";; induction hypothesis at {inner_app}\n(assert {})\n", let_params(&d.params, &a, &ih));
                         if seen.insert(inst.clone()) {
-                            out.push_str(&inst);
+                            body_out.push_str(&inst);
+                            // The body's callee applications at the hypothesis's application — the
+                            // law's `self(…)` at `v := smaller` — recorded so the callees' contracts
+                            // (their laws above all: the doubling law of the naive power at `e div 2`)
+                            // are instantiated there too, by the preamble rendered below.
+                            for (t2, args2) in &body_apps {
+                                let Ok(a2) = args2.iter().map(|x| lower(x, &mut penv.clone(), Some(&sd)).map(|s| let_params(&sd.params, &terms, &s))).collect::<Result<Vec<String>>>() else { continue };
+                                let at_ih: Vec<String> = a2.iter().map(|s| let_params(&d.params, &a, &format!("(let (({v} {smaller})) {s})"))).collect();
+                                push_callee_app(t2, &at_ih);
+                            }
                         }
                     }
                 }
             }
         }
     }
+    let (callees, callee_insts, _) = callee_preamble()?;
+    out.push_str(&callees);
+    out.push_str(&decls);
+    out.push_str(&callee_insts);
+    out.push_str(&body_out);
     out.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
     let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
-    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees: true, euclid: false }, m_label))
+    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees: true, euclid: false, steps: None, stepwise: None }, m_label))
 }
 
 /// Prove a law about a NON-recursive function by induction through the definitions of the linked
@@ -2628,9 +2677,7 @@ pub fn prove_by_callee_induction(
     }
     // The Euclidean rung over the last certificate (see `euclid`).
     if let (ProofOutcome::Unknown, Some(mut cert), m) = last {
-        if let Some(augmented) = crate::euclid::retry(&cert.smt, solver) {
-            cert.smt = augmented;
-            cert.euclid = true;
+        if euclid_ladder(&mut cert, solver) {
             return (ProofOutcome::Proved, Some(cert), m);
         }
         return (ProofOutcome::Unknown, Some(cert), m);
@@ -2917,6 +2964,43 @@ mod tests {
         let prev = set_self_facts(Some(CalleeContract { symbol: "self".into(), params: vec!["a".into(), "b".into()], param_sorts: vec![Sort::Int, Sort::Int], ret: Sort::Int, pres: vec![], posts: vec![op("or", vec![op("and", vec![op("lt", vec![v("a"), lit(1)]), op("lt", vec![v("b"), lit(1)])]), op("ge", vec![v("result"), lit(1)])])], laws: vec![], nat_positions: nats.clone() }));
         let (out, _, _) = prove_by_numeric_induction(&unguarded, Some(&gcd_body()), &nats, solver);
         set_self_facts(prev);
+        assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+    }
+
+    /// pow_mod_naive: \b e m -> case gt(e, 0) of true -> mod(mul(self(b, sub(e, 1), m), mod(b, m)), m) | false -> mod(1, m)
+    fn naive_power_body() -> J {
+        let step = op("mod", vec![op("mul", vec![self_app(vec![v("b"), op("sub", vec![v("e"), ilit(1)]), v("m")]), op("mod", vec![v("b"), v("m")])]), v("m")]);
+        json!({ "kind": "lambda", "params": [{ "name": "b" }, { "name": "e" }, { "name": "m" }], "body": { "kind": "case",
+            "scrutinee": op("gt", vec![v("e"), ilit(0)]),
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": step },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": op("mod", vec![ilit(1), v("m")]) } ] } })
+    }
+
+    #[test]
+    fn the_doubling_law_closes_stepwise() {
+        // pow(b, 2e) ≡ pow(b, e)² (mod m): the step is pure modular algebra whose residues the two
+        // sides reach only through the unfoldings — one query drowns (measured), the stepwise
+        // checker closes it: every instance's premise verified alone, the final query over
+        // uninterpreted mod/div/products.
+        let Some(solver) = solver() else { return };
+        let nats: BTreeSet<usize> = [1].into();
+        let doubling = law(&["b", "e", "m"], op("or", vec![
+            op("eq", vec![v("m"), lit(0)]),
+            op("eq", vec![self_app(vec![v("b"), op("mul", vec![lit(2), v("e")]), v("m")]),
+                          op("mod", vec![op("mul", vec![self_app(vec![v("b"), v("e"), v("m")]), self_app(vec![v("b"), v("e"), v("m")])]), v("m")])])]));
+        let (out, cert, m) = prove_by_numeric_induction(&doubling, Some(&naive_power_body()), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        let cert = cert.unwrap();
+        assert!(cert.euclid && cert.stepwise.is_some(), "{m:?}");
+        assert!(cert.steps.as_deref().unwrap_or("").contains("(push 1)"));
+        assert!(cert.smt.contains("(declare-fun umod (Int Int) Int)") && cert.smt.contains("umul"), "{}", cert.smt);
+        // The false doubling `… ≡ pow(b, e)² + 1 (mod m)` stays open.
+        let wrong = law(&["b", "e", "m"], op("or", vec![
+            op("eq", vec![v("m"), lit(0)]),
+            op("eq", vec![self_app(vec![v("b"), op("mul", vec![lit(2), v("e")]), v("m")]),
+                          op("mod", vec![op("add", vec![op("mul", vec![self_app(vec![v("b"), v("e"), v("m")]), self_app(vec![v("b"), v("e"), v("m")])]), lit(1)]), v("m")])])]));
+        let (out, _, _) = prove_by_numeric_induction(&wrong, Some(&naive_power_body()), &nats, solver);
         assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
     }
 
