@@ -9,9 +9,9 @@
 | `mod_add` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | congruent_to_plain_sum=EXHAUSTIVE; commutative=EXHAUSTIVE | congruent_to_plain_sum=PROVED; commutative=PROVED |
 | `mod_mul` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | congruent_to_plain_product=EXHAUSTIVE; commutative=EXHAUSTIVE | congruent_to_plain_product=PROVED; commutative=PROVED |
 | `is_even` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | period_two=EXHAUSTIVE; alternates=EXHAUSTIVE | period_two=PROVED; alternates=PROVED |
-| `pow_mod_naive` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
+| `pow_mod_naive` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | double_exponent=EXHAUSTIVE | double_exponent=PROVED |
 | `mod_pow` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
-| `pow_mod_agree` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | fast_equals_naive=EXHAUSTIVE | fast_equals_naive=UNKNOWN |
+| `pow_mod_agree` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | fast_equals_naive=EXHAUSTIVE | fast_equals_naive=PROVED |
 | `isqrt` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | square_root_of_square=EXHAUSTIVE; floor_bounds=EXHAUSTIVE | square_root_of_square=PROVED; floor_bounds=PROVED |
 | `mr_squarings` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `mr_witness` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |

@@ -7,11 +7,12 @@
   that compose and instantiate, induction through a callee's definition, the Euclidean rung and a
   function's own facts in its inductions (`tooling/validator`); the records published to the
   commons with signed certifications. The 41 records and their builder live here (`records/`,
-  `build_records.py`) — reproducible with no credential. Final tally (eighth follow-up): 41/41
+  `build_records.py`) — reproducible with no credential. Final tally (ninth follow-up): 41/41
   certify, termination AND complexity SOUND on all 41 (the NTT chain at `O(n log n)`, with no fuel
-  parameter), every declared contract SOUND (21) and 25 of 33 laws proved — `lcm`'s through
+  parameter), every declared contract SOUND (21) and 27 of 34 laws proved — `lcm`'s through
   `gcd`'s certified contract, `ext_gcd`'s Bézout identity over a tuple result, `gcd` dividing both
-  of its arguments, the modular congruences — and all 33 held both over the bounded domain and
+  of its arguments, the modular congruences, and **fast exponentiation agreeing with the naive
+  power** (through the doubling law, stepwise) — and all 34 held both over the bounded domain and
   across magnitudes.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
 - **Dates:** first published 2026-10-17, last updated 2026-10-18
@@ -771,7 +772,7 @@ view's contract derivation for a callee the same phases. The budget is part of t
   for `a·x ≡ 1` — is one the engine does not search for; measured by hand, with that one instance
   added z3 closes the modular-inverse law instantly. Both are named below, with what they need.
 
-### Still open
+### Still open after the eighth follow-up (the first closed in the ninth, below)
 
 - **`pow_mod_agree`** (fast exponentiation agrees with the naive power): the lemma it needs,
   `pow(b, 2e) ≡ pow(b, e)² (mod m)` by induction on `e`, is exactly the equational case above
@@ -794,6 +795,83 @@ view's contract derivation for a callee the same phases. The budget is part of t
   `ite` of the inlined body.
 - `gcd` associativity, `binomial` symmetry and Pascal: facts no contract states (the greatest
   common divisor's characterization; binomial identities); solver limits.
+- The generative checker's report of skipped (erroring) cases.
+
+## Ninth follow-up (2026-10-18): the stepwise checker — fast exponentiation agrees with the naive power
+
+### Measured
+
+| law | before | now |
+|---|---|---|
+| `pow_mod_naive` `double_exponent`: `m = 0 ∨ pow(b, 2e, m) = pow(b, e, m)² mod m` (authored this round) | — | **PROVED** by numeric induction on `e`, stepwise: 156 instances, 156 premises verified alone, the final query unsat; ~20 s |
+| `pow_mod_agree`: `m = 0 ∨ mod_pow(b, e, m) = pow_mod_naive(b, e, m)` (guarded at `m = 0` this round — `mod` by zero errors, the checker skips it) | UNKNOWN | **PROVED** by induction through both callees' definitions on `e`, stepwise: 251 instances, 250 premises verified, the final query unsat; ~75 s |
+
+Totals: laws **27 PROVED / 7 UNKNOWN / 0 UNSUPPORTED** (34 laws), everything else unchanged
+(41/41 run and certify, 21 contracts SOUND, termination and complexity 41/41, 34/34 held).
+
+**What one query could not do, and why.** The eighth follow-up measured it: the doubling law's
+step rests on residues the two sides reach only THROUGH the certificate's equations (an unfolding
+equating a `self` application with a `mod` term), and the instance set that reaches them left z3
+at unknown. Three measurements then located the difficulty exactly. (1) Each instance's PREMISE —
+a ring identity over the solver's own `div`/`mod` axioms — is unsat in 20 ms when checked with
+nothing but the declarations and `m ≠ 0`, and unknown beside the hypotheses: it was never the
+identities, it was the search around them. (2) With every premise verified alone and the
+conclusions assumed, the final query was STILL unknown: `mod` by a variable is nonlinear whether
+or not the proof needs its semantics, and so are products of uninterpreted terms. (3) With
+`mod`/`div` by a non-literal modulus and products of two or more non-literal factors ABSTRACTED to
+uninterpreted functions, the final query is congruence plus linear arithmetic — decidable — and
+answers in 20 ms: unsat with the right instances, sat (a model, not a timeout) without, which is
+what made the last gap findable: the agreement's odd case needs the naive power at `e − 1`
+identified with the doubling law at `2·(e div 2)`, an equality the engine's normalized matching
+cannot see because it holds only in that case; matching application atoms loosely (compound
+arithmetic arguments may differ) generates the variant, and only after the exact matches (the
+loose ones flood the list, and a cap that cuts an exact one loses the proof — 29 exact instances
+closed the doubling law, 192 mixed ones did not).
+
+**The stepwise checker (`euclid::retry_stepwise`).** The rung after the one-query Euclidean rung,
+in every ladder: instances with the certificate's equations substituted into the goal (exact
+matches to depth 3, then loose); each premise its own query (2 s each, 60 s in all — an
+unverifiable premise is left out, stated); the two lemmas (uniqueness, and `(x mod m) mod m =
+x mod m`) discharged once per solver; the final query over `umod`/`udiv`/`umul` with the
+hypotheses, the verified conclusions as `m ≠ 0 ⇒ …` facts, the idempotence lemma at every
+residue, and the negated goal. Sound: the abstraction is a sound over-approximation (a model of
+the original interprets the uninterpreted symbols as the real operations), every identity the
+conclusions rest on was verified with the real operations in its own query, and nothing is ever
+assumed that a query did not discharge. The certificate is three files: the final query
+(`.callee-induction.smt2` / `.induction.smt2`), the premise script (`.euclid-steps.smt2`, every
+`(check-sat)` must answer unsat) and the lemmas (`.lemma-euclid.smt2`, `.lemma-mod-idem.smt2`).
+
+**The agreement's own proof.** The callee rung now states the hypothesis at EVERY recursive
+callee's descent that the induction variable reaches — `mod_pow` at `e div 2`, the naive power at
+`e − 1` — and records the body's callee applications at the hypothesis's application, so the
+callees' contracts are instantiated there too: the doubling law at `(b, e div 2, m)` is what
+closes the odd case (`e − 1 = 2·(e div 2)`), the hypothesis `mod_pow(b, e div 2, m) = pow(b,
+e div 2, m)` and the Euclidean instances the rest; the base cases are the unfoldings.
+
+### Argued
+
+- **A proof is a sequence of decidable questions.** The eighth follow-up's "stepwise" guess was
+  half right: splitting the premises out was necessary, and not sufficient — the final query had
+  to be made DECIDABLE, by abstracting what the proof no longer needs. That abstraction is the
+  honest statement of what the final step is: congruence and linear arithmetic over facts
+  already checked. A solver asked a decidable question answers it; one asked an undecidable one
+  guesses, and its guess was "unknown".
+- **The budget is a design parameter, again.** Two seconds per premise and a minute in all is what
+  keeps a law that will not close from costing the builder hours; the laws that do close spend a
+  fraction of it. What a prover can reach is a function of what it is allowed to spend. The
+  builder's full gauntlet now takes ~33 minutes (it was ~11): every open law pays the stepwise
+  attempt in every ladder it reaches, in every contract derivation of every dependent.
+
+### Still open
+
+- **`prime_agree`**: documented negative (a theorem of number theory, not a consequence of the
+  definitions); no rung reaches it and none should claim to.
+- **`inverse_holds` / `crt_holds`** (and the `Maybe`-valued contracts): witnesses from
+  hypotheses (the Bézout combination) — the stepwise checker does not search the ideal the
+  hypotheses generate. Measured by hand: one such instance closes the inverse law.
+- **`lcm` multiple-of-both**: the quotient's residue modulo `a` needs `(div a g)·g` recombined into
+  `a − (mod a g)` against the other modulus, and `mod` pushed through the inlined body's `ite`.
+- `gcd` associativity, `binomial` symmetry and Pascal: facts no contract states.
 - The generative checker's report of skipped (erroring) cases.
 
 ## Open questions (as they stood before the follow-up)

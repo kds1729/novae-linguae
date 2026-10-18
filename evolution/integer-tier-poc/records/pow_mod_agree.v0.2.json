@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_9312246c3b94ca4fcd1138126b424a610e50498692b7bc97403233ccab284fda",
+ "body_hash": "expr_768bf4f1edb74903d9b37e4ee43b9c2ab5126511c66b1ddf05e9dc1a12ed3bc2",
  "derived_from": null,
  "examples": [
   {
@@ -43,7 +43,7 @@
    }
   }
  ],
- "hash": "fn_642f48617b1c1d0e3ac9d20238fadf2dd7696db8259aaf1639a35bf8885d3ce6",
+ "hash": "fn_11f4079d4477cb4d255eec18dc8bc5c7c37acdacdaeb8f8ff63b4d39fbf0f15e",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -63,27 +63,47 @@
        "args": [
         {
          "kind": "var",
-         "name": "b"
-        },
-        {
-         "kind": "var",
-         "name": "e"
-        },
-        {
-         "kind": "var",
          "name": "m"
+        },
+        {
+         "kind": "lit",
+         "value": 0
         }
        ],
        "kind": "app",
-       "op": "self"
+       "op": "eq"
       },
       {
-       "kind": "lit",
-       "value": true
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "var",
+           "name": "e"
+          },
+          {
+           "kind": "var",
+           "name": "m"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": true
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
       }
      ],
      "kind": "app",
-     "op": "eq"
+     "op": "or"
     },
     "kind": "forall",
     "vars": [

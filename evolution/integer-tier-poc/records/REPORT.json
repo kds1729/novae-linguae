@@ -306,7 +306,16 @@
    "refinement:post[0]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(n)` (inferred O(n))"
-  }
+  },
+  "properties_generative": [
+   "double_exponent: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "double_exponent: CONSISTENT  |  generative: HELD (71 cases)"
+  ],
+  "prove": [
+   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 156 of 156 premises verified separately, the final query over uninterpreted mod/div]"
+  ]
  },
  {
   "name": "mod_pow",
@@ -358,7 +367,7 @@
    "fast_equals_naive: CONSISTENT  |  generative: HELD (73 cases)"
   ],
   "prove": [
-   "fast_equals_naive: UNKNOWN      solver could not decide"
+   "fast_equals_naive: PROVED       by induction through the callees' definitions, on `e (through `fn_17294c85\u2026`, `fn_31c081eb\u2026`)` (unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 250 of 251 premises verified separately, the final query over uninterpreted mod/div]"
   ]
  },
  {

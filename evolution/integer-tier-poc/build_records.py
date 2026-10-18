@@ -337,6 +337,10 @@ def main():
           [{"args": [ilit(2), nlit(10), ilit(1000)], "result": ilit(24)}, {"args": [ilit(3), nlit(0), ilit(7)], "result": ilit(1)},
            {"args": [ilit(-2), nlit(3), ilit(7)], "result": ilit(6)}],
           refinements=[("pre", "m > 0"), ("post", "result >= 0 && result < m")],
+          # The doubling law — pow(b, 2e) ≡ pow(b, e)² (mod m) — is the lemma fast exponentiation's
+          # agreement rests on: an induction on `e` whose step is pure modular algebra, closed by the
+          # Euclidean rung's STEPWISE checker (one query cannot verify the chain; measured).
+          props=[("double_exponent", "forall b e m. m == 0 || self(b, 2 * e, m) == (self(b, e, m) * self(b, e, m)) % m")],
           hints=["modular_power_linear"], complexity="O(n)")
     gauntlet("pow_mod_naive", prove)
 
@@ -358,7 +362,10 @@ def main():
     build("pow_mod_agree", r"\b e m -> eq ({mod_pow} b e m) ({pow_mod_naive} b e m)",
           FN([INT, NAT, INT], BOOL),
           [{"args": [ilit(2), nlit(10), ilit(1000)], "result": blit(True)}, {"args": [ilit(-3), nlit(5), ilit(11)], "result": blit(True)}],
-          props=[("fast_equals_naive", "forall b e m. self(b, e, m) == true")],
+          # Guarded at m = 0 (`mod` by zero errors; the checker skips the case, the prover must be
+          # told). The proof: strong induction on `e` through BOTH callees' descents (`e div 2`,
+          # `e − 1`), the naive power's doubling law at `e div 2`, and the Euclidean rung.
+          props=[("fast_equals_naive", "forall b e m. m == 0 || self(b, e, m) == true")],
           tags=["predicate/check"], hints=["modular_power_agreement"], complexity="O(n)")
     gauntlet("pow_mod_agree", prove)
 

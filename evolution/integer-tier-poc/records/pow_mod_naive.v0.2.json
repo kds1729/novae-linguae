@@ -63,7 +63,7 @@
    }
   }
  ],
- "hash": "fn_0f459738708a5cbb12b39d2b25433f2ce621dc768c08b6a500c6df4830029795",
+ "hash": "fn_17294c8567b399157a80a2ec27662ef1798d30b361e0153cb7550dad9816dc8c",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -73,7 +73,125 @@
   "pow_mod_naive",
   "modular_power_linear"
  ],
- "properties": [],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "m"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "args": [
+            {
+             "kind": "lit",
+             "value": 2
+            },
+            {
+             "kind": "var",
+             "name": "e"
+            }
+           ],
+           "kind": "app",
+           "op": "mul"
+          },
+          {
+           "kind": "var",
+           "name": "m"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "b"
+              },
+              {
+               "kind": "var",
+               "name": "e"
+              },
+              {
+               "kind": "var",
+               "name": "m"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            },
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "b"
+              },
+              {
+               "kind": "var",
+               "name": "e"
+              },
+              {
+               "kind": "var",
+               "name": "m"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            }
+           ],
+           "kind": "app",
+           "op": "mul"
+          },
+          {
+           "kind": "var",
+           "name": "m"
+          }
+         ],
+         "kind": "app",
+         "op": "mod"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "b",
+     "e",
+     "m"
+    ]
+   },
+   "name": "double_exponent"
+  }
+ ],
  "schema_version": "0.2.0",
  "signature": {
   "capabilities": [],
