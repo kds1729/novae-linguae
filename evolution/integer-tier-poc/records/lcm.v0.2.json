@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_123246cfbefad381dcfe6e704a5f63296a548705da9c74c5276445727e128250",
+ "body_hash": "expr_042ba08f609096fab65c15a820ad97b7680b1d9d67c2acad76f00ebfc004c419",
  "derived_from": null,
  "examples": [
   {
@@ -67,7 +67,7 @@
    }
   }
  ],
- "hash": "fn_0beacde50b4d3bc1b9f34e8143aa321ee4e70e8e1d15baa12183cddb58da299f",
+ "hash": "fn_56f417741bde2dd1e8013f00d9e0d6fcdd2ccb8c7da52f9588378488c594d21e",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",

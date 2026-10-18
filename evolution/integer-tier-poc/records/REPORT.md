@@ -1,13 +1,13 @@
 | record | run | certified | typecheck | effects | refinement | termination | complexity | properties (generative) | prove |
 |---|---|---|---|---|---|---|---|---|---|
-| `gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | commutative=EXHAUSTIVE; right_zero=EXHAUSTIVE; divides_both=EXHAUSTIVE; associative=EXHAUSTIVE | commutative=PROVED; right_zero=PROVED; divides_both=UNKNOWN; associative=UNKNOWN |
+| `gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | commutative=EXHAUSTIVE; right_zero=EXHAUSTIVE; divides_both=EXHAUSTIVE; associative=EXHAUSTIVE | commutative=PROVED; right_zero=PROVED; divides_both=PROVED; associative=UNKNOWN |
 | `lcm` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | multiple_of_both=EXHAUSTIVE; commutative=EXHAUSTIVE | multiple_of_both=UNKNOWN; commutative=PROVED |
 | `ext_gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
 | `bezout_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | bezout_identity=EXHAUSTIVE; bezout_identity_nat=EXHAUSTIVE | bezout_identity=PROVED; bezout_identity_nat=PROVED |
 | `mod_inverse` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `inverse_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | inverse_identity=EXHAUSTIVE | inverse_identity=UNKNOWN |
-| `mod_add` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | congruent_to_plain_sum=EXHAUSTIVE; commutative=EXHAUSTIVE | congruent_to_plain_sum=UNKNOWN; commutative=PROVED |
-| `mod_mul` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | congruent_to_plain_product=EXHAUSTIVE; commutative=EXHAUSTIVE | congruent_to_plain_product=UNKNOWN; commutative=PROVED |
+| `mod_add` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | congruent_to_plain_sum=EXHAUSTIVE; commutative=EXHAUSTIVE | congruent_to_plain_sum=PROVED; commutative=PROVED |
+| `mod_mul` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | congruent_to_plain_product=EXHAUSTIVE; commutative=EXHAUSTIVE | congruent_to_plain_product=PROVED; commutative=PROVED |
 | `is_even` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | period_two=EXHAUSTIVE; alternates=EXHAUSTIVE | period_two=PROVED; alternates=PROVED |
 | `pow_mod_naive` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
 | `mod_pow` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
@@ -27,8 +27,8 @@
 | `digits` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `from_digits` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | — | — |
 | `digits_roundtrip` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | digits_then_from_digits=EXHAUSTIVE | digits_then_from_digits=PROVED |
-| `digit_sum` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=UNVERIFIABLE | SOUND | SOUND | sum_bounded_by_value=EXHAUSTIVE | sum_bounded_by_value=UNKNOWN |
-| `binomial` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=UNVERIFIABLE | SOUND | SOUND | symmetry=EXHAUSTIVE; pascal=EXHAUSTIVE; choose_zero=EXHAUSTIVE | symmetry=UNKNOWN; pascal=UNKNOWN; choose_zero=PROVED |
+| `digit_sum` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | sum_bounded_by_value=EXHAUSTIVE | sum_bounded_by_value=PROVED |
+| `binomial` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | symmetry=EXHAUSTIVE; pascal=EXHAUSTIVE; choose_zero=EXHAUSTIVE; beyond_n=EXHAUSTIVE | symmetry=UNKNOWN; pascal=UNKNOWN; choose_zero=PROVED; beyond_n=PROVED |
 | `ntt_split` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `ntt_butterfly` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `log2_floor` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | below_power=EXHAUSTIVE | below_power=PROVED |

@@ -37,8 +37,8 @@
   "prove": [
    "commutative: PROVED       by numeric induction on `a+b (by unfolding alone)` (strong induction over the measure; unsat)",
    "right_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
-   "divides_both: UNKNOWN      numeric induction on `b` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
-   "associative: UNKNOWN      numeric induction on `b+c` did not close (the step needs a lemma, or the arithmetic is nonlinear)"
+   "divides_both: PROVED       by numeric induction on `b, with self's certified contract at the instantiated points (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms]",
+   "associative: UNKNOWN      numeric induction on `b+c (hypothesis as instances at the recursive calls)` did not close (the step needs a lemma, or the arithmetic is nonlinear)"
   ]
  },
  {
@@ -214,7 +214,7 @@
    "commutative: CONSISTENT  |  generative: HELD (198 cases)"
   ],
   "prove": [
-   "congruent_to_plain_sum: UNKNOWN      solver could not decide",
+   "congruent_to_plain_sum: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
    "commutative: PROVED       holds for all inputs (unsat negation)"
   ]
  },
@@ -248,7 +248,7 @@
    "commutative: CONSISTENT  |  generative: HELD (198 cases)"
   ],
   "prove": [
-   "congruent_to_plain_product: UNKNOWN      solver could not decide",
+   "congruent_to_plain_product: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
    "commutative: PROVED       holds for all inputs (unsat negation)"
   ]
  },
@@ -756,7 +756,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -764,7 +764,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:nat-result (\u2265 0)": "numeric induction did not close (the step needs a lemma, or the arithmetic is nonlinear)",
+   "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
@@ -775,7 +775,7 @@
    "sum_bounded_by_value: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "sum_bounded_by_value: UNKNOWN      numeric induction on `n` did not close (the step needs a lemma, or the arithmetic is nonlinear)"
+   "sum_bounded_by_value: PROVED       by numeric induction on `n (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat)"
   ]
  },
  {
@@ -787,7 +787,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:nat-result (\u2265 0)": "UNVERIFIABLE",
+   "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -795,24 +795,27 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
-   "refinement:nat-result (\u2265 0)": "numeric induction did not close (the step needs a lemma, or the arithmetic is nonlinear)",
+   "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(n)` (inferred O(n))"
   },
   "properties_generative": [
    "symmetry: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "pascal: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
-   "choose_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+   "choose_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
+   "beyond_n: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
    "symmetry: CONSISTENT  |  generative: HELD (19 cases)",
    "pascal: CONSISTENT  |  generative: HELD (41 cases)",
-   "choose_zero: CONSISTENT  |  generative: HELD (200 cases)"
+   "choose_zero: CONSISTENT  |  generative: HELD (200 cases)",
+   "beyond_n: CONSISTENT  |  generative: HELD (45 cases)"
   ],
   "prove": [
-   "symmetry: UNKNOWN      numeric induction on `k+n` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
-   "pascal: UNKNOWN      numeric induction on `k` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
-   "choose_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)"
+   "symmetry: UNKNOWN      numeric induction on `k+n (hypothesis as instances at the recursive calls)` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
+   "pascal: UNKNOWN      numeric induction on `k (hypothesis as instances at the recursive calls)` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
+   "choose_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
+   "beyond_n: PROVED       by numeric induction on `k` (strong induction over the measure; unsat)"
   ]
  },
  {

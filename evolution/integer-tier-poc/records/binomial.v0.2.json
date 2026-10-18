@@ -83,7 +83,7 @@
    }
   }
  ],
- "hash": "fn_132acbb5ae850b328b7676ab00b46c34f8edede321a20b587383157067e3b222",
+ "hash": "fn_4141709c823385798a6dd93b111b2a621fd5cfb13d886efbf1dcfe3ec23a2c2f",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -375,6 +375,60 @@
     ]
    },
    "name": "choose_zero"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "k"
+        },
+        {
+         "kind": "var",
+         "name": "n"
+        }
+       ],
+       "kind": "app",
+       "op": "le"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "n"
+          },
+          {
+           "kind": "var",
+           "name": "k"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n",
+     "k"
+    ]
+   },
+   "name": "beyond_n"
   }
  ],
  "schema_version": "0.2.0",

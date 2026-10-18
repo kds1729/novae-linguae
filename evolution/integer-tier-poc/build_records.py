@@ -238,7 +238,11 @@ def main():
            {"args": [nlit(1071), nlit(462)], "result": nlit(21)}],
           props=[("commutative", "forall a b. self(a, b) == self(b, a)"),
                  ("right_zero", "forall a. self(a, 0) == a"),
-                 ("divides_both", "forall a b. a % self(a, b) == 0 && b % self(a, b) == 0"),
+                 # Guarded at (0, 0): gcd(0, 0) = 0 and `0 % 0` is an error, which the generative
+                 # checker SKIPS (an erroring case is undecided, so the unguarded law read
+                 # EXHAUSTIVE) while the prover must be told the domain — a model with the modulus
+                 # 0 is honest, not spurious.
+                 ("divides_both", "forall a b. (a == 0 && b == 0) || (a % self(a, b) == 0 && b % self(a, b) == 0)"),
                  ("associative", "forall a b c. self(self(a, b), c) == self(a, self(b, c))")],
           # Positivity: a certified contract `lcm` relies on through composition (its `div` by gcd is sound
           # only because gcd ≥ 1 whenever an argument is).
@@ -480,7 +484,12 @@ def main():
            {"args": [nlit(60), nlit(30)], "result": nlit(118264581564861424)}, {"args": [nlit(100), nlit(50)], "result": nlit(100891344545564193334812497256)}],
           props=[("symmetry", "forall n k. n < 0 || k < 0 || k > n || self(n, k) == self(n, n - k)"),
                  ("pascal", "forall n k. n < 0 || k < 0 || self(n + 1, k + 1) == self(n, k) + self(n, k + 1)"),
-                 ("choose_zero", "forall n. self(n, 0) == 1")],
+                 ("choose_zero", "forall n. self(n, 0) == 1"),
+                 # C(n, k) = 0 past n — the lemma `result ≥ 0` needs: the multiplicative step's second
+                 # factor `n − k + 1` is negative there, and the product is non-negative only because
+                 # the first factor already vanished (a law proved first, then stated in the post's own
+                 # induction).
+                 ("beyond_n", "forall n k. k <= n || self(n, k) == 0")],
           hints=["binomial_coefficient", "choose"], complexity="O(n)")
     gauntlet("binomial", prove)
 

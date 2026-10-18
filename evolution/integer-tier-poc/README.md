@@ -2,16 +2,19 @@
 
 - **Status:** absorbed (2026-10-17; the four open questions closed the same day, below). Every
   language-level finding below is in the tree: eight evaluator/checker defects fixed, two checkers
-  widened, and — from the follow-up — callee folding over a linked view, a numeric-induction rung
-  in the prover, variable divisors, and magnitude-wide sampling (`tooling/validator`); the records
-  published to the commons with signed certifications. The 41 records and their builder live here
-  (`records/`, `build_records.py`) — reproducible with no credential. Final tally (fourth follow-up):
-  41/41 certify, termination AND complexity SOUND on all 41 (the NTT chain at `O(n log n)`, with no
-  fuel parameter), 18 contracts and 13 laws proved — `lcm`'s through `gcd`'s certified contract,
-  `ext_gcd`'s Bézout identity over a tuple result — and 31 laws held both over the bounded domain and
+  widened, and — from the follow-ups — callee folding over a linked view, numeric induction in the
+  prover (with the hypothesis as instances), variable divisors, magnitude-wide sampling, contracts
+  that compose and instantiate, induction through a callee's definition, the Euclidean rung and a
+  function's own facts in its inductions (`tooling/validator`); the records published to the
+  commons with signed certifications. The 41 records and their builder live here (`records/`,
+  `build_records.py`) — reproducible with no credential. Final tally (eighth follow-up): 41/41
+  certify, termination AND complexity SOUND on all 41 (the NTT chain at `O(n log n)`, with no fuel
+  parameter), every declared contract SOUND (21) and 25 of 33 laws proved — `lcm`'s through
+  `gcd`'s certified contract, `ext_gcd`'s Bézout identity over a tuple result, `gcd` dividing both
+  of its arguments, the modular congruences — and all 33 held both over the bounded domain and
   across magnitudes.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-10-17, last updated 2026-10-17
+- **Dates:** first published 2026-10-17, last updated 2026-10-18
 - **Scope:** `tooling/validator` (`interp.rs` arithmetic + comparison + recursion depth,
   `proptest.rs`, `eval.rs`, `prove.rs`, `induct.rs`, `terminate.rs`, `complexity.rs`, `main.rs`),
   `spec/evaluation.md`; read against `spec/surface-syntax.md` §2 (predicate surface) and
@@ -653,7 +656,7 @@ then instances only) runs in this rung too. The false round-trip `… = n + 1` s
   at ITS recursive call: each a quantified statement instantiated at the points the proof uses,
   each measured against the quantified form first.
 
-### Still open
+### Still open after the seventh follow-up (the first reached in the eighth, below)
 
 - The nonlinear UNKNOWNs (Pascal, associativity, `binomial ≥ 0`, `digit_sum ≥ 0`, the `mod`
   congruences, `gcd` divides both): both solvers time out; a lemma rung (stating `mod`
@@ -665,6 +668,133 @@ then instances only) runs in this rung too. The false round-trip `… = n + 1` s
   / `n` with different strides; the equivalence prover inducts over lists). The rung above
   reaches ONE recursive callee's measure; a law comparing two needs their definitions unfolded
   in lockstep — the two-recursive principle, numerically.
+
+## Eighth follow-up (2026-10-18): the Euclidean rung, the hypothesis as instances, the function's own facts
+
+### Measured
+
+| | after the seventh follow-up | now |
+|---|---|---|
+| refinements | 19 SOUND / 2 UNVERIFIABLE | **21 / 0** — `digit_sum ≥ 0` (the hypothesis as instances), `binomial ≥ 0` (from its new law `beyond_n`, `k > n ⇒ C(n, k) = 0`, proved first and stated in the post's own induction) |
+| laws, prove | 20 PROVED / 12 UNKNOWN / 0 UNSUPPORTED (32 laws) | **25 / 8 / 0** (33 laws) — new: `mod_add`'s and `mod_mul`'s congruences with the plain sum and product (the Euclidean rung), `digit_sum ≤ n` (the hypothesis as instances), **`gcd` divides both of its arguments** (all three: its own certified `≥ 1`, the hypothesis at `gcd(b, a mod b)`, and `a` reduced modulo `g` through `a = (a div b)·b + (a mod b)`), `beyond_n` (plain induction on `k`) |
+| laws, generative | 31 of 31 | **33 of 33** bounded (30 EXHAUSTIVE, 3 HELD) and `--wide` |
+| everything else | | unchanged: 41/41 run and certify, termination 41/41, complexity 41/41 |
+
+**What the solvers can and cannot do, measured first.** Every modular identity here is a
+consequence of ONE fact, the uniqueness of Euclidean division: `m ≠ 0 ∧ x = q·m + r ∧ 0 ≤ r < |m|
+⇒ x div m = q ∧ x mod m = r`. z3 4.13 (this box), z3 4.16 (the release workflow's pin) and cvc5
+1.3 all prove it in exactly that form — and z3 4.16 answers *unknown* on the `m > 0` form and on
+the one-step shift `(x + m) mod m = x mod m` that 4.13 proves; a solver version is part of the
+measurement. None of the three proves the sum or product congruence directly, nor the
+divisibility step `d | a ∧ d | b ⇒ d | (a mod b)`: `mod` by a variable is nonlinear, and the
+solver does not find the quotient witness. Given the witness — the lemma instantiated at the
+right `(x, q, r)` — every one of them closes by linear reasoning plus the solver's own `div`/`mod`
+axioms, in milliseconds.
+
+**The Euclidean rung (`tooling/validator/src/euclid.rs`).** A post-pass over any certificate: each
+`(mod t m)`/`(div t m)` with a non-literal modulus has `t` read as a polynomial over its atoms,
+each atom replaced by its own decomposition `(div y m)·m + (mod y m)`, the result split as `t = P
++ m·Q`, and the lemma asserted at `x = t, q = Q + (P div m), r = P mod m` — the conclusion `t mod m
+= P mod m` is the ring homomorphism ℤ → ℤ/mℤ stated at the goal's own terms, and a hypothesis
+that an atom's residue vanishes (`b mod g = 0`, the induction hypothesis) then kills it inside
+`P`. A nested residue of a compound argument is lifted one occurrence per step through `(mod X m)
+= X − m·(X div m)` (every premise stays a low-degree identity; lifting everything at once leaves
+z3 at unknown on a fourth-degree one). For Euclid's step, `a` must first be rewritten by its
+decomposition against the OTHER modulus the certificate mentions — `a = (a div b)·b + (a mod b)`,
+then each piece modulo `g` — the cross-modulus variants, generated for the goal's terms only (the
+hypotheses' terms get their plain instance): the full set closes the divisibility law in 18 s,
+the pruned one in 0.1 s. The lemma is discharged by the solver FIRST (cached per solver; no
+discharge, no rung); each instance keeps the lemma's premises, so a wrong witness is vacuous, never
+unsound — the prover's algebra is not trusted, only the solver's check of it; instances are true,
+so a model of the augmented certificate is a model of the original. A retry on UNKNOWN in every
+ladder: first-order, numeric and callee induction, the self-contract rung, refinements. The
+certificate records it (`--smt-out` writes the lemma's own certificate beside it); the label says
+`[with the Euclidean-division lemma instantiated at its mod/div terms]`.
+
+**The hypothesis as instances.** The numeric-induction ladder had two rungs — unfolding alone,
+then the quantified hypothesis. `digit_sum(b, n) ≤ n` closes on neither: the quantifier over
+`div`/`mod` terms leaves z3 at unknown. The hypothesis as explicit INSTANCES at each recursive call
+the unfoldings reach (`self(b, n div b)`), bound to the call's arguments in goal scope (parameters
+substituted before lowering — no `let` a permuted law could shadow) and guarded by the measure
+decrease and the domain facts, closes it with no lemma at all, and `digit_sum ≥ 0` with it. The
+third rung; the same measurement as the structural measure's, the callee rung's and the contract
+ladder's — the fourth time the instance beats the quantifier.
+
+**The function's own certified facts in its inductions.** `gcd` divides both of its arguments
+needs, in its step, that `gcd ≥ 1`: with `self` uninterpreted, the deepest application the
+unfoldings reach is unconstrained, the model sets it to 0, and `mod` by 0 says nothing — an honest
+SAT (the first run, before the guard below, was also honest for a second reason). `gcd`'s
+`(a < 1 ∧ b < 1) ∨ result ≥ 1` is CERTIFIED, by the same induction without laws. So the rung gets
+the record's own contract — its proved posts and laws, as the linked view re-derives them —
+instantiated at every `self` application the certificate states. Derived in PHASES so that nothing
+assumes itself (`certify::derive_self_facts`): (1) laws by the plain rungs; (2) posts, with the
+phase-1 laws as facts — `binomial ≥ 0` is the multiplicative step `C(n, k−1)·(n−k+1) div k`, whose
+second factor is negative past `n` and whose product is non-negative only because `C(n, k−1)` has
+already vanished there: the law `beyond_n` (`k > n ⇒ C(n, k) = 0`, proved by plain induction on
+`k`) stated in the post's own induction closes it; (3) the laws phase 1 left open, with the posts
+and the phase-1 laws — `gcd`'s divisibility. `check-refinement`, `certify` and the linked view all
+read this one derivation, so a dependent never sees a fact its callee's own report does not show;
+`prove`'s retry never installs the law under proof (the view's phase 3 may have proved it, and a
+certificate that assumes its goal is no proof).
+
+**A law that errors.** `gcd(0, 0) = 0`, so `a mod gcd(a, b)` at `(0, 0)` is `0 mod 0` — an error
+in the interpreter, which the generative checker SKIPS (an erroring case is undecided, by its
+documented rule), so the unguarded law read EXHAUSTIVE over the bounded domain while the prover's
+model with the modulus 0 was honest. The law is now guarded at `(0, 0)`; the checker's report is
+the open note (a skipped case is not a passed one).
+
+**Cost.** An open law of a recursive function now runs up to four rungs of numeric induction,
+the self-contract rung, the callee rung and a second numeric ladder with the function's facts,
+each solver call budgeted at 5 s; the builder's full gauntlet takes ~11 minutes (it was ~4), the
+view's contract derivation for a callee the same phases. The budget is part of the prover's reach
+— the pruning above exists because of it.
+
+### Argued
+
+- **The witness is the proof.** Nonlinear modular arithmetic is where one-query SMT stops; the
+  quotient a congruence rests on is a few lines of polynomial algebra a prover can do and a
+  solver cannot search for. Supplying it as an INSTANCE of a lemma the solver discharged — never
+  as an axiom assumed — keeps the certificate re-checkable end to end and the verdict exactly as
+  honest as before: the lemma, its instances, the goal, each checked.
+- **A function's facts form a DAG.** The same discipline as composition by contract, applied to a
+  function's OWN facts: nothing proved enters a proof that it depends on. Three phases are
+  enough for everything here; the order (laws, posts, laws) is the measured one, not a doctrine.
+- **Two limits, recorded with their diagnosis.** A goal whose two sides meet at residues the solver
+  forms only THROUGH equations — an unfolding equating a `self` application with a `mod` term, the
+  fast-exponentiation step `pow(b, 2e) ≡ pow(b, e)² (mod m)` — has no syntactic term to
+  instantiate at. Substituting those equations into the goal to generate them was built and
+  measured: the instances are the right ones, and the set (108 for Euclid's divisibility, 15
+  without) leaves z3 at unknown on certificates it otherwise closes in 0.1 s — a chain of nonlinear
+  premises is a proof to be checked STEPWISE (each instance's premise its own query), not one
+  query; that is a proof-producing procedure, a different artifact. And a witness that is a
+  combination of a HYPOTHESIS — the Bézout identity's `q = −y − (a mod m)·(x div m) + (1 div m)`
+  for `a·x ≡ 1` — is one the engine does not search for; measured by hand, with that one instance
+  added z3 closes the modular-inverse law instantly. Both are named below, with what they need.
+
+### Still open
+
+- **`pow_mod_agree`** (fast exponentiation agrees with the naive power): the lemma it needs,
+  `pow(b, 2e) ≡ pow(b, e)² (mod m)` by induction on `e`, is exactly the equational case above
+  (its instances exist; one query does not verify the chain). The route is a stepwise checker:
+  each Euclidean instance's premise discharged as its own query, the chain assembled as a proof.
+  Then the agreement itself needs the hypothesis at BOTH callees' descents (`e div 2` and `e − 1`)
+  in the callee rung — strong induction on the shared variable, the two-recursive principle
+  numerically.
+- **`prime_agree`** (deterministic Miller–Rabin with twelve bases agrees with trial division): a
+  theorem of number theory whose proof rests on computed tables (the bases cover `n < 3.3·10²⁴`),
+  not a consequence of the two definitions. No rung reaches it and none should claim to; the
+  wide generative check (137/200 decided at 2^60) is its evidence. A documented negative.
+- **`inverse_holds` / `crt_holds`** (and the `Maybe`-valued contracts for `mod_inverse`/`crt2`):
+  witnesses from hypotheses — a linear combination over the certificate's equations, found by
+  solving for the goal's residue in the ideal the hypotheses generate (Gröbner-style, bounded).
+  Measured: one such instance closes the inverse law.
+- **`lcm` multiple-of-both**: the quotient `(a·b) div g` is `a·(b div g)` by `gcd`'s now-proved
+  divisibility, but its residue modulo `a` needs `(div a g)·g` recombined into `a − (mod a g)` — a
+  normalization against the OTHER modulus the chain does not do — and `mod` pushed through the
+  `ite` of the inlined body.
+- `gcd` associativity, `binomial` symmetry and Pascal: facts no contract states (the greatest
+  common divisor's characterization; binomial identities); solver limits.
+- The generative checker's report of skipped (erroring) cases.
 
 ## Open questions (as they stood before the follow-up)
 

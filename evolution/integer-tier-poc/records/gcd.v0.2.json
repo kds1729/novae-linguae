@@ -83,7 +83,7 @@
    }
   }
  ],
- "hash": "fn_09bb7f29b5f5c300f38eb800c2423cf60f8fb77d761c7cb22280c766515ecb38",
+ "hash": "fn_0a35b52c57653f69ac62b0ae61f731270437b59bf20042777742f2e22c78ac2f",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -185,33 +185,13 @@
            "name": "a"
           },
           {
-           "args": [
-            {
-             "kind": "var",
-             "name": "a"
-            },
-            {
-             "kind": "var",
-             "name": "b"
-            }
-           ],
-           "kind": "app",
-           "op": "self"
+           "kind": "lit",
+           "value": 0
           }
          ],
          "kind": "app",
-         "op": "mod"
+         "op": "eq"
         },
-        {
-         "kind": "lit",
-         "value": 0
-        }
-       ],
-       "kind": "app",
-       "op": "eq"
-      },
-      {
-       "args": [
         {
          "args": [
           {
@@ -219,34 +199,94 @@
            "name": "b"
           },
           {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
+        }
+       ],
+       "kind": "app",
+       "op": "and"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
            "args": [
             {
              "kind": "var",
              "name": "a"
             },
             {
-             "kind": "var",
-             "name": "b"
+             "args": [
+              {
+               "kind": "var",
+               "name": "a"
+              },
+              {
+               "kind": "var",
+               "name": "b"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
             }
            ],
            "kind": "app",
-           "op": "self"
+           "op": "mod"
+          },
+          {
+           "kind": "lit",
+           "value": 0
           }
          ],
          "kind": "app",
-         "op": "mod"
+         "op": "eq"
         },
         {
-         "kind": "lit",
-         "value": 0
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "b"
+            },
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "a"
+              },
+              {
+               "kind": "var",
+               "name": "b"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            }
+           ],
+           "kind": "app",
+           "op": "mod"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
         }
        ],
        "kind": "app",
-       "op": "eq"
+       "op": "and"
       }
      ],
      "kind": "app",
-     "op": "and"
+     "op": "or"
     },
     "kind": "forall",
     "vars": [
