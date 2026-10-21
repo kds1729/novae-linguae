@@ -1,8 +1,8 @@
 # A second cloud, a second description format, the same adapter
 
-- **Status:** absorbed (2026-08-20). Both defects it reports are fixed in-tree (`e27b281` —
+- **Status:** absorbed (2026-08-20). Both defects it reports are fixed in-tree (`0b11263` —
   [finding 1](findings.md#1-certifys-schema-check-emits-verdicts-the-certification-schema-forbids);
-  `2099326` — [finding 3](findings.md#3-a-bodied-operations-synthesized-worked-example-violates-the-descriptions-own-schema)),
+  `b5e5bd1` — [finding 3](findings.md#3-a-bodied-operations-synthesized-worked-example-violates-the-descriptions-own-schema)),
   findings 2, 4, 5 and 6 are recorded measurements,
   [finding 7](findings.md#7-the-live-service-serializes-absent-members-as-explicit-null--and-the-description-does-not-admit-it)
   is resolved (null-as-absence admitted for optional members, refused for required ones), and
@@ -15,15 +15,15 @@
 - **Scope:** `tooling/nl-ingest-openapi` (exercised unmodified against a second vendor's format
   chain; one open defect reported); `spec/certification.schema.json` (finding 1, fixed); extends
   `evolution/gcp-sdk-poc` — its findings 3, 7 and 11 get cross-vendor generalisation data here.
-- **Provenance:** upstream commit `e27b281`; Smithy model `aws/api-models-aws` commit `bedddbec`
+- **Provenance:** upstream commit `0b11263`; Smithy model `aws/api-models-aws` commit `bedddbec`
   (2026-08-19), `models/lambda/service/2015-03-31/lambda-2015-03-31.json`
   (sha256 `f70ac72f4f028bac…`); `smithy-cli` **1.73.0** (openapi plugin, with
   smithy-aws-traits / -aws-iam-traits / -aws-endpoints / -waiters / -rules-engine /
   -smoke-test-traits / -aws-smoke-test-model / -aws-apigateway-openapi 1.73.0); **moto 5.2.2**
   (`moto[server]`, pip) as the rehearsal service; run date 2026-08-19.
 - **Resolution:** module committed to `main` directly (solo-maintainer repo). Finding 1's fix is
-  `e27b281`. Findings 2, 4, 5 and 6 are measurements, not requests. Finding 3's suggested
-  resolution was accepted by the maintainer and fixed in `2099326` — the hermetic repro below now
+  `0b11263`. Findings 2, 4, 5 and 6 are measurements, not requests. Finding 3's suggested
+  resolution was accepted by the maintainer and fixed in `b5e5bd1` — the hermetic repro below now
   refuses with the reason.
 
 ## Summary
@@ -60,7 +60,7 @@ gestured at ([finding 5](findings.md#5-aws-moves-auth-and-endpoint-from-data-to-
 Standing the commons node up for this corpus also caught a fresh regression in the tree: the
 finding-12 fix gave `certify` a `schema` check whose verdicts the certification schema's own enum
 forbade, making every newly signed certification unpublishable — the producer/admitting-authority
-disagreement it was built to close, reintroduced one layer up. Fixed in `e27b281`
+disagreement it was built to close, reintroduced one layer up. Fixed in `0b11263`
 ([finding 1](findings.md#1-certifys-schema-check-emits-verdicts-the-certification-schema-forbids)).
 
 ## Contents
@@ -87,7 +87,7 @@ disagreement it was built to close, reintroduced one layer up. Fixed in `e27b281
 The named next step ran, and the provenance table proved its worth: the pipeline was reproduced
 from it on a second machine — the Smithy model fetched at `bedddbec` (sha256 verified,
 `f70ac72f4f028bac…`), smithy-cli 1.73.0 reinstalled from its release archive, the two
-description transforms applied, and the corpus regenerated with the adapter at `5aaffda`:
+description transforms applied, and the corpus regenerated with the adapter at `e52f0c5`:
 **84 of 85 operations compiled, with the same single refusal**
 (`GetDurableExecutionState`, documents no 404). The loop then ran against **real AWS Lambda**
 (us-east-1), through a local SigV4 signing proxy holding an IAM user scoped to read-wide /
@@ -158,7 +158,7 @@ outside the repository — create bodies and plan data embed ARNs, which are the
 (the same boundary the slice close drew).
 
 This surface then drove two rungs [`spec/world-state.md`](../../spec/world-state.md) had held
-as deliberately-out. **Plans became commons artifacts** (`plan_…`, `2e2507a`): the OQ4 worked
+as deliberately-out. **Plans became commons artifacts** (`plan_…`, `a7707ec`): the OQ4 worked
 lifecycle plan published through Arca's gate as `plan_e4cf79e5…` and re-decided PLAN-SOUND
 from the live node by address. And **observation probes** closed the testimony gap this
 module's dependency made concrete: a fourth plan — put-concurrency resting on the stated

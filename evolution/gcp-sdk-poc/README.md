@@ -3,13 +3,13 @@
 - **Status:** published. Three of the four defects it has reported are fixed —
   [proposal 01](proposals/01-request-content-type.md) is `accepted` and implemented, and
   [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call) was fixed in
-  `ff1c258` (verified against its own fixture: all three projections now refuse, and the legitimate
+  `76b20a2` (verified against its own fixture: all three projections now refuse, and the legitimate
   path is unaffected). [Finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction)
-  and 12 are fixed in `25fe525`;
+  and 12 are fixed in `9c08c0f`;
   [finding 13](findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable) —
   what finding 11's refusal costs the delete surface — is resolved:
   [proposal 02](proposals/02-idempotent-delete-observation.md) was **accepted** and applied in
-  `b0271de` (`--observe-absent-delete`). Nothing this module reported remains open; whether it
+  `b744f20` (`--observe-absent-delete`). Nothing this module reported remains open; whether it
   now qualifies as absorbed is the author's to declare.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
 - **Dates:** first published 2026-07-30, last updated 2026-08-01
@@ -19,9 +19,9 @@
   `storage:v1` revision **20260719**; `google-discovery-to-swagger` **2.1.0**;
   `swagger2openapi` **7.0.8**; run date 2026-07-26
 - **Resolution:** module merged in #2. Defect 1 fixed by accepting
-  [proposal 01](proposals/01-request-content-type.md); defect 2 in `2659c09`; defect 3 in `ff1c258`.
+  [proposal 01](proposals/01-request-content-type.md); defect 2 in `5629590`; defect 3 in `76b20a2`.
   All four original **open questions** are answered in-tree, and findings 9 and 10 — raised by
-  exercising those answers — are fixed in `b689ce5`. Defect 4 ([finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction))
+  exercising those answers — are fixed in `fb74196`. Defect 4 ([finding 11](findings.md#11-a-path-parameterised-gets-worked-example-is-unsatisfiable-by-construction))
   is outstanding.
 
 ## Summary
@@ -55,7 +55,7 @@ Two defects surfaced along the way, one of them silent for days.
 | [`findings.md`](findings.md) | The thirteen findings, each with the measurement behind it, and how they generalise across four APIs |
 | [`repro/`](repro/) | Hermetic fixtures — no cloud account, no credentials, no vendor input |
 | [`proposals/01-request-content-type.md`](proposals/01-request-content-type.md) | Emit the declared request `Content-Type` — **accepted**, applied, and its three questions answered |
-| [`proposals/02-idempotent-delete-observation.md`](proposals/02-idempotent-delete-observation.md) | Observe the idempotent DELETE at the absent name, recovering the 109 unreachable deletes — **accepted**, applied in `b0271de` |
+| [`proposals/02-idempotent-delete-observation.md`](proposals/02-idempotent-delete-observation.md) | Observe the idempotent DELETE at the absent name, recovering the 109 unreachable deletes — **accepted**, applied in `b744f20` |
 
 ## Defects reported
 
@@ -73,7 +73,7 @@ Two defects surfaced along the way, one of them silent for days.
    an optional query parameter, and **zero** about the **69** response bodies it declined. The
    trigger is the media range `*/*`, which is what *any* Swagger 2.0 description without `produces`
    converts to — so the exposed class is far wider than one vendor.
-   **Fixed in #1** (`2659c09`) — diagnostics only, no artifact changes. The adapter now names the
+   **Fixed in #1** (`5629590`) — diagnostics only, no artifact changes. The adapter now names the
    media type it declined and why.
 
 3. **An optional field projection materialises off a FAILED call** — when the observation gate's call
@@ -83,7 +83,7 @@ Two defects surfaced along the way, one of them silent for days.
    verdicts. The guard that would catch it is `required_field`, and Google Discovery emits no
    `required` at all — **0 of 34** schemas here declare one — so it is dead code for this entire
    class of description. An expired token would silently mint a `None`-valued, certified projection
-   for every field of every operation in a corpus. **Fixed in `ff1c258`** — each projection's verdict
+   for every field of every operation in a corpus. **Fixed in `76b20a2`** — each projection's verdict
    now rests on its own recorded observation. Found after publication; hermetic fixture in
    [`repro/`](repro/). See
    [finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call).
@@ -138,26 +138,26 @@ each against the corpus then showed — the answers work, and each surfaced the 
 ### Fixed since, and verified against this corpus
 
 - **[Finding 8](findings.md#8-an-optional-field-projection-materialises-off-a-failed-call)** —
-  fixed in `ff1c258`, by a better route than the one suggested: each projection's verdict rests on
+  fixed in `76b20a2`, by a better route than the one suggested: each projection's verdict rests on
   its *own* recorded observation rather than inheriting the whole-document projection's, which is
   right, since those are separate executions. Re-run against the module's own fixture: all three
   projections refuse, only the status record is written, and the legitimate path is untouched
   (39 projections still admitted, `getLocation` still observes `Just("US")`).
 - **[Finding 9](findings.md#9-world-refinements-cannot-key-a-resource-the-request-body-names)** —
-  fixed in `b689ce5` by a `body-field` key part, grounded at plan-check time from the step's literal
+  fixed in `fb74196` by a `body-field` key part, grounded at plan-check time from the step's literal
   argument, so decidability is untouched. The create → verify → delete plan that could only come back
   `UNVERIFIABLE` is now **`PLAN-SOUND`**, and discharged by *step 1's own `ensures`* rather than by a
   stated assumption — which was the whole point, since the assumption that made it pass before was
   false at plan start.
 - **[Findings 11 and 12](findings.md#12-certify-admits-records-the-commons-cannot-accept)** — both
-  fixed in `25fe525`. Finding 12 took both halves: `certify` now schema-validates (a 200-character
+  fixed in `9c08c0f`. Finding 12 took both halves: `certify` now schema-validates (a 200-character
   `name_hint` gives `=> NOT CERTIFIED`) *and* the cap moved 64 → 128, so real operations are no
   longer excluded — the seven IAM records the node had refused now load, `failed=0`. Finding 11 is
   fixed by refusing the operation rather than minting a false example; see
   [finding 13](findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable) for
   what that costs.
 - **[Finding 10](findings.md#10-assemble-cannot-admit-any-record-from-this-corpus)** — fixed in
-  `b689ce5` by exactly the suggested resolution. `assemble` now answers the same goal:
+  `fb74196` by exactly the suggested resolution. `assemble` now answers the same goal:
 
   ```
   REUSED  storage_buckets_getlocation  fn_777700ffa716f1cf…
@@ -174,7 +174,7 @@ Nothing. The last entry — the
 [finding 13](findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable)
 consequence, 109 path-parameterised DELETEs unreachable by any route — closed when
 [proposal 02](proposals/02-idempotent-delete-observation.md) was accepted and applied in
-`b0271de`: the opt-in `--observe-absent-delete` observes the verb's effect-free absent-name
+`b744f20`: the opt-in `--observe-absent-delete` observes the verb's effect-free absent-name
 case behind a probe-checked precondition, so the create → verify → delete lifecycle is again
 assemblable from a description. The corpus regeneration that was held on this decision can
 proceed.

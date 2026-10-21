@@ -20,7 +20,7 @@
   `proptest.rs`, `eval.rs`, `prove.rs`, `induct.rs`, `terminate.rs`, `complexity.rs`, `main.rs`),
   `spec/evaluation.md`; read against `spec/surface-syntax.md` §2 (predicate surface) and
   `spec/intent-tag-vocabulary.md` (`math/<…>`).
-- **Provenance:** upstream commit `b0c7183` (the tree before this module); `nl-validator` built
+- **Provenance:** upstream commit `e4d71a8` (the tree before this module); `nl-validator` built
   with rustc 1.99 (release profile); z3 4.13.3 (Debian/Ubuntu package); python 3.14 for the
   builder; one laptop (Ubuntu 26.04). Reference values for the worked examples computed with
   Python's integers (`pow`, `math.isqrt`, a 12-base Miller–Rabin, a textbook NTT) inside the
@@ -55,7 +55,7 @@ proving is recursive).
 
 | Input | Pinned at |
 |---|---|
-| Repository | `b0c7183` before; this module's commit and the validator commit after |
+| Repository | `e4d71a8` before; this module's commit and the validator commit after |
 | Validator | `cargo build --release`, rustc 1.99; 609 tests after the changes (600 before) |
 | Solver | z3 4.13.3 (apt); `prove` default |
 | NTT prime | p = 998244353 = 119·2^23 + 1, primitive root 3 (lengths up to 2^23 divide p − 1) |
@@ -66,7 +66,7 @@ proving is recursive).
 
 Every number below comes from `build_records.py` (its stdout is the log; `records/REPORT.json`
 and `records/REPORT.md` are the per-record tables). `REPORT-before-fixes.md` is the table from the
-first run, on the validator as it stood at `b0c7183`.
+first run, on the validator as it stood at `e4d71a8`.
 
 **The records.** 38 pure records in surface syntax: 23 number-theoretic (`gcd`, `lcm`, `ext_gcd`,
 `mod_inverse`, `mod_add`, `mod_mul`, `is_even`, `pow_mod_naive`, `mod_pow`, `isqrt`,

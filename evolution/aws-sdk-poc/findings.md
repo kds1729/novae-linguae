@@ -12,7 +12,7 @@ and keep every number.
 | Smithy → OpenAPI 3 | `smithy-cli` **1.73.0**, `openapi` plugin (protocol `aws.protocols#restJson1`), with the 1.73.0 trait/dependency set named in the README |
 | description transforms | strip `aws.auth#sigv4` (finding 5); set `servers[0].url` to the operator's signing entry point (finding 5) |
 | rehearsal service | **moto 5.2.2** (`moto[server]`, pip), behind a local SigV4-signing proxy |
-| upstream commit | `5aaffda` for the ingest runs; `e27b281` (this module's finding 1 fix) for the node loading |
+| upstream commit | `e52f0c5` for the ingest runs; `0b11263` (this module's finding 1 fix) for the node loading |
 | run date | 2026-08-19 |
 
 AWS publishes Smithy JSON AST models rather than OpenAPI 3, so the pipeline is
@@ -46,10 +46,10 @@ replays with no grants, no proxy, and no service running.
 
 ## 1. `certify`'s schema check emits verdicts the certification schema forbids
 
-Found while standing a commons node up for this corpus, at upstream `5aaffda`; the node's own
+Found while standing a commons node up for this corpus, at upstream `e52f0c5`; the node's own
 suite caught it (3 failures).
 
-**Measured.** `certify.rs` (since `25fe525`, the finding-12 fix in `gcp-sdk-poc`) prepends a
+**Measured.** `certify.rs` (since `9c08c0f`, the finding-12 fix in `gcp-sdk-poc`) prepends a
 `schema` check whose verdicts are `VALID` / `SCHEMA-INVALID`. The verdict enum in
 `spec/certification.schema.json` contained neither, so the node's verify-then-store gate answered
 every freshly signed certification with:
@@ -64,7 +64,7 @@ one layer up (the record schema gained a check; the certification schema never l
 check's vocabulary). A gate and its producer sharing a vocabulary is a single fact that lived in
 two places.
 
-**Resolved** in `e27b281`: the enum admits both verdicts. All 173 node tests and the validator
+**Resolved** in `0b11263`: the enum admits both verdicts. All 173 node tests and the validator
 suite pass; the 168-artifact load reported `stored=168 skipped=0 failed=0`.
 
 ## 2. A Smithy-derived description documents its errors — the absent-name convention is satisfiable
@@ -108,7 +108,7 @@ python3 -c "import json; r=json.load(open('/tmp/f3/createwidget.v0.2.json')); \
 ```
 
 **Concluded.** This is finding 11's family — *use a value nothing satisfies* colliding with
-*assert the documented success* — one verb class over: the `25fe525` fix covered
+*assert the documented success* — one verb class over: the `9c08c0f` fix covered
 path-parameterised GET/DELETE and left bodied operations carrying the same disease through a
 different limb. The description states the unsatisfiability in its own words (`required`), so the
 refusal needs no execution to justify. The suggested resolution mirrors the accepted one: an
@@ -119,10 +119,10 @@ rule and these verbs mutate — supplying an operator body would make the exampl
 could not make it *observed*, which is gcp finding 4 still standing, correctly. Asserting the
 documented 400 at `{}` instead would be the vacuous-example trap of gcp finding 8 in new clothes.
 
-**Resolved** in `2099326`, by the suggested resolution: an operation whose every declared request
+**Resolved** in `b5e5bd1`, by the suggested resolution: an operation whose every declared request
 media type requires fields the synthesized example cannot supply refuses with the reason — the
 repro above now answers `CreateWidget SKIPPED: request body requires fields (`name`, `kind`) …`
-and writes nothing (the transcript above records the defect as measured at `5aaffda`). A
+and writes nothing (the transcript above records the defect as measured at `e52f0c5`). A
 description also offering a media type that admits the empty body keeps compiling. Adapter tests
 63 → 66.
 
@@ -249,8 +249,8 @@ python3 tooling/nl-ingest-openapi/openapi_ingest.py lambda.openapi3.normalized.j
 #   nl-validator eval --records records/ --grant net.{read,write}@127.0.0.1 --trace-out …
 ```
 
-Finding 1 needs only the repository at `5aaffda`:
-`manage.py test commons` fails 3; at `e27b281` it passes 173.
+Finding 1 needs only the repository at `e52f0c5`:
+`manage.py test commons` fails 3; at `0b11263` it passes 173.
 
 The live provisioning step against real AWS needs an account and is the module's named next
 step; no finding above depends on it.

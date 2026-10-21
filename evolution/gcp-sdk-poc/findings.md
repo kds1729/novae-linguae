@@ -11,7 +11,7 @@ from it. A reader may reject every conclusion here and keep every number.
 | Discovery documents | `storage:v1` rev **20260719** (findings 1–11); plus `cloudresourcemanager:v3`, `iam:v1` and `compute:v1`, all fetched 2026-08-01, for finding 12 and the generalisation results |
 | Discovery → Swagger 2.0 | `google-discovery-to-swagger` **2.1.0** (npm) |
 | Swagger 2.0 → OpenAPI 3 | `swagger2openapi` **7.0.8** (npm) |
-| upstream commit | `76fc6ba` (2026-07-15) for findings 1–7; `c482645` for 8–11; `ff1c258`/`b689ce5` for the fix verifications; `ca24c88` for finding 12 |
+| upstream commit | `76fc6ba` (2026-07-15) for findings 1–7; `9445296` for 8–11; `76b20a2`/`fb74196` for the fix verifications; `b8a0cd2` for finding 12 |
 | run dates | 2026-07-26 (storage), 2026-08-01 (the other three APIs, and every re-verification) |
 
 Google publishes Discovery documents rather than OpenAPI 3, so the pipeline is
@@ -109,7 +109,7 @@ because it contradicts the adapter's own contract that what it cannot carry gets
 that conversion path loses every body projection without a word — a large class, and Swagger 2.0
 conversion is a common way OpenAPI 3 descriptions come into existence.
 
-**Resolved.** Fixed in #1 (`2659c09`): the adapter now names the media type it declined and why.
+**Resolved.** Fixed in #1 (`5629590`): the adapter now names the media type it declined and why.
 Only the note changed — whether `*/*` accompanied by a JSON Schema should be *treated* as JSON is a
 separate judgement, deliberately not taken. Diagnostics only, so no generated artifact moved.
 
@@ -212,7 +212,7 @@ a description that means `application/json` should say so.
 ## 8. An optional field projection materialises off a FAILED call
 
 Found after the module was first published, while applying `*/*` → `application/json` (finding 7) and
-then pointing the observation gate at real GCS. Reproduced against upstream `c482645`.
+then pointing the observation gate at real GCS. Reproduced against upstream `9445296`.
 
 **Measured — hermetically, no cloud and no credentials.** A bodyless `GET` with no path parameters
 (so its projections are constructible), a literal path the in-repo fake service does not serve, and a
@@ -275,7 +275,7 @@ document was checked.
 ---
 
 *Findings 9, 10 and 11 come from pointing the architect machinery — `check-plan`, `assemble` — at this
-corpus for the first time, at upstream `c482645`. Nine and ten are not defect reports: the plan checker and
+corpus for the first time, at upstream `9445296`. Nine and ten are not defect reports: the plan checker and
 the assembler each behave exactly as specified, and both are about what a corpus derived from an
 API description can and cannot feed them. Eleven is a defect, and the live gate is what exposed it.*
 
@@ -396,7 +396,7 @@ node without the traces.
 
 ### Addendum after the fix: reuse is unblocked, composition is not
 
-`b689ce5` makes an effectful record matchable **as a whole** — `record_solves_goal` accepts a
+`fb74196` makes an effectful record matchable **as a whole** — `record_solves_goal` accepts a
 `Replayed` match against the record's own trace-carrying example. Multi-stage assembly is a separate
 path and did not change. `search()` builds its candidate list with no purity filter and then advances
 each state by `crate::eval_body(&c.body, &call)` — it *executes* a stage to produce the next stage's
@@ -518,7 +518,7 @@ when a path or required-query parameter matches the resource noun in its `operat
 > **131 of 131** create-shaped operations across all four APIs name the new resource **in the request
 > body**. Not one names it in the URL.
 
-So the `body-field` key part that `b689ce5` added is not a GCS accommodation — without it, the
+So the `body-field` key part that `fb74196` added is not a GCS accommodation — without it, the
 `ensures` clause is inexpressible for every create in every one of these APIs.
 
 **Finding 11 generalises completely.** Across **1,164 operations** in four APIs, **zero** document a
@@ -533,7 +533,7 @@ it is a property of the format, not of one API.
 
 ## 13. Finding 11's refusal makes path-parameterised DELETE unreachable
 
-Found by re-running the pipeline after `25fe525` fixed findings 11 and 12. The fix is right; this is
+Found by re-running the pipeline after `9c08c0f` fixed findings 11 and 12. The fix is right; this is
 its cost, and one verb bears all of it.
 
 **Measured — the fix works, and for GET it improves on what it replaced.** A path-parameterised
@@ -604,7 +604,7 @@ delete surface is settled, because a corpus that cannot express teardown is wors
 would replace.
 
 **Resolved** via [proposal 02](proposals/02-idempotent-delete-observation.md), accepted and
-applied in `b0271de`: the opt-in `--observe-absent-delete` runs the absent-name DELETE through
+applied in `b744f20`: the opt-in `--observe-absent-delete` runs the absent-name DELETE through
 the ordinary observation gate behind a probe-checked absence precondition and records what the
 service answered, trace-attached. The delete surface is settled; the held corpus regeneration
 can proceed.

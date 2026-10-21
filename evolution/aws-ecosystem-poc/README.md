@@ -19,7 +19,7 @@
   clock, `eval --redact`, `check-plan --probe` over composed probe bodies), `spec/evaluation.md`,
   `spec/world-state.md` (probes, audits), `spec/expressiveness.md` (GW19); read against
   `evolution/aws-sdk-poc`.
-- **Provenance:** upstream commit `6f5c9a5` (the tree at the end of the first day) and the
+- **Provenance:** upstream commit `982140f` (the tree at the end of the first day) and the
   2026-10-17 follow-up commit; AWS service models from `aws/api-models-aws` at commit `7eb6ab98`
   (ECS 2014-11-13, ECR 2015-09-21, Cloud Map 2017-03-14, Global Accelerator 2018-08-08, Cloud
   Control 2021-09-30; `smithy-cli` 1.73.0 was used only to measure that the awsJson models do NOT
@@ -54,7 +54,7 @@ its identity field is nested where the finder looked flat.
 
 | Input | Pinned at |
 |---|---|
-| Repository | `6f5c9a5` |
+| Repository | `982140f` |
 | `aws/api-models-aws` | `7eb6ab98` (five models; sha256 prefixes in the operator's `PINNED.json`) |
 | AWS account / regions | one account; `us-east-1` (writer) and `us-west-2`; Global Accelerator's control plane in `us-west-2`; CloudFront via `us-east-1` |
 | Signing boundary | a local SigV4 proxy routing `http://127.0.0.1:9099/<service>/<region>/` to the signed upstream (aws-sdk-poc finding 5) |

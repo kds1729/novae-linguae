@@ -11,7 +11,7 @@
 - **Scope:** `tooling/nl-ingest-graphql` (new), `tooling/fake-service` (a `/graphql` surface),
   `spec/expressiveness.md` (GW18); read against `tooling/nl-ingest-openapi`'s doctrine and
   `evolution/gcp-sdk-poc` / `evolution/aws-sdk-poc`'s findings 3, 7, 8 and 11.
-- **Provenance:** upstream commit `1306ac5` (the tree the adapter was written against);
+- **Provenance:** upstream commit `dfcd485` (the tree the adapter was written against);
   introspection results of three public services fetched 2026-08-27T14:25Z by the standard
   introspection query (`repro/introspection_query.json`): **Countries**
   (`https://countries.trevorblades.com/graphql`, 23 types, no `Mutation`), **Rick & Morty**
@@ -20,7 +20,7 @@
   `/home/claude/sandbox/graphql-poc/` (not committed — regenerate with the query; a live schema
   drifts, so a re-run may differ in counts).
 - **Resolution:** the adapter, its tests (25), the fake-service surface and this module landed
-  together on `main` (`fe3c2ff`). **Production close on Arca, 2026-08-27:** the 21 Countries
+  together on `main` (`9870faf`). **Production close on Arca, 2026-08-27:** the 21 Countries
   records + their 21 signed certifications + 6 traces published (`countries` by address, blob
   `20aa71e6…` in the node's store) — e.g. `countryCapital` = `fn_b4ce9f7133e465d6…`, cert
   `cert_7461b34dce5e7b1…`; then the **verified loop from the live node**: `orchestrate --node

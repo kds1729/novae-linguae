@@ -262,7 +262,7 @@ made on **shared tasks**, never raw totals:
 > is published; adapters+evals in `/home/claude/sandbox/round24/` (names `c24-*`).
 > **Named follow-up: curated #55 eval rows** (world-state/lifecycle read+write tasks,
 > oracle-gated) so the family becomes measurable — re-eval the retained c24 adapters
-> alongside the next round. **FOLLOW-UP RAN same day (ef8fac5 + this note): 8 curated
+> alongside the next round. **FOLLOW-UP RAN same day (e79b266 + this note): 8 curated
 > world-state rows** (parameter/structure-fresh vs the #55 grid — branch order swapped,
 > or-guards, eq-chains, a collect-failures walk; verified to share NO gold body with any
 > ftdata24 training completion, so the re-eval measures transfer), corpus 254→262, oracle
@@ -281,7 +281,7 @@ made on **shared tasks**, never raw totals:
 > pods, both pods terminated by the agent the moment artifacts were pulled).
 
 > **Round 25 (2026-08-26, corpus25/ftdata25 — family #55c branch-order/or-guard/dispatch
-> variants, 7b28502 — a TARGETED single cycle: 7B seed 1 only, RTX PRO 6000 Blackwell
+> variants, 2c79b79 — a TARGETED single cycle: 7B seed 1 only, RTX PRO 6000 Blackwell
 > ~21 min ≈ $0.75): the 7B-s1 watch CLOSED.** The diagnosis first (this session, $0): both
 > rounds' three misses are PARSE failures — the seed answers the absent-first rows with
 > Haskell-style pattern guards (`n if n >= int(200) ... =>`, c23) / (`int(x) if ... =>`,
@@ -305,7 +305,7 @@ made on **shared tasks**, never raw totals:
 > (`adapter-c25-7b-s1`, unpublished). Durable residue unchanged: `run_command`,
 > `read/min_string`, `read/insert_sorted`.
 
-> **Round 26 (2026-08-26, corpus26/ftdata26 — family #56 command interpreters, c056513 —
+> **Round 26 (2026-08-26, corpus26/ftdata26 — family #56 command interpreters, 756592f —
 > the `run_command` diagnosis + a two-cycle confirm, 7B-s0 + 14B-s1 on one RTX PRO 6000
 > Blackwell, ~45 min ≈ $1.57): THE LAST DURABLE WRITE RESIDUE CLOSED AT BOTH TIERS, AND THE
 > 7B RE-PINS.** Diagnosis ($0): `run_command` (0/17 across three rounds) was never a syntax
@@ -337,7 +337,7 @@ made on **shared tasks**, never raw totals:
 > durable list is EMPTY.
 
 > **Round 27 (2026-08-26/27, corpus27/ftdata27 — family #57 code-point order in read
-> position, 082762e — three legs 3B-s0 / 7B-s0 / 14B-s1 on one H100 NVL, ~1h53m ≈ $6.00):
+> position, 07cb87f — three legs 3B-s0 / 7B-s0 / 14B-s1 on one H100 NVL, ~1h53m ≈ $6.00):
 > the read residue SPLIT, not closed; every pin stands; the 3B gap is measured.** Diagnosis
 > ($0): `read/min_string` and `read/insert_sorted` are the mixed-case code-point trap in
 > TWO-argument / list form (`"a"` vs `"Z"` → `"Z"`; `"Z"` into `["a"]` → `["Z","a"]`); every
@@ -362,13 +362,13 @@ made on **shared tasks**, never raw totals:
 > boundary-documented. Ops: the H100 NVL ran 3B ~30 min / 7B ~25 / 14B ~40 (train) — ~1.5×
 > the Blackwell; take it only when the Blackwell is out of stock.
 
-> **Round 28 (2026-08-27, corpus28/ftdata28 — family #58 the GraphQL idiom, 89b9289 — the
+> **Round 28 (2026-08-27, corpus28/ftdata28 — family #58 the GraphQL idiom, 95f4113 — the
 > third evolution/ module's failure cluster, measured then taught: an eval-only Blackwell pod
 > (6 adapters × 16 tasks, ~7 min ≈ $0.25), three legs 3B-s0 / 7B-s0 / 14B-s1 on a Blackwell
 > (~1h05m ≈ $2.40), a 7B-s1 confirm on an H100 NVL (Blackwell out mid-day, ~32 min ≈ $1.70);
 > round ≈ $4.35): the cluster is REAL and it CLOSES at 3B and 14B; both re-pin; the 7B pin
 > stands on its write criterion.** Diagnosis ($0.25): the 8 curated graphql_funcs rows
-> (`evolution/graphql-poc`, 9ed59f7; eval 432 → **448**) scored coder3b-c14-s0 3/16, c27-3b-s0
+> (`evolution/graphql-poc`, a9a394e; eval 432 → **448**) scored coder3b-c14-s0 3/16, c27-3b-s0
 > 2/16, c26-7b-s0 7/16, c27-7b-s0 3/16, c23-14b-s1 7/16, c27-14b-s1 8/16 — write 1–3/8 on
 > EVERY tier. Four clusters, all vocabulary the corpus never carried in write position:
 > (A) JSON spliced by `str_concat "{\"code\":\"" s "\"}"` instead of built as a Json VALUE and
@@ -378,7 +378,7 @@ made on **shared tasks**, never raw totals:
 > read side: `render_json` not applied, narrowing skipped, `Just(None)` for `JNull`. The rows
 > also surfaced a validator defect: `unparse-body` printed a payload variant in argument
 > position (`render_json JObj(…)`) that `parse-body` refused, so the oracle failed its own
-> golds (446/448) — fixed in 2ce354e (a tag now starts an atom; 281-body round-trip sweep
+> golds (446/448) — fixed in 5a980eb (a tag now starts an atom; 281-body round-trip sweep
 > clean; oracle 448/448). **Family #58 (41 specs)**: literal-key variables encoders (one/two
 > keys, string/int/bool, disjoint from the curated `code`/`page`), envelope walks with literal
 > fields (absence = `Just(JNull)`), typed leaves through `JStr`/`JBool`/`JList`, the errors
@@ -407,7 +407,7 @@ made on **shared tasks**, never raw totals:
 > the GraphQL adapter is what made the eval-only pod possible at all (16 tasks/adapter).
 
 
-> **Round 29 (2026-08-27, corpus29/ftdata29 — family #58b parameterized levels, f056c95 — a
+> **Round 29 (2026-08-27, corpus29/ftdata29 — family #58b parameterized levels, a9899e5 — a
 > two-leg targeted confirm 7B-s0 / 14B-s1 on one Blackwell, ~42 min ≈ $1.80): the round-28
 > residue closes; 7B AND 14B re-pin; THE LOOP IS PARKED INDEFINITELY.** Diagnosis ($0): every
 > GraphQL write miss left after round 28 was the walk where the field and the leaf both arrive

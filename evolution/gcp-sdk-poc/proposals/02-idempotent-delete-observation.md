@@ -3,7 +3,7 @@
 - **Status:** accepted — applied as proposed (maintainer decision 2026-08-20).
 - **Module:** [`gcp-sdk-poc`](../README.md)
 - **Addresses:** [finding 13](../findings.md#13-finding-11s-refusal-makes-path-parameterised-delete-unreachable)
-- **Resolution:** applied in `b0271de` as the opt-in `--observe-absent-delete` (requires
+- **Resolution:** applied in `b744f20` as the opt-in `--observe-absent-delete` (requires
   `--verify-against`): the probe-then-delete mechanism exactly as specified below — probe GET at
   the absent name must answer non-2xx (a 2xx refuses loudly before any DELETE is issued), then
   the DELETE runs once and the example records what this service answered, trace-attached,
