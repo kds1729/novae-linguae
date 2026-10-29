@@ -1087,9 +1087,32 @@ fn check_predicate_node(value: &Value) -> Result<()> {
                 .ok_or_else(|| anyhow!("`{kind}` missing `body`"))?;
             check_predicate_node(body)?;
         }
+        // The sum eliminator, in a predicate as in a body (the same node shape): the scrutinee
+        // and every arm's body are predicates; patterns are the body-expression pattern kinds.
+        "case" => {
+            let scrutinee = obj
+                .get("scrutinee")
+                .ok_or_else(|| anyhow!("`case` missing `scrutinee`"))?;
+            check_predicate_node(scrutinee)?;
+            let arms = obj
+                .get("arms")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow!("`case` missing `arms`"))?;
+            if arms.is_empty() {
+                return Err(anyhow!("`case` needs at least one arm"));
+            }
+            for arm in arms {
+                let pat_kind = arm.get("pattern").and_then(|p| p.get("kind")).and_then(|k| k.as_str());
+                if !matches!(pat_kind, Some("wildcard" | "bind" | "variant" | "lit" | "tuple")) {
+                    return Err(anyhow!("`case` arm pattern must be a wildcard, bind, variant, lit or tuple pattern"));
+                }
+                let body = arm.get("body").ok_or_else(|| anyhow!("`case` arm missing `body`"))?;
+                check_predicate_node(body)?;
+            }
+        }
         other => {
             return Err(anyhow!(
-                "unknown predicate-expression kind `{other}` (expected: var, lit, app, forall, exists)"
+                "unknown predicate-expression kind `{other}` (expected: var, lit, lit_blob, app, forall, exists, case)"
             ));
         }
     }

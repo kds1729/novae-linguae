@@ -1800,6 +1800,19 @@ fn eval_predicate(node: &J, env: &Env, self_fn: &Option<Val>) -> Option<Val> {
             }
             eval_predicate(node.get("body")?, &env2, self_fn)
         }
+        // The sum eliminator in a predicate (a contract on a `Maybe`-valued result): the body
+        // evaluator's own pattern matcher, the first arm that matches, its bindings in scope.
+        "case" => {
+            let scrutinee = eval_predicate(node.get("scrutinee")?, env, self_fn)?;
+            for arm in node.get("arms")?.as_array()? {
+                if let Some(binds) = match_pattern(arm.get("pattern")?, &scrutinee).ok()? {
+                    let mut env2 = env.clone();
+                    env2.extend(binds);
+                    return eval_predicate(arm.get("body")?, &env2, self_fn);
+                }
+            }
+            None
+        }
         "app" => {
             let op = node.get("op")?.as_str()?;
             let arg_nodes = node.get("args")?.as_array()?;
@@ -3138,5 +3151,28 @@ mod tests {
         assert!(runs[1].passed, "{:?}", runs[1]);
         clear_resolver();
         clear_effects();
+    }
+    #[test]
+    fn predicate_case_on_a_maybe_result_evaluates_through_the_pattern_matcher() {
+        // `case result of { Just(x) => (a * x) % m == 1 % m; None => true }` — the Maybe-valued
+        // contract form, evaluated under explicit bindings (the generative checker's path).
+        let pred: J = serde_json::json!({ "kind": "case", "scrutinee": { "kind": "var", "name": "result" }, "arms": [
+            { "pattern": { "kind": "variant", "tag": "Just", "payload": { "kind": "bind", "name": "x" } },
+              "body": { "kind": "app", "op": "eq", "args": [
+                  { "kind": "app", "op": "mod", "args": [{ "kind": "app", "op": "mul", "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "x" }] }, { "kind": "var", "name": "m" }] },
+                  { "kind": "app", "op": "mod", "args": [{ "kind": "lit", "value": 1 }, { "kind": "var", "name": "m" }] }] } },
+            { "pattern": { "kind": "variant", "tag": "None" }, "body": { "kind": "lit", "value": true } }] });
+        let mut env: BTreeMap<String, Val> = BTreeMap::new();
+        env.insert("a".into(), Val::Int(3));
+        env.insert("m".into(), Val::Int(11));
+        env.insert("result".into(), Val::Variant("Just".into(), Some(Box::new(Val::Int(4)))));
+        assert_eq!(eval_predicate_env(&pred, &env, &None), Some(Val::Bool(true)));
+        env.insert("result".into(), Val::Variant("Just".into(), Some(Box::new(Val::Int(5)))));
+        assert_eq!(eval_predicate_env(&pred, &env, &None), Some(Val::Bool(false)));
+        env.insert("result".into(), Val::Variant("None".into(), None));
+        assert_eq!(eval_predicate_env(&pred, &env, &None), Some(Val::Bool(true)));
+        // A scrutinee no arm matches is undecidable, never silently true.
+        env.insert("result".into(), Val::Int(7));
+        assert_eq!(eval_predicate_env(&pred, &env, &None), None);
     }
 }

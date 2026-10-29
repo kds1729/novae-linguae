@@ -388,6 +388,15 @@ ambiguity refuses. This is what lets a contract be stated about a tuple result (
 identity, `fst(result) == a·fst(snd(result)) + b·snd(snd(result))`) and a checker record match a
 callee's `Maybe` result. Lists stay with the inductive backend.
 
+**`case` in a predicate** (2026-10-29). A contract on a sum-typed result names the payload the way
+the body that produced it does: `case result of { Just(x) => (a * x) % m == 1 % m; None => true }`
+is `mod_inverse`'s postcondition. The predicate `case` is the body-expression `case` (same node,
+same pattern kinds — `spec/surface-syntax.md` §2), lowered as a tester-guarded `ite` over the
+datatype and evaluated by the generative checker through the interpreter's pattern matcher; the
+declared result type's datatypes are registered before a refinement obligation is lowered, since
+the obligation inlines the body. A `Maybe`-valued function is composable by contract with this:
+`crt2`'s contract is proved through `mod_inverse`'s, not its definition.
+
 `prove` ranges a law over the function's **declared domain** (2026-10-17): a law variable the law
 feeds to a `nat`-typed parameter of `self` is asserted `≥ 0`, as the generative checker already
 samples it — without that, a law over `lcm : nat nat → nat` is asked to hold where `gcd`'s
@@ -704,6 +713,32 @@ naive power's doubling law at `e div 2`). Measured: `pow(b, 2e) ≡ pow(b, e)² 
 numeric induction (156 premises), and `mod_pow(b, e, m) = pow_mod_naive(b, e, m)` PROVED by
 induction through both callees' definitions (251 instances, 250 premises); the false doubling
 `… + 1` stays UNKNOWN.
+
+**The witness rung (2026-10-29, the tenth follow-up).** The quotient witness that is a combination
+of a HYPOTHESIS (above: the Bézout identity for `a·x ≡ 1`) is searched for, in a bounded space.
+Every equation the certificate's hypotheses state (through implications, conjunctions and both
+branches of an `ite`) is a polynomial identity over the chain's atoms; oriented at a monomial of
+degree ≥ 2 with unit coefficient it is a rewrite rule — the Bézout identity `g = r·x + m·y` with
+lead `r·x`; a residue equation `(mod T m) = R` through the exact identity `T = R + m·(div T m)`
+with lead `T`'s monomial (`mod_inverse`'s own contract at `(m1, m2)` gives `m1·inv → (1 mod m2)
++ m2·(div (m1·inv) m2)`). When the chain's residue polynomial is stuck (nothing left to lift), a
+monomial containing a lead — each lead atom itself or its residue, the residue UN-LIFTED through
+`(mod y m) = y − m·(div y m)` to expose the atom — is rewritten by the rule and the chain
+continues; the quotient that comes out is the hypothesis-derived one. Such an instance's premise
+holds MODULO the rule's hypothesis, so the instance records the assertion it used and the
+stepwise checker verifies the premise beside exactly that assertion and the certificate's small
+facts (preconditions, a `case`'s tester, domain bounds — never an unfolding or a quantified
+axiom). Two companions: a residue of ANOTHER modulus that is a polynomial multiple of the chain's
+(`m1·m2` against `m1`, the Chinese-remainder shape) is lifted through its own identity, its `n`
+part a multiple of `m`; and the witness rung's chains continue one substitution per premise (a
+lift with the lifted term's atoms bare, else one atom decomposed) — the CRT chain's lift and
+three decompositions as one premise are past 40 s for z3, one at a time milliseconds. Soundness
+is unchanged (a rule only proposes a term; every premise is checked; an undischarged one leaves
+its instance out or vacuous), and so are the plain chains' instance sets and timings: the
+witness rung's instances come after the plain ones, are a further one-query retry, and have their
+own 20 s budget stepwise. Measured: `mod_inverse`'s `Just(x) ⇒ a·x ≡ 1 (mod m)` SOUND, `crt2`'s
+`Just(x) ⇒ x ≡ a1 (mod m1) ∧ x ≡ a2 (mod m2)` SOUND through `mod_inverse`'s contract (stepwise),
+and the two checker laws on those domains first-order from the contracts at the point of use.
 
 ## Semantic equivalence
 

@@ -16,7 +16,17 @@
 //! unary     ::= "!" unary | "-" unary | call_pred  -- not / neg
 //! call_pred ::= name ("(" (pred ("," pred)*)? ")")? | atom
 //! atom      ::= ident | content_addr | int | float | str | "true" | "false" | "(" pred ")"
+//!             | case_pred
+//! case_pred ::= "case" pred "of" "{" arm (";" arm)* ";"? "}"   -- case (the body form, in a predicate)
+//! arm       ::= pattern "=>" pred
+//! pattern   ::= "_" | ident | Tag | Tag "(" pattern ")" | "(" pattern ("," pattern)+ ")" | literal
 //! ```
+//!
+//! `case` is the sum eliminator, in predicates as in bodies: a contract on a `Maybe`-valued
+//! result (`case result of { Just(x) => (a * x) % m == 1 % m; None => true }`) names the payload
+//! the way the body that produced it does. The AST node is the body-expression `case` (same
+//! shape, same pattern kinds — `spec/body-expression.schema.json`), so every consumer that
+//! lowers bodies (the prover, the interpreter) reads it unchanged.
 //!
 //! ## Where this diverges from `spec/surface-syntax.md`
 //!
@@ -215,8 +225,98 @@ impl Parser {
         }
     }
 
+    /// `case <pred> of { pattern => pred; … }` — the body form's `case`, as a predicate.
+    fn parse_case(&mut self) -> Result<Value, SurfaceError> {
+        self.bump(); // `case`
+        let scrutinee = self.parse_pred()?;
+        if !self.at_keyword("of") {
+            let t = self.peek();
+            return Err(SurfaceError::at(t.offset, format!("expected `of` after the case scrutinee, found {}", describe(t))));
+        }
+        self.bump();
+        self.expect(TokKind::Lbrace, "`{` to open the case arms")?;
+        let mut arms: Vec<Value> = Vec::new();
+        loop {
+            let pattern = self.parse_pattern()?;
+            self.expect(TokKind::FatArrow, "`=>` after a case pattern")?;
+            let body = self.parse_pred()?;
+            arms.push(json!({ "pattern": pattern, "body": body }));
+            if self.at(&TokKind::Semi) {
+                self.bump();
+                if self.at(&TokKind::Rbrace) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        self.expect(TokKind::Rbrace, "`}` to close the case arms")?;
+        Ok(json!({ "kind": "case", "scrutinee": scrutinee, "arms": arms }))
+    }
+
+    /// A case-arm pattern: the body grammar's pattern kinds, the same AST
+    /// (`spec/body-expression.schema.json` `pattern`).
+    fn parse_pattern(&mut self) -> Result<Value, SurfaceError> {
+        match self.kind() {
+            TokKind::Underscore => {
+                self.bump();
+                Ok(json!({ "kind": "wildcard" }))
+            }
+            TokKind::Ident => {
+                let t = self.bump();
+                match t.text.as_str() {
+                    "true" => Ok(json!({ "kind": "lit", "value": { "kind": "bool", "value": true } })),
+                    "false" => Ok(json!({ "kind": "lit", "value": { "kind": "bool", "value": false } })),
+                    "int" if self.at(&TokKind::Lparen) => {
+                        self.bump();
+                        let n = self.expect(TokKind::Int, "an integer literal inside `int(...)`")?;
+                        self.expect(TokKind::Rparen, "`)` to close `int(...)`")?;
+                        Ok(json!({ "kind": "lit", "value": { "kind": "int", "value": super::values::int_from_text(&n.text) } }))
+                    }
+                    _ => Ok(json!({ "kind": "bind", "name": t.text })),
+                }
+            }
+            TokKind::Tag => {
+                let t = self.bump();
+                let mut variant = serde_json::Map::new();
+                variant.insert("kind".to_string(), Value::String("variant".to_string()));
+                variant.insert("tag".to_string(), Value::String(t.text));
+                if self.at(&TokKind::Lparen) {
+                    self.bump();
+                    let payload = self.parse_pattern()?;
+                    self.expect(TokKind::Rparen, "`)` after a variant pattern's payload")?;
+                    variant.insert("payload".to_string(), payload);
+                }
+                Ok(Value::Object(variant))
+            }
+            TokKind::Int | TokKind::Float | TokKind::Str | TokKind::Bytes => {
+                let t = self.bump();
+                let value = super::values::scalar_value_from_token(&t).expect("scalar token kinds are handled")?;
+                Ok(json!({ "kind": "lit", "value": value }))
+            }
+            TokKind::Lparen => {
+                self.bump();
+                let mut elems = vec![self.parse_pattern()?];
+                while self.at(&TokKind::Comma) {
+                    self.bump();
+                    elems.push(self.parse_pattern()?);
+                }
+                self.expect(TokKind::Rparen, "`)` to close a tuple pattern")?;
+                if elems.len() < 2 {
+                    return Err(SurfaceError::msg("a tuple pattern needs at least two elements"));
+                }
+                Ok(json!({ "kind": "tuple", "elems": elems }))
+            }
+            _ => {
+                let t = self.peek();
+                Err(SurfaceError::at(t.offset, format!("expected a case pattern, found {}", describe(t))))
+            }
+        }
+    }
+
     fn call_pred(&mut self) -> Result<Value, SurfaceError> {
         match self.kind() {
+            TokKind::Ident if self.at_keyword("case") => self.parse_case(),
             // A name (ident) or content address may be the operator of a call.
             TokKind::Ident => {
                 let t = self.bump();
@@ -464,9 +564,68 @@ fn render(node: &Value) -> Result<(String, u8), SurfaceError> {
                 .collect::<Result<Vec<_>, _>>()?;
             Ok((format!("{op}({})", parts.join(", ")), ATOM_PREC))
         }
+        "case" => {
+            let scrutinee = node
+                .get("scrutinee")
+                .ok_or_else(|| SurfaceError::msg("`case` missing `scrutinee`"))?;
+            let arms = node
+                .get("arms")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| SurfaceError::msg("`case` missing `arms`"))?;
+            let mut rendered: Vec<String> = Vec::with_capacity(arms.len());
+            for arm in arms {
+                let pattern = arm
+                    .get("pattern")
+                    .ok_or_else(|| SurfaceError::msg("case arm missing `pattern`"))?;
+                let body = arm
+                    .get("body")
+                    .ok_or_else(|| SurfaceError::msg("case arm missing `body`"))?;
+                rendered.push(format!("{} => {}", render_pattern(pattern)?, render(body)?.0));
+            }
+            // An atom: `case … of { … }` is self-delimiting, like a parenthesized predicate.
+            Ok((format!("case {} of {{ {} }}", render(scrutinee)?.0, rendered.join("; ")), ATOM_PREC))
+        }
         other => Err(SurfaceError::msg(format!(
             "unknown predicate-expression kind `{other}`"
         ))),
+    }
+}
+
+/// A case-arm pattern on the surface (the body printer's rendering, so the two agree).
+fn render_pattern(node: &Value) -> Result<String, SurfaceError> {
+    let kind = node_kind(node).ok_or_else(|| SurfaceError::msg("pattern must have a `kind`"))?;
+    match kind {
+        "wildcard" => Ok("_".to_string()),
+        "bind" => node
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .ok_or_else(|| SurfaceError::msg("`bind` pattern missing `name`")),
+        "variant" => {
+            let tag = node
+                .get("tag")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| SurfaceError::msg("`variant` pattern missing `tag`"))?;
+            match node.get("payload") {
+                Some(payload) => Ok(format!("{tag}({})", render_pattern(payload)?)),
+                None => Ok(tag.to_string()),
+            }
+        }
+        "lit" => {
+            let value = node
+                .get("value")
+                .ok_or_else(|| SurfaceError::msg("`lit` pattern missing `value`"))?;
+            super::values::unparse_value(value)
+        }
+        "tuple" => {
+            let elems = node
+                .get("elems")
+                .and_then(|e| e.as_array())
+                .ok_or_else(|| SurfaceError::msg("`tuple` pattern missing `elems`"))?;
+            let parts = elems.iter().map(render_pattern).collect::<Result<Vec<_>, SurfaceError>>()?;
+            Ok(format!("({})", parts.join(", ")))
+        }
+        other => Err(SurfaceError::msg(format!("unknown pattern kind `{other}`"))),
     }
 }
 
@@ -487,6 +646,32 @@ mod tests {
 
     fn parses_to(src: &str, expected: Value) {
         assert_eq!(parse_predicate(src).unwrap(), expected, "parse of `{src}`");
+    }
+
+    #[test]
+    fn parse_case_on_a_sum_result_round_trips() {
+        // The Maybe-valued contract form: the body's `case`, in a predicate.
+        let src = "case result of { Just(x) => a * x % m == 1 % m; None => true }";
+        let ast = parse_predicate(src).unwrap();
+        assert_eq!(ast["kind"], "case");
+        assert_eq!(ast["scrutinee"], json!({"kind": "var", "name": "result"}));
+        let arms = ast["arms"].as_array().unwrap();
+        assert_eq!(arms.len(), 2);
+        assert_eq!(arms[0]["pattern"], json!({"kind": "variant", "tag": "Just", "payload": {"kind": "bind", "name": "x"}}));
+        assert_eq!(arms[1]["pattern"], json!({"kind": "variant", "tag": "None"}));
+        assert_eq!(arms[1]["body"], json!({"kind": "lit", "value": true}));
+        assert_eq!(unparse_predicate(&ast).unwrap(), src);
+        // Inside a quantifier and a connective; a trailing `;`; wildcard, tuple and literal patterns.
+        let src2 = "forall a. m < 2 || case f(a) of { (g, (x, y)) => g == a * x; _ => false }";
+        let ast2 = parse_predicate(src2).unwrap();
+        assert_eq!(ast2["body"]["args"][1]["kind"], "case");
+        assert_eq!(ast2["body"]["args"][1]["arms"][0]["pattern"]["kind"], "tuple");
+        assert_eq!(unparse_predicate(&ast2).unwrap(), src2);
+        let ast3 = parse_predicate("case n of { 0 => true; int(2) => false; k => k > 0; }").unwrap();
+        assert_eq!(ast3["arms"].as_array().unwrap().len(), 3);
+        assert_eq!(ast3["arms"][1]["pattern"], json!({"kind": "lit", "value": {"kind": "int", "value": 2}}));
+        assert!(parse_predicate("case result { Just(x) => x }").is_err());
+        assert!(parse_predicate("case result of { Just(x) }").is_err());
     }
 
     #[test]

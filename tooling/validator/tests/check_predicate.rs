@@ -15,6 +15,34 @@ fn lit_leaf_passes() {
     assert!(check_predicate_well_formed(&v).is_ok());
 }
 
+// ---- case: the sum eliminator in a predicate ----
+
+#[test]
+fn case_with_variant_arms_passes() {
+    let v = json!({
+        "kind": "case", "scrutinee": {"kind": "var", "name": "result"},
+        "arms": [
+            {"pattern": {"kind": "variant", "tag": "Just", "payload": {"kind": "bind", "name": "x"}},
+             "body": {"kind": "app", "op": "eq", "args": [{"kind": "var", "name": "x"}, {"kind": "lit", "value": 1}]}},
+            {"pattern": {"kind": "variant", "tag": "None"}, "body": {"kind": "lit", "value": true}}
+        ]
+    });
+    assert!(check_predicate_well_formed(&v).is_ok());
+}
+
+#[test]
+fn case_without_arms_or_with_a_bad_pattern_fails() {
+    let empty = json!({"kind": "case", "scrutinee": {"kind": "var", "name": "r"}, "arms": []});
+    assert!(check_predicate_well_formed(&empty).is_err());
+    let bad = json!({"kind": "case", "scrutinee": {"kind": "var", "name": "r"},
+        "arms": [{"pattern": {"kind": "regex"}, "body": {"kind": "lit", "value": true}}]});
+    assert!(check_predicate_well_formed(&bad).unwrap_err().to_string().contains("pattern"));
+    // An ill-formed arm body is caught through the case.
+    let inner = json!({"kind": "case", "scrutinee": {"kind": "var", "name": "r"},
+        "arms": [{"pattern": {"kind": "wildcard"}, "body": {"kind": "app", "op": "not", "args": []}}]});
+    assert!(check_predicate_well_formed(&inner).is_err());
+}
+
 // ---- app arity checks ----
 
 #[test]

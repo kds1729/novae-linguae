@@ -436,7 +436,8 @@
         { "$ref": "#/$defs/pe_lit_blob" },
         { "$ref": "#/$defs/pe_app" },
         { "$ref": "#/$defs/pe_forall" },
-        { "$ref": "#/$defs/pe_exists" }
+        { "$ref": "#/$defs/pe_exists" },
+        { "$ref": "#/$defs/pe_case" }
       ]
     },
     "pe_var": {
@@ -509,6 +510,89 @@
         },
         "body": { "$ref": "#/$defs/pe_predicate" }
       }
+    },
+
+    "pe_case": {
+      "type": "object",
+      "required": ["kind", "scrutinee", "arms"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "case" },
+        "scrutinee": { "$ref": "#/$defs/pe_predicate", "description": "The expression being matched — typically `result` (a sum-typed output) or a tuple-valued application." },
+        "arms": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["pattern", "body"],
+            "additionalProperties": false,
+            "properties": {
+              "pattern": { "$ref": "#/$defs/pe_pattern" },
+              "body": { "$ref": "#/$defs/pe_predicate" }
+            }
+          },
+          "description": "Match arms in order; the first matching pattern's body is the predicate's value, with the pattern's bindings in scope. The verifier checks exhaustiveness against the scrutinee's type."
+        }
+      },
+      "description": "The sum eliminator in a predicate — the body-expression `case` (spec/body-expression.schema.json), same shape, same pattern kinds — so a refinement or law can speak about a `Maybe`- or tuple-valued result the way the body that produced it does. Evaluated by the generative checker through the interpreter's pattern matcher and lowered by the prover as a tester-guarded `ite` over the datatype."
+    },
+    "pe_pattern": {
+      "oneOf": [
+        { "$ref": "#/$defs/pe_pat_wildcard" },
+        { "$ref": "#/$defs/pe_pat_bind" },
+        { "$ref": "#/$defs/pe_pat_variant" },
+        { "$ref": "#/$defs/pe_pat_lit" },
+        { "$ref": "#/$defs/pe_pat_tuple" }
+      ],
+      "description": "A pattern in a `case` arm (the body-expression pattern kinds). Discriminated by `kind`."
+    },
+    "pe_pat_wildcard": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": { "kind": { "const": "wildcard" } },
+      "description": "Match anything; bind nothing."
+    },
+    "pe_pat_bind": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "bind" },
+        "name": { "type": "string", "pattern": "^[a-z_][a-zA-Z0-9_']*$", "minLength": 1, "maxLength": 64 }
+      },
+      "description": "Match anything and bind the matched value to `name` for use in the arm's predicate."
+    },
+    "pe_pat_variant": {
+      "type": "object",
+      "required": ["kind", "tag"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "variant" },
+        "tag": { "type": "string", "pattern": "^[A-Z][a-zA-Z0-9_]*$", "minLength": 1, "maxLength": 64 },
+        "payload": { "$ref": "#/$defs/pe_pattern", "description": "Pattern matched against the variant's payload. Omit for nullary variants." }
+      },
+      "description": "Match a specific sum variant by its tag, optionally destructuring its payload."
+    },
+    "pe_pat_lit": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "lit" },
+        "value": { "type": "object", "description": "A value-expression literal to match (value-expression.schema.json); checked structurally only here." }
+      },
+      "description": "Match a specific literal value."
+    },
+    "pe_pat_tuple": {
+      "type": "object",
+      "required": ["kind", "elems"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "tuple" },
+        "elems": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/pe_pattern" } }
+      },
+      "description": "Destructure a tuple positionally."
     },
 
     "ve_value": {

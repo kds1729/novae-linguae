@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://novae-linguae.org/spec/v0.1/predicate-expression.schema.json",
   "title": "Nova Lingua Predicate Expression",
-  "description": "Structured AST for predicate expressions in Nova Lingua. Used by refinements (function-record.signature.refinements[].expr), property tests (function-record.properties[].expr), and assert claims (claim-expression.schema.json `expr`). Six kinds — `var`, `lit`, `lit_blob`, `app`, `forall`, `exists` — sufficient to express the predicates that appear in standard-library function records (e.g. `length(output) == length(input)` for a refinement; `map(id, xs) == xs` for an identity property) and result claims whose value is too large to inline (`lit_blob`). Boolean connectives (and / or / not / implies / iff), comparisons (eq / neq / lt / le / gt / ge), and arithmetic (add / sub / mul / div / mod) are all expressed as `app` with the appropriate string `op`. Well-formedness (variable scoping, op arity, type compatibility) is enforced by the verifier engine, not by JSON Schema. function-record schema v0.2 requires this AST form for `refinement.expr` and `property.expr`; v0.1 records may still carry the string surface form.",
+  "description": "Structured AST for predicate expressions in Nova Lingua. Used by refinements (function-record.signature.refinements[].expr), property tests (function-record.properties[].expr), and assert claims (claim-expression.schema.json `expr`). Seven kinds — `var`, `lit`, `lit_blob`, `app`, `forall`, `exists`, `case` — sufficient to express the predicates that appear in standard-library function records (e.g. `length(output) == length(input)` for a refinement; `map(id, xs) == xs` for an identity property) and result claims whose value is too large to inline (`lit_blob`); `case` is the sum eliminator (the body-expression form, same node shape and pattern kinds), so a contract on a sum-typed result can name the payload: `case result of { Just(x) => (a * x) % m == 1 % m; None => true }`. Boolean connectives (and / or / not / implies / iff), comparisons (eq / neq / lt / le / gt / ge), and arithmetic (add / sub / mul / div / mod) are all expressed as `app` with the appropriate string `op`. Well-formedness (variable scoping, op arity, type compatibility) is enforced by the verifier engine, not by JSON Schema. function-record schema v0.2 requires this AST form for `refinement.expr` and `property.expr`; v0.1 records may still carry the string surface form.",
   "$ref": "#/$defs/predicate",
   "$defs": {
     "predicate": {
@@ -12,7 +12,8 @@
         { "$ref": "#/$defs/lit_blob" },
         { "$ref": "#/$defs/app" },
         { "$ref": "#/$defs/forall" },
-        { "$ref": "#/$defs/exists" }
+        { "$ref": "#/$defs/exists" },
+        { "$ref": "#/$defs/case" }
       ],
       "description": "Any predicate expression. Discriminated by the 'kind' field."
     },
@@ -120,6 +121,88 @@
         "body": { "$ref": "#/$defs/predicate" }
       },
       "description": "Existential quantification — 'there exists an assignment of these variables for which body holds.' Less common than forall in properties; useful in refinements that assert reachability."
+    },
+    "case": {
+      "type": "object",
+      "required": ["kind", "scrutinee", "arms"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "case" },
+        "scrutinee": { "$ref": "#/$defs/predicate", "description": "The expression being matched — typically `result` (a sum-typed output) or a tuple-valued application." },
+        "arms": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["pattern", "body"],
+            "additionalProperties": false,
+            "properties": {
+              "pattern": { "$ref": "#/$defs/pattern" },
+              "body": { "$ref": "#/$defs/predicate" }
+            }
+          },
+          "description": "Match arms in order; the first matching pattern's body is the predicate's value, with the pattern's bindings in scope. The verifier checks exhaustiveness against the scrutinee's type."
+        }
+      },
+      "description": "The sum eliminator in a predicate — the body-expression `case` (spec/body-expression.schema.json), same shape, same pattern kinds — so a refinement or law can speak about a `Maybe`- or tuple-valued result the way the body that produced it does. Evaluated by the generative checker through the interpreter's pattern matcher and lowered by the prover as a tester-guarded `ite` over the datatype."
+    },
+    "pattern": {
+      "oneOf": [
+        { "$ref": "#/$defs/pat_wildcard" },
+        { "$ref": "#/$defs/pat_bind" },
+        { "$ref": "#/$defs/pat_variant" },
+        { "$ref": "#/$defs/pat_lit" },
+        { "$ref": "#/$defs/pat_tuple" }
+      ],
+      "description": "A pattern in a `case` arm (the body-expression pattern kinds). Discriminated by `kind`."
+    },
+    "pat_wildcard": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": { "kind": { "const": "wildcard" } },
+      "description": "Match anything; bind nothing."
+    },
+    "pat_bind": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "bind" },
+        "name": { "type": "string", "pattern": "^[a-z_][a-zA-Z0-9_']*$", "minLength": 1, "maxLength": 64 }
+      },
+      "description": "Match anything and bind the matched value to `name` for use in the arm's predicate."
+    },
+    "pat_variant": {
+      "type": "object",
+      "required": ["kind", "tag"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "variant" },
+        "tag": { "type": "string", "pattern": "^[A-Z][a-zA-Z0-9_]*$", "minLength": 1, "maxLength": 64 },
+        "payload": { "$ref": "#/$defs/pattern", "description": "Pattern matched against the variant's payload. Omit for nullary variants." }
+      },
+      "description": "Match a specific sum variant by its tag, optionally destructuring its payload."
+    },
+    "pat_lit": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "lit" },
+        "value": { "type": "object", "description": "A value-expression literal to match (value-expression.schema.json); checked structurally only here." }
+      },
+      "description": "Match a specific literal value."
+    },
+    "pat_tuple": {
+      "type": "object",
+      "required": ["kind", "elems"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "tuple" },
+        "elems": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/pattern" } }
+      },
+      "description": "Destructure a tuple positionally."
     }
   }
 }

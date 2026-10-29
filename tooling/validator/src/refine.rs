@@ -457,6 +457,37 @@ mod tests {
     }
 
     #[test]
+    fn maybe_valued_post_through_a_predicate_case() {
+        let Some(s) = solver() else { return };
+        // safe_pred : int -> Maybe int, Just(n − 1) when n > 0 else None; post: Just(x) ⇒ x ≥ 0.
+        let maybe = json!({ "kind": "sum", "variants": [{ "tag": "Just", "type": int() }, { "tag": "None" }] });
+        let ty = fn_ty(vec![int()], maybe);
+        let body = lambda(
+            &["n"],
+            json!({ "kind": "case", "scrutinee": app("gt", vec![var("n"), int_lit(0)]), "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+                  "body": { "kind": "variant", "tag": "Just", "payload": app("sub", vec![var("n"), int_lit(1)]) } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+                  "body": { "kind": "variant", "tag": "None" } }] }),
+        );
+        let post = |cmp: &str| refinement("post", json!({ "kind": "case", "scrutinee": var("result"), "arms": [
+            { "pattern": { "kind": "variant", "tag": "Just", "payload": { "kind": "bind", "name": "x" } },
+              "body": app(cmp, vec![var("x"), int_lit(0)]) },
+            { "pattern": { "kind": "variant", "tag": "None" }, "body": json!({ "kind": "lit", "value": true }) }] }));
+        let reports = check_refinements(&ty, &[post("ge")], &body, s);
+        if reports[0].outcome != RefinementOutcome::Sound {
+            let prev = crate::prove::set_self_type(Some(ty.clone()));
+            let goal = json!({ "kind": "forall", "vars": ["n"], "body": subst_many(&post("ge")["expr"], &[("result".to_string(), body["body"].clone())].into_iter().collect()) });
+            let (out, _) = prove_property(&goal, None, s);
+            crate::prove::set_self_type(prev);
+            panic!("first-order outcome: {out:?}; reports: {reports:?}");
+        }
+        // `Just(x) ⇒ x > 0` is violated at n = 1.
+        let reports = check_refinements(&ty, &[post("gt")], &body, s);
+        assert!(matches!(reports[0].outcome, RefinementOutcome::Violated(_)), "{reports:?}");
+    }
+
+    #[test]
     fn post_and_implicit_nat_both_reported() {
         let Some(s) = solver() else { return };
         // double : nat -> nat, post: result = n + n. Two reports: the post (sound) and the nat (sound).

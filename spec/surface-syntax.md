@@ -198,7 +198,25 @@ atom_pred ::= ident                              -- var
             | str_literal                        -- lit {value: S}
             | "true" | "false"                   -- lit {value: bool}
             | "(" pred ")"
+            | case_pred                          -- case (the body form, see below)
+
+case_pred ::= "case" pred "of" "{" arm (";" arm)* ";"? "}"
+arm       ::= pattern "=>" pred
+pattern   ::= "_" | ident | Tag | Tag "(" pattern ")" | "(" pattern ("," pattern)+ ")" | literal
 ```
+
+`case` is the sum eliminator, in predicates as in bodies. A contract on a `Maybe`-valued
+result names the payload the way the body that produced it does:
+
+```
+case result of { Just(x) => (a * x) % m == 1 % m; None => true }
+```
+
+The AST node is the body-expression `case` — the same shape and the same pattern kinds
+(`wildcard`, `bind`, `variant`, `lit`, `tuple`; `spec/body-expression.schema.json`), so a
+verifier that lowers bodies reads a predicate `case` unchanged; `predicate-expression.schema.json`
+carries its own copy of those definitions. A predicate `case` binds its pattern variables in the
+arm's predicate only.
 
 ### Infix → op name mapping
 

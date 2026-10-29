@@ -238,6 +238,23 @@ pub fn set_self_type(ty: Option<J>) -> Option<J> {
 
 /// The declared parameter and result sorts of the function under proof, when a type was supplied
 /// and it is a function type of the given arity (each sort `None` where out of the fragment).
+/// The declared type's datatypes registered before an obligation is lowered. A refinement
+/// obligation INLINES a non-recursive body (no `self` definition is lowered, so nothing else
+/// registers the declared sorts), yet a variant the body constructs — `Just(mod x m)` — or the
+/// post's `case` on the result needs the declared sum in scope.
+fn register_declared_self_type() {
+    let Some(ty) = SELF_TYPE.with(|t| t.borrow().clone()) else { return };
+    let fn_ty = if ty.get("kind").and_then(|k| k.as_str()) == Some("forall") { ty.get("body").cloned().unwrap_or(ty) } else { ty };
+    if let Some(ps) = fn_ty.get("params").and_then(|p| p.as_array()) {
+        for p in ps {
+            let _ = sort_of_type(p);
+        }
+    }
+    if let Some(r) = fn_ty.get("result") {
+        let _ = sort_of_type(r);
+    }
+}
+
 fn declared_self_sorts(arity: usize) -> Option<(Vec<Option<Sort>>, Option<Sort>)> {
     let ty = SELF_TYPE.with(|t| t.borrow().clone())?;
     let fn_ty = if ty.get("kind").and_then(|k| k.as_str()) == Some("forall") { ty.get("body")?.clone() } else { ty };
@@ -1500,6 +1517,7 @@ pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_pos
     take_callees_used(); // a failed earlier lowering must not leak its callees into this certificate
     take_callee_apps();
     reset_list_emission();
+    register_declared_self_type();
     // Normalize away curried application spines first, so surface-parsed properties/bodies
     // (juxtaposition parses curried) analyze identically to AST-authored flat ones.
     let prop_expr = &uncurry(prop_expr);
