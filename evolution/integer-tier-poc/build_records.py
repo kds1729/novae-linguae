@@ -288,21 +288,30 @@ def main():
           tags=["predicate/check"], hints=["bezout_identity_check"], complexity="O(log n)")
     gauntlet("bezout_holds", prove)
 
-    # 4. mod_inverse — through ext_gcd; None when not coprime.
+    # 4. mod_inverse — through ext_gcd; None when not coprime. The Maybe-valued CONTRACT (tenth
+    # follow-up): `Just(x) ⇒ a·x ≡ 1 (mod m)` — a predicate `case` on the result (the sum eliminator,
+    # in predicates as in bodies). Its proof is the witness rung: the residue `(a mod m)·(x mod m)`
+    # reduces to `g` only through ext_gcd's certified Bézout identity, which the chain now reads as
+    # a rewrite rule (r·x → g − m·y), the hypothesis-derived quotient the engine did not search for.
     build("mod_inverse", r"\a m -> case {ext_gcd} (mod a m) m of { (g, (x, y)) => case eq g 1 of { true => Just(mod x m); false => None } }",
           FN([INT, INT], MAYBE(INT)),
           [{"args": [ilit(3), ilit(11)], "result": just(ilit(4))}, {"args": [ilit(10), ilit(17)], "result": just(ilit(12))},
            {"args": [ilit(6), ilit(9)], "result": NONE}, {"args": [ilit(-1), ilit(7)], "result": just(ilit(6))}],
-          refinements=[("pre", "m > 1")],
+          refinements=[("pre", "m > 1"),
+                       ("post", "case result of { Just(x) => (a * x) % m == 1 % m; None => true }")],
           hints=["modular_inverse"], complexity="O(log n)")
     gauntlet("mod_inverse", prove)
 
     # The law is a*x ≡ 1 (mod m), i.e. (a*x) mod m == 1 mod m — NOT `== 1`: in Z/1Z every residue is 0,
     # and the generator found exactly that edge (a = 0, m = 1) when the law was first written with `1`.
+    # The checker ranges over ALL ints (the unguarded law = generative evidence, as bezout_identity);
+    # mod_inverse's contract is certified on its precondition `m > 1`, so the law PROVABLE from it is
+    # the one qualified to that domain — composition by contract, first-order, no rung.
     build("inverse_holds", r"\a m -> case {mod_inverse} a m of { Just(x) => eq (mod (mul a x) m) (mod 1 m); None => true }",
           FN([INT, INT], BOOL),
           [{"args": [ilit(3), ilit(11)], "result": blit(True)}, {"args": [ilit(6), ilit(9)], "result": blit(True)}],
-          props=[("inverse_identity", "forall a m. self(a, m) == true")],
+          props=[("inverse_identity", "forall a m. self(a, m) == true"),
+                 ("inverse_identity_pre", "forall a m. m < 2 || self(a, m) == true")],
           tags=["predicate/check"], hints=["modular_inverse_check"], complexity="O(log n)")
     gauntlet("inverse_holds", prove)
 
@@ -443,18 +452,25 @@ def main():
           tags=["predicate/check"], hints=["primality_agreement"], complexity="O(n^2)")
     gauntlet("prime_agree", prove)
 
-    # 9. Chinese remainder for two coprime moduli.
+    # 9. Chinese remainder for two coprime moduli. The Maybe-valued contract: the solution satisfies
+    # both congruences — proved through mod_inverse's certified contract at (m1, m2) (its residue
+    # equation `(m1·inv) mod m2 = 1 mod m2` read as the rule m1·inv → 1 mod m2 + m2·q) and the
+    # solution's residue modulo the PRODUCT lifted against each factor (the foreign-modulus lift).
     build("crt2", r"\a1 m1 a2 m2 -> case {mod_inverse} m1 m2 of { Just(inv) => let t = mod (mul (sub a2 a1) inv) m2 in Just(mod (add a1 (mul m1 t)) (mul m1 m2)); None => None }",
           FN([INT, INT, INT, INT], MAYBE(INT)),
           [{"args": [ilit(2), ilit(3), ilit(3), ilit(5)], "result": just(ilit(8))}, {"args": [ilit(1), ilit(4), ilit(3), ilit(6)], "result": NONE},
            {"args": [ilit(0), ilit(7), ilit(6), ilit(11)], "result": just(ilit(28))}],
-          refinements=[("pre", "m1 > 1 && m2 > 1")],
+          refinements=[("pre", "m1 > 1 && m2 > 1"),
+                       ("post", "case result of { Just(x) => x % m1 == a1 % m1 && x % m2 == a2 % m2; None => true }")],
           hints=["chinese_remainder"], complexity="O(log n)")
     gauntlet("crt2", prove)
+    # As for inverse_holds: the unguarded law is generative evidence over all ints; the law provable
+    # from crt2's contract is the one on its precondition domain.
     build("crt_holds", r"\a1 m1 a2 m2 -> case {crt2} a1 m1 a2 m2 of { Just(x) => and (eq (mod x m1) (mod a1 m1)) (eq (mod x m2) (mod a2 m2)); None => true }",
           FN([INT, INT, INT, INT], BOOL),
           [{"args": [ilit(2), ilit(3), ilit(3), ilit(5)], "result": blit(True)}],
-          props=[("solves_both_congruences", "forall a1 m1 a2 m2. self(a1, m1, a2, m2) == true")],
+          props=[("solves_both_congruences", "forall a1 m1 a2 m2. self(a1, m1, a2, m2) == true"),
+                 ("solves_both_congruences_pre", "forall a1 m1 a2 m2. m1 < 2 || m2 < 2 || self(a1, m1, a2, m2) == true")],
           tags=["predicate/check"], hints=["chinese_remainder_check"], complexity="O(log n)")
     gauntlet("crt_holds", prove)
 

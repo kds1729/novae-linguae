@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_dcb9a669a4e1f664af587c0e966e95755338847ad43dbd139a050aa1f02b68c5",
+ "body_hash": "expr_dc0ff87dad172bb1dc2e76b988fabedee447357f23f3f35da90374fc1c8826ef",
  "derived_from": null,
  "examples": [
   {
@@ -35,7 +35,7 @@
    }
   }
  ],
- "hash": "fn_eca0fe3e8063668aca356643a5abe4ef21ef50301b32fe487676c240951b6660",
+ "hash": "fn_4dcb6f678af3d32cf23add3ac7087bfb9d846472aa101a454145d63280de25bc",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -80,6 +80,60 @@
     ]
    },
    "name": "inverse_identity"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "m"
+        },
+        {
+         "kind": "lit",
+         "value": 2
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "m"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": true
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "m"
+    ]
+   },
+   "name": "inverse_identity_pre"
   }
  ],
  "schema_version": "0.2.0",

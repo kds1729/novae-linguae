@@ -4,8 +4,8 @@
 | `lcm` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | multiple_of_both=EXHAUSTIVE; commutative=EXHAUSTIVE | multiple_of_both=UNKNOWN; commutative=PROVED |
 | `ext_gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
 | `bezout_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | bezout_identity=EXHAUSTIVE; bezout_identity_nat=EXHAUSTIVE | bezout_identity=PROVED; bezout_identity_nat=PROVED |
-| `mod_inverse` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
-| `inverse_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | inverse_identity=EXHAUSTIVE | inverse_identity=UNKNOWN |
+| `mod_inverse` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
+| `inverse_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | inverse_identity=EXHAUSTIVE; inverse_identity_pre=EXHAUSTIVE | inverse_identity=UNKNOWN; inverse_identity_pre=PROVED |
 | `mod_add` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | congruent_to_plain_sum=EXHAUSTIVE; commutative=EXHAUSTIVE | congruent_to_plain_sum=PROVED; commutative=PROVED |
 | `mod_mul` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | congruent_to_plain_product=EXHAUSTIVE; commutative=EXHAUSTIVE | congruent_to_plain_product=PROVED; commutative=PROVED |
 | `is_even` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | period_two=EXHAUSTIVE; alternates=EXHAUSTIVE | period_two=PROVED; alternates=PROVED |
@@ -22,8 +22,8 @@
 | `no_divisor_from` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `is_prime_trial` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `prime_agree` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | miller_rabin_agrees_with_trial=EXHAUSTIVE | miller_rabin_agrees_with_trial=UNKNOWN |
-| `crt2` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
-| `crt_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | solves_both_congruences=HELD | solves_both_congruences=UNKNOWN |
+| `crt2` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
+| `crt_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | solves_both_congruences=HELD; solves_both_congruences_pre=HELD | solves_both_congruences=UNKNOWN; solves_both_congruences_pre=PROVED |
 | `digits` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `from_digits` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | — | — |
 | `digits_roundtrip` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | digits_then_from_digits=EXHAUSTIVE | digits_then_from_digits=PROVED |

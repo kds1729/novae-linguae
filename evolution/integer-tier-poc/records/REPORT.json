@@ -140,7 +140,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:refinements": "N/A",
+   "refinement:post[0]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -148,7 +148,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> Sum",
    "effects": "effects [] \u2286 declared",
-   "refinement:refinements": "",
+   "refinement:post[0]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   }
@@ -175,13 +175,16 @@
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
-   "inverse_identity: CONSISTENT  |  generative: EXHAUSTIVE (72 cases \u2014 bounded domain, no counterexample)"
+   "inverse_identity: CONSISTENT  |  generative: EXHAUSTIVE (72 cases \u2014 bounded domain, no counterexample)",
+   "inverse_identity_pre: CONSISTENT  |  generative: EXHAUSTIVE (72 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "inverse_identity: CONSISTENT  |  generative: HELD (196 cases)"
+   "inverse_identity: CONSISTENT  |  generative: HELD (196 cases)",
+   "inverse_identity_pre: CONSISTENT  |  generative: HELD (196 cases)"
   ],
   "prove": [
-   "inverse_identity: UNKNOWN      solver could not decide"
+   "inverse_identity: UNKNOWN      solver could not decide",
+   "inverse_identity_pre: PROVED       holds for all inputs (unsat negation)"
   ]
  },
  {
@@ -314,7 +317,7 @@
    "double_exponent: CONSISTENT  |  generative: HELD (71 cases)"
   ],
   "prove": [
-   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 156 of 156 premises verified separately, the final query over uninterpreted mod/div]"
+   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 158 of 161 premises verified separately, the final query over uninterpreted mod/div]"
   ]
  },
  {
@@ -367,7 +370,7 @@
    "fast_equals_naive: CONSISTENT  |  generative: HELD (73 cases)"
   ],
   "prove": [
-   "fast_equals_naive: PROVED       by induction through the callees' definitions, on `e (through `fn_17294c85\u2026`, `fn_31c081eb\u2026`)` (unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 250 of 251 premises verified separately, the final query over uninterpreted mod/div]"
+   "fast_equals_naive: PROVED       by induction through the callees' definitions, on `e (through `fn_17294c85\u2026`, `fn_31c081eb\u2026`)` (unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 252 of 255 premises verified separately, the final query over uninterpreted mod/div]"
   ]
  },
  {
@@ -637,7 +640,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:refinements": "N/A",
+   "refinement:post[0]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -645,7 +648,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int, int, int) -> Sum",
    "effects": "effects [] \u2286 declared",
-   "refinement:refinements": "",
+   "refinement:post[0]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   }
@@ -672,13 +675,16 @@
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
-   "solves_both_congruences: CONSISTENT  |  generative: HELD (399 cases)"
+   "solves_both_congruences: CONSISTENT  |  generative: HELD (399 cases)",
+   "solves_both_congruences_pre: CONSISTENT  |  generative: HELD (399 cases)"
   ],
   "properties_wide": [
-   "solves_both_congruences: CONSISTENT  |  generative: HELD (195 cases)"
+   "solves_both_congruences: CONSISTENT  |  generative: HELD (195 cases)",
+   "solves_both_congruences_pre: CONSISTENT  |  generative: HELD (195 cases)"
   ],
   "prove": [
-   "solves_both_congruences: UNKNOWN      solver could not decide"
+   "solves_both_congruences: UNKNOWN      solver could not decide",
+   "solves_both_congruences_pre: PROVED       holds for all inputs (unsat negation)"
   ]
  },
  {

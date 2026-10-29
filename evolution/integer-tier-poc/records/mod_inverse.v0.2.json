@@ -79,7 +79,7 @@
    }
   }
  ],
- "hash": "fn_e503191e164c0ab3d34797a639a3d0d8422be514b666780992e460567de7e150",
+ "hash": "fn_4ce4344602e31e7192cf3a2799139ffa6378a45cd6a5eaefe2d5a07a22b9fe2b",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -112,6 +112,82 @@
      "op": "gt"
     },
     "kind": "pre"
+   },
+   {
+    "expr": {
+     "arms": [
+      {
+       "body": {
+        "args": [
+         {
+          "args": [
+           {
+            "args": [
+             {
+              "kind": "var",
+              "name": "a"
+             },
+             {
+              "kind": "var",
+              "name": "x"
+             }
+            ],
+            "kind": "app",
+            "op": "mul"
+           },
+           {
+            "kind": "var",
+            "name": "m"
+           }
+          ],
+          "kind": "app",
+          "op": "mod"
+         },
+         {
+          "args": [
+           {
+            "kind": "lit",
+            "value": 1
+           },
+           {
+            "kind": "var",
+            "name": "m"
+           }
+          ],
+          "kind": "app",
+          "op": "mod"
+         }
+        ],
+        "kind": "app",
+        "op": "eq"
+       },
+       "pattern": {
+        "kind": "variant",
+        "payload": {
+         "kind": "bind",
+         "name": "x"
+        },
+        "tag": "Just"
+       }
+      },
+      {
+       "body": {
+        "kind": "lit",
+        "value": true
+       },
+       "pattern": {
+        "kind": "variant",
+        "tag": "None"
+       }
+      }
+     ],
+     "kind": "case",
+     "scrutinee": {
+      "kind": "var",
+      "name": "result"
+     }
+    },
+    "kind": "post"
    }
   ],
   "terminates": "always",

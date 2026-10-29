@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_34f4674f29933a63ee77d3141e5399f17214d8735d5878605f6c991374fe3534",
+ "body_hash": "expr_80d3b2f562451702b3e4eb4ef0dde30135377b45682fd1c848fc51d42979a754",
  "derived_from": null,
  "examples": [
   {
@@ -27,7 +27,7 @@
    }
   }
  ],
- "hash": "fn_01c0b60777c924f24da7cb2a7e2c601e46d74165d3d13d1050f404715832f2c7",
+ "hash": "fn_cbd53f859fb33c8afbb7038c6d1ff6b046dbcfd8d7fe4b96d94e4c97e6abae85",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -82,6 +82,90 @@
     ]
    },
    "name": "solves_both_congruences"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "m1"
+          },
+          {
+           "kind": "lit",
+           "value": 2
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "m2"
+          },
+          {
+           "kind": "lit",
+           "value": 2
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        }
+       ],
+       "kind": "app",
+       "op": "or"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a1"
+          },
+          {
+           "kind": "var",
+           "name": "m1"
+          },
+          {
+           "kind": "var",
+           "name": "a2"
+          },
+          {
+           "kind": "var",
+           "name": "m2"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": true
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "a1",
+     "m1",
+     "a2",
+     "m2"
+    ]
+   },
+   "name": "solves_both_congruences_pre"
   }
  ],
  "schema_version": "0.2.0",

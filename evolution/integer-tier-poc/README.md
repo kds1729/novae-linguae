@@ -5,17 +5,19 @@
   widened, and — from the follow-ups — callee folding over a linked view, numeric induction in the
   prover (with the hypothesis as instances), variable divisors, magnitude-wide sampling, contracts
   that compose and instantiate, induction through a callee's definition, the Euclidean rung and a
-  function's own facts in its inductions (`tooling/validator`); the records published to the
-  commons with signed certifications. The 41 records and their builder live here (`records/`,
-  `build_records.py`) — reproducible with no credential. Final tally (ninth follow-up): 41/41
-  certify, termination AND complexity SOUND on all 41 (the NTT chain at `O(n log n)`, with no fuel
-  parameter), every declared contract SOUND (21) and 27 of 34 laws proved — `lcm`'s through
-  `gcd`'s certified contract, `ext_gcd`'s Bézout identity over a tuple result, `gcd` dividing both
-  of its arguments, the modular congruences, and **fast exponentiation agreeing with the naive
-  power** (through the doubling law, stepwise) — and all 34 held both over the bounded domain and
-  across magnitudes.
+  function's own facts in its inductions, the witness rung and `case` in predicates
+  (`tooling/validator`); the records published to the commons with signed certifications. The 41
+  records and their builder live here (`records/`, `build_records.py`) — reproducible with no
+  credential. Final tally (tenth follow-up): 41/41 certify, termination AND complexity SOUND on
+  all 41 (the NTT chain at `O(n log n)`, with no fuel parameter), every declared contract SOUND
+  (23 — including the **modular inverse's and the Chinese remainder's `Maybe`-valued contracts**)
+  and 29 of 36 laws proved — `lcm`'s through `gcd`'s certified contract, `ext_gcd`'s Bézout
+  identity over a tuple result, `gcd` dividing both of its arguments, the modular congruences,
+  fast exponentiation agreeing with the naive power (through the doubling law, stepwise), and the
+  inverse and CRT checkers on their callees' domains (from the contracts) — and all 36 held both
+  over the bounded domain and across magnitudes.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-10-17, last updated 2026-10-18
+- **Dates:** first published 2026-10-17, last updated 2026-10-29
 - **Scope:** `tooling/validator` (`interp.rs` arithmetic + comparison + recursion depth,
   `proptest.rs`, `eval.rs`, `prove.rs`, `induct.rs`, `terminate.rs`, `complexity.rs`, `main.rs`),
   `spec/evaluation.md`; read against `spec/surface-syntax.md` §2 (predicate surface) and
@@ -862,13 +864,126 @@ e div 2, m)` and the Euclidean instances the rest; the base cases are the unfold
   builder's full gauntlet now takes ~33 minutes (it was ~11): every open law pays the stepwise
   attempt in every ladder it reaches, in every contract derivation of every dependent.
 
-### Still open
+### Still open after the ninth follow-up (the second closed in the tenth, below)
 
 - **`prime_agree`**: documented negative (a theorem of number theory, not a consequence of the
   definitions); no rung reaches it and none should claim to.
 - **`inverse_holds` / `crt_holds`** (and the `Maybe`-valued contracts): witnesses from
   hypotheses (the Bézout combination) — the stepwise checker does not search the ideal the
   hypotheses generate. Measured by hand: one such instance closes the inverse law.
+- **`lcm` multiple-of-both**: the quotient's residue modulo `a` needs `(div a g)·g` recombined into
+  `a − (mod a g)` against the other modulus, and `mod` pushed through the inlined body's `ite`.
+- `gcd` associativity, `binomial` symmetry and Pascal: facts no contract states.
+- The generative checker's report of skipped (erroring) cases.
+
+## Tenth follow-up (2026-10-29): witnesses from hypotheses — the modular inverse and the Chinese remainder, as contracts
+
+### Measured
+
+| | before | now |
+|---|---|---|
+| `mod_inverse`'s contract `Just(x) ⇒ a·x ≡ 1 (mod m)` (authored this round, a predicate `case` on the result) | — (not expressible) | **SOUND** — the witness rung: the chain's instances plus the Bézout rule's (the hypothesis-derived quotient), one query; the whole refinement ladder 15 s |
+| `crt2`'s contract `Just(x) ⇒ x ≡ a1 (mod m1) ∧ x ≡ a2 (mod m2)` (authored this round) | — | **SOUND** — through `mod_inverse`'s certified contract at `(m1, m2)`, stepwise: 11 instances, 10 premises verified (the one left out is a cross-modulus instance that is vacuous at `m1 = 0`), the final query unsat; ~40 s |
+| `inverse_holds`'s law on `mod_inverse`'s precondition domain, `m < 2 ∨ inverse_holds(a, m)` (authored this round) | — | **PROVED** first-order, from the callee's contract at the point of use |
+| `crt_holds`'s law on `crt2`'s domain, `m1 < 2 ∨ m2 < 2 ∨ crt_holds(a1, m1, a2, m2)` (authored this round) | — | **PROVED** first-order, from `crt2`'s contract |
+| the unguarded `inverse_holds` / `crt_holds` laws (over all ints) | UNKNOWN | UNKNOWN — generative evidence, as before (`inverse_holds` EXHAUSTIVE over the bounded domain, `crt_holds` 399 cases held, both `--wide`) |
+
+Totals: contracts **23 SOUND / 0 UNVERIFIABLE** (was 21/0), laws **29 PROVED / 7 UNKNOWN / 0 UNSUPPORTED** (36 laws; was
+27/7/0 of 34), 36/36 held both bounded and `--wide`; 41/41 run and certify, termination and
+complexity 41/41. Builder: ~32 min (was ~33).
+
+**What was missing, measured first.** The eighth follow-up recorded it: `a·x ≡ 1 (mod m)` for the
+modular inverse rests on the Bézout identity `g = r·x + m·y` that `ext_gcd`'s certified contract
+states at `(a mod m, m)`, and the residue part the chain reaches — `(a mod m)·(x mod m)` — reduces
+to `g` only THROUGH that equation; z3 given that one instance by hand closed the law instantly,
+and the engine never searched for it. Two more things stood between the contract and a proof.
+The contract itself could not be written: a predicate had no form for a sum-typed result (the
+Bézout post exists only because the predicate language gained `fst`/`snd` for tuples in the
+fourth follow-up). And the Chinese remainder's solution is a residue modulo the PRODUCT `m1·m2`
+read modulo each factor — a residue of another modulus, which the chain treated as an opaque atom.
+
+**`case` in a predicate.** The sum eliminator, in predicates as in bodies: `case result of {
+Just(x) => (a * x) % m == 1 % m; None => true }` is a postcondition now (`spec/surface-syntax.md`
+§2; the node is the body-expression `case`, same shape and pattern kinds, so the prover lowers it
+as it lowers a body's — a tester-guarded `ite` over the datatype — and the generative checker
+evaluates it through the interpreter's own pattern matcher). The refinement obligation inlines
+the body, so the declared result type's datatypes are registered before an obligation is lowered
+(they were not: a variant the inlined body constructs read "belongs to no declared sum type").
+
+**The witness rung (`euclid.rs`).** Every equation the certificate's hypotheses state — read
+through implications, conjunctions and both branches of an `ite` — is a polynomial identity;
+oriented at a monomial of degree ≥ 2 with unit coefficient it is a rewrite rule (the Bézout
+identity: lead `r·x`, rest `g − m·y`; a residue equation `(mod T m) = R` through the exact
+identity `T = R + m·(div T m)`: lead `T`'s monomial — `mod_inverse`'s own contract at `(m1, m2)`
+gives `m1·inv → (1 mod m2) + m2·(div (m1·inv) m2)`). When the chain's residue polynomial is
+stuck (nothing left to lift), a monomial that contains a lead — each lead atom either itself or
+its residue, the residue UN-LIFTED through `(mod y m) = y − m·(div y m)` to expose the atom — is
+rewritten by the rule, and the chain decomposes the result as it does any term. The quotient
+that comes out is the hypothesis-derived one (`−y − (a mod m)·(x div m) + (g div m)` for the
+inverse — the eighth follow-up's hand witness, computed). Such an instance's premise is a ring
+identity MODULO the rule's hypothesis, so the instance records the assertion it used (`uses`),
+and the stepwise checker verifies the premise beside exactly that assertion and the certificate's
+small facts (the preconditions, a `case`'s tester — read with `let`s substituted, since the
+goal's `let`-bound result hid its tester — and the domain bounds; never an unfolding or a
+quantified axiom, which drown a ring identity). Soundness is unchanged: a rule only proposes a
+term; every premise is checked by the solver, and one it cannot discharge leaves its instance out
+(stepwise) or vacuous (one query).
+
+**The foreign-modulus lift.** A residue `(mod X n)` of ANOTHER modulus `n` that is a polynomial
+multiple of the chain's `m` (every monomial of `n` carries `m`: `n = m1·m2` against `m1`) is
+lifted through its own identity `X − n·(div X n)`; the `n` part is a multiple of `m` and goes to
+the quotient, and `X`'s residue is what remains — `a1 + m1·t` modulo `m1` is `a1 mod m1` in one
+step, and modulo `m2` it is where `m1·inv` meets the inverse's contract.
+
+**One substitution per premise.** The witness rung's chains continue GRANULARLY — a lift with the
+lifted term's atoms left bare, else one atom decomposed, per step — so every premise is a single
+identity: the CRT chain's `P₁ → P₂` step as one premise (a lift and three decompositions at once)
+is past 40 s for z3; one at a time, each is milliseconds. The plain and cross-modulus chains keep
+the measured discipline of the eighth and ninth follow-ups (their instance sets and timings are
+unchanged — checked on `gcd`'s divisibility: the same three instances, 0.1 s). A monomial that
+already carries the modulus is a multiple of it whatever its other atoms are, so it is no longer
+decomposed further (the CRT chain crossed the 64-term cap otherwise and ended silently).
+
+**Costs, and where they are paid.** The witness rung's instances are listed AFTER the plain ones
+and are a FURTHER retry in the one-query rung (the plain set first: the same `gcd` certificate
+with two rule instances added takes z3 1.9 s instead of 0.1 s, which crossed the 5 s budget on
+a loaded machine); stepwise, they have their own 20 s budget inside the 60 s (a premise that
+rests on a hypothesis costs its whole timeout when it does not hold, and an open law must not
+pay thirty of them in every ladder it reaches). Measured on `gcd`'s four laws, one of them open:
+1.5 min before, 2.2 min now. The builder's full gauntlet: ~32 min (was ~33).
+
+**Composition, again.** `inverse_holds`'s and `crt_holds`'s laws on the callees' precondition
+domains are first-order and instant: the callee's contract instantiated at the point of use
+(the sixth follow-up) IS the law. The unguarded laws over all ints stay generative evidence — the
+contracts are certified on `m > 1`, and a law provable from a contract is the one qualified to
+its domain, exactly as the Bézout law's nat-qualified twin (the fourth follow-up). `crt2`'s
+contract never unfolds `ext_gcd`: it composes through `mod_inverse`'s, one level up — modular
+verification through content addresses, a second time.
+
+### Argued
+
+- **The hypotheses are part of the term algebra.** The chain's normal form was computed from the
+  goal's terms alone; a proof that rests on what the hypotheses SAY about those terms needs the
+  hypotheses as rewrite rules, and the bounded search here — rules oriented at their largest
+  monomials, applied when the normalization is stuck — is enough for the two laws the module had
+  left, because the identities a contract states are few and shallow. A Gröbner basis would be
+  the general tool; its need has not been measured.
+- **A certificate is a sequence of decidable questions, and each question should be small.** The
+  ninth follow-up split premises out; this one splits each premise down to one substitution.
+  The same identity that is past 40 s as one query is a chain of millisecond ones — the solver's
+  reach is a function of how the question is asked, not only of how long it is given.
+- **Contracts on sums needed a form, not a feature.** Nothing was added to the language: `case`
+  already was the sum eliminator, and a predicate that can name the payload the way the body
+  produced it is what makes a `Maybe`-valued function COMPOSABLE by contract — `crt2` is proved
+  through `mod_inverse`'s contract, not its definition.
+
+### Still open
+
+- **`prime_agree`**: documented negative (a theorem of number theory, not a consequence of the
+  definitions); no rung reaches it and none should claim to.
+- **The unguarded `inverse_holds` / `crt_holds` laws over ALL ints** (negative moduli): true, by
+  the generative checker, but outside the callees' certified domains (`m > 1`); a contract on a
+  wider precondition would carry them.
 - **`lcm` multiple-of-both**: the quotient's residue modulo `a` needs `(div a g)·g` recombined into
   `a − (mod a g)` against the other modulus, and `mod` pushed through the inlined body's `ite`.
 - `gcd` associativity, `binomial` symmetry and Pascal: facts no contract states.

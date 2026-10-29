@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_5317aac3a63a5c5e04cf5931a6346278b0ef6b220005a9d8f63c8be67d5f786c",
+ "body_hash": "expr_d5de16f6c4dd01a9ebc43a582d3991221bdaac4979b054fa75d3723d767b2117",
  "derived_from": null,
  "examples": [
   {
@@ -83,7 +83,7 @@
    }
   }
  ],
- "hash": "fn_5cbcccf744e243145fbab5eda84b82d0baa0d27c94ca5f7bfbc4fd33d56acc75",
+ "hash": "fn_2680ca90ed6fb6580c87a4bd4d7ab00488a5019a8e9c93bd243d1bd1c3244a41",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -136,6 +136,112 @@
      "op": "and"
     },
     "kind": "pre"
+   },
+   {
+    "expr": {
+     "arms": [
+      {
+       "body": {
+        "args": [
+         {
+          "args": [
+           {
+            "args": [
+             {
+              "kind": "var",
+              "name": "x"
+             },
+             {
+              "kind": "var",
+              "name": "m1"
+             }
+            ],
+            "kind": "app",
+            "op": "mod"
+           },
+           {
+            "args": [
+             {
+              "kind": "var",
+              "name": "a1"
+             },
+             {
+              "kind": "var",
+              "name": "m1"
+             }
+            ],
+            "kind": "app",
+            "op": "mod"
+           }
+          ],
+          "kind": "app",
+          "op": "eq"
+         },
+         {
+          "args": [
+           {
+            "args": [
+             {
+              "kind": "var",
+              "name": "x"
+             },
+             {
+              "kind": "var",
+              "name": "m2"
+             }
+            ],
+            "kind": "app",
+            "op": "mod"
+           },
+           {
+            "args": [
+             {
+              "kind": "var",
+              "name": "a2"
+             },
+             {
+              "kind": "var",
+              "name": "m2"
+             }
+            ],
+            "kind": "app",
+            "op": "mod"
+           }
+          ],
+          "kind": "app",
+          "op": "eq"
+         }
+        ],
+        "kind": "app",
+        "op": "and"
+       },
+       "pattern": {
+        "kind": "variant",
+        "payload": {
+         "kind": "bind",
+         "name": "x"
+        },
+        "tag": "Just"
+       }
+      },
+      {
+       "body": {
+        "kind": "lit",
+        "value": true
+       },
+       "pattern": {
+        "kind": "variant",
+        "tag": "None"
+       }
+      }
+     ],
+     "kind": "case",
+     "scrutinee": {
+      "kind": "var",
+      "name": "result"
+     }
+    },
+    "kind": "post"
    }
   ],
   "terminates": "always",
