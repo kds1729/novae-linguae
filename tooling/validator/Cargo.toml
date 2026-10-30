@@ -1,6 +1,6 @@
 [package]
 name = "nl-validator"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "Reference validator, canonicalizer, and hasher for Novae Linguae artifacts"
 license = "Apache-2.0 OR MIT"
