@@ -636,7 +636,75 @@ fn take_body_apps() -> Vec<(String, Vec<String>)> {
     BODY_APPS.with(|b| std::mem::take(&mut *b.borrow_mut()))
 }
 
+thread_local! {
+    /// The `let`- and pattern-bound names in scope while an expression is lowered, each with the
+    /// SMT term that defines it (innermost last). A callee application recorded for a contract
+    /// INSTANCE is stated outside those scopes, so its arguments are resolved through this stack
+    /// first: `case normalize(n, d) of (p, q) => gcd(|p|, q)` records gcd's application at
+    /// `(abs (dt_0 (normalize n d)))`, `(dt_1 (normalize n d))` — in the goal's scope — where
+    /// before it recorded `(abs p)`, `q` and the certificate failed with "unknown constant p"
+    /// (the rational tier's lowest-terms checker, 2026-10-30).
+    static LOCAL_BINDINGS: std::cell::RefCell<Vec<(String, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Lower under a local binding `name = def` (pushed for the duration of `f`).
+fn with_locals<T>(binds: &[(String, String)], f: impl FnOnce() -> T) -> T {
+    LOCAL_BINDINGS.with(|l| l.borrow_mut().extend(binds.iter().cloned()));
+    let out = f();
+    LOCAL_BINDINGS.with(|l| {
+        let mut l = l.borrow_mut();
+        let n = l.len() - binds.len();
+        l.truncate(n);
+    });
+    out
+}
+
+/// Replace whole-token occurrences of `name` in an SMT term by `def`.
+fn replace_token(s: &str, name: &str, def: &str) -> String {
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '\'' || c == '.' || c == '!' || c == '?';
+    let mut out = String::with_capacity(s.len());
+    let bytes: Vec<char> = s.chars().collect();
+    let pat: Vec<char> = name.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        let at = i + pat.len() <= bytes.len() && bytes[i..i + pat.len()] == pat[..];
+        let before_ok = i == 0 || !is_ident(bytes[i - 1]);
+        let after_ok = i + pat.len() == bytes.len() || !is_ident(bytes[i + pat.len()]);
+        if at && before_ok && after_ok {
+            out.push_str(def);
+            i += pat.len();
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// An application's argument terms with every local binding in scope substituted by its
+/// definition (innermost first), so the terms read in the enclosing scope.
+fn resolve_locals(args: &[String]) -> Vec<String> {
+    LOCAL_BINDINGS.with(|l| {
+        let l = l.borrow();
+        if l.is_empty() {
+            return args.to_vec();
+        }
+        args.iter()
+            .map(|a| {
+                let mut t = a.clone();
+                for (name, def) in l.iter().rev() {
+                    if t.contains(name.as_str()) {
+                        t = replace_token(&t, name, def);
+                    }
+                }
+                t
+            })
+            .collect()
+    })
+}
+
 fn record_callee_app(target: &str, args: &[String]) {
+    let args = resolve_locals(args);
     if BODY_APPS_ENABLED.with(|e| e.get()) {
         BODY_APPS.with(|b| b.borrow_mut().push((target.to_string(), args.to_vec())));
         return;
@@ -644,7 +712,7 @@ fn record_callee_app(target: &str, args: &[String]) {
     if !CALLEE_APPS_ENABLED.with(|e| e.get()) {
         return;
     }
-    push_callee_app(target, args);
+    push_callee_app(target, &args);
 }
 
 /// Record a callee application in goal scope unconditionally.
@@ -1096,7 +1164,8 @@ fn lower(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&SelfDef>)
             let vsmt = lower(value, env, self_def)?;
             let mut e2 = env.clone();
             e2.insert(name.clone(), vsort);
-            let body = lower(node.get("body").ok_or_else(|| anyhow!("let has no body"))?, &mut e2, self_def)?;
+            let body_node = node.get("body").ok_or_else(|| anyhow!("let has no body"))?;
+            let body = with_locals(&[(name.clone(), vsmt.clone())], || lower(body_node, &mut e2, self_def))?;
             Ok(format!("(let (({name} {vsmt})) {body})"))
         }
         "case" => lower_case(node, env, self_def),
@@ -1141,7 +1210,7 @@ fn lower_case(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&Self
                 let name = pat.get("name").and_then(|n| n.as_str()).ok_or_else(|| anyhow!("bind has no name"))?;
                 let mut e2 = env.clone();
                 e2.insert(name.to_string(), ssort);
-                let b = lower(body, &mut e2, self_def)?;
+                let b = with_locals(&[(name.to_string(), scrut_smt.clone())], || lower(body, &mut e2, self_def))?;
                 default = Some(format!("(let (({name} {scrut_smt})) {b})"));
             }
             Some("lit") => {
@@ -1156,7 +1225,8 @@ fn lower_case(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&Self
                 for (n, _, s) in &binds {
                     e2.insert(n.clone(), *s);
                 }
-                let b = lower(body, &mut e2, self_def)?;
+                let locals: Vec<(String, String)> = binds.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect();
+                let b = with_locals(&locals, || lower(body, &mut e2, self_def))?;
                 default = Some(wrap_lets(&binds, b));
             }
             // Variant arms: tester-guarded, the payload bound by its accessor.
@@ -1173,7 +1243,8 @@ fn lower_case(node: &J, env: &mut BTreeMap<String, Sort>, self_def: Option<&Self
                 for (n, _, s) in &binds {
                     e2.insert(n.clone(), *s);
                 }
-                let b = wrap_lets(&binds, lower(body, &mut e2, self_def)?);
+                let locals: Vec<(String, String)> = binds.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect();
+                let b = wrap_lets(&binds, with_locals(&locals, || lower(body, &mut e2, self_def))?);
                 variant_arms.push((format!("((_ is dt{i}_{tag}) {scrut_smt})"), tag.to_string(), b));
             }
             other => bail!("unsupported case pattern `{other:?}` (out of fragment)"),
@@ -2962,6 +3033,38 @@ mod tests {
         let (out, _) = prove_property(&law_too_strong, None, solver);
         assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
         set_callee_contracts(prev);
+    }
+
+    /// A callee applied to a LOCALLY bound name — `let p = f(n) in f(p) + 1 > 0` — gets its contract
+    /// instance at the binding's DEFINITION (`f(f(n))`), in the goal's scope: before, the instance
+    /// was stated at `p` outside the `let` and the solver answered "unknown constant p" (the rational
+    /// tier's lowest-terms checker, which binds normalize's result by a tuple pattern, 2026-10-30).
+    #[test]
+    fn a_callee_instance_at_a_local_binding_is_stated_at_its_definition() {
+        let Some(solver) = solver() else { return };
+        let target = format!("fn_{}", "cd".repeat(32));
+        let contract = CalleeContract {
+            symbol: "callee_cdcd".into(),
+            params: vec!["x".into()],
+            param_sorts: vec![Sort::Int],
+            ret: Sort::Int,
+            pres: vec![],
+            posts: vec![json!({ "kind": "app", "op": "ge", "args": [{ "kind": "var", "name": "result" }, { "kind": "lit", "value": 0 }] })],
+            laws: vec![],
+            nat_positions: [0].into(),
+        };
+        let call = |a: J| json!({ "kind": "app", "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": target } }, "args": [a] });
+        let inner = json!({ "kind": "let", "name": "p", "value": call(v("n")),
+            "body": op("gt", vec![op("add", vec![call(v("p")), lit(1)]), lit(0)]) });
+        let law_ok = law(&["n"], op("or", vec![op("lt", vec![v("n"), lit(0)]), inner]));
+        let prev = set_callee_contracts([(target.clone(), contract)].into_iter().collect());
+        let (out, cert) = prove_property(&law_ok, None, solver);
+        set_callee_contracts(prev);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        let smt = cert.unwrap().smt;
+        // The instance binds the contract's parameter to the DEFINITION of `p`, not to `p`.
+        assert!(smt.contains("(let ((x (callee_cdcd n))) (=> (>= x 0) (>= (callee_cdcd x) 0)))"), "the instance at the definition: {smt}");
+        assert!(!smt.contains("(let ((x p))"), "never at the local name: {smt}");
     }
 
     #[test]
