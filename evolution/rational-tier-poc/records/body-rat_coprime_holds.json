@@ -1,0 +1,111 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "args": [
+      {
+       "kind": "lit",
+       "value": {
+        "kind": "nat",
+        "value": 1
+       }
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "args": [
+         {
+          "kind": "var",
+          "name": "q"
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "p"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "abs"
+           },
+           "kind": "app"
+          }
+         ],
+         "fn": {
+          "kind": "lit",
+          "value": {
+           "kind": "fn_ref",
+           "target": "fn_7875d6be2650b66990fd3851ac8181787c70b7dc6d445fbe1ff2cc1c440a3c2c"
+          }
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "eq"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    },
+    "pattern": {
+     "elems": [
+      {
+       "kind": "bind",
+       "name": "p"
+      },
+      {
+       "kind": "bind",
+       "name": "q"
+      }
+     ],
+     "kind": "tuple"
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "d"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "n"
+     }
+    ],
+    "fn": {
+     "kind": "lit",
+     "value": {
+      "kind": "fn_ref",
+      "target": "fn_07bd6d6e51692248d5afeb0dfad470428082a7713869d3841f95cbf0a93c0cb2"
+     }
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "n"
+  },
+  {
+   "name": "d"
+  }
+ ]
+}

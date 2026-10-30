@@ -1,0 +1,36 @@
+{
+ "body": {
+  "args": [
+   {
+    "kind": "var",
+    "name": "n"
+   }
+  ],
+  "fn": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "d"
+    }
+   ],
+   "fn": {
+    "kind": "lit",
+    "value": {
+     "kind": "fn_ref",
+     "target": "fn_07bd6d6e51692248d5afeb0dfad470428082a7713869d3841f95cbf0a93c0cb2"
+    }
+   },
+   "kind": "app"
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "n"
+  },
+  {
+   "name": "d"
+  }
+ ]
+}

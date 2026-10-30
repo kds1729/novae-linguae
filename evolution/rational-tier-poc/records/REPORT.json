@@ -1,0 +1,462 @@
+[
+ {
+  "name": "rat_normalize",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  },
+  "properties_generative": [
+   "value_preserved: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "idempotent: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "value_preserved: CONSISTENT  |  generative: HELD (200 cases)",
+   "idempotent: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "value_preserved: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
+   "idempotent: UNKNOWN      solver could not decide"
+  ]
+ },
+ {
+  "name": "rat_coprime_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(log n)`, not established: applies `fn_7875d6be2650b66990fd3851ac8181787c70b7dc6d445fbe1ff2cc1c440a3c2c` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+  },
+  "properties_generative": [
+   "lowest_terms: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "lowest_terms: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "lowest_terms: UNKNOWN      solver could not decide"
+  ]
+ },
+ {
+  "name": "rat_neg",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "involution_num: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "involution_den: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "involution_num: CONSISTENT  |  generative: HELD (200 cases)",
+   "involution_den: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "involution_num: PROVED       holds for all inputs (unsat negation)",
+   "involution_den: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "rat_inv",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  },
+  "properties_generative": [
+   "denominator_positive: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "denominator_positive: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "denominator_positive: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "rat_add",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(log n)`, not established: applies `fn_07bd6d6e51692248d5afeb0dfad470428082a7713869d3841f95cbf0a93c0cb2` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+  },
+  "properties_generative": [
+   "commutative: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "commutative: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "commutative: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "rat_sub",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(log n)`, not established: applies `fn_07bd6d6e51692248d5afeb0dfad470428082a7713869d3841f95cbf0a93c0cb2` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+  },
+  "properties_generative": [
+   "self_difference_is_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "self_difference_is_zero: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "self_difference_is_zero: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "rat_mul",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(log n)`, not established: applies `fn_07bd6d6e51692248d5afeb0dfad470428082a7713869d3841f95cbf0a93c0cb2` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+  },
+  "properties_generative": [
+   "commutative: CONSISTENT  |  generative: HELD (400 cases)",
+   "zero_annihilates: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "commutative: CONSISTENT  |  generative: HELD (200 cases)",
+   "zero_annihilates: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "commutative: PROVED       holds for all inputs (unsat negation)",
+   "zero_annihilates: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "rat_eq",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "reflexive: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "symmetric: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "reflexive: CONSISTENT  |  generative: HELD (200 cases)",
+   "symmetric: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "reflexive: PROVED       holds for all inputs (unsat negation)",
+   "symmetric: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "rat_lt",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "irreflexive: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "asymmetric: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "irreflexive: CONSISTENT  |  generative: HELD (200 cases)",
+   "asymmetric: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "irreflexive: PROVED       holds for all inputs (unsat negation)",
+   "asymmetric: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "rat_floor",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "lower_bound: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "upper_bound: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "lower_bound: CONSISTENT  |  generative: HELD (200 cases)",
+   "upper_bound: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "lower_bound: PROVED       holds for all inputs (unsat negation)",
+   "upper_bound: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "rat_add_zero_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_493b408c85e33f13cdae90ef5d476d9ad7f6fe1cabe5588612640e5bac5a71c0` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+  },
+  "properties_generative": [
+   "add_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "add_zero: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "add_zero: UNKNOWN      solver could not decide"
+  ]
+ },
+ {
+  "name": "rat_mul_one_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_43882ce1950b1c0a0b4829292902f210876060a80ff7cf6ff3dbe6355f199228` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+  },
+  "properties_generative": [
+   "mul_one: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "mul_one: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "mul_one: UNKNOWN      solver could not decide"
+  ]
+ },
+ {
+  "name": "rat_eq_normalize_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  },
+  "properties_generative": [
+   "equality_is_normal_form_equality: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "equality_is_normal_form_equality: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "equality_is_normal_form_equality: UNKNOWN      solver could not decide"
+  ]
+ },
+ {
+  "name": "rat_add_assoc_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_493b408c85e33f13cdae90ef5d476d9ad7f6fe1cabe5588612640e5bac5a71c0` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+  },
+  "properties_generative": [
+   "associative: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "associative: CONSISTENT  |  generative: HELD (194 cases; 6 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at a = 1154, b = \"389114219404723736\", c = \"-503311226190474878\", d = \"22477513098\u2026)"
+  ],
+  "prove": [
+   "associative: UNKNOWN      solver could not decide"
+  ]
+ }
+]

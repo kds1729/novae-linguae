@@ -1,0 +1,222 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "arms": [
+      {
+       "body": {
+        "args": [
+         {
+          "args": [
+           {
+            "args": [
+             {
+              "kind": "var",
+              "name": "s"
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "var",
+               "name": "q"
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "eq"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "r"
+              }
+             ],
+             "fn": {
+              "args": [
+               {
+                "kind": "var",
+                "name": "p"
+               }
+              ],
+              "fn": {
+               "kind": "var",
+               "name": "eq"
+              },
+              "kind": "app"
+             },
+             "kind": "app"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "and"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "d"
+            }
+           ],
+           "fn": {
+            "args": [
+             {
+              "kind": "var",
+              "name": "c"
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "var",
+               "name": "b"
+              }
+             ],
+             "fn": {
+              "args": [
+               {
+                "kind": "var",
+                "name": "a"
+               }
+              ],
+              "fn": {
+               "kind": "lit",
+               "value": {
+                "kind": "fn_ref",
+                "target": "fn_6537ebee97ad60532758b11e637922735995751eaf1de7349c108c16c9670911"
+               }
+              },
+              "kind": "app"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           },
+           "kind": "app"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "eq"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       },
+       "pattern": {
+        "elems": [
+         {
+          "kind": "bind",
+          "name": "r"
+         },
+         {
+          "kind": "bind",
+          "name": "s"
+         }
+        ],
+        "kind": "tuple"
+       }
+      }
+     ],
+     "kind": "case",
+     "scrutinee": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "d"
+       }
+      ],
+      "fn": {
+       "args": [
+        {
+         "kind": "var",
+         "name": "c"
+        }
+       ],
+       "fn": {
+        "kind": "lit",
+        "value": {
+         "kind": "fn_ref",
+         "target": "fn_07bd6d6e51692248d5afeb0dfad470428082a7713869d3841f95cbf0a93c0cb2"
+        }
+       },
+       "kind": "app"
+      },
+      "kind": "app"
+     }
+    },
+    "pattern": {
+     "elems": [
+      {
+       "kind": "bind",
+       "name": "p"
+      },
+      {
+       "kind": "bind",
+       "name": "q"
+      }
+     ],
+     "kind": "tuple"
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "b"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "a"
+     }
+    ],
+    "fn": {
+     "kind": "lit",
+     "value": {
+      "kind": "fn_ref",
+      "target": "fn_07bd6d6e51692248d5afeb0dfad470428082a7713869d3841f95cbf0a93c0cb2"
+     }
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "b"
+  },
+  {
+   "name": "c"
+  },
+  {
+   "name": "d"
+  }
+ ]
+}

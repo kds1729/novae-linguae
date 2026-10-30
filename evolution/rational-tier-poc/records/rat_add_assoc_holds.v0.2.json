@@ -1,0 +1,271 @@
+{
+ "body_hash": "expr_38605368e5ceabae544c1de71f68f8ac19da0d20569f5f4dfe18a96cf60d1b0c",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 2
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 3
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 6
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -1
+    },
+    {
+     "kind": "int",
+     "value": 2
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 3
+    },
+    {
+     "kind": "int",
+     "value": 2
+    },
+    {
+     "kind": "int",
+     "value": 5
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 0
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 0
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 0
+    },
+    {
+     "kind": "int",
+     "value": 1
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  }
+ ],
+ "hash": "fn_161f7de7fcc0fab74a5cceacf4485cd7ced4df1087678a231b33d888f82d0e51",
+ "intent_tags": [
+  "arithmetic/rational",
+  "math/rational",
+  "math/rational/rat-add-assoc-holds",
+  "predicate/check"
+ ],
+ "name_hints": [
+  "rat_add_assoc_holds",
+  "additive_associativity_check"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "b"
+            },
+            {
+             "kind": "lit",
+             "value": 1
+            }
+           ],
+           "kind": "app",
+           "op": "lt"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "d"
+            },
+            {
+             "kind": "lit",
+             "value": 1
+            }
+           ],
+           "kind": "app",
+           "op": "lt"
+          }
+         ],
+         "kind": "app",
+         "op": "or"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "f"
+          },
+          {
+           "kind": "lit",
+           "value": 1
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        }
+       ],
+       "kind": "app",
+       "op": "or"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "var",
+           "name": "c"
+          },
+          {
+           "kind": "var",
+           "name": "d"
+          },
+          {
+           "kind": "var",
+           "name": "e"
+          },
+          {
+           "kind": "var",
+           "name": "f"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": true
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b",
+     "c",
+     "d",
+     "e",
+     "f"
+    ]
+   },
+   "name": "associative"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "bool"
+   }
+  }
+ },
+ "supersedes": null
+}

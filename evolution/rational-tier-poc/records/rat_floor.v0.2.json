@@ -1,0 +1,264 @@
+{
+ "body_hash": "expr_85151b0fc54cf29c64b7e1cd4f68e00dfac43ce85218e9e9bdba7407b2c7c333",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 7
+    },
+    {
+     "kind": "int",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 3
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -7
+    },
+    {
+     "kind": "int",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": -4
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 6
+    },
+    {
+     "kind": "int",
+     "value": 3
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 2
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 0
+    },
+    {
+     "kind": "int",
+     "value": 5
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 0
+   }
+  }
+ ],
+ "hash": "fn_170117d2e1f558f9a9a252f0744a64c4db4932c7cc90f509f1b9fb80da66a60c",
+ "intent_tags": [
+  "arithmetic/rational",
+  "math/rational",
+  "math/rational/rat-floor"
+ ],
+ "name_hints": [
+  "rat_floor",
+  "floor_of_fraction"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "d"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "n"
+            },
+            {
+             "kind": "var",
+             "name": "d"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          },
+          {
+           "kind": "var",
+           "name": "d"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        },
+        {
+         "kind": "var",
+         "name": "n"
+        }
+       ],
+       "kind": "app",
+       "op": "le"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n",
+     "d"
+    ]
+   },
+   "name": "lower_bound"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "d"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "n"
+              },
+              {
+               "kind": "var",
+               "name": "d"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            },
+            {
+             "kind": "lit",
+             "value": 1
+            }
+           ],
+           "kind": "app",
+           "op": "add"
+          },
+          {
+           "kind": "var",
+           "name": "d"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n",
+     "d"
+    ]
+   },
+   "name": "upper_bound"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(1)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "d"
+      },
+      {
+       "kind": "lit",
+       "value": 1
+      }
+     ],
+     "kind": "app",
+     "op": "ge"
+    },
+    "kind": "pre"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "int"
+   }
+  }
+ },
+ "supersedes": null
+}

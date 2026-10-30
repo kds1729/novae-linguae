@@ -1,0 +1,209 @@
+{
+ "body_hash": "expr_384f58aae3e9f27477294480107a0b56c2f68a5afa4a8ccc0ebd65301f26ab24",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 2
+    },
+    {
+     "kind": "int",
+     "value": 2
+    },
+    {
+     "kind": "int",
+     "value": 4
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 2
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 3
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -3
+    },
+    {
+     "kind": "int",
+     "value": 6
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": -2
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  }
+ ],
+ "hash": "fn_76ef1aa2234eb45fd386f71a52f349ee54cd745ee4bebfc5fd80b260869a1f51",
+ "intent_tags": [
+  "arithmetic/rational",
+  "math/rational",
+  "math/rational/rat-eq-normalize-holds",
+  "predicate/check"
+ ],
+ "name_hints": [
+  "rat_eq_normalize_holds",
+  "normal_form_uniqueness_check"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "lit",
+           "value": 1
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "d"
+          },
+          {
+           "kind": "lit",
+           "value": 1
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        }
+       ],
+       "kind": "app",
+       "op": "or"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "var",
+           "name": "c"
+          },
+          {
+           "kind": "var",
+           "name": "d"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": true
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b",
+     "c",
+     "d"
+    ]
+   },
+   "name": "equality_is_normal_form_equality"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(log n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "bool"
+   }
+  }
+ },
+ "supersedes": null
+}
