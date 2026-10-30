@@ -517,9 +517,16 @@ pub fn generative_check_mode(
     seed: u64,
     wide: bool,
 ) -> GenOutcome {
-    // Only a `forall` gives a domain to range over.
+    // A CLOSED law — no `forall`, as the Gaussian tier's `i² = −1` is written — is one case: its
+    // domain is the empty binding, and evaluating it once IS the exhaustive check (2026-10-30;
+    // it read UNGENERATABLE "not a forall — no domain to sample" before).
     if expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
-        return GenOutcome::Ungeneratable("not a forall — no domain to sample");
+        crate::interp::clear_predicate_skip_reason();
+        return match eval_case(expr, &BTreeMap::new(), self_fn) {
+            Some(Val::Bool(true)) => GenOutcome::Exhaustive(1, Skips::default()),
+            Some(Val::Bool(false)) => GenOutcome::Refuted(Vec::new()),
+            _ => GenOutcome::Ungeneratable("the closed law did not evaluate to a bool"),
+        };
     }
     let Some(var_arr) = expr.get("vars").and_then(|v| v.as_array()) else {
         return GenOutcome::Ungeneratable("forall has no vars");
@@ -622,6 +629,21 @@ mod tests {
             }
             other => panic!("expected every case to decide over lists, got {other:?}"),
         }
+    }
+
+    /// A CLOSED law (no `forall`) is one case, evaluated: `self(2, 3) == 5` on `add` is EXHAUSTIVE
+    /// over its one (empty) binding, `self(2, 3) == 6` REFUTED — where before both read
+    /// UNGENERATABLE "not a forall" (the Gaussian tier's `i² = −1`, 2026-10-30).
+    #[test]
+    fn a_closed_law_is_one_evaluated_case() {
+        let body = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "add" }, "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] } });
+        let self_fn = self_fn_from_body(&body);
+        let call = json!({ "kind": "app", "op": "self", "args": [{ "kind": "lit", "value": 2 }, { "kind": "lit", "value": 3 }] });
+        let holds = json!({ "kind": "app", "op": "eq", "args": [call.clone(), { "kind": "lit", "value": 5 }] });
+        let fails = json!({ "kind": "app", "op": "eq", "args": [call, { "kind": "lit", "value": 6 }] });
+        assert!(matches!(generative_check(&holds, &self_fn, &Default::default(), 200, 1), GenOutcome::Exhaustive(1, _)));
+        assert!(matches!(generative_check(&fails, &self_fn, &Default::default(), 200, 1), GenOutcome::Refuted(_)));
     }
 
     /// An exponential body on a WIDE sample — Pascal's-rule binomials at n near 2^60 — must not
