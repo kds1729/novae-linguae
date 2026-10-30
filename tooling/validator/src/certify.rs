@@ -383,7 +383,7 @@ impl<'a> LinkedView<'a> {
             // Prove the callee's contract — posts AND laws — with ITS callees' contracts installed and
             // its own declared type in force (tuple/sum sorts come from the signature), in the
             // phases of `derive_self_facts` (nothing assumes itself).
-            let deps = self.contracts_for(body);
+            let deps = self.contracts_for_record(rec, body);
             let prev_refusals = crate::prove::set_callee_refusals(self.refusals_for(body));
             let prev = crate::set_callee_contracts(deps);
             let prev_ty = crate::prove::set_self_type(Some(sig_type.clone()));
@@ -416,6 +416,34 @@ impl<'a> LinkedView<'a> {
     pub fn contracts_for(&self, body: &J) -> std::collections::BTreeMap<String, crate::CalleeContract> {
         let mut targets = std::collections::BTreeSet::new();
         fn_ref_targets(body, &mut targets);
+        self.contracts_closure(targets)
+    }
+
+    /// [`contracts_for`], seeded also with the functions the RECORD'S OWN pres, posts and laws
+    /// apply by content address. `gi_norm`'s law `N(conj(z)) = N(z)` applies `gi_conj`, and
+    /// `gi_rem`'s post `N(result) < N(w)` applies `gi_norm` — neither of which the body applies, so
+    /// both read UNSUPPORTED "its certified contract is not available here" with the records a
+    /// directory entry away (the Gaussian tier's round 1, 2026-10-30): the fourth place that had
+    /// assumed a contract applies no callee.
+    pub fn contracts_for_record(&self, record: &J, body: &J) -> std::collections::BTreeMap<String, crate::CalleeContract> {
+        let mut targets = std::collections::BTreeSet::new();
+        fn_ref_targets(body, &mut targets);
+        let own = record.get("hash").and_then(|h| h.as_str()).unwrap_or_default();
+        for r in record.pointer("/signature/refinements").and_then(|r| r.as_array()).into_iter().flatten() {
+            if let Some(e) = r.get("expr") {
+                predicate_fn_targets(e, &mut targets);
+            }
+        }
+        for p in record.get("properties").and_then(|p| p.as_array()).into_iter().flatten() {
+            if let Some(e) = p.get("expr") {
+                predicate_fn_targets(e, &mut targets);
+            }
+        }
+        targets.remove(own);
+        self.contracts_closure(targets)
+    }
+
+    fn contracts_closure(&self, targets: std::collections::BTreeSet<String>) -> std::collections::BTreeMap<String, crate::CalleeContract> {
         // The CLOSURE under the contracts: a callee's post may itself apply a callee (`rat_normalize`'s
         // `gcd(|fst(result)|, snd(result)) = 1` applies `gcd`), and lowering that post needs the
         // second callee's contract installed too — without it the obligation refused with "its
@@ -799,7 +827,7 @@ pub fn certify_record_linked(
     if let Some(sig_type) = record.pointer("/signature/type") {
         let refinements: Vec<J> =
             record.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
-        let prev = view.as_ref().map(|v| crate::set_callee_contracts(v.contracts_for(body)));
+        let prev = view.as_ref().map(|v| crate::set_callee_contracts(v.contracts_for_record(record, body)));
         let prev_refusals = view.as_ref().map(|v| crate::prove::set_callee_refusals(v.refusals_for(body)));
         // The same phased derivation the linked view uses for a callee (its own plain-proved laws
         // may enter a post's induction), so this report and a dependent's view of it agree.
@@ -1048,6 +1076,42 @@ mod tests {
         assert!(contracts.contains_key(&ha), "A, applied by the body");
         assert!(contracts.contains_key(&hb), "B, applied only by A's post: {:?}", contracts.keys().collect::<Vec<_>>());
         assert!(!contracts[&ha].posts.is_empty(), "A's post proved (needs B's contract itself)");
+    }
+
+    /// The record's OWN pres, posts and laws may apply a callee the body does not (`gi_norm`'s law
+    /// `N(conj(z)) = N(z)` applies `gi_conj`; `gi_rem`'s post `N(result) < N(w)` applies `gi_norm`):
+    /// `contracts_for_record` seeds the closure with those too (the Gaussian tier's round 1).
+    #[test]
+    fn the_contract_set_includes_the_callees_the_records_own_predicates_apply() {
+        let Some(solver) = (["z3", "cvc5"].into_iter().find(|s| std::process::Command::new(s).arg("--version").output().map(|o| o.status.success()).unwrap_or(false))) else { return };
+        let int = json!({ "kind": "builtin", "name": "int" });
+        let mk = |name: &str, body: J, posts: Vec<J>| -> (String, J, J) {
+            let bh = crate::hash_artifact_with_kind(&body, crate::ArtifactKind::BodyExpression).unwrap();
+            let mut rec = json!({
+                "schema_version": "0.2.0", "hash": "fn_".to_string() + &"0".repeat(64), "name_hints": [name],
+                "signature": { "type": { "kind": "fn", "params": [int.clone()], "result": int.clone() },
+                               "refinements": posts.into_iter().map(|p| json!({ "kind": "post", "expr": p })).collect::<Vec<_>>(),
+                               "effects": [], "capabilities": [], "terminates": "always" },
+                "examples": [], "intent_tags": [], "derived_from": J::Null, "supersedes": J::Null, "body_hash": bh });
+            let h = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
+            rec["hash"] = json!(h.clone());
+            (h, rec, body)
+        };
+        let var = |n: &str| json!({ "kind": "var", "name": n });
+        let lam = |b: J| json!({ "kind": "lambda", "params": [{ "name": "x" }], "body": b });
+        // B = \x -> abs(x), post result >= 0.
+        let (hb, rb, bb) = mk("b", lam(json!({ "kind": "app", "fn": var("abs"), "args": [var("x")] })),
+            vec![json!({ "kind": "app", "op": "ge", "args": [var("result"), { "kind": "lit", "value": 0 }] })]);
+        // C = \x -> x applies NOTHING; its post `B(result) >= 0` applies B.
+        let (_, rc, bc) = mk("c", lam(var("x")),
+            vec![json!({ "kind": "app", "op": "ge", "args": [{ "kind": "app", "op": hb, "args": [var("result")] }, { "kind": "lit", "value": 0 }] })]);
+        let records: HashMap<String, J> = [(hb.clone(), rb)].into_iter().collect();
+        let bodies: HashMap<String, J> = [(hb.clone(), bb)].into_iter().collect();
+        let view = LinkedView::new(&records, &bodies, solver);
+        assert!(view.contracts_for(&bc).is_empty(), "the body applies no callee");
+        let contracts = view.contracts_for_record(&rc, &bc);
+        assert!(contracts.contains_key(&hb), "B, applied only by C's own post: {:?}", contracts.keys().collect::<Vec<_>>());
+        assert!(!contracts[&hb].posts.is_empty(), "B's post proved");
     }
 
     #[test]

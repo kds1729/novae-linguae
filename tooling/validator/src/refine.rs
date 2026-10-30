@@ -263,7 +263,7 @@ fn decide(goal: &J, body: Option<&J>, solver: &str, nat_positions: &std::collect
         ProofOutcome::Refuted(model) => RefinementOutcome::Violated(model),
         ProofOutcome::NoSolver => RefinementOutcome::NoSolver,
         ProofOutcome::Unknown => RefinementOutcome::Unverifiable("solver could not decide".into()),
-        ProofOutcome::Unsupported(_) => {
+        ProofOutcome::Unsupported(first_order_why) => {
             match prove_by_induction_with_exploration(goal, body, solver, DEFAULT_LEMMA_DEPTH).0 {
                 InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_) => RefinementOutcome::Sound,
                 // A satisfiable induction base is a concrete short input on which the body breaks the contract.
@@ -284,7 +284,10 @@ fn decide(goal: &J, body: Option<&J>, solver: &str, nat_positions: &std::collect
                         ProofOutcome::Proved => RefinementOutcome::Sound,
                         ProofOutcome::Unknown => RefinementOutcome::Unverifiable("numeric induction did not close (the step needs a lemma, or the arithmetic is nonlinear)".into()),
                         ProofOutcome::NoSolver => RefinementOutcome::NoSolver,
-                        _ => RefinementOutcome::Unverifiable(why),
+                        // The first-order refusal is the informative one (a callee's contract
+                        // missing, an unsupported construct); the list engine's "nothing to induct
+                        // on" hid it (`gi_rem`'s post, 2026-10-30).
+                        _ => RefinementOutcome::Unverifiable(format!("{first_order_why}; induction: {why}")),
                     }
                 }
             }

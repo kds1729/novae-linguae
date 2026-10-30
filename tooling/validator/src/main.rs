@@ -1475,7 +1475,7 @@ fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str, records:
     let maps = linked_maps(records)?;
     let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, solver));
     if let Some(v) = &view {
-        nl_validator::set_callee_contracts(v.contracts_for(&body));
+        nl_validator::set_callee_contracts(v.contracts_for_record(&record, &body));
         nl_validator::set_callee_refusals(v.refusals_for(&body));
     }
     let sig_type = record
@@ -1833,7 +1833,7 @@ fn cmd_prove(
     let maps = linked_maps(records)?;
     let view = maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, solver));
     if let (Some(v), Some(b)) = (&view, &body_ast) {
-        nl_validator::set_callee_contracts(v.contracts_for(b));
+        nl_validator::set_callee_contracts(v.contracts_for_record(&value, b));
         nl_validator::set_callee_refusals(v.refusals_for(b));
     }
     // The view that can compute THIS record's own contract (the self-contract rung below): the

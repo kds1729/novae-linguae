@@ -1648,18 +1648,21 @@ pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_pos
     let prop_expr = &uncurry(prop_expr);
     let body_flat = body.map(uncurry);
     let body = body_flat.as_ref();
-    if prop_expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
-        bail!("not a `forall` — no universally-quantified obligation to prove");
-    }
-    let vars: Vec<String> = prop_expr
-        .get("vars")
-        .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-        .unwrap_or_default();
-    if vars.is_empty() {
-        bail!("`forall` has no variables");
-    }
-    let pred = prop_expr.get("body").ok_or_else(|| anyhow!("`forall` has no body"))?;
+    // A CLOSED predicate — no `forall`, or one with no variables — is an obligation with no
+    // quantified variables, not a refusal: the Gaussian tier's `i² = −1` (`fst(self(0, 1, 0, 1))
+    // == 0 - 1`) and "the four units" read UNSUPPORTED "not a `forall`" although one solver call
+    // decides them (2026-10-30).
+    let is_forall = prop_expr.get("kind").and_then(|k| k.as_str()) == Some("forall");
+    let vars: Vec<String> = if is_forall {
+        prop_expr
+            .get("vars")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let pred = if is_forall { prop_expr.get("body").ok_or_else(|| anyhow!("`forall` has no body"))? } else { prop_expr };
 
     // Does the predicate reference `self`? If so, we need the body.
     let uses_self = references_self(pred);
@@ -3118,6 +3121,24 @@ mod tests {
     }
     fn op(o: &str, args: Vec<J>) -> J {
         json!({ "kind": "app", "op": o, "args": args })
+    }
+
+    #[test]
+    fn a_closed_law_is_a_zero_variable_obligation() {
+        let Some(solver) = solver() else { return };
+        // `\a b -> add a b` with the CLOSED law `self(2, 3) == 5` — no `forall`, the shape of the
+        // Gaussian tier's `i² = −1` — is one solver call, not UNSUPPORTED "not a `forall`".
+        let add = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }],
+            "body": { "kind": "app", "fn": v("add"), "args": [v("a"), v("b")] } });
+        let closed = op("eq", vec![self_app(vec![lit(2), lit(3)]), lit(5)]);
+        let (out, _) = prove_property(&closed, Some(&add), solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        let wrong = op("eq", vec![self_app(vec![lit(2), lit(3)]), lit(6)]);
+        assert!(matches!(prove_property(&wrong, Some(&add), solver).0, ProofOutcome::Refuted(_)));
+        // An explicit `forall` with no variables is the same obligation.
+        let empty_forall = law(&[], op("eq", vec![self_app(vec![lit(2), lit(3)]), lit(5)]));
+        let (out, _) = prove_property(&empty_forall, Some(&add), solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
     }
 
     #[test]
