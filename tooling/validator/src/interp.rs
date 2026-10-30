@@ -3166,13 +3166,13 @@ mod tests {
         env.insert("a".into(), Val::Int(3));
         env.insert("m".into(), Val::Int(11));
         env.insert("result".into(), Val::Variant("Just".into(), Some(Box::new(Val::Int(4)))));
-        assert_eq!(eval_predicate_env(&pred, &env, &None), Some(Val::Bool(true)));
+        assert!(matches!(eval_predicate_env(&pred, &env, &None), Some(Val::Bool(true))));
         env.insert("result".into(), Val::Variant("Just".into(), Some(Box::new(Val::Int(5)))));
-        assert_eq!(eval_predicate_env(&pred, &env, &None), Some(Val::Bool(false)));
+        assert!(matches!(eval_predicate_env(&pred, &env, &None), Some(Val::Bool(false))));
         env.insert("result".into(), Val::Variant("None".into(), None));
-        assert_eq!(eval_predicate_env(&pred, &env, &None), Some(Val::Bool(true)));
+        assert!(matches!(eval_predicate_env(&pred, &env, &None), Some(Val::Bool(true))));
         // A scrutinee no arm matches is undecidable, never silently true.
         env.insert("result".into(), Val::Int(7));
-        assert_eq!(eval_predicate_env(&pred, &env, &None), None);
+        assert!(eval_predicate_env(&pred, &env, &None).is_none());
     }
 }
