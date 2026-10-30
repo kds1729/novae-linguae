@@ -1137,6 +1137,18 @@ pub const MAX_APPLY_DEPTH: usize = 100_000;
 
 thread_local! {
     static APPLY_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// An EVALUATION BUDGET in closure applications, when a caller sets one (`set_eval_fuel`):
+    /// the generative checker gives each generated case a budget, so an exponential body on a
+    /// wide sample — `binomial` by Pascal's rule at n ≈ 2^60 — is a SKIPPED case with a stated
+    /// reason, not a checker that never returns (measured 2026-10-30: 33 minutes and counting on
+    /// one case). `None` = unbounded, the default for `run`, `eval` and `certify`.
+    static EVAL_FUEL: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Install an evaluation budget (closure applications) for the current thread, returning the
+/// previous one. `None` removes it.
+pub fn set_eval_fuel(fuel: Option<u64>) -> Option<u64> {
+    EVAL_FUEL.with(|f| f.replace(fuel))
 }
 
 pub fn apply(f: Val, mut args: Vec<Val>) -> Result<Val> {
@@ -1155,6 +1167,12 @@ pub fn apply(f: Val, mut args: Vec<Val>) -> Result<Val> {
                 let mut env2 = env;
                 for (p, a) in params.iter().zip(args.iter()) {
                     env2.insert(p.clone(), a.clone());
+                }
+                if let Some(left) = EVAL_FUEL.with(|f| f.get()) {
+                    if left == 0 {
+                        bail!("evaluation budget exceeded (closure applications): the case was not decided");
+                    }
+                    EVAL_FUEL.with(|f| f.set(Some(left - 1)));
                 }
                 let depth = APPLY_DEPTH.with(|d| {
                     d.set(d.get() + 1);

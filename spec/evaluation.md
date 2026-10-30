@@ -355,7 +355,11 @@ function ONLY as its argument had no kind evidence and defaulted to Int — `pad
 n. n < 0 || length(self(xs, n)) == n` fed an int for `xs` in 72 of its 81 bounded cases, each
 skipped on "expected a list", and read EXHAUSTIVE (9 cases) for eight rounds. Such a variable
 now ranges over the function's DECLARED parameter type (`int`/`nat`/`bool`/`string`/`List …`,
-read from the signature; a tuple, sum, function or `Json` parameter still has no generator). **`--wide`** replaces the small
+read from the signature; a tuple, sum, function or `Json` parameter still has no generator). And
+each generated case has an EVALUATION BUDGET (2,000,000 closure applications, deterministic): a
+case over it is skipped with the reason "evaluation budget exceeded" — found when `--wide` drew
+n ≈ 2^60 for a Pascal's-rule binomial, exponential in n, and one case ran 33 minutes without
+returning (2026-10-30). `run`, `eval` and `certify` keep their unbounded evaluation. **`--wide`** replaces the small
 bounded domain with sampling ACROSS MAGNITUDES (log-uniform to 2^60, nats non-negative): number
 theory's cases live far above −4..4, and a law that HELD over 200 wide samples is evidence the small
 domain cannot give — still sampling, never a proof. A CONSISTENT/UNVERIFIABLE law

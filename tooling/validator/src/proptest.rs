@@ -361,6 +361,19 @@ fn shrink(
 // instead of sampling. `bool` is total; `int`/`list` use a bounded range so the verdict is exhaustive
 // over that range (not a universal proof — see GenOutcome::Exhaustive).
 const EXHAUSTIVE_BUDGET: usize = 4096;
+/// Closure applications one generated case may spend before it is SKIPPED with the reason
+/// "evaluation budget exceeded" — enough for any polynomial body at the sampled magnitudes, and
+/// a wall for an exponential one on a wide sample (`binomial` by Pascal's rule at n ≈ 2^60 never
+/// returned; 2026-10-30). Deterministic, so the verdict stays reproducible.
+const CASE_FUEL: u64 = 2_000_000;
+
+/// Evaluate one generated case under the fuel budget.
+fn eval_case(body: &J, binding: &BTreeMap<String, Val>, self_fn: &Option<Val>) -> Option<Val> {
+    let prev = crate::interp::set_eval_fuel(Some(CASE_FUEL));
+    let out = eval_predicate_env(body, binding, self_fn);
+    crate::interp::set_eval_fuel(prev);
+    out
+}
 const INT_LO: i128 = -4;
 const INT_HI: i128 = 4;
 const LIST_MAX_LEN: usize = 3;
@@ -528,7 +541,7 @@ pub fn generative_check_mode(
         let mut skips = Skips::default();
         for binding in domain {
             crate::interp::clear_predicate_skip_reason();
-            match eval_predicate_env(body, &binding, self_fn) {
+            match eval_case(body, &binding, self_fn) {
                 Some(Val::Bool(true)) => decided += 1,
                 Some(Val::Bool(false)) => {
                     let minimal = shrink(body, self_fn, &names, binding);
@@ -552,13 +565,13 @@ pub fn generative_check_mode(
         let binding: BTreeMap<String, Val> =
             names.iter().map(|n| (n.clone(), gen_value(&kinds[n], &mut rng, wide))).collect();
         crate::interp::clear_predicate_skip_reason();
-        match eval_predicate_env(body, &binding, self_fn) {
+        match eval_case(body, &binding, self_fn) {
             Some(Val::Bool(true)) => decided += 1,
             Some(Val::Bool(false)) => {
                 let minimal = shrink(body, self_fn, &names, binding);
                 return GenOutcome::Refuted(report_binding(&names, &minimal));
             }
-            _ => skips.note(&names, &binding), // undecidable on this input (out of domain / errored)
+            _ => skips.note(&names, &binding), // undecidable on this input (out of domain / errored / over budget)
         }
     }
     if decided == 0 {
@@ -608,6 +621,58 @@ mod tests {
                 assert_eq!(skips, Skips::default(), "{skips:?}");
             }
             other => panic!("expected every case to decide over lists, got {other:?}"),
+        }
+    }
+
+    /// An exponential body on a WIDE sample — Pascal's-rule binomials at n near 2^60 — must not
+    /// hang the checker: each case has a budget, and a case over it is SKIPPED with the reason.
+    #[test]
+    fn a_case_over_the_evaluation_budget_is_skipped_not_waited_for() {
+        // \n k -> case gt k 0 of { true => case gt n 0 of { true => add (self (sub n 1) (sub k 1)) (self (sub n 1) k); false => 0 }; false => 1 }
+        let pascal = json!({ "kind": "lambda", "params": [{ "name": "n" }, { "name": "k" }], "body": { "kind": "case",
+            "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "gt" }, "args": [{ "kind": "var", "name": "k" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+            "arms": [
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": { "kind": "case",
+                    "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "gt" }, "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 0 } }] },
+                    "arms": [
+                        { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": { "kind": "app", "fn": { "kind": "var", "name": "add" }, "args": [
+                            { "kind": "app", "fn": { "kind": "var", "name": "self" }, "args": [ { "kind": "app", "fn": { "kind": "var", "name": "sub" }, "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 1 } }] }, { "kind": "app", "fn": { "kind": "var", "name": "sub" }, "args": [{ "kind": "var", "name": "k" }, { "kind": "lit", "value": { "kind": "int", "value": 1 } }] } ] },
+                            { "kind": "app", "fn": { "kind": "var", "name": "self" }, "args": [ { "kind": "app", "fn": { "kind": "var", "name": "sub" }, "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": { "kind": "int", "value": 1 } }] }, { "kind": "var", "name": "k" } ] } ] } },
+                        { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": { "kind": "lit", "value": { "kind": "int", "value": 0 } } } ] } },
+                { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": { "kind": "lit", "value": { "kind": "int", "value": 1 } } } ] } });
+        // On a CLI-sized stack: the recursion is as deep as `n`, and a wide `n` reaches the depth
+        // bound (100,000) long before a test thread's 2 MiB stack would allow.
+        let out = std::thread::Builder::new()
+            .stack_size(2 << 30)
+            .spawn(move || {
+                let self_fn = self_fn_from_body(&pascal);
+                let nats: BTreeSet<usize> = [0, 1].into();
+                // C(n, 0) = 1 returns at once: every wide case decides.
+                let law = json!({ "kind": "forall", "vars": ["n"], "body": { "kind": "app", "op": "eq", "args": [
+                    { "kind": "app", "op": "self", "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": 0 }] }, { "kind": "lit", "value": 1 } ] } });
+                let quick = generative_check_mode(&law, &self_fn, &nats, 20, 1, true);
+                // C(n, n div 2) ≥ 1: the tree is exponential in n at bounded depth (n ≈ 60 was the
+                // 33-minute case), and a wide `n` hits the depth bound; either way every sampled case
+                // must come back — skipped and SAID, or decided — within the budget.
+                let law = json!({ "kind": "forall", "vars": ["n"], "body": { "kind": "app", "op": "ge", "args": [
+                    { "kind": "app", "op": "self", "args": [{ "kind": "var", "name": "n" }, { "kind": "app", "op": "div", "args": [{ "kind": "var", "name": "n" }, { "kind": "lit", "value": 2 }] }] }, { "kind": "lit", "value": 1 } ] } });
+                let t = std::time::Instant::now();
+                let slow = generative_check_mode(&law, &self_fn, &nats, 12, 1, true);
+                (quick, slow, t.elapsed())
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        let (quick, slow, elapsed) = out;
+        assert!(matches!(quick, GenOutcome::Held(_, Skips { count: 0, .. })), "{quick:?}");
+        assert!(elapsed.as_secs() < 120, "the budget must bound the wall clock: {elapsed:?}");
+        match slow {
+            GenOutcome::Held(_, skips) => {
+                let why = skips.first.as_deref().unwrap_or("");
+                assert!(skips.count == 0 || why.contains("evaluation budget exceeded") || why.contains("recursion depth exceeded"), "{skips:?}");
+            }
+            GenOutcome::Ungeneratable(_) => {} // every sampled case over budget: also honest
+            other => panic!("{other:?}"),
         }
     }
 
