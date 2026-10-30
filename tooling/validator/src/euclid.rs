@@ -622,7 +622,12 @@ fn rules_of(asserted: &[S], expanded: &[S]) -> Vec<Rule> {
             for (a, b) in [(&l, &r), (&r, &l)] {
                 let Some(identity) = identity_of(a, b) else { continue };
                 for (mono, c) in &identity {
-                    if mono.len() < MIN_LEAD_DEGREE || (*c != 1 && *c != -1) {
+                    // A lead of degree one is admitted only when it is a residue atom (`(mod a g)
+                    // = 0`, a certified divisibility): it rewrites a residue the chain reached to
+                    // what the hypothesis says it is — never an application atom to its
+                    // unfolding (the variants' business, measured to drown the solver).
+                    let residue_lead = mono.len() == 1 && mono[0].starts_with("(mod ");
+                    if (mono.len() < MIN_LEAD_DEGREE && !residue_lead) || (*c != 1 && *c != -1) {
                         continue;
                     }
                     // lead = rest:  c·lead + rest' = 0  ⇒  lead = −rest'/c
@@ -770,6 +775,22 @@ fn push_accessor_once(s: &S) -> Vec<S> {
                 }
             }
         }
+        // An `ite` in arithmetic position — the inlined body's `case` under the goal's `mod`
+        // (`lcm`'s `(ite (= a 0) 0 (… (div (* a b) g)))` modulo `a`) — pushed to each branch:
+        // the solver identifies the term with the branch under its condition.
+        if matches!(h.as_str(), "mod" | "div" | "+" | "-" | "*") {
+            for (i, x) in items.iter().enumerate().skip(1) {
+                if let S::List(ite) = x {
+                    if ite.len() == 4 && matches!(&ite[0], S::Atom(x) if x == "ite") {
+                        for branch in [&ite[2], &ite[3]] {
+                            let mut items2 = items.clone();
+                            items2[i] = branch.clone();
+                            out.push(S::List(items2));
+                        }
+                    }
+                }
+            }
+        }
     }
     for (i, x) in items.iter().enumerate() {
         for v in push_accessor_once(x) {
@@ -816,14 +837,82 @@ fn match_lead(lead: &Mono, mono: &Mono, mkey: &str) -> Option<(BTreeMap<String, 
     Some((unlift, rest.into_iter().flatten().collect()))
 }
 
+/// A quotient atom `(div X n)` of ANOTHER modulus, lifted to its quotient polynomial when the
+/// hypotheses say the residue vanishes: `X` decomposed against `n` into `P + n·Q`, the rules
+/// applied to `P` until it is empty — then `(div X n) = Q` exactly (`X = n·Q + 0`, uniqueness).
+/// `lcm`'s `(a·b) div g` modulo `a`: `a·b = g·(a div g)(b div g)·g + …` with the residues
+/// `a mod g`, `b mod g` both 0 by `gcd`'s certified divisibility, so the quotient is
+/// `g·(a div g)·(b div g)`, and `g·(a div g)` is `a` by the same facts. The first atom that
+/// lifts is replaced (one substitution per step), and the assertions used are returned.
+fn div_lift(cur: &Poly, rules: &[Rule], mkey: &str) -> Option<(Poly, Vec<String>)> {
+    let atoms: BTreeSet<String> = cur
+        .iter()
+        .filter(|(mono, _)| !mono.iter().any(|a| a == mkey))
+        .flat_map(|(mono, _)| mono.iter().cloned())
+        .filter(|a| a.starts_with("(div "))
+        .collect();
+    for atom in atoms {
+        let Some(S::List(items)) = parse_all(&atom).ok().and_then(|v| v.into_iter().next()) else { continue };
+        if items.len() != 3 || is_literal(&items[2]) {
+            continue;
+        }
+        let (x, n) = (&items[1], &items[2]);
+        let nkey = render(n);
+        if nkey == mkey {
+            continue;
+        }
+        let Some(xp) = to_poly(x) else { continue };
+        let Some((mut p, q, _)) = step(&xp, n, &nkey, false) else { continue };
+        let mut uses: Vec<String> = Vec::new();
+        for _ in 0..4 {
+            if p.is_empty() {
+                break;
+            }
+            let Some((p2, used)) = apply_rules(&p, rules, &nkey) else { break };
+            p = p2;
+            for u in used {
+                if !uses.contains(&u) {
+                    uses.push(u);
+                }
+            }
+        }
+        if !p.is_empty() {
+            continue;
+        }
+        // Substitute: every monomial with the atom gets `Q` in its place.
+        let mut out = Poly::new();
+        for (mono, c) in cur {
+            let count = mono.iter().filter(|a| **a == atom).count();
+            if count == 0 {
+                *out.entry(mono.clone()).or_insert(0) += c;
+                continue;
+            }
+            let mut term = p_const(*c);
+            for a in mono {
+                let factor = if *a == atom { q.clone() } else { p_atom(a.clone()) };
+                term = p_mul(&term, &factor)?;
+            }
+            out = p_add(&out, &term)?;
+        }
+        out.retain(|_, c| *c != 0);
+        return Some((out, uses));
+    }
+    None
+}
+
 /// The polynomial with every monomial that contains a rule's lead rewritten by it (one rule per
 /// monomial), and the assertions used. `None` when no rule applies.
 fn apply_rules(cur: &Poly, rules: &[Rule], mkey: &str) -> Option<(Poly, Vec<String>)> {
     let mut out = cur.clone();
     let mut uses: Vec<String> = Vec::new();
     let mut any = false;
+    // A rule whose right-hand side mentions the chain's modulus first: it rewrites the monomial
+    // to a multiple of `m` (`g·(b div g) → b` modulo `b`), which is what the residue part needs
+    // to vanish; `g·(a div g) → a` modulo `b` is equally true and leads nowhere.
+    let mut ordered: Vec<&Rule> = rules.iter().collect();
+    ordered.sort_by_key(|r| !r.rest.keys().flat_map(|mono| mono.iter()).any(|a| a == mkey));
     for (mono, c) in cur {
-        for rule in rules {
+        for rule in &ordered {
             if rule.lead.iter().any(|a| a == mkey) {
                 continue;
             }
@@ -1378,8 +1467,12 @@ fn instance_chain(t: &S, m: &S, tp: &Poly, rewrite: &BTreeMap<String, Poly>, rul
         // rule's assertion, which the instance records.
         let mut uses: Vec<String> = Vec::new();
         let mut work = cur.clone();
-        if !first && !has_liftable(&work, &mkey) {
-            if let Some((rewritten, used)) = apply_rules(&work, rules, &mkey) {
+        if !has_liftable(&work, &mkey) {
+            // Rules wait for the plain chain to be stuck; the quotient lift may open the chain
+            // (the plain step on a lone quotient atom is the trivial `t mod m = (t mod m) mod m`,
+            // which is never stated — nothing is lost).
+            let rewritten = if first { None } else { apply_rules(&work, rules, &mkey) };
+            if let Some((rewritten, used)) = rewritten.or_else(|| div_lift(&work, rules, &mkey)) {
                 work = rewritten;
                 uses = used;
                 witness = true;
@@ -1415,7 +1508,7 @@ fn instance_chain(t: &S, m: &S, tp: &Poly, rewrite: &BTreeMap<String, Poly>, rul
             out.push(Instance { modulus: mkey.clone(), premise, conclusion, text, uses, witness });
         }
         first = false;
-        if p.is_empty() || (!has_liftable(&p, &mkey) && apply_rules(&p, rules, &mkey).is_none()) {
+        if p.is_empty() || (!has_liftable(&p, &mkey) && apply_rules(&p, rules, &mkey).is_none() && div_lift(&p, rules, &mkey).is_none()) {
             break;
         }
         x = ps;
@@ -1771,6 +1864,35 @@ mod tests {
         assert!(insts.iter().any(|i| !i.uses.is_empty() && i.uses[0].contains("(mod (* m1 (dt0_Just_v (callee_inv m1 m2))) m2)")), "{:?}", insts.iter().map(|i| &i.uses).collect::<Vec<_>>());
         let Some(s) = solver() else { return };
         assert!(retry(CRT_POST, s).is_some() || retry_stepwise(CRT_POST, s).is_some(), "the CRT post should close");
+    }
+
+    /// `lcm`'s guarded law `a < 1 ∨ b < 1 ∨ (lcm(a, b) mod a = 0 ∧ lcm(a, b) mod b = 0)` as `prove`
+    /// states it: `gcd` uninterpreted under its certified contract (≥ 1 off (0, 0), ≥ 0,
+    /// commutative, divides both), the body inlined.
+    const LCM_LAW: &str = "(set-logic ALL)\n\
+(declare-fun callee_g (Int Int) Int)\n\
+(define-fun self ((a Int) (b Int)) Int (ite (= a 0) 0 (ite (= b 0) 0 (div (* a b) (callee_g a b)))))\n\
+(declare-const a Int)\n(declare-const b Int)\n\
+(assert (>= a 0))\n(assert (>= b 0))\n\
+(assert (=> (and (>= a 0) (>= b 0)) (or (and (< a 1) (< b 1)) (>= (callee_g a b) 1))))\n\
+(assert (=> (and (>= a 0) (>= b 0)) (>= (callee_g a b) 0)))\n\
+(assert (=> (and (>= a 0) (>= b 0)) (= (callee_g a b) (callee_g b a))))\n\
+(assert (=> (and (>= a 0) (>= b 0)) (or (and (= a 0) (= b 0)) (and (= (mod a (callee_g a b)) 0) (= (mod b (callee_g a b)) 0)))))\n\
+(assert (not (or (< a 1) (< b 1) (and (= (mod (self a b) a) 0) (= (mod (self a b) b) 0)))))\n\
+(check-sat)\n";
+
+    #[test]
+    fn the_div_lift_reaches_lcm_through_gcds_divisibility() {
+        let insts = instances(LCM_LAW, false).expect("instances");
+        // The quotient `(a·b) div g` lifted to `g·(a div g)·(b div g)` (the residues vanish by the
+        // divisibility rules), then `g·(a div g)` rewritten to `a`: the goal's term is a multiple of `a`.
+        for m in ["a", "b"] {
+            let chain: Vec<&Instance> = insts.iter().filter(|i| i.modulus == m && i.witness).collect();
+            assert!(chain.iter().any(|i| i.premise.starts_with("(= (div (* a b) (callee_g a b))")), "the quotient lifted modulo {m}: {:?}", insts.iter().map(|i| (&i.modulus, &i.conclusion)).collect::<Vec<_>>());
+            assert!(chain.iter().any(|i| !i.uses.is_empty() && i.conclusion.ends_with(&format!(" {m}) 0))"))), "the residue vanishes modulo {m}: {:?}", chain.iter().map(|i| &i.conclusion).collect::<Vec<_>>());
+        }
+        let Some(s) = solver() else { return };
+        assert!(retry(LCM_LAW, s).is_some() || retry_stepwise(LCM_LAW, s).is_some(), "lcm's guarded law should close");
     }
 
     #[test]

@@ -739,6 +739,13 @@ witness rung's instances come after the plain ones, are a further one-query retr
 own 20 s budget stepwise. Measured: `mod_inverse`'s `Just(x) ⇒ a·x ≡ 1 (mod m)` SOUND, `crt2`'s
 `Just(x) ⇒ x ≡ a1 (mod m1) ∧ x ≡ a2 (mod m2)` SOUND through `mod_inverse`'s contract (stepwise),
 and the two checker laws on those domains first-order from the contracts at the point of use.
+Same evening, the quotient lift: a quotient atom `(div X n)` of another modulus is lifted to its
+quotient polynomial when the rules reduce `X`'s residue part modulo `n` to zero (`X = n·Q + 0`,
+so `(div X n) = Q` by uniqueness) — `lcm`'s `(a·b) div g` is `g·(a div g)·(b div g)` by `gcd`'s
+certified divisibility, and `g·(a div g)` is `a` by the same facts read the other way, so
+`lcm(a, b) mod a = 0` on the guarded law (the unguarded one asks `0 mod 0` at `a = 0` and is
+unprovable as stated); a residue atom may be a rule's degree-one lead (`(mod a g) → 0`), and the
+goal's `ite` in arithmetic position is pushed to its branches as a variant.
 
 ## Semantic equivalence
 
