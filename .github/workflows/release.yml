@@ -35,9 +35,11 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools unzip
           curl -fsSL -o z3.zip https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/z3-4.16.0-x64-glibc-2.39.zip
           unzip -q z3.zip && sudo cp z3-4.16.0-x64-glibc-2.39/bin/z3 /usr/local/bin/z3 && z3 --version
-      - name: z3 (the prover tests need a solver)
+      - name: z3 4.16.0 (the prover tests need a solver — the SAME release as Linux; Homebrew's moving z3 failed eleven solver-shape-dependent proofs on 2026-10-30)
         if: runner.os == 'macOS'
-        run: brew install z3
+        run: |
+          curl -fsSL -o z3.zip https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/z3-4.16.0-arm64-osx-15.7.3.zip
+          unzip -q z3.zip && sudo cp z3-4.16.0-arm64-osx-15.7.3/bin/z3 /usr/local/bin/z3 && z3 --version
       - name: build
         working-directory: tooling/validator
         run: cargo build --release --locked --target ${{ matrix.target }} --bin nl-validator
