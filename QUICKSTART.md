@@ -83,9 +83,10 @@ testimony; the trace is theirs — that is the honest scope, and it is stated).
   discovery tag is `parse/<lowercase-hyphenated-field>` (`countryCapital` → `parse/country-capital`)
   and its argument order is the record's `signature` (base URL first, then the observed arguments)
   — both are in the `.v0.2.json` the adapter prints next to each record, and each adapter's
-  per-record line ends with `intent=<tag>`. For OpenAPI: `--verify-against` runs every documented
-  example live, mutating verbs included, so aim it at a sandbox (the public Petstore answers 500 to
-  its own documented writes); a relative `servers[0].url` is resolved against it; gate-failed
+  per-record line ends with `intent=<tag>`. For OpenAPI: `--verify-against` is the examples' base
+  — every documented example runs against it, mutating verbs included, so aim it at a sandbox
+  (the public Petstore answers 500 to its own documented writes); the description's own server
+  url is not called, and a relative one (`/api/v3`) is joined onto the base you give; gate-failed
   records move to `<out>/failed/` and the closing `summary:` line counts what is left to publish.
 - **Publish and be verified.** `python3 tooling/commons-node/publish_records.py records/` posts
   your bodies, traces and records to a node's `/v0/records` in the right order (Arca's gate

@@ -117,10 +117,14 @@ verified-by-default exactly like a hand-authored one. The in-repo
 documented example runs, mutating verbs included** (a `POST /order` with a documented `200` is
 sent, once): point `--verify-against` at an emulator or a sandbox, not at production — the
 *observation* gate is read-only by rule (below), the *example* gate is not, because the
-documented example is the description's own claim about that call. A **relative `servers[0].url`**
-(`/api/v3`, resolved by OpenAPI against the description's own location, which a saved file has
-lost) is resolved against `--verify-against` and said so (`servers[0] note: …`); without one it is
-left as written and nothing can run live. A record whose gate, certification or replay **fails
+documented example is the description's own claim about that call. **`--verify-against` is the
+examples' base**: the records' first argument and what every gate calls — the description's own
+`servers[0].url` is not called when the two differ (the emulator serves the description's paths at
+the base you name; the GraphQL adapter treats its endpoint the same way), and a **relative**
+server url (`/api/v3`, resolved by OpenAPI against the description's own location, which a saved
+file has lost) is joined onto it; either way a `servers[0] note: …` line says so. Without
+`--verify-against` the description's url stands, and a relative one is reported, since nothing can
+run live against it. A record whose gate, certification or replay **fails
 leaves the output directory** for `<out>/failed/` (record, body, any traces it earned) so
 `publish_records.py <out>` never posts it; the run ends with a tally —
 `summary: N records materialized of M operations compiled (K skipped); all certified + replayed`,

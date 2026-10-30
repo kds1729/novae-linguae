@@ -1211,21 +1211,39 @@ def _example_for(base_url, verb, path_param_names, has_body, op,
     return {"args": args, "result": {"kind": "int", "value": want}}
 
 
-def resolve_relative_server(spec, verify_against):
-    """A RELATIVE `servers[0].url` (`/api/v3`): OpenAPI resolves it against the description's own
-    location, which a saved file no longer has. Under --verify-against it is resolved against that
-    live base (an absolute path replaces the base's path, so `/api/v3` against
-    `https://host/api/v3` is `https://host/api/v3`, not doubled) and the spec is updated in place
-    — the examples' base is then a URL the gates can call. Without one it is left as written and
-    reported: nothing runs live anyway, and the records' example base says exactly what the
-    description said. Returns the note to print, or None when the url is absolute (or absent).
-    Stranger 5 (2026-10-30) hit this on the Swagger Petstore: every gate failed with the
-    interpreter's `only http:// and https:// URLs are supported: /api/v3/pet/1`."""
+def resolve_live_base(spec, verify_against):
+    """The examples' BASE (their first argument, and what the live gates call) is `--verify-against`
+    when it is given — that is what the flag says: run the examples against this live base — and
+    the description's `servers[0].url` otherwise. Three cases, all reported with a `servers[0]`
+    note so the record says where its knowledge came from:
+      * an ABSOLUTE server url and a different --verify-against: the live base replaces it (the
+        emulator or sandbox serves the description's paths at that base; the GraphQL adapter does
+        the same with its endpoint);
+      * a RELATIVE server url (`/api/v3` — OpenAPI resolves it against the description's own
+        location, which a saved file has lost): joined onto --verify-against (an absolute path
+        replaces the base's path, so `/api/v3` against `https://host/api/v3` is
+        `https://host/api/v3`, not doubled; against `https://host` it is the same);
+      * a relative url and no --verify-against: left as written — nothing runs live, and the
+        example base says exactly what the description said.
+    The spec is updated in place (every record's example base reads the result). Returns the note
+    to print, or None when nothing changed. Stranger 5 (2026-10-30) hit the relative case on the
+    Swagger Petstore: every gate failed with the interpreter's `only http:// and https:// URLs are
+    supported: /api/v3/pet/1`; the absolute case was found right after, when the gate called the
+    description's server instead of the dead port it was told to."""
     from urllib.parse import urljoin
     servers = spec.get("servers") or []
     first = servers[0] if servers and isinstance(servers[0], dict) else None
     url = first.get("url") if first else None
-    if not url or "://" in url:
+    if "://" in (url or ""):
+        if not verify_against or verify_against.rstrip("/") == url.rstrip("/"):
+            return None
+        first["url"] = verify_against
+        return (f"the examples' base is --verify-against `{verify_against}`; the description's "
+                f"server `{url}` is not called (the record's base parameter stays the caller's)")
+    if not url:
+        if verify_against:
+            spec["servers"] = [{"url": verify_against}]
+            return f"no server url in the description; the examples' base is --verify-against `{verify_against}`"
         return None
     if verify_against:
         resolved = urljoin(verify_against if verify_against.endswith("/") else verify_against + "/", url)
@@ -1608,7 +1626,10 @@ def main(argv=None):
     ap.add_argument("--secret-name", default=None,
                     help="secret placeholder name for Bearer auth (default: the security scheme name)")
     ap.add_argument("--verify-against", default=None,
-                    help="run each record's examples against this live base URL (a fake or real service)")
+                    help="run each record's examples against this live base URL (a fake or real service): "
+                         "it becomes the examples' base — the description's server url is not called "
+                         "(a relative one is joined onto it). EVERY documented example runs, mutating "
+                         "verbs included, so aim it at an emulator or a sandbox")
     ap.add_argument("--token", action="append", default=None,
                     help="auth credential for --verify-against. `NAME=VALUE` binds security scheme "
                          "NAME to its own value; a bare VALUE (at most one) is the default for every "
@@ -1675,7 +1696,7 @@ def main(argv=None):
         sys.exit("--observe-absent-delete records a live observation; it requires "
                  "--verify-against (an observation needs a live service)")
 
-    server_note = resolve_relative_server(spec, args.verify_against)
+    server_note = resolve_live_base(spec, args.verify_against)
     if server_note:
         print(f"{'servers[0]':16} note: {server_note}")
     ops, skipped, pending, observe_report = walk(spec, secret_name, observe_map,
