@@ -1,0 +1,75 @@
+{
+ "body": {
+  "args": [
+   {
+    "args": [
+     {
+      "kind": "var",
+      "name": "k"
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "n"
+      }
+     ],
+     "fn": {
+      "kind": "lit",
+      "value": {
+       "kind": "fn_ref",
+       "target": "fn_7b52465002ff97a9b648321f652655839c39553c0609401465f51f7b69818187"
+      }
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   }
+  ],
+  "fn": {
+   "args": [
+    {
+     "args": [
+      {
+       "kind": "var",
+       "name": "k"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "n"
+       }
+      ],
+      "fn": {
+       "kind": "lit",
+       "value": {
+        "kind": "fn_ref",
+        "target": "fn_4141709c823385798a6dd93b111b2a621fd5cfb13d886efbf1dcfe3ec23a2c2f"
+       }
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    }
+   ],
+   "fn": {
+    "kind": "var",
+    "name": "eq"
+   },
+   "kind": "app"
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "n"
+  },
+  {
+   "name": "k"
+  }
+ ]
+}

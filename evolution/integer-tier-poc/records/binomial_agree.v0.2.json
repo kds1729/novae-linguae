@@ -1,0 +1,126 @@
+{
+ "body_hash": "expr_5972d3e7bc682703c36657de40ab255f26c3c5597d8846e566ecc01c48e90a9d",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 5
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 7
+    },
+    {
+     "kind": "nat",
+     "value": 7
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 3
+    },
+    {
+     "kind": "nat",
+     "value": 5
+    }
+   ],
+   "result": {
+    "kind": "bool",
+    "value": true
+   }
+  }
+ ],
+ "hash": "fn_902c87d818211c2a71ea55624b642987c453fbd2fc63b3206757e6f2d19784e8",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/binomial-agree",
+  "predicate/check"
+ ],
+ "name_hints": [
+  "binomial_agree",
+  "binomial_definitions_agree_check"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "var",
+         "name": "k"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "kind": "lit",
+       "value": true
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "n",
+     "k"
+    ]
+   },
+   "name": "definitions_agree"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "bool"
+   }
+  }
+ },
+ "supersedes": null
+}

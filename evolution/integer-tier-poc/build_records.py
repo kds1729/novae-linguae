@@ -529,6 +529,30 @@ def main():
           hints=["binomial_coefficient", "choose"], complexity="O(n)")
     gauntlet("binomial", prove)
 
+    # 11b. The same coefficients by Pascal's rule (twelfth note): C(n+1, k+1) = C(n, k) + C(n, k+1),
+    # C(n, 0) = 1, C(0, k > 0) = 0 — no division, so Pascal's identity is the DEFINITION and
+    # symmetry is a two-variable induction; the multiplicative record's two open laws, re-posed.
+    # Exponential as written (two recursive calls), so no complexity bound is declared.
+    build("binomial_pascal", r"\n k -> case gt k 0 of { true => case gt n 0 of { true => add (self (sub n 1) (sub k 1)) (self (sub n 1) k); false => 0 }; false => 1 }",
+          FN([NAT, NAT], NAT),
+          [{"args": [nlit(5), nlit(2)], "result": nlit(10)}, {"args": [nlit(10), nlit(0)], "result": nlit(1)}, {"args": [nlit(4), nlit(5)], "result": nlit(0)},
+           {"args": [nlit(12), nlit(6)], "result": nlit(924)}, {"args": [nlit(0), nlit(0)], "result": nlit(1)}],
+          props=[("pascal", "forall n k. n < 0 || k < 0 || self(n + 1, k + 1) == self(n, k) + self(n, k + 1)"),
+                 ("symmetry", "forall n k. n < 0 || k < 0 || k > n || self(n, k) == self(n, n - k)"),
+                 ("choose_zero", "forall n. self(n, 0) == 1"),
+                 ("beyond_n", "forall n k. k <= n || self(n, k) == 0")],
+          hints=["binomial_coefficient_pascal", "choose_additive"])
+    gauntlet("binomial_pascal", prove)
+
+    # 11c. The two definitions agree — a checker record; the law is the factorial fact the
+    # multiplicative record's division hides (`k | C(n, k−1)·(n−k+1)`), expected UNKNOWN.
+    build("binomial_agree", r"\n k -> eq ({binomial} n k) ({binomial_pascal} n k)",
+          FN([NAT, NAT], BOOL),
+          [{"args": [nlit(5), nlit(2)], "result": blit(True)}, {"args": [nlit(7), nlit(7)], "result": blit(True)}, {"args": [nlit(3), nlit(5)], "result": blit(True)}],
+          props=[("definitions_agree", "forall n k. self(n, k) == true")],
+          tags=["predicate/check"], hints=["binomial_definitions_agree_check"])
+    gauntlet("binomial_agree", prove)
+
     # 12. The number-theoretic transform over Z/pZ, p = 998244353 — the FFT's integer cousin, by
     # recursive even/odd splitting over lists (the butterfly is a zip that builds both halves).
     build("ntt_split", r"\xs -> case null xs of { true => (nil, nil); false => case null (tail xs) of { true => (cons (head xs) nil, nil); false => "

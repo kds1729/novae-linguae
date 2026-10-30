@@ -6,18 +6,19 @@
   prover (with the hypothesis as instances), variable divisors, magnitude-wide sampling, contracts
   that compose and instantiate, induction through a callee's definition, the Euclidean rung and a
   function's own facts in its inductions, the witness rung and `case` in predicates
-  (`tooling/validator`); the records published to the commons with signed certifications. The 41
+  (`tooling/validator`); the records published to the commons with signed certifications. The 43
   records and their builder live here (`records/`, `build_records.py`) — reproducible with no
-  credential. Final tally (tenth follow-up and its `lcm` addendum): 41/41 certify, termination AND complexity SOUND on
-  all 41 (the NTT chain at `O(n log n)`, with no fuel parameter), every declared contract SOUND
-  (23 — including the **modular inverse's and the Chinese remainder's `Maybe`-valued contracts**)
-  and 32 of 38 laws proved — `gcd`'s associativity (through the divisibility rung, from the
-  greatest-divisor law — eleventh follow-up), `lcm`'s commutativity and its (guarded)
-  multiple-of-both through `gcd`'s certified contract, `ext_gcd`'s Bézout
+  credential. Final tally (twelfth note): 43/43 certify, termination SOUND on all 43, complexity
+  SOUND on the 41 that declare a bound (the NTT chain at `O(n log n)`, with no fuel parameter),
+  every declared contract SOUND (23 — including the **modular inverse's and the Chinese
+  remainder's `Maybe`-valued contracts**) and 36 of 43 laws proved — `gcd`'s associativity
+  (through the divisibility rung, from the greatest-divisor law — eleventh follow-up), binomial
+  symmetry and Pascal's identity on the Pascal-rule record (twelfth note), `lcm`'s commutativity
+  and its (guarded) multiple-of-both through `gcd`'s certified contract, `ext_gcd`'s Bézout
   identity over a tuple result, `gcd` dividing both of its arguments, the modular congruences,
   fast exponentiation agreeing with the naive power (through the doubling law, stepwise), and the
-  inverse and CRT checkers on their callees' domains (from the contracts) — and all 38 held both
-  over the bounded domain and across magnitudes.
+  inverse and CRT checkers on their callees' domains (from the contracts) — and all 43 held over
+  the bounded domain and across magnitudes (the generative checker now says what it skips).
 - **Author:** Keith Sprochi <kds1729@gmail.com>
 - **Dates:** first published 2026-10-17, last updated 2026-10-29
 - **Scope:** `tooling/validator` (`interp.rs` arithmetic + comparison + recursion depth,
@@ -1129,7 +1130,7 @@ And one ordering fact in the self-facts derivation: a law proved in its third ph
 posts) is now a fact for the laws after it in the record's order — associativity rests on the
 greatest-divisor law, which is why the new law is authored before it.
 
-### Still open
+### Still open after the eleventh (the last re-posed in the twelfth note, below)
 
 - **`prime_agree`**: documented negative.
 - **The unguarded `inverse_holds` / `crt_holds` / `multiple_of_both` laws over ALL ints**: a
@@ -1137,6 +1138,61 @@ greatest-divisor law, which is why the new law is authored before it.
   cases it skips.
 - **`binomial` symmetry and Pascal**: the multiplicative definition's `div`; a factorial
   theorem no contract states.
+
+## Twelfth note (2026-10-30): binomials by Pascal's rule — the two open laws, re-posed
+
+The multiplicative `binomial` divides at every step, and its symmetry and Pascal's identity are
+facts about that division no contract states. The same coefficients by Pascal's rule —
+`C(n+1, k+1) = C(n, k) + C(n, k+1)`, `C(n, 0) = 1`, `C(0, k > 0) = 0` — divide nothing: Pascal's
+identity is the DEFINITION, and symmetry is a two-variable induction. Authored as a second record,
+`binomial_pascal` (exponential as written — two recursive calls — so no complexity bound is
+declared), with a checker `binomial_agree` that the two definitions agree.
+
+| law | verdict |
+|---|---|
+| `binomial_pascal`'s `pascal` | **PROVED** by numeric induction on `n`, by unfolding alone — it is the definition |
+| `binomial_pascal`'s `symmetry` (`k > n ∨ C(n, k) = C(n, n − k)`) | **PROVED** by numeric induction on `n` with `self`'s certified facts at the instantiated points — UNKNOWN on the multiplicative record since the first follow-up |
+| `binomial_pascal`'s `choose_zero`, `beyond_n` | **PROVED** (unfolding; induction on `n`) |
+| `binomial_agree`'s `definitions_agree` (`binomial(n, k) = binomial_pascal(n, k)`) | UNKNOWN — the division: `k | C(n, k−1)·(n − k + 1)` is the factorial fact no contract states, now isolated to this one law |
+
+Totals: laws **36 PROVED / 7 UNKNOWN / 0 UNSUPPORTED** (43 laws; was 32 / 6 / 0 of 38); 43 records,
+**43/43 certified**, contracts 23/0, termination 43/43, complexity SOUND 41 / N/A 2 (the two new
+records declare none); 43/43 held over the bounded domain; across magnitudes the Pascal-rule
+record's laws read HELD with the skips SAID — `pascal` HELD (44 cases; 156 skipped: recursion depth
+exceeded 100000 …), `symmetry` HELD (103; 97 skipped), `definitions_agree` HELD (24; 176 skipped) —
+a wide `n` recurses `n` deep and the interpreter's depth bound stops it, where a run earlier the
+same pass did not return at all. Builder 33.0 min (two records more than round 14's 25.2).
+
+**What the gauntlet found on the way.** The first run of this note HUNG: `check-properties
+--generate --wide` on `binomial_pascal` ran 33 minutes on one generated case and would not have
+returned. The wide sampler draws `n` log-uniform to 2^60; at `n ≈ 60` Pascal's rule makes ~10^17
+leaf calls at a recursion depth that never approaches the interpreter's bound, so nothing stopped
+it. The generative checker now gives each case an evaluation budget (2,000,000 closure
+applications, deterministic) and reports a case over it as skipped with that reason (d00f114).
+It is the third thing the skipped-case report has caught in a day, and the first that was a
+liveness defect rather than a soundness one. The wide pass on this record now finishes and says
+what it skipped.
+
+**Argued.** The two definitions are the same function and the module proves five laws about one
+and none of the same five about the other. That is not a judgement on the laws; it is a
+measurement of where the prover's reach ends: at integer division with a symbolic divisor. The
+multiplicative record earns its place by cost — `O(n)` against the additive record's exponential
+tree — and the honest statement of their relation is the checker law, UNKNOWN, with the
+factorial fact it waits on named. A consumer who needs the identities applies `binomial_pascal`;
+one who needs the speed applies `binomial`; the commons carries both, and the claim that they
+agree is a generative one, exhaustive over the bounded domain and held across magnitudes within
+the budget.
+
+### Still open
+
+- **`prime_agree`**: documented negative.
+- **The unguarded laws over ALL ints**: a guard or a wider precondition is the honest form.
+- **`binomial` (multiplicative) symmetry and Pascal**, and the two definitions' agreement: the
+  division; a factorial theorem no contract states. Symmetry and Pascal's identity themselves are
+  now PROVED, on the Pascal-rule record; what remains open is exactly the division.
+- The exponential record's complexity: no bound declared (N/A), and none the checker could
+  verify as written — a memoized or multiplicative-by-Pascal hybrid would be the shape to
+  certify, if anyone needs the additive definition fast.
 
 ## Open questions (as they stood before the follow-up)
 

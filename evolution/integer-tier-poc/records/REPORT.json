@@ -840,6 +840,77 @@
   ]
  },
  {
+  "name": "binomial_pascal",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:nat-result (\u2265 0)": "SOUND",
+   "termination": "SOUND",
+   "complexity": "N/A"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:nat-result (\u2265 0)": "",
+   "termination": "provably always-terminates",
+   "complexity": "none declared; inferred O(2^n)"
+  },
+  "properties_generative": [
+   "pascal: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "symmetry: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "choose_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
+   "beyond_n: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "pascal: CONSISTENT  |  generative: HELD (44 cases; 156 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)",
+   "symmetry: CONSISTENT  |  generative: HELD (103 cases; 97 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)",
+   "choose_zero: CONSISTENT  |  generative: HELD (200 cases)",
+   "beyond_n: CONSISTENT  |  generative: HELD (146 cases; 54 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
+  ],
+  "prove": [
+   "pascal: PROVED       by numeric induction on `n (by unfolding alone)` (strong induction over the measure; unsat)",
+   "symmetry: PROVED       by numeric induction on `n, with self's certified contract at the instantiated points` (strong induction over the measure; unsat)",
+   "choose_zero: PROVED       by numeric induction on `n (by unfolding alone)` (strong induction over the measure; unsat)",
+   "beyond_n: PROVED       by numeric induction on `n` (strong induction over the measure; unsat)"
+  ]
+ },
+ {
+  "name": "binomial_agree",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "N/A"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "none declared; inferred O(2^n)"
+  },
+  "properties_generative": [
+   "definitions_agree: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "definitions_agree: CONSISTENT  |  generative: HELD (24 cases; 176 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
+  ],
+  "prove": [
+   "definitions_agree: UNKNOWN      solver could not decide"
+  ]
+ },
+ {
   "name": "ntt_split",
   "schema": "VALID",
   "run": "PASS",

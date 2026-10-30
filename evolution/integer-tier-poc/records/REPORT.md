@@ -29,6 +29,8 @@
 | `digits_roundtrip` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | digits_then_from_digits=EXHAUSTIVE | digits_then_from_digits=PROVED |
 | `digit_sum` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | sum_bounded_by_value=EXHAUSTIVE | sum_bounded_by_value=PROVED |
 | `binomial` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | symmetry=EXHAUSTIVE; pascal=EXHAUSTIVE; choose_zero=EXHAUSTIVE; beyond_n=EXHAUSTIVE | symmetry=UNKNOWN; pascal=UNKNOWN; choose_zero=PROVED; beyond_n=PROVED |
+| `binomial_pascal` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | N/A | pascal=EXHAUSTIVE; symmetry=EXHAUSTIVE; choose_zero=EXHAUSTIVE; beyond_n=EXHAUSTIVE | pascal=PROVED; symmetry=PROVED; choose_zero=PROVED; beyond_n=PROVED |
+| `binomial_agree` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | N/A | definitions_agree=EXHAUSTIVE | definitions_agree=UNKNOWN |
 | `ntt_split` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `ntt_butterfly` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `log2_floor` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | below_power=EXHAUSTIVE | below_power=PROVED |
