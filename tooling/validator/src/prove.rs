@@ -1854,8 +1854,9 @@ pub fn run_solver(cert: &Certificate, solver: &str) -> Result<ProofOutcome> {
 /// The budget of the callee-side divisibility rung's query: the LAST rung of the first-order
 /// ladder, reached only after every cheaper one answered unknown, so a longer budget costs
 /// nothing where it is not needed and buys the proofs that sit at the default's edge — the
-/// lowest-terms post closes in 3 s alone and past 5 s under a parallel test load.
-const DIVISIBILITY_BUDGET_SECS: u64 = 15;
+/// lowest-terms post's closing query takes 3.2 s under z3 4.13 and 10.3 s under z3 4.16 (CI's
+/// pin), both past 5 s under a parallel test load. Solver version is part of the measurement.
+const DIVISIBILITY_BUDGET_SECS: u64 = 30;
 
 /// [`run_solver`] with an explicit per-check budget.
 pub fn run_solver_secs(cert: &Certificate, solver: &str, secs: u64) -> Result<ProofOutcome> {
