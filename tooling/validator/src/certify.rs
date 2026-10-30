@@ -416,7 +416,27 @@ impl<'a> LinkedView<'a> {
     pub fn contracts_for(&self, body: &J) -> std::collections::BTreeMap<String, crate::CalleeContract> {
         let mut targets = std::collections::BTreeSet::new();
         fn_ref_targets(body, &mut targets);
-        targets.into_iter().filter_map(|t| self.contract(&t).map(|c| (t, c))).collect()
+        // The CLOSURE under the contracts: a callee's post may itself apply a callee (`rat_normalize`'s
+        // `gcd(|fst(result)|, snd(result)) = 1` applies `gcd`), and lowering that post needs the
+        // second callee's contract installed too — without it the obligation refused with "its
+        // certified contract is not available here" although the records directory held it (the
+        // rational tier's round 4, 2026-10-30). Transitive, so a contract's callee's own contract
+        // applications are followed as well; each record's contract is derived once (memoized).
+        let mut out = std::collections::BTreeMap::new();
+        let mut queue: Vec<String> = targets.into_iter().collect();
+        while let Some(t) = queue.pop() {
+            if out.contains_key(&t) {
+                continue;
+            }
+            let Some(c) = self.contract(&t) else { continue };
+            for pred in c.pres.iter().chain(c.posts.iter()).chain(c.laws.iter()) {
+                let mut more = std::collections::BTreeSet::new();
+                predicate_fn_targets(pred, &mut more);
+                queue.extend(more.into_iter().filter(|m| !out.contains_key(m)));
+            }
+            out.insert(t, c);
+        }
+        out
     }
 
     /// For every `fn_ref` callee of `body` that yields NO contract, the stated reason — installed
@@ -578,6 +598,25 @@ pub fn derive_self_facts(
 }
 
 /// Every `fn_ref` literal target in an AST.
+/// Every function a PREDICATE applies by content address (`{"kind":"app","op":"fn_…"}` — the
+/// predicate dialect's spelling of a callee application).
+fn predicate_fn_targets(node: &J, out: &mut std::collections::BTreeSet<String>) {
+    match node {
+        J::Object(m) => {
+            if m.get("kind").and_then(|k| k.as_str()) == Some("app") {
+                if let Some(op) = m.get("op").and_then(|o| o.as_str()) {
+                    if op.starts_with("fn_") {
+                        out.insert(op.to_string());
+                    }
+                }
+            }
+            m.values().for_each(|v| predicate_fn_targets(v, out));
+        }
+        J::Array(xs) => xs.iter().for_each(|v| predicate_fn_targets(v, out)),
+        _ => {}
+    }
+}
+
 fn fn_ref_targets(node: &J, out: &mut std::collections::BTreeSet<String>) {
     match node {
         J::Object(m) => {
@@ -965,6 +1004,50 @@ mod tests {
 
     fn schema_check(cert: &Certification) -> &CertCheck {
         cert.checks.iter().find(|c| c.check == "schema").expect("a schema check row")
+    }
+
+    /// A caller's contract set is the CLOSURE under the contracts: `C` applies `A`, whose post
+    /// applies `B` — `B`'s contract must be installed for `A`'s post to lower (the rational tier's
+    /// `rat_inv`, whose callee `rat_normalize` has a post applying `gcd`, read UNSUPPORTED: "its
+    /// certified contract is not available here").
+    #[test]
+    fn the_contract_set_closes_over_the_callees_a_contract_applies() {
+        let Some(solver) = (["z3", "cvc5"].into_iter().find(|s| std::process::Command::new(s).arg("--version").output().map(|o| o.status.success()).unwrap_or(false))) else { return };
+        let int = json!({ "kind": "builtin", "name": "int" });
+        let mk = |name: &str, body: J, posts: Vec<J>| -> (String, J, J) {
+            let bh = crate::hash_artifact_with_kind(&body, crate::ArtifactKind::BodyExpression).unwrap();
+            let mut rec = json!({
+                "schema_version": "0.2.0", "hash": "fn_".to_string() + &"0".repeat(64), "name_hints": [name],
+                "signature": { "type": { "kind": "fn", "params": [int.clone()], "result": int.clone() },
+                               "refinements": posts.into_iter().map(|p| json!({ "kind": "post", "expr": p })).collect::<Vec<_>>(),
+                               "effects": [], "capabilities": [], "terminates": "always" },
+                "examples": [], "intent_tags": [], "derived_from": J::Null, "supersedes": J::Null, "body_hash": bh });
+            let h = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
+            rec["hash"] = json!(h.clone());
+            (h, rec, body)
+        };
+        let var = |n: &str| json!({ "kind": "var", "name": n });
+        let call = |t: &str, a: J| json!({ "kind": "app", "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": t } }, "args": [a] });
+        let lam = |b: J| json!({ "kind": "lambda", "params": [{ "name": "x" }], "body": b });
+        // B = \x -> abs(x), post result >= 0.
+        let (hb, rb, bb) = mk("b", lam(json!({ "kind": "app", "fn": var("abs"), "args": [var("x")] })),
+            vec![json!({ "kind": "app", "op": "ge", "args": [var("result"), { "kind": "lit", "value": 0 }] })]);
+        // A = \x -> B(x), post B(result) >= 0 — a post that APPLIES a callee.
+        let (ha, ra, ba) = mk("a", lam(call(&hb, var("x"))),
+            vec![json!({ "kind": "app", "op": "ge", "args": [{ "kind": "app", "op": hb, "args": [var("result")] }, { "kind": "lit", "value": 0 }] })]);
+        // C = \x -> A(x): its contract set must hold A AND B.
+        let (_, _, bc) = mk("c", lam(call(&ha, var("x"))), vec![]);
+        let mut records = HashMap::new();
+        let mut bodies = HashMap::new();
+        for (h, r, b) in [(hb.clone(), rb, bb), (ha.clone(), ra, ba)] {
+            records.insert(h.clone(), r);
+            bodies.insert(h, b);
+        }
+        let view = LinkedView::new(&records, &bodies, solver);
+        let contracts = view.contracts_for(&bc);
+        assert!(contracts.contains_key(&ha), "A, applied by the body");
+        assert!(contracts.contains_key(&hb), "B, applied only by A's post: {:?}", contracts.keys().collect::<Vec<_>>());
+        assert!(!contracts[&ha].posts.is_empty(), "A's post proved (needs B's contract itself)");
     }
 
     #[test]
