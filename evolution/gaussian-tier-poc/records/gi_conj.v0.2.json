@@ -1,0 +1,326 @@
+{
+ "body_hash": "expr_2b3327d18e0bcbdca7d67b59d387d7b8a3e074f40e3e3d828033219319e5cb65",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 2
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": -2
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 0
+    },
+    {
+     "kind": "int",
+     "value": 0
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 0
+     },
+     {
+      "kind": "int",
+      "value": 0
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -3
+    },
+    {
+     "kind": "int",
+     "value": -4
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": -3
+     },
+     {
+      "kind": "int",
+      "value": 4
+     }
+    ],
+    "kind": "tuple"
+   }
+  }
+ ],
+ "hash": "fn_9f4fa4dd3cf72130e042e41498ddce8b7ecc82e8513630f071d5ef9eab6d93ef",
+ "intent_tags": [
+  "arithmetic/gaussian",
+  "math/gaussian-integer",
+  "math/gaussian-integer/gi-conj"
+ ],
+ "name_hints": [
+  "gi_conj",
+  "gaussian_conjugate",
+  "complex_conjugate"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "a"
+                },
+                {
+                 "kind": "var",
+                 "name": "b"
+                }
+               ],
+               "kind": "app",
+               "op": "self"
+              }
+             ],
+             "kind": "app",
+             "op": "fst"
+            },
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "a"
+                },
+                {
+                 "kind": "var",
+                 "name": "b"
+                }
+               ],
+               "kind": "app",
+               "op": "self"
+              }
+             ],
+             "kind": "app",
+             "op": "snd"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "fst"
+        },
+        {
+         "kind": "var",
+         "name": "a"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "a"
+                },
+                {
+                 "kind": "var",
+                 "name": "b"
+                }
+               ],
+               "kind": "app",
+               "op": "self"
+              }
+             ],
+             "kind": "app",
+             "op": "fst"
+            },
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "a"
+                },
+                {
+                 "kind": "var",
+                 "name": "b"
+                }
+               ],
+               "kind": "app",
+               "op": "self"
+              }
+             ],
+             "kind": "app",
+             "op": "snd"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "snd"
+        },
+        {
+         "kind": "var",
+         "name": "b"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "and"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "involution"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(1)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "result"
+        }
+       ],
+       "kind": "app",
+       "op": "fst"
+      },
+      {
+       "kind": "var",
+       "name": "a"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "result"
+        }
+       ],
+       "kind": "app",
+       "op": "snd"
+      },
+      {
+       "args": [
+        {
+         "kind": "lit",
+         "value": 0
+        },
+        {
+         "kind": "var",
+         "name": "b"
+        }
+       ],
+       "kind": "app",
+       "op": "sub"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "post"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "builtin",
+      "name": "int"
+     },
+     {
+      "kind": "builtin",
+      "name": "int"
+     }
+    ],
+    "kind": "tuple"
+   }
+  }
+ },
+ "supersedes": null
+}

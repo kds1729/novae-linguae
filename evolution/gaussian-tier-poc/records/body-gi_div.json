@@ -1,0 +1,209 @@
+{
+ "body": {
+  "body": {
+   "elems": [
+    {
+     "args": [
+      {
+       "kind": "var",
+       "name": "n"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "args": [
+         {
+          "args": [
+           {
+            "kind": "var",
+            "name": "d"
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "mul"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "c"
+            }
+           ],
+           "fn": {
+            "args": [
+             {
+              "kind": "var",
+              "name": "a"
+             }
+            ],
+            "fn": {
+             "kind": "var",
+             "name": "mul"
+            },
+            "kind": "app"
+           },
+           "kind": "app"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "add"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "kind": "lit",
+       "value": {
+        "kind": "fn_ref",
+        "target": "fn_02e79f519f9f680342c4274f8aa47f8ef838700d747cfdf0167c571158a42e78"
+       }
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    },
+    {
+     "args": [
+      {
+       "kind": "var",
+       "name": "n"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "args": [
+         {
+          "args": [
+           {
+            "kind": "var",
+            "name": "d"
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "mul"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "c"
+            }
+           ],
+           "fn": {
+            "args": [
+             {
+              "kind": "var",
+              "name": "b"
+             }
+            ],
+            "fn": {
+             "kind": "var",
+             "name": "mul"
+            },
+            "kind": "app"
+           },
+           "kind": "app"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "sub"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "kind": "lit",
+       "value": {
+        "kind": "fn_ref",
+        "target": "fn_02e79f519f9f680342c4274f8aa47f8ef838700d747cfdf0167c571158a42e78"
+       }
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    }
+   ],
+   "kind": "tuple"
+  },
+  "kind": "let",
+  "name": "n",
+  "value": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "d"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "c"
+     }
+    ],
+    "fn": {
+     "kind": "lit",
+     "value": {
+      "kind": "fn_ref",
+      "target": "fn_8328260910b99901bb959bf62ac7d7674aa841df69cc7561161dbac89e2b9931"
+     }
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "b"
+  },
+  {
+   "name": "c"
+  },
+  {
+   "name": "d"
+  }
+ ]
+}

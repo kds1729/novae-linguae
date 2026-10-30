@@ -1,0 +1,486 @@
+[
+ {
+  "name": "gi_add",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "commutative: CONSISTENT  |  generative: HELD (400 cases)",
+   "associative: UNVERIFIABLE  |  generative: HELD (400 cases)",
+   "zero_identity: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "commutative: CONSISTENT  |  generative: HELD (200 cases)",
+   "associative: UNVERIFIABLE  |  generative: HELD (200 cases)",
+   "zero_identity: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "commutative: PROVED       holds for all inputs (unsat negation)",
+   "associative: PROVED       holds for all inputs (unsat negation)",
+   "zero_identity: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_sub",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "self_difference_is_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "self_difference_is_zero: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "self_difference_is_zero: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_neg",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "involution: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "involution: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "involution: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_conj",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "involution: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "involution: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "involution: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_mul",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "commutative: CONSISTENT  |  generative: HELD (400 cases)",
+   "one_identity: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "i_squared_is_minus_one: CONSISTENT  |  generative: UNGENERATABLE (not a forall \u2014 no domain to sample)",
+   "zero_annihilates: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "associative: UNVERIFIABLE  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "commutative: CONSISTENT  |  generative: HELD (200 cases)",
+   "one_identity: CONSISTENT  |  generative: HELD (200 cases)",
+   "i_squared_is_minus_one: CONSISTENT  |  generative: UNGENERATABLE (not a forall \u2014 no domain to sample)",
+   "zero_annihilates: CONSISTENT  |  generative: HELD (200 cases)",
+   "associative: UNVERIFIABLE  |  generative: HELD (129 cases; 71 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at a = 20406979942701, b = -298270703168, c = 1871720281, d = 1, e = -508375471504\u2026)"
+  ],
+  "prove": [
+   "commutative: PROVED       holds for all inputs (unsat negation)",
+   "one_identity: PROVED       holds for all inputs (unsat negation)",
+   "i_squared_is_minus_one: PROVED       holds for all inputs (unsat negation)",
+   "zero_annihilates: PROVED       holds for all inputs (unsat negation)",
+   "associative: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_norm",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "zero_only_at_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "positive_off_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "conj_invariant: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "zero_only_at_zero: CONSISTENT  |  generative: HELD (200 cases)",
+   "positive_off_zero: CONSISTENT  |  generative: HELD (200 cases)",
+   "conj_invariant: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "zero_only_at_zero: PROVED       holds for all inputs (unsat negation)",
+   "positive_off_zero: PROVED       holds for all inputs (unsat negation)",
+   "conj_invariant: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_norm_mul_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(1)`, not established: applies `fn_8328260910b99901bb959bf62ac7d7674aa841df69cc7561161dbac89e2b9931` to an argument whose size is not bounded by the input (var) \u2014 its class cannot be re-expressed in n"
+  },
+  "properties_generative": [
+   "norm_multiplicative: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "norm_multiplicative: CONSISTENT  |  generative: HELD (61 cases; 139 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at a = 5569058055027760, b = -1, c = \"-182284504041995846\", d = -2891245644247)"
+  ],
+  "prove": [
+   "norm_multiplicative: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_conj_mul_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(1)`, not established: applies `fn_9f4fa4dd3cf72130e042e41498ddce8b7ecc82e8513630f071d5ef9eab6d93ef` to an argument whose size is not bounded by the input (var) \u2014 its class cannot be re-expressed in n"
+  },
+  "properties_generative": [
+   "conj_multiplicative: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "conj_multiplicative: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "conj_multiplicative: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_is_unit",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "units_lie_on_an_axis: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "the_four_units: CONSISTENT  |  generative: UNGENERATABLE (not a forall \u2014 no domain to sample)"
+  ],
+  "properties_wide": [
+   "units_lie_on_an_axis: CONSISTENT  |  generative: HELD (200 cases)",
+   "the_four_units: CONSISTENT  |  generative: UNGENERATABLE (not a forall \u2014 no domain to sample)"
+  ],
+  "prove": [
+   "units_lie_on_an_axis: PROVED       holds for all inputs (unsat negation)",
+   "the_four_units: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_round_div",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "exact_on_multiples: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "by_one: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "exact_on_multiples: CONSISTENT  |  generative: HELD (200 cases)",
+   "by_one: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "exact_on_multiples: PROVED       holds for all inputs (unsat negation)",
+   "by_one: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_div",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
+   "refinement:post[3]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "refinement:post[2]": "",
+   "refinement:post[3]": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(1)`, not established: applies `fn_02e79f519f9f680342c4274f8aa47f8ef838700d747cfdf0167c571158a42e78` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+  },
+  "properties_generative": [
+   "by_one: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "by_one: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "by_one: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_rem",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(1)`, not established: applies the fn_ref `fn_72c94cf8faf2e61bad6a4193fa4b5a6f0df510df4006ceec43aef8df72bea4d7` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+  },
+  "properties_generative": [
+   "by_one_is_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "by_one_is_zero: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "by_one_is_zero: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_euclid_holds",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> bool",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(1)`, not established: applies the fn_ref `fn_4ed7be4134ced1fa06c4171138d76548af271221fe7e6da2fb61d878a40e4e00` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+  },
+  "properties_generative": [
+   "remainder_smaller: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "remainder_smaller: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "remainder_smaller: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_gcd",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "UNVERIFIABLE",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "typecheck": "(int, int, int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "declared `always`, not proven: no single argument position provably descends in every self-call (structural `tail`; a guarded constant decrement \u2014 `gt(p, lit)`-guarded `sub(p, c)`, or a nat's non-zero-guarded `sub(p, 1)`; a halving `div(p, ",
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_4ed7be4134ced1fa06c4171138d76548af271221fe7e6da2fb61d878a40e4e00` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+  },
+  "properties_generative": [
+   "right_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "right_zero: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "right_zero: UNSUPPORTED  recursive body \u2014 structural induction: unsupported expression kind `tuple` (out of fragment); numeric induction: the body's recursion has no provable numeric measure (structural list recursion, or termination not established)"
+  ]
+ }
+]

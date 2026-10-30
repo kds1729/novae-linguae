@@ -1,0 +1,33 @@
+{
+ "body": {
+  "elems": [
+   {
+    "kind": "var",
+    "name": "a"
+   },
+   {
+    "args": [
+     {
+      "kind": "var",
+      "name": "b"
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "neg"
+    },
+    "kind": "app"
+   }
+  ],
+  "kind": "tuple"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "b"
+  }
+ ]
+}

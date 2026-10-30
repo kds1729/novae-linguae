@@ -1,0 +1,66 @@
+{
+ "body": {
+  "elems": [
+   {
+    "args": [
+     {
+      "kind": "var",
+      "name": "c"
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "a"
+      }
+     ],
+     "fn": {
+      "kind": "var",
+      "name": "sub"
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   },
+   {
+    "args": [
+     {
+      "kind": "var",
+      "name": "d"
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "b"
+      }
+     ],
+     "fn": {
+      "kind": "var",
+      "name": "sub"
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   }
+  ],
+  "kind": "tuple"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "b"
+  },
+  {
+   "name": "c"
+  },
+  {
+   "name": "d"
+  }
+ ]
+}

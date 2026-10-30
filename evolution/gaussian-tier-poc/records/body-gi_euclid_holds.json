@@ -1,0 +1,144 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "d"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "kind": "var",
+          "name": "c"
+         }
+        ],
+        "fn": {
+         "kind": "lit",
+         "value": {
+          "kind": "fn_ref",
+          "target": "fn_8328260910b99901bb959bf62ac7d7674aa841df69cc7561161dbac89e2b9931"
+         }
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "args": [
+         {
+          "kind": "var",
+          "name": "r2"
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "kind": "var",
+           "name": "r1"
+          }
+         ],
+         "fn": {
+          "kind": "lit",
+          "value": {
+           "kind": "fn_ref",
+           "target": "fn_8328260910b99901bb959bf62ac7d7674aa841df69cc7561161dbac89e2b9931"
+          }
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "lt"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    },
+    "pattern": {
+     "elems": [
+      {
+       "kind": "bind",
+       "name": "r1"
+      },
+      {
+       "kind": "bind",
+       "name": "r2"
+      }
+     ],
+     "kind": "tuple"
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "d"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "c"
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "b"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "a"
+       }
+      ],
+      "fn": {
+       "kind": "lit",
+       "value": {
+        "kind": "fn_ref",
+        "target": "fn_4ed7be4134ced1fa06c4171138d76548af271221fe7e6da2fb61d878a40e4e00"
+       }
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "b"
+  },
+  {
+   "name": "c"
+  },
+  {
+   "name": "d"
+  }
+ ]
+}
