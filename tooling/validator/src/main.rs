@@ -1891,6 +1891,8 @@ fn cmd_prove(
                 write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
                 write_cert(".lemma-div-trans", nl_validator::euclid::DIV_TRANS_SMT)?;
                 write_cert(".lemma-div-antisym", nl_validator::euclid::DIV_ANTISYM_SMT)?;
+                write_cert(".lemma-div-scale", nl_validator::euclid::DIV_SCALE_SMT)?;
+                write_cert(".lemma-div-bound", nl_validator::euclid::DIV_BOUND_SMT)?;
             }
             if let Some(steps) = &c.steps {
                 write_cert(".euclid-steps", steps)?;

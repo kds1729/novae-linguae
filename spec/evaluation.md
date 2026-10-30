@@ -731,7 +731,19 @@ form a solver proves it: with the uniqueness lemma's instance at the composed wi
 y)·(y div z)`; bare, z3 answers unknown), then stated at the certificate's applications: a divisor
 of an application divides its arguments, two applications dividing each other are equal. Emitted
 only when the self facts include a divisibility law; the lemma certificates ride beside the proof
-(`.lemma-div-trans`, `.lemma-div-antisym`). `binomial`'s symmetry and Pascal remain open: the
+(`.lemma-div-trans`, `.lemma-div-antisym`). The same evening the rung reached CALLEE laws, as a
+retry after the contract ladder (`DIVISIBILITY_CALLEES`): a callee law with a free variable is
+instantiated over the obligation's applications of that callee AND their pairwise products, and
+two more lemmas join — scaling (`e | x ⇒ e·g | g·x`, discharged with the uniqueness instance at
+the composed witness) and the divisor bound (`x | y ∧ x, y ≥ 1 ⇒ x ≤ y`). The need was the rational
+tier's headline fact, lowest terms after normalization: `gcd(|n div g|, d div g) = 1` for `g =
+gcd(|n|, d)` holds because a common divisor `e` of the quotients makes `e·g` a common divisor of
+`n` and `d`, so `e·g | g` by the greatest-divisor law at `d = e·g` — the PRODUCT witness — so
+`e = 1`. Hand-measured first: with the product instance and scaling, unsat; without the product,
+satisfiable. With it the post `gcd(|p|, q) = 1` on `rat_normalize` is SOUND through `gcd`'s
+contract from the other module. The rung is a retry, not part of the base certificate, because
+its instances cost the solver time where they are not needed (`lcm`'s plain certificate sits at
+the 5 s budget's edge). `binomial`'s symmetry and Pascal remain open: the
 record's multiplicative definition divides (`binomial(n, k−1)·(n−k+1) div k`), and the fact that
 `k` divides that product is a theorem about factorials no contract states — recorded, not reached.
 

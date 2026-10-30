@@ -914,7 +914,44 @@ fn callee_preamble() -> Result<(String, String, bool)> {
                 for args in &at {
                     inst.push_str(&format!("(assert {})\n", let_params(&names, args, &guarded)));
                 }
+            } else if DIVISIBILITY_CALLEES.with(|d| d.get()) {
+                // The callee-side divisibility rung: a law one of whose variables no application
+                // fixes (`d` in gcd's greatest-divisor law, `a` in associativity) ranges over the
+                // obligation's applications of this callee and their pairwise PRODUCTS — the witness
+                // `e·g` that lowest terms after normalization needs (measured by hand first: with it,
+                // unsat; without, sat). EVERY such law, not only the ones that speak of `mod`:
+                // restricting to divisibility laws lost the proof (measured — z3's path uses the
+                // commutativity/associativity instances at those terms too), so the rung's query
+                // has its own budget instead (`DIVISIBILITY_BUDGET_SECS`).
+                let calls = collect_self_applications_of(&pred, &target);
+                let partial = calls.iter().find_map(|call| {
+                    let names: Vec<&str> = call.iter().filter_map(|a| var_name(a)).collect();
+                    if names.len() != call.len() || names.iter().collect::<BTreeSet<_>>().len() != names.len() {
+                        return None;
+                    }
+                    let free: Vec<&String> = vars.iter().filter(|v| !names.contains(&v.as_str())).collect();
+                    (free.len() == 1 && var_sorts.get(free[0].as_str()) == Some(&Sort::Int))
+                        .then(|| (names.into_iter().map(String::from).collect::<Vec<_>>(), free[0].clone()))
+                });
+                if let Some((mut names, free)) = partial {
+                    names.push(free.clone());
+                    for t in free_var_candidates(&c.symbol, &at, true) {
+                        for args in &at {
+                            let mut with = args.clone();
+                            with.push(t.clone());
+                            inst.push_str(&format!(";; certified law of {target} at ({} {}) with {free} = {t}\n(assert {})\n", c.symbol, args.join(" "), let_params(&names, &with, &guarded)));
+                        }
+                    }
+                }
             }
+        }
+        // The divisibility lemma instances at this callee's applications, when its laws include a
+        // divisibility fact and the solver has discharged the lemmas (the rung is a retry).
+        if DIVISIBILITY_CALLEES.with(|d| d.get())
+            && c.laws.iter().any(|l| serde_json::to_string(l).unwrap_or_default().contains("\"mod\""))
+            && DIVISIBILITY_SOLVER.with(|s| s.borrow().as_deref().map(crate::euclid::divisibility_discharged).unwrap_or(false))
+        {
+            inst.push_str(&divisibility_instances(&c.symbol, &at));
         }
     }
     // Lowering the axioms marked the callee used again; the preamble is complete, so clear.
@@ -1811,7 +1848,18 @@ pub fn run_smt_secs(script: &str, solver: &str, secs: u64) -> Result<SatAnswer> 
 
 /// Run a solver on a certificate, mapping the SAT answer to a proof outcome.
 pub fn run_solver(cert: &Certificate, solver: &str) -> Result<ProofOutcome> {
-    Ok(match run_smt(&cert.smt, solver)? {
+    run_solver_secs(cert, solver, SOLVER_TIMEOUT_SECS)
+}
+
+/// The budget of the callee-side divisibility rung's query: the LAST rung of the first-order
+/// ladder, reached only after every cheaper one answered unknown, so a longer budget costs
+/// nothing where it is not needed and buys the proofs that sit at the default's edge — the
+/// lowest-terms post closes in 3 s alone and past 5 s under a parallel test load.
+const DIVISIBILITY_BUDGET_SECS: u64 = 15;
+
+/// [`run_solver`] with an explicit per-check budget.
+pub fn run_solver_secs(cert: &Certificate, solver: &str, secs: u64) -> Result<ProofOutcome> {
+    Ok(match run_smt_secs(&cert.smt, solver, secs)? {
         SatAnswer::Unsat => ProofOutcome::Proved,
         // A model over an uninterpreted callee is not a counterexample to the law (the callee is
         // pinned only by its contract): honest UNKNOWN.
@@ -1830,6 +1878,18 @@ pub fn prove_property(prop_expr: &J, body: Option<&J>, solver: &str) -> (ProofOu
 
 /// [`prove_property`] over the function's declared domain (see [`build_certificate_in_domain`]).
 pub fn prove_property_in_domain(
+    prop_expr: &J,
+    body: Option<&J>,
+    self_nat_positions: &BTreeSet<usize>,
+    solver: &str,
+) -> (ProofOutcome, Option<Certificate>) {
+    let prev = DIVISIBILITY_SOLVER.with(|s| s.replace(Some(solver.to_string())));
+    let out = prove_property_in_domain_inner(prop_expr, body, self_nat_positions, solver);
+    DIVISIBILITY_SOLVER.with(|s| *s.borrow_mut() = prev);
+    out
+}
+
+fn prove_property_in_domain_inner(
     prop_expr: &J,
     body: Option<&J>,
     self_nat_positions: &BTreeSet<usize>,
@@ -1861,6 +1921,37 @@ pub fn prove_property_in_domain(
     // terms stated as instances of the division-uniqueness lemma (see `euclid`).
     if euclid_ladder(&mut last, solver) {
         return (ProofOutcome::Proved, Some(last));
+    }
+    // The callee-side divisibility rung (see `DIVISIBILITY_CALLEES`): the instances-only
+    // certificate with a callee law's free variable ranging over the callee's applications and
+    // their products, and the divisibility lemmas instantiated there — then the Euclidean rung
+    // over that. The lowest-terms post of the rational tier closes here (2026-10-30).
+    if last.uses_callees {
+        if let Ok(mut cert3) = with_divisibility_callees(|| without_contract_quantifiers(|| build_certificate_in_domain(prop_expr, body, self_nat_positions))) {
+            if cert3.smt != last.smt {
+                match run_solver_secs(&cert3, solver, DIVISIBILITY_BUDGET_SECS) {
+                    Ok(ProofOutcome::Proved) => return (ProofOutcome::Proved, Some(cert3)),
+                    _ => {
+                        // The Euclidean instances over the rung's certificate, at the rung's
+                        // budget (the lowest-terms post closes HERE: the product witness needs the
+                        // quotients' decompositions), then the ordinary Euclidean ladder.
+                        if crate::euclid::lemma_discharged(solver) {
+                            if let Some(aug) = crate::euclid::augment(&cert3.smt) {
+                                if matches!(run_smt_secs(&aug, solver, DIVISIBILITY_BUDGET_SECS), Ok(SatAnswer::Unsat)) {
+                                    cert3.smt = aug;
+                                    cert3.euclid = true;
+                                    return (ProofOutcome::Proved, Some(cert3));
+                                }
+                            }
+                        }
+                        if euclid_ladder(&mut cert3, solver) {
+                            return (ProofOutcome::Proved, Some(cert3));
+                        }
+                        last = cert3;
+                    }
+                }
+            }
+        }
     }
     (ProofOutcome::Unknown, Some(last))
 }
@@ -2153,6 +2244,40 @@ thread_local! {
     /// the divisibility rung states its lemma instances only for a solver that has discharged
     /// the lemmas (`euclid::divisibility_discharged`). `None` = no rung.
     static DIVISIBILITY_SOLVER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// The divisibility rung for CALLEE laws (a retry in `prove_property_in_domain`): a callee law
+    /// with a free variable instantiated over the obligation's applications of that callee &&
+    /// their pairwise products — the product witness `e·g` the lowest-terms proof needs — plus
+    /// the divisibility lemma instances at those applications. Off in the base certificate: the
+    /// instances cost the solver time where they are not needed (lcm's plain certificate sits at
+    /// the 5 s budget's edge), so they are a further rung, not the first.
+    static DIVISIBILITY_CALLEES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Build with the callee-side divisibility rung on.
+fn with_divisibility_callees<T>(f: impl FnOnce() -> T) -> T {
+    let prev = DIVISIBILITY_CALLEES.with(|c| c.replace(true));
+    let out = f();
+    DIVISIBILITY_CALLEES.with(|c| c.set(prev));
+    out
+}
+
+/// The candidate terms a law's free variable ranges over: the applications' terms and, when
+/// `products` is set, their pairwise products (the divisor `e·g` of the lowest-terms proof).
+fn free_var_candidates(symbol: &str, at: &[Vec<String>], products: bool) -> Vec<String> {
+    let mut terms: Vec<String> = at.iter().map(|a| format!("({symbol} {})", a.join(" "))).collect();
+    terms.sort();
+    terms.dedup();
+    terms.truncate(MAX_FREE_TERMS);
+    if products {
+        let base = terms.clone();
+        for (i, a) in base.iter().enumerate() {
+            for b in &base[i + 1..] {
+                terms.push(format!("(* {a} {b})"));
+            }
+        }
+        terms.truncate(MAX_FREE_TERMS * 2);
+    }
+    terms
 }
 
 /// The most self-application terms a law's free variable ranges over (the divisibility rung).
@@ -2169,19 +2294,19 @@ const MAX_FREE_TERMS: usize = 12;
 /// building: with both, z3 closes associativity in 10 ms; without transitivity, unknown; without
 /// the greatest-divisor law, satisfiable. Emitted only when the self facts include a `mod … = 0`
 /// law (a divisibility fact) and the solver has discharged the lemmas.
-fn divisibility_instances(at: &[Vec<String>]) -> String {
-    let mut terms: Vec<String> = at.iter().map(|a| format!("(self {})", a.join(" "))).collect();
+fn divisibility_instances(symbol: &str, at: &[Vec<String>]) -> String {
+    let mut terms: Vec<String> = at.iter().map(|a| format!("({symbol} {})", a.join(" "))).collect();
     terms.sort();
     terms.dedup();
     if terms.len() < 2 {
         return String::new();
     }
-    let mut out = String::from(";; the divisibility rung: transitivity and antisymmetry of `mod … = 0` at the certificate's applications (lemmas `div_trans`, `div_antisym`, discharged separately)\n");
+    let mut out = String::from(";; the divisibility rung: transitivity, antisymmetry and scaling of `mod … = 0` at the certificate's applications (lemmas `div_trans`, `div_antisym`, `div_scale`, `div_bound`, discharged separately)\n");
     let mut seen: BTreeSet<String> = BTreeSet::new();
     // z | self(x, …) ∧ self(x, …) | x  ⇒  z | x: a divisor of an application divides its arguments
     // (through the application's own divides-both fact), for every other application z.
     for args in at {
-        let m = format!("(self {})", args.join(" "));
+        let m = format!("({symbol} {})", args.join(" "));
         for x in args {
             for z in &terms {
                 if *z == m {
@@ -2198,6 +2323,22 @@ fn divisibility_instances(at: &[Vec<String>]) -> String {
     for (i, g) in terms.iter().enumerate() {
         for h in &terms[i + 1..] {
             out.push_str(&format!("(assert (=> (and (>= {g} 1) (>= {h} 1) (= (mod {g} {h}) 0) (= (mod {h} {g}) 0)) (= {g} {h})))\n"));
+        }
+    }
+    // Scaling: e | x ⇒ e·g | g·x, for an application e, each of its arguments x, and every
+    // other application g — the step that carries a divisor of the quotient up to the product.
+    for args in at {
+        let e = format!("({symbol} {})", args.join(" "));
+        for x in args {
+            for g in &terms {
+                if *g == e {
+                    continue;
+                }
+                let inst = format!("(assert (=> (and (not (= {e} 0)) (not (= {g} 0)) (= (mod {x} {e}) 0)) (= (mod (* {g} {x}) (* {e} {g})) 0)))\n");
+                if seen.insert(inst.clone()) {
+                    out.push_str(&inst);
+                }
+            }
         }
     }
     out
@@ -2310,7 +2451,7 @@ fn self_fact_instances(c: &CalleeContract, at: &[Vec<String>], goal: &[Vec<Strin
     // discharged the lemmas (see `divisibility_instances`).
     let divisibility_law = c.laws.iter().any(|l| serde_json::to_string(l).unwrap_or_default().contains("\"mod\""));
     if divisibility_law && DIVISIBILITY_SOLVER.with(|s| s.borrow().as_deref().map(crate::euclid::divisibility_discharged).unwrap_or(false)) {
-        inst.push_str(&divisibility_instances(goal));
+        inst.push_str(&divisibility_instances("self", goal));
     }
     Ok(inst)
 }
@@ -3241,6 +3382,65 @@ mod tests {
         let smt = cert.unwrap().smt;
         assert!(smt.contains("with d = (self"), "the free variable ranges over the gcd terms: {smt}");
         assert!(smt.contains("the divisibility rung"), "{smt}");
+    }
+
+    /// Lowest terms after normalization — the rational tier's headline fact — through the
+    /// CALLEE-side divisibility rung: `gcd` is a linked callee under its contract (positivity,
+    /// divides-both, the greatest-divisor law), the body divides both components by
+    /// `gcd(|n|, d)`, and the post `gcd(|p|, q) = 1` needs the greatest-divisor law at the PRODUCT
+    /// `e·g` plus the scaling lemma — hand-measured: with them unsat, without the product
+    /// satisfiable. The contract ladder alone leaves it UNKNOWN; the rung closes it.
+    #[test]
+    fn the_callee_divisibility_rung_proves_lowest_terms_after_normalization() {
+        let Some(solver) = solver() else { return };
+        let target = format!("fn_{}", "ef".repeat(32));
+        let g = |x: J, y: J| json!({ "kind": "app", "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": target } }, "args": [x, y] });
+        let pg = |x: J, y: J| op(&target, vec![x, y]);
+        let nats: BTreeSet<usize> = [0, 1].into();
+        let post_pos = op("or", vec![op("and", vec![op("lt", vec![v("a"), lit(1)]), op("lt", vec![v("b"), lit(1)])]), op("ge", vec![v("result"), lit(1)])]);
+        let divides = law(&["a", "b"], op("or", vec![
+            op("and", vec![op("eq", vec![v("a"), lit(0)]), op("eq", vec![v("b"), lit(0)])]),
+            op("and", vec![op("eq", vec![op("mod", vec![v("a"), pg(v("a"), v("b"))]), lit(0)]), op("eq", vec![op("mod", vec![v("b"), pg(v("a"), v("b"))]), lit(0)])])]));
+        let greatest = law(&["a", "b", "d"], op("or", vec![op("lt", vec![v("d"), lit(1)]), op("or", vec![
+            op("gt", vec![op("mod", vec![v("a"), v("d")]), lit(0)]), op("or", vec![
+            op("gt", vec![op("mod", vec![v("b"), v("d")]), lit(0)]),
+            op("eq", vec![op("mod", vec![pg(v("a"), v("b")), v("d")]), lit(0)])])])]));
+        let contract = CalleeContract {
+            symbol: "callee_efef".into(), params: vec!["a".into(), "b".into()], param_sorts: vec![Sort::Int, Sort::Int], ret: Sort::Int,
+            pres: vec![], posts: vec![post_pos], laws: vec![divides, greatest], nat_positions: nats.clone(),
+        };
+        // The rational tier's `rat_normalize`: \n d -> case eq n 0 of { true => (0, 1); false => case
+        // lt d 0 of { true => (div (neg n) G, div (neg d) G); false => (div n G, div d G) } } with
+        // G = gcd(|n|, |d|). (The stripped body without the zero and sign cases is HARDER for z3 —
+        // unknown at the budget where this one closes in 3 s; the shape the module ships is the
+        // shape under test.)
+        let bapp = |name: &str, args: Vec<J>| json!({ "kind": "app", "fn": { "kind": "var", "name": name }, "args": args });
+        let gnd = g(bapp("abs", vec![v("n")]), bapp("abs", vec![v("d")]));
+        let ilit = |x: i64| json!({ "kind": "lit", "value": { "kind": "int", "value": x } });
+        let blit = |b: bool| json!({ "kind": "lit", "value": { "kind": "bool", "value": b } });
+        let pair = |a: J, b: J| json!({ "kind": "tuple", "elems": [a, b] });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }, { "name": "d" }], "body": { "kind": "case",
+            "scrutinee": bapp("eq", vec![v("n"), ilit(0)]),
+            "arms": [
+                { "pattern": blit(true), "body": pair(ilit(0), ilit(1)) },
+                { "pattern": blit(false), "body": { "kind": "case",
+                    "scrutinee": bapp("lt", vec![v("d"), ilit(0)]),
+                    "arms": [
+                        { "pattern": blit(true), "body": pair(bapp("div", vec![bapp("neg", vec![v("n")]), gnd.clone()]), bapp("div", vec![bapp("neg", vec![v("d")]), gnd.clone()])) },
+                        { "pattern": blit(false), "body": pair(bapp("div", vec![v("n"), gnd.clone()]), bapp("div", vec![v("d"), gnd.clone()])) } ] } } ] } });
+        let ty = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "int" }],
+            "result": { "kind": "tuple", "elems": [{ "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "int" }] } });
+        // The post as the module states it: pre d ≠ 0, post gcd(|fst(result)|, snd(result)) == 1.
+        let r = |acc: &str| op(acc, vec![v("result")]);
+        let refinements = vec![
+            json!({ "kind": "pre", "expr": op("neq", vec![v("d"), lit(0)]) }),
+            json!({ "kind": "post", "expr": op("eq", vec![pg(op("abs", vec![r("fst")]), r("snd")), lit(1)]) }),
+        ];
+        let prev = set_callee_contracts([(target.clone(), contract)].into_iter().collect());
+        let reports = crate::refine::check_refinements(&ty, &refinements, &body, solver);
+        set_callee_contracts(prev);
+        let post = reports.iter().find(|r| r.label == "post[0]").expect("the post's report");
+        assert!(matches!(post.outcome, crate::RefinementOutcome::Sound), "{:?}", post.outcome);
     }
 
     /// pow_mod_naive: \b e m -> case gt(e, 0) of true -> mod(mul(self(b, sub(e, 1), m), mod(b, m)), m) | false -> mod(1, m)

@@ -104,8 +104,25 @@ pub const DIV_ANTISYM_SMT: &str = "(set-logic ALL)\n\
 (declare-const x Int)\n(declare-const y Int)\n\
 (assert (>= x 1))\n(assert (>= y 1))\n(assert (= (mod x y) 0))\n(assert (= (mod y x) 0))\n(assert (not (= x y)))\n(check-sat)\n";
 
-/// Has `solver` proved both divisibility lemmas (and the uniqueness lemma transitivity rests on)?
-/// Cached per solver per thread; a solver that cannot makes the rung unavailable, stated.
+/// Scaling: `e | x ⇒ e·g | g·x` (the PRODUCT witness the lowest-terms proof needs — the rational
+/// tier, 2026-10-30), stated with the uniqueness instance at `q = x div e, r = 0`.
+pub const DIV_SCALE_SMT: &str = "(set-logic ALL)\n\
+;; scaling: e ≠ 0 ∧ g ≠ 0 ∧ x mod e = 0 ⇒ (g·x) mod (e·g) = 0\n\
+(declare-const x Int)\n(declare-const e Int)\n(declare-const g Int)\n\
+(assert (not (= e 0)))\n(assert (not (= g 0)))\n(assert (= (mod x e) 0))\n\
+;; euclid_unique at t = g·x, m = e·g, q = x div e, r = 0\n\
+(assert (=> (and (not (= (* e g) 0)) (= (* g x) (+ (* (div x e) (* e g)) 0)) (< 0 (abs (* e g)))) (and (= (div (* g x) (* e g)) (div x e)) (= (mod (* g x) (* e g)) 0))))\n\
+(assert (not (= (mod (* g x) (* e g)) 0)))\n(check-sat)\n";
+
+/// The divisor bound: `y ≥ 1 ∧ x ≥ 1 ∧ y mod x = 0 ⇒ x ≤ y` (z3 proves it bare).
+pub const DIV_BOUND_SMT: &str = "(set-logic ALL)\n\
+;; divisor bound: y ≥ 1 ∧ x ≥ 1 ∧ y mod x = 0 ⇒ x ≤ y\n\
+(declare-const x Int)\n(declare-const y Int)\n\
+(assert (>= x 1))\n(assert (>= y 1))\n(assert (= (mod y x) 0))\n(assert (not (<= x y)))\n(check-sat)\n";
+
+/// Has `solver` proved the divisibility lemmas (transitivity, antisymmetry, scaling, the divisor
+/// bound — and the uniqueness lemma two of them rest on)? Cached per solver per thread; a solver
+/// that cannot makes the rung unavailable, stated.
 pub fn divisibility_discharged(solver: &str) -> bool {
     let key = format!("div:{solver}");
     if let Some(v) = DISCHARGED.with(|d| d.borrow().get(&key).copied()) {
@@ -113,7 +130,9 @@ pub fn divisibility_discharged(solver: &str) -> bool {
     }
     let ok = lemma_discharged(solver)
         && matches!(run_smt_secs(DIV_TRANS_SMT, solver, 5), Ok(SatAnswer::Unsat))
-        && matches!(run_smt_secs(DIV_ANTISYM_SMT, solver, 5), Ok(SatAnswer::Unsat));
+        && matches!(run_smt_secs(DIV_ANTISYM_SMT, solver, 5), Ok(SatAnswer::Unsat))
+        && matches!(run_smt_secs(DIV_SCALE_SMT, solver, 5), Ok(SatAnswer::Unsat))
+        && matches!(run_smt_secs(DIV_BOUND_SMT, solver, 5), Ok(SatAnswer::Unsat));
     DISCHARGED.with(|d| d.borrow_mut().insert(key, ok));
     ok
 }
