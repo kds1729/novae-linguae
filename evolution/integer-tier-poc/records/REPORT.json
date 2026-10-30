@@ -25,7 +25,7 @@
   "properties_generative": [
    "commutative: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "right_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
-   "divides_both: CONSISTENT  |  generative: EXHAUSTIVE (80 cases \u2014 bounded domain, no counterexample)",
+   "divides_both: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "associative: UNVERIFIABLE  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
@@ -63,13 +63,13 @@
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
-   "multiple_of_both: CONSISTENT  |  generative: EXHAUSTIVE (64 cases \u2014 bounded domain, no counterexample)",
-   "multiple_of_both_pos: CONSISTENT  |  generative: EXHAUSTIVE (64 cases \u2014 bounded domain, no counterexample)",
+   "multiple_of_both: CONSISTENT  |  generative: EXHAUSTIVE (64 cases \u2014 bounded domain, no counterexample; 17 skipped: modulo by zero at a = 0, b = 0)",
+   "multiple_of_both_pos: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "commutative: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "multiple_of_both: CONSISTENT  |  generative: HELD (191 cases)",
-   "multiple_of_both_pos: CONSISTENT  |  generative: HELD (191 cases)",
+   "multiple_of_both: CONSISTENT  |  generative: HELD (191 cases; 9 skipped: modulo by zero at a = 0, b = 3556)",
+   "multiple_of_both_pos: CONSISTENT  |  generative: HELD (200 cases)",
    "commutative: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
@@ -178,12 +178,12 @@
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
-   "inverse_identity: CONSISTENT  |  generative: EXHAUSTIVE (72 cases \u2014 bounded domain, no counterexample)",
-   "inverse_identity_pre: CONSISTENT  |  generative: EXHAUSTIVE (72 cases \u2014 bounded domain, no counterexample)"
+   "inverse_identity: CONSISTENT  |  generative: EXHAUSTIVE (72 cases \u2014 bounded domain, no counterexample; 9 skipped: modulo by zero at a = -4, m = 0)",
+   "inverse_identity_pre: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "inverse_identity: CONSISTENT  |  generative: HELD (196 cases)",
-   "inverse_identity_pre: CONSISTENT  |  generative: HELD (196 cases)"
+   "inverse_identity: CONSISTENT  |  generative: HELD (196 cases; 4 skipped: modulo by zero at a = -86, m = 0)",
+   "inverse_identity_pre: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "inverse_identity: UNKNOWN      solver could not decide",
@@ -212,12 +212,12 @@
    "complexity": "within declared `O(1)` (inferred O(1))"
   },
   "properties_generative": [
-   "congruent_to_plain_sum: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)",
-   "commutative: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
+   "congruent_to_plain_sum: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)",
+   "commutative: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "congruent_to_plain_sum: CONSISTENT  |  generative: HELD (198 cases)",
-   "commutative: CONSISTENT  |  generative: HELD (198 cases)"
+   "congruent_to_plain_sum: CONSISTENT  |  generative: HELD (200 cases)",
+   "commutative: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "congruent_to_plain_sum: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
@@ -246,12 +246,12 @@
    "complexity": "within declared `O(1)` (inferred O(1))"
   },
   "properties_generative": [
-   "congruent_to_plain_product: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)",
-   "commutative: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
+   "congruent_to_plain_product: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)",
+   "commutative: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "congruent_to_plain_product: CONSISTENT  |  generative: HELD (198 cases)",
-   "commutative: CONSISTENT  |  generative: HELD (198 cases)"
+   "congruent_to_plain_product: CONSISTENT  |  generative: HELD (200 cases)",
+   "commutative: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "congruent_to_plain_product: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
@@ -314,10 +314,10 @@
    "complexity": "within declared `O(n)` (inferred O(n))"
   },
   "properties_generative": [
-   "double_exponent: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
+   "double_exponent: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "double_exponent: CONSISTENT  |  generative: HELD (71 cases)"
+   "double_exponent: CONSISTENT  |  generative: HELD (76 cases; 124 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
   ],
   "prove": [
    "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 159 of 161 premises verified separately, the final query over uninterpreted mod/div]"
@@ -367,10 +367,10 @@
    "complexity": "within declared `O(n)` (inferred O(n))"
   },
   "properties_generative": [
-   "fast_equals_naive: CONSISTENT  |  generative: EXHAUSTIVE (648 cases \u2014 bounded domain, no counterexample)"
+   "fast_equals_naive: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "fast_equals_naive: CONSISTENT  |  generative: HELD (73 cases)"
+   "fast_equals_naive: CONSISTENT  |  generative: HELD (78 cases; 122 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
   ],
   "prove": [
    "fast_equals_naive: PROVED       by induction through the callees' definitions, on `e (through `fn_17294c85\u2026`, `fn_31c081eb\u2026`)` (unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 252 of 255 premises verified separately, the final query over uninterpreted mod/div]"
@@ -628,7 +628,7 @@
    "miller_rabin_agrees_with_trial: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "miller_rabin_agrees_with_trial: CONSISTENT  |  generative: HELD (137 cases)"
+   "miller_rabin_agrees_with_trial: CONSISTENT  |  generative: HELD (137 cases; 63 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
   ],
   "prove": [
    "miller_rabin_agrees_with_trial: UNKNOWN      solver could not decide"
@@ -678,12 +678,12 @@
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
-   "solves_both_congruences: CONSISTENT  |  generative: HELD (399 cases)",
-   "solves_both_congruences_pre: CONSISTENT  |  generative: HELD (399 cases)"
+   "solves_both_congruences: CONSISTENT  |  generative: HELD (399 cases; 1 skipped: modulo by zero at a1 = -13, m1 = 16, a2 = -15, m2 = 0)",
+   "solves_both_congruences_pre: CONSISTENT  |  generative: HELD (400 cases)"
   ],
   "properties_wide": [
-   "solves_both_congruences: CONSISTENT  |  generative: HELD (195 cases)",
-   "solves_both_congruences_pre: CONSISTENT  |  generative: HELD (195 cases)"
+   "solves_both_congruences: CONSISTENT  |  generative: HELD (195 cases; 5 skipped: modulo by zero at a1 = 4, m1 = 9193655187, a2 = -86, m2 = 0)",
+   "solves_both_congruences_pre: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "solves_both_congruences: UNKNOWN      solver could not decide",
@@ -824,10 +824,10 @@
    "beyond_n: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "symmetry: CONSISTENT  |  generative: HELD (19 cases)",
-   "pascal: CONSISTENT  |  generative: HELD (41 cases)",
+   "symmetry: CONSISTENT  |  generative: HELD (103 cases; 97 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at n = 166930048535190, k = 4)",
+   "pascal: CONSISTENT  |  generative: HELD (41 cases; 159 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)",
    "choose_zero: CONSISTENT  |  generative: HELD (200 cases)",
-   "beyond_n: CONSISTENT  |  generative: HELD (45 cases)"
+   "beyond_n: CONSISTENT  |  generative: HELD (125 cases; 75 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
   ],
   "prove": [
    "symmetry: UNKNOWN      numeric induction on `k+n (hypothesis as instances at the recursive calls)` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
@@ -1083,10 +1083,10 @@
    "complexity": "within declared `O(n)` (inferred O(n))"
   },
   "properties_generative": [
-   "length_is_n: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+   "length_is_n: CONSISTENT  |  generative: HELD (400 cases)"
   ],
   "properties_wide": [
-   "length_is_n: CONSISTENT  |  generative: HELD (7 cases)"
+   "length_is_n: CONSISTENT  |  generative: HELD (73 cases; 127 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
   ],
   "prove": [
    "length_is_n: PROVED       by induction on `n` (strong induction over the measure; unsat)"

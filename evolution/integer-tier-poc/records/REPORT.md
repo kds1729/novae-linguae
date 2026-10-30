@@ -38,6 +38,6 @@
 | `ntt_inverse` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `ntt_roundtrip` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `pointwise_mod` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | length_is_min=HELD | length_is_min=PROVED |
-| `pad_to` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | length_is_n=EXHAUSTIVE | length_is_n=PROVED |
+| `pad_to` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | length_is_n=HELD | length_is_n=PROVED |
 | `next_pow2` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | at_least_n=EXHAUSTIVE; under_twice_n=EXHAUSTIVE | at_least_n=PROVED; under_twice_n=PROVED |
 | `convolution` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |

@@ -1014,7 +1014,7 @@ on this one law, its own ladder is 15 s (the quantified and the point-of-use cer
 each, then the instances); the other 64 s re-derive `gcd`'s contract at the point of use — its
 four laws re-proved, the UNKNOWN associativity through its whole ladder — once per caller.
 
-### Still open
+### Still open after the tenth follow-up (the last closed in the addendum, below)
 
 - **`prime_agree`**: documented negative (a theorem of number theory, not a consequence of the
   definitions); no rung reaches it and none should claim to.
@@ -1023,6 +1023,67 @@ four laws re-proved, the UNKNOWN associativity through its whole ladder — once
   erroring case (`0 mod 0`); a contract on a wider precondition, or a guard, is the honest form.
 - `gcd` associativity, `binomial` symmetry and Pascal: facts no contract states.
 - The generative checker's report of skipped (erroring) cases.
+
+### Addendum (2026-10-30): the skipped cases, said; the derived-contract cache
+
+**The skipped cases.** Twice in this module a law read as a clean EXHAUSTIVE while the case
+that breaks it was being skipped — `gcd`'s divisibility and `lcm`'s multiple-of-both both error
+on `0 mod 0`, the checker dropped the case without a word, and the solver's model found it later
+each time. The generative verdict now carries the count and the first reason with its binding.
+Round 12 of the builder, same records, same validator rungs:
+
+| law | generative verdict, as it now reads |
+|---|---|
+| `lcm`'s unguarded `multiple_of_both` | EXHAUSTIVE (64 cases — bounded domain, no counterexample; **17 skipped**: modulo by zero at a = 0, b = 0) |
+| `inverse_holds`' unguarded `inverse_identity` | EXHAUSTIVE (72 cases — …; **9 skipped**: modulo by zero at a = −4, m = 0) |
+| `crt_holds`' unguarded `solves_both_congruences` | HELD (399 cases; **1 skipped**: modulo by zero at a1 = −13, m1 = 16, a2 = −15, m2 = 0) |
+| the 34 other laws | unchanged, nothing skipped — with one exception found by the report itself, below |
+
+The three are exactly the laws the "Still open" list calls honest only on a guard or a wider
+precondition — and now the checker says so in the same breath as HELD, instead of the solver
+saying it a week later.
+
+Its first use found the next thing: the GUARDED twin `a < 1 ∨ b < 1 ∨ …` skipped the same 17
+cases as the unguarded law, because the checker evaluated `or` strictly — the guard was true and
+the guarded side still ran. The connectives `or`/`and`/`implies` in a predicate now decide from
+one decided side (the second is evaluated only when the first leaves it open; an erroring side
+beside a deciding one never undecides the whole), the reading a guard asks for and the one the
+prover already had: `multiple_of_both_pos` reads 81 cases, 0 skipped.
+
+And the report's first full run (builder round 12) found a third thing, in a record nobody
+suspected: `pad_to`'s `length_is_n` read `EXHAUSTIVE (9 cases …; 72 skipped: expected a list,
+got an int)`. The checker infers a variable's kind from its uses, and `xs` has exactly one — the
+function's own argument — which told it nothing but the `nat` positions; so `xs` defaulted to
+Int, the nine cases that decided were the ones with `n = 0` (the body never touches `xs` there),
+and the law read EXHAUSTIVE for eight rounds while testing almost nothing. A variable that
+reaches the function only as its argument now ranges over the DECLARED parameter type (read
+from the signature: int, nat, bool, string, `List …`); `pad_to`'s law reads HELD (400 cases),
+nothing skipped — lists × nats outgrow the exhaustive budget, so it samples; what changed is
+that every case decides. The same mechanism had already left the NTT chain's list-parameter laws
+untouched only because each of them also applies `length` to the variable.
+
+**The derived-contract cache.** A callee's contract is re-derived from its own body on the
+linked view, never read from its declaration; measured on `lcm`'s one law, that re-derivation was
+64 of the 79 s `prove` spent (`gcd`'s four laws, associativity's whole failing ladder), paid
+again by every record that applies `gcd`, each in its own process. With `NL_DERIVED_CACHE=1` the
+validator keeps each derived contract on disk, keyed by the callee's content address and the
+validator version, and the next process reads it: the same facts — every post and law in it was
+proved here, from that record, by this validator — not a declaration taken on trust. Measured:
+`lcm`'s law 79 s → 15 s warm; the builder (which sets it) 29.0 min on an empty cache (round 12
+— each callee derived once, then hits within the run) and 23.8 min on the next run (round 13 —
+the cache from round 12 still valid: no record's content address had moved), was 32. Off by
+default, so a test run or a fresh audit never reads yesterday's proofs.
+
+Totals unchanged: 41/41 certified, contracts **23 SOUND / 0**, laws **30 PROVED / 7 UNKNOWN / 0
+UNSUPPORTED** (37 laws), 37/37 held.
+
+### Still open
+
+- **`prime_agree`**: documented negative.
+- **The unguarded `inverse_holds` / `crt_holds` / `multiple_of_both` laws over ALL ints**: the
+  checker now SAYS which cases it skips for them; a contract on a wider precondition, or a
+  guard, remains the honest form.
+- `gcd` associativity, `binomial` symmetry and Pascal: facts no contract states.
 
 ## Open questions (as they stood before the follow-up)
 

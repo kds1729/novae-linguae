@@ -18,6 +18,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 V = Path(os.environ.get("NL_VALIDATOR") or REPO / "tooling/validator/target/release/nl-validator")
+# The derived-contract cache (spec/evaluation.md): a callee's contract re-derived once per
+# validator process cost this build 64 s per record applying `gcd`; cached on disk by content
+# address + validator version, it is re-derived once per build. `NL_DERIVED_CACHE=0` turns it off.
+os.environ.setdefault("NL_DERIVED_CACHE", "1")
 OUT = HERE / "records"
 P_NTT = 998244353          # 119 * 2^23 + 1, primitive root 3 — the NTT prime
 I64_MAX = 9223372036854775807
