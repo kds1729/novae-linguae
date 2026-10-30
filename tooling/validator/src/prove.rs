@@ -2001,6 +2001,20 @@ pub fn prove_by_numeric_induction(
     nat_positions: &BTreeSet<usize>,
     solver: &str,
 ) -> (ProofOutcome, Option<Certificate>, Option<String>) {
+    // The divisibility rung's lemma instances may enter the self-fact instances below, but only
+    // for a solver that has discharged the lemmas — which the certificate builder must know.
+    let prev = DIVISIBILITY_SOLVER.with(|s| s.replace(Some(solver.to_string())));
+    let out = prove_by_numeric_induction_inner(prop_expr, body, nat_positions, solver);
+    DIVISIBILITY_SOLVER.with(|s| *s.borrow_mut() = prev);
+    out
+}
+
+fn prove_by_numeric_induction_inner(
+    prop_expr: &J,
+    body: Option<&J>,
+    nat_positions: &BTreeSet<usize>,
+    solver: &str,
+) -> (ProofOutcome, Option<Certificate>, Option<String>) {
     // A ladder: UNFOLDING alone first (the instantiated defining equations, no hypothesis — enough for
     // `gcd(a, 0) = a` and, measured, for `gcd(a, b) = gcd(b, a)`, which the quantified hypothesis only
     // obscures: z3 answers unknown with it and unsat without), then the QUANTIFIED hypothesis, then
@@ -2064,6 +2078,58 @@ thread_local! {
     /// measure-induction certificate makes. Installed by the caller for one retry only — never
     /// while the linked view is computing that contract (the facts must not assume themselves).
     static SELF_FACTS: std::cell::RefCell<Option<CalleeContract>> = const { std::cell::RefCell::new(None) };
+    /// The solver the running numeric induction will use (set by `prove_by_numeric_induction`):
+    /// the divisibility rung states its lemma instances only for a solver that has discharged
+    /// the lemmas (`euclid::divisibility_discharged`). `None` = no rung.
+    static DIVISIBILITY_SOLVER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The most self-application terms a law's free variable ranges over (the divisibility rung).
+const MAX_FREE_TERMS: usize = 12;
+
+/// THE DIVISIBILITY RUNG (2026-10-30). `gcd` associativity was "a fact no contract states" for ten
+/// follow-ups; it follows from two facts the contract CAN state — `gcd` divides both arguments,
+/// and every common divisor divides `gcd` (`∀ a b d. d | a ∧ d | b ⇒ d | gcd(a, b)`, PROVED by the
+/// numeric induction with the Euclidean rung) — once (1) the second law is INSTANTIATED although no
+/// application in it fixes `d` (`self_fact_instances` lets one free Int variable range over the
+/// certificate's own self-application terms: the only candidates such a law needs are the gcds
+/// the goal mentions), and (2) divisibility's transitivity and antisymmetry are stated at those
+/// terms, here, as instances of two lemmas the solver discharges first. Measured by hand before
+/// building: with both, z3 closes associativity in 10 ms; without transitivity, unknown; without
+/// the greatest-divisor law, satisfiable. Emitted only when the self facts include a `mod … = 0`
+/// law (a divisibility fact) and the solver has discharged the lemmas.
+fn divisibility_instances(at: &[Vec<String>]) -> String {
+    let mut terms: Vec<String> = at.iter().map(|a| format!("(self {})", a.join(" "))).collect();
+    terms.sort();
+    terms.dedup();
+    if terms.len() < 2 {
+        return String::new();
+    }
+    let mut out = String::from(";; the divisibility rung: transitivity and antisymmetry of `mod … = 0` at the certificate's applications (lemmas `div_trans`, `div_antisym`, discharged separately)\n");
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    // z | self(x, …) ∧ self(x, …) | x  ⇒  z | x: a divisor of an application divides its arguments
+    // (through the application's own divides-both fact), for every other application z.
+    for args in at {
+        let m = format!("(self {})", args.join(" "));
+        for x in args {
+            for z in &terms {
+                if *z == m {
+                    continue;
+                }
+                let inst = format!("(assert (=> (and (not (= {m} 0)) (not (= {z} 0)) (= (mod {x} {m}) 0) (= (mod {m} {z}) 0)) (= (mod {x} {z}) 0)))\n");
+                if seen.insert(inst.clone()) {
+                    out.push_str(&inst);
+                }
+            }
+        }
+    }
+    // Two applications that divide each other are equal (both positive).
+    for (i, g) in terms.iter().enumerate() {
+        for h in &terms[i + 1..] {
+            out.push_str(&format!("(assert (=> (and (>= {g} 1) (>= {h} 1) (= (mod {g} {h}) 0) (= (mod {h} {g}) 0)) (= {g} {h})))\n"));
+        }
+    }
+    out
 }
 
 /// Install (or clear) the function's own certified facts for the measure-induction rung,
@@ -2075,7 +2141,7 @@ pub fn set_self_facts(facts: Option<CalleeContract>) -> Option<CalleeContract> {
 /// The function's own contract instantiated at the given `self` applications (argument terms in
 /// goal scope): each proved postcondition under its antecedent, and each proved law at the
 /// application that fixes its variables. The same rendering as a callee's contract instances.
-fn self_fact_instances(c: &CalleeContract, at: &[Vec<String>], sd: &SelfDef) -> Result<String> {
+fn self_fact_instances(c: &CalleeContract, at: &[Vec<String>], goal: &[Vec<String>], sd: &SelfDef) -> Result<String> {
     let mut inst = String::new();
     if c.params.len() != sd.params.len() || at.is_empty() {
         return Ok(inst);
@@ -2135,16 +2201,45 @@ fn self_fact_instances(c: &CalleeContract, at: &[Vec<String>], sd: &SelfDef) -> 
             1 => format!("(=> {} {body})", guards[0]),
             _ => format!("(=> (and {}) {body})", guards.join(" ")),
         };
-        let fixing = collect_self_applications(pred).into_iter().find(|call| {
+        let calls = collect_self_applications(pred);
+        let distinct_vars = |call: &Vec<J>| -> Option<Vec<String>> {
             let names: Vec<&str> = call.iter().filter_map(|a| var_name(a)).collect();
-            names.len() == call.len() && names.iter().collect::<BTreeSet<_>>().len() == names.len() && vars.iter().all(|v| names.contains(&v.as_str()))
-        });
+            (names.len() == call.len() && names.iter().collect::<BTreeSet<_>>().len() == names.len())
+                .then(|| names.into_iter().map(String::from).collect())
+        };
+        let fixing = calls.iter().find(|call| distinct_vars(call).is_some_and(|names| vars.iter().all(|v| names.contains(v))));
         if let Some(call) = fixing {
             let names: Vec<String> = call.iter().filter_map(|a| var_name(a).map(String::from)).collect();
             for args in at {
                 inst.push_str(&format!(";; self's certified law at (self {})\n(assert {})\n", args.join(" "), let_params(&names, args, &guarded)));
             }
+        } else if let Some((mut names, free)) = calls.iter().find_map(|call| {
+            // An application fixing all but ONE Int variable: that variable ranges over the
+            // certificate's self-application terms (the divisibility rung — `d` in the
+            // greatest-divisor law can only usefully be another gcd the goal mentions).
+            let names = distinct_vars(call)?;
+            let free: Vec<&String> = vars.iter().filter(|v| !names.contains(v)).collect();
+            (free.len() == 1 && var_sorts.get(free[0].as_str()) == Some(&Sort::Int)).then(|| (names, free[0].clone()))
+        }) {
+            let mut terms: Vec<String> = goal.iter().map(|a| format!("(self {})", a.join(" "))).collect();
+            terms.sort();
+            terms.dedup();
+            terms.truncate(MAX_FREE_TERMS);
+            names.push(free.clone());
+            for args in goal {
+                for t in &terms {
+                    let mut with = args.clone();
+                    with.push(t.clone());
+                    inst.push_str(&format!(";; self's certified law at (self {}) with {free} = {t}\n(assert {})\n", args.join(" "), let_params(&names, &with, &guarded)));
+                }
+            }
         }
+    }
+    // The divisibility rung, when the facts include a divisibility law and the solver has
+    // discharged the lemmas (see `divisibility_instances`).
+    let divisibility_law = c.laws.iter().any(|l| serde_json::to_string(l).unwrap_or_default().contains("\"mod\""));
+    if divisibility_law && DIVISIBILITY_SOLVER.with(|s| s.borrow().as_deref().map(crate::euclid::divisibility_discharged).unwrap_or(false)) {
+        inst.push_str(&divisibility_instances(goal));
     }
     Ok(inst)
 }
@@ -2303,6 +2398,11 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     // Every `self` application the certificate states, by its argument terms in goal scope — where
     // the function's own certified facts are instantiated (`SELF_FACTS`).
     let mut self_apps: Vec<Vec<String>> = Vec::new();
+    // The GOAL's own applications (the law's terms, before the unfoldings' inner calls): the
+    // divisibility rung instantiates over these only — the recursive calls' applications
+    // multiply the instances past what the solver decides in budget (measured: 4 goal terms
+    // close associativity in 10 ms; all 8 applications, 234 assertions, time out).
+    let mut goal_apps: Vec<Vec<String>> = Vec::new();
     for call in collect_self_applications(pred) {
         if call.len() != sd.params.len() {
             bail!("self applied to {} args, expects {}", call.len(), sd.params.len());
@@ -2312,6 +2412,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
         if seen.insert(app.clone()) {
             out.push_str(&format!("(assert (= {app} {}))\n", let_params(&sd.params, &terms, &sd.body_smt)));
             self_apps.push(terms.clone());
+            goal_apps.push(terms.clone());
         }
         // One level deeper: the body's own recursive calls, at this instantiation.
         let mut penv: BTreeMap<String, Sort> = sd.params.iter().cloned().zip(sd.param_sorts.iter().copied()).collect();
@@ -2423,7 +2524,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     // nothing.
     let mut m = m;
     if let Some(c) = SELF_FACTS.with(|s| s.borrow().clone()) {
-        let facts = self_fact_instances(&c, &self_apps, &sd)?;
+        let facts = self_fact_instances(&c, &self_apps, &goal_apps, &sd)?;
         if !facts.is_empty() {
             out.push_str(&facts);
             m = format!("{m}, with self's certified contract at the instantiated points");
@@ -3000,6 +3101,43 @@ mod tests {
         let (out, _, _) = prove_by_numeric_induction(&unguarded, Some(&gcd_body()), &nats, solver);
         set_self_facts(prev);
         assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+    }
+
+    /// gcd associativity — "a fact no contract states" for ten follow-ups — follows from two
+    /// facts gcd's contract CAN state (it divides both arguments; every common divisor divides
+    /// it) through the DIVISIBILITY RUNG: the greatest-divisor law has a variable no application
+    /// fixes (`d`), so it is instantiated with `d` ranging over the certificate's own gcd terms,
+    /// and transitivity + antisymmetry of `mod … = 0` are stated at those terms (the lemmas
+    /// discharged first). Without the greatest-divisor law the same ladder stays UNKNOWN.
+    #[test]
+    fn the_divisibility_rung_closes_gcd_associativity() {
+        let Some(solver) = solver() else { return };
+        let nats: BTreeSet<usize> = [0, 1].into();
+        let g = |x: J, y: J| self_app(vec![x, y]);
+        let assoc = law(&["a", "b", "c"], op("eq", vec![g(g(v("a"), v("b")), v("c")), g(v("a"), g(v("b"), v("c")))]));
+        let divides = law(&["a", "b"], op("or", vec![
+            op("and", vec![op("eq", vec![v("a"), lit(0)]), op("eq", vec![v("b"), lit(0)])]),
+            op("and", vec![op("eq", vec![op("mod", vec![v("a"), g(v("a"), v("b"))]), lit(0)]), op("eq", vec![op("mod", vec![v("b"), g(v("a"), v("b"))]), lit(0)])])]));
+        let greatest = law(&["a", "b", "d"], op("or", vec![op("lt", vec![v("d"), lit(1)]), op("or", vec![
+            op("gt", vec![op("mod", vec![v("a"), v("d")]), lit(0)]), op("or", vec![
+            op("gt", vec![op("mod", vec![v("b"), v("d")]), lit(0)]),
+            op("eq", vec![op("mod", vec![g(v("a"), v("b")), v("d")]), lit(0)])])])]));
+        let post = op("or", vec![op("and", vec![op("lt", vec![v("a"), lit(1)]), op("lt", vec![v("b"), lit(1)])]), op("ge", vec![v("result"), lit(1)])]);
+        let contract = |laws: Vec<J>| CalleeContract {
+            symbol: "self".into(), params: vec!["a".into(), "b".into()], param_sorts: vec![Sort::Int, Sort::Int], ret: Sort::Int,
+            pres: vec![], posts: vec![post.clone()], laws, nat_positions: nats.clone(),
+        };
+        let prev = set_self_facts(Some(contract(vec![divides.clone()])));
+        let (out, _, _) = prove_by_numeric_induction(&assoc, Some(&gcd_body()), &nats, solver);
+        set_self_facts(prev);
+        assert!(matches!(out, ProofOutcome::Unknown), "without the greatest-divisor law: {out:?}");
+        let prev = set_self_facts(Some(contract(vec![divides, greatest])));
+        let (out, cert, m) = prove_by_numeric_induction(&assoc, Some(&gcd_body()), &nats, solver);
+        set_self_facts(prev);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?} {m:?}");
+        let smt = cert.unwrap().smt;
+        assert!(smt.contains("with d = (self"), "the free variable ranges over the gcd terms: {smt}");
+        assert!(smt.contains("the divisibility rung"), "{smt}");
     }
 
     /// pow_mod_naive: \b e m -> case gt(e, 0) of true -> mod(mul(self(b, sub(e, 1), m), mod(b, m)), m) | false -> mod(1, m)

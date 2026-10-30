@@ -1887,6 +1887,11 @@ fn cmd_prove(
             if c.euclid {
                 write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
             }
+            if c.smt.contains(";; the divisibility rung") {
+                write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
+                write_cert(".lemma-div-trans", nl_validator::euclid::DIV_TRANS_SMT)?;
+                write_cert(".lemma-div-antisym", nl_validator::euclid::DIV_ANTISYM_SMT)?;
+            }
             if let Some(steps) = &c.steps {
                 write_cert(".euclid-steps", steps)?;
                 write_cert(".lemma-mod-idem", nl_validator::euclid::IDEM_SMT)?;

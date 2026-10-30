@@ -711,6 +711,26 @@ taken on trust, and the address covers the body and, through its `fn_ref`s, the 
 default, so a test run or a fresh audit never reads yesterday's proofs; the module builder turns it
 on. A contract over a per-process datatype sort is never cached.
 
+**The divisibility rung (2026-10-30, the eleventh follow-up).** `gcd` associativity was "a fact
+no contract states" for ten follow-ups. Measured first: it follows from two facts the contract CAN
+state — `gcd` divides both arguments (certified since the eighth follow-up) and every common
+divisor divides `gcd` (`∀ a b d. d ≥ 1 ∧ d | a ∧ d | b ⇒ d | gcd(a, b)`, authored in the eleventh;
+PROVED by the numeric induction with the Euclidean rung) — through transitivity and antisymmetry
+of divisibility; by hand, z3 closes the certificate with those in 10 ms, stays unknown without
+transitivity, and finds a model without the greatest-divisor law. Two things the engine lacked,
+now built: (1) a self law one of whose variables NO application fixes (`d`) was never instantiated
+— `self_fact_instances` now lets one free Int variable range over the certificate's own
+self-application terms (the gcds the goal mentions: the only candidates such a law needs; at most
+12); (2) the two divisibility lemmas — `y ≠ 0 ∧ z ≠ 0 ∧ x mod y = 0 ∧ y mod z = 0 ⇒ x mod z = 0`
+and `x, y ≥ 1 ∧ x mod y = 0 ∧ y mod x = 0 ⇒ x = y` — discharged once per solver (transitivity in the
+form a solver proves it: with the uniqueness lemma's instance at the composed witness `(x div
+y)·(y div z)`; bare, z3 answers unknown), then stated at the certificate's applications: a divisor
+of an application divides its arguments, two applications dividing each other are equal. Emitted
+only when the self facts include a divisibility law; the lemma certificates ride beside the proof
+(`.lemma-div-trans`, `.lemma-div-antisym`). `binomial`'s symmetry and Pascal remain open: the
+record's multiplicative definition divides (`binomial(n, k−1)·(n−k+1) div k`), and the fact that
+`k` divides that product is a theorem about factorials no contract states — recorded, not reached.
+
 **The stepwise checker (2026-10-18, the ninth follow-up).** The rung after the one-query
 Euclidean rung, in every ladder (`euclid::retry_stepwise`), for a goal whose residues the two
 sides reach only through the certificate's equations — the fast-exponentiation step. Measured

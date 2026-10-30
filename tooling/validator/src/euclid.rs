@@ -86,6 +86,38 @@ pub fn idem_discharged(solver: &str) -> bool {
     ok
 }
 
+/// The DIVISIBILITY RUNG's two lemmas (prove.rs `divisibility_instances`), discharged once per
+/// solver before any instance is used. Transitivity is stated with the uniqueness lemma's
+/// instance at the COMPOSED witness — `x = z·((x div y)·(y div z)) + 0` — which is how a solver
+/// proves it (measured 2026-10-30: bare, z3 answers unknown at 30 s; with the instance, unsat in
+/// milliseconds); antisymmetry on positives z3 proves bare.
+pub const DIV_TRANS_SMT: &str = "(set-logic ALL)\n\
+;; divisibility is transitive: y ≠ 0 ∧ z ≠ 0 ∧ x mod y = 0 ∧ y mod z = 0 ⇒ x mod z = 0\n\
+(declare-const x Int)\n(declare-const y Int)\n(declare-const z Int)\n\
+(assert (not (= y 0)))\n(assert (not (= z 0)))\n(assert (= (mod x y) 0))\n(assert (= (mod y z) 0))\n\
+;; euclid_unique at t = x, m = z, q = (x div y)·(y div z), r = 0\n\
+(assert (=> (and (not (= z 0)) (= x (+ (* (* (div x y) (div y z)) z) 0)) (< 0 (abs z))) (and (= (div x z) (* (div x y) (div y z))) (= (mod x z) 0))))\n\
+(assert (not (= (mod x z) 0)))\n(check-sat)\n";
+
+pub const DIV_ANTISYM_SMT: &str = "(set-logic ALL)\n\
+;; divisibility is antisymmetric on positives: x ≥ 1 ∧ y ≥ 1 ∧ x mod y = 0 ∧ y mod x = 0 ⇒ x = y\n\
+(declare-const x Int)\n(declare-const y Int)\n\
+(assert (>= x 1))\n(assert (>= y 1))\n(assert (= (mod x y) 0))\n(assert (= (mod y x) 0))\n(assert (not (= x y)))\n(check-sat)\n";
+
+/// Has `solver` proved both divisibility lemmas (and the uniqueness lemma transitivity rests on)?
+/// Cached per solver per thread; a solver that cannot makes the rung unavailable, stated.
+pub fn divisibility_discharged(solver: &str) -> bool {
+    let key = format!("div:{solver}");
+    if let Some(v) = DISCHARGED.with(|d| d.borrow().get(&key).copied()) {
+        return v;
+    }
+    let ok = lemma_discharged(solver)
+        && matches!(run_smt_secs(DIV_TRANS_SMT, solver, 5), Ok(SatAnswer::Unsat))
+        && matches!(run_smt_secs(DIV_ANTISYM_SMT, solver, 5), Ok(SatAnswer::Unsat));
+    DISCHARGED.with(|d| d.borrow_mut().insert(key, ok));
+    ok
+}
+
 /// A stepwise proof: the final query (over uninterpreted `mod`/`div`, with the verified instances'
 /// conclusions as facts), the premise queries as one re-checkable script (every `(check-sat)` in
 /// it must answer unsat), and how many premises verified of how many were generated.

@@ -559,13 +559,17 @@ pub fn derive_self_facts(
     // Phase 3 (recursive bodies only — the rung that reads the facts is the induction one).
     let mut proved = plain.clone();
     if shape.is_some() && (!posts.is_empty() || !plain.is_empty()) && crate::prove::references_self(body) {
-        crate::prove::set_self_facts(facts(posts, plain.clone()));
+        crate::prove::set_self_facts(facts(posts.clone(), plain.clone()));
         for law in laws {
             if proved.contains(law) {
                 continue;
             }
             if matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved) {
                 proved.push(law.clone());
+                // A law proved here is a fact for the laws after it (in the record's order): gcd
+                // associativity rests on the greatest-divisor law, which may itself have needed
+                // the posts (2026-10-30, the divisibility rung).
+                crate::prove::set_self_facts(facts(posts.clone(), proved.clone()));
             }
         }
     }
