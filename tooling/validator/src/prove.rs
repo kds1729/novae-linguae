@@ -1938,6 +1938,19 @@ fn prove_property_in_domain_inner(
             }
         }
     }
+    // The GROUND rung (see `ground`): the instances-only certificate with its callee applications
+    // as constants and its tuples reduced, in QF_NIA — where z3's nonlinear engine decides what
+    // the combination solver with uninterpreted symbols did not (the Gaussian tier's Euclidean
+    // property, degree 4: under a second here, undecided in 90 s before). Weaker than the
+    // certificate it rewrites, so its unsat is the certificate's.
+    if last.uses_callees {
+        if let Some(ground) = crate::ground::ackermannize(&last.smt) {
+            if matches!(run_smt_secs(&ground, solver, SOLVER_TIMEOUT_SECS), Ok(SatAnswer::Unsat)) {
+                last.smt = ground;
+                return (ProofOutcome::Proved, Some(last));
+            }
+        }
+    }
     // The Euclidean rung: the same obligation with the residue normal forms of its `mod`/`div`
     // terms stated as instances of the division-uniqueness lemma (see `euclid`).
     if euclid_ladder(&mut last, solver) {

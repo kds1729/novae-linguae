@@ -747,6 +747,23 @@ the 5 s budget's edge). `binomial`'s symmetry and Pascal remain open: the
 record's multiplicative definition divides (`binomial(n, k−1)·(n−k+1) div k`), and the fact that
 `k` divides that product is a theorem about factorials no contract states — recorded, not reached.
 
+**The ground rung (2026-10-30, the Gaussian tier).** A nonlinear obligation that is a theorem of
+plain integer arithmetic once the callees' contract instances are in hand can still be undecided
+with the callees as uninterpreted functions: the Gaussian tier's Euclidean property — the
+remainder of the nearest-integer division has a smaller norm, `N(z − q·w) < N(w)`, degree 4 — is
+unsat in under a second as `QF_NIA` over the instances (the four rounding bounds, the exact
+product posts, the norm's definition) and undecided in 90 s under `(set-logic ALL)` with
+`callee_…` symbols and the tuple datatype, which keep the query in the combination solver whose
+nonlinear reasoning is the weaker one. So the ladder has a ground rung (`ground::ackermannize`)
+after the instances-only retry: `let`s expanded, `define-fun` applications beta-reduced,
+projections of constructors reduced, equalities between tuple terms split into projections, and
+every remaining callee application of Int/Bool sort — and every projection of a tuple-valued
+one — a fresh constant per distinct term, asserts with a quantifier dropped, logic `QF_NIA`.
+This is Ackermann's reduction WITHOUT the congruence constraints, and that is what makes it a
+proof rung: the rewrite is weaker than the certificate (a model of the original evaluates to a
+model of the rewrite), so its unsat is the certificate's unsat, and a sat is reported as nothing.
+Outside Int/Bool/tuples — strings, lists, sums, tuple-valued constants — the rung declines.
+
 **The stepwise checker (2026-10-18, the ninth follow-up).** The rung after the one-query
 Euclidean rung, in every ladder (`euclid::retry_stepwise`), for a goal whose residues the two
 sides reach only through the certificate's equations — the fast-exponentiation step. Measured

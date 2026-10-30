@@ -36,6 +36,7 @@ pub use prove::{
 /// The Euclidean rung: residue normal forms of a certificate's `mod`/`div` terms as instances
 /// of the division-uniqueness lemma (a retry on UNKNOWN in every proof ladder).
 pub mod euclid;
+pub mod ground;
 
 pub mod lemmas;
 pub mod explore;
