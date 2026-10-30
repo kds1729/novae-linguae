@@ -67,7 +67,7 @@
    }
   }
  ],
- "hash": "fn_56f417741bde2dd1e8013f00d9e0d6fcdd2ccb8c7da52f9588378488c594d21e",
+ "hash": "fn_018af03fe8c72d9f0aaefb279be92f77af1191ed5f38d23d0fac25f3de1b8115",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -161,6 +161,130 @@
     ]
    },
    "name": "multiple_of_both"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "lit",
+           "value": 1
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "lit",
+           "value": 1
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        }
+       ],
+       "kind": "app",
+       "op": "or"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "a"
+              },
+              {
+               "kind": "var",
+               "name": "b"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            },
+            {
+             "kind": "var",
+             "name": "a"
+            }
+           ],
+           "kind": "app",
+           "op": "mod"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "a"
+              },
+              {
+               "kind": "var",
+               "name": "b"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "mod"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
+        }
+       ],
+       "kind": "app",
+       "op": "and"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "multiple_of_both_pos"
   },
   {
    "expr": {

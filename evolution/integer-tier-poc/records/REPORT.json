@@ -64,14 +64,17 @@
   },
   "properties_generative": [
    "multiple_of_both: CONSISTENT  |  generative: EXHAUSTIVE (64 cases \u2014 bounded domain, no counterexample)",
+   "multiple_of_both_pos: CONSISTENT  |  generative: EXHAUSTIVE (64 cases \u2014 bounded domain, no counterexample)",
    "commutative: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
    "multiple_of_both: CONSISTENT  |  generative: HELD (191 cases)",
+   "multiple_of_both_pos: CONSISTENT  |  generative: HELD (191 cases)",
    "commutative: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "multiple_of_both: UNKNOWN      solver could not decide",
+   "multiple_of_both_pos: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
    "commutative: PROVED       holds for all inputs (unsat negation)"
   ]
  },
@@ -317,7 +320,7 @@
    "double_exponent: CONSISTENT  |  generative: HELD (71 cases)"
   ],
   "prove": [
-   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 158 of 161 premises verified separately, the final query over uninterpreted mod/div]"
+   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 159 of 161 premises verified separately, the final query over uninterpreted mod/div]"
   ]
  },
  {

@@ -255,7 +255,13 @@ def main():
           FN([NAT, NAT], NAT),
           [{"args": [nlit(4), nlit(6)], "result": nlit(12)}, {"args": [nlit(21), nlit(6)], "result": nlit(42)},
            {"args": [nlit(0), nlit(5)], "result": nlit(0)}, {"args": [nlit(7), nlit(7)], "result": nlit(7)}],
+          # multiple_of_both is unguarded: at a = 0 the law asks `0 mod 0`, which the interpreter
+          # errors on (the generative checker skips it) and the solver leaves unconstrained — so no
+          # rung could ever prove it (an honest model). The guarded twin is the law the Euclidean
+          # rung proves (tenth follow-up): the quotient (a·b) div g decomposed against gcd's
+          # certified divisibility, one instance.
           props=[("multiple_of_both", "forall a b. self(a, b) % a == 0 && self(a, b) % b == 0"),
+                 ("multiple_of_both_pos", "forall a b. a < 1 || b < 1 || self(a, b) % a == 0 && self(a, b) % b == 0"),
                  ("commutative", "forall a b. self(a, b) == self(b, a)")],
           hints=["least_common_multiple"], complexity="O(log n)")
     gauntlet("lcm", prove)

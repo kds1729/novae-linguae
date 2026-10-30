@@ -8,13 +8,14 @@
   function's own facts in its inductions, the witness rung and `case` in predicates
   (`tooling/validator`); the records published to the commons with signed certifications. The 41
   records and their builder live here (`records/`, `build_records.py`) — reproducible with no
-  credential. Final tally (tenth follow-up): 41/41 certify, termination AND complexity SOUND on
+  credential. Final tally (tenth follow-up and its `lcm` addendum): 41/41 certify, termination AND complexity SOUND on
   all 41 (the NTT chain at `O(n log n)`, with no fuel parameter), every declared contract SOUND
   (23 — including the **modular inverse's and the Chinese remainder's `Maybe`-valued contracts**)
-  and 29 of 36 laws proved — `lcm`'s through `gcd`'s certified contract, `ext_gcd`'s Bézout
+  and 30 of 37 laws proved — `lcm`'s commutativity and its (guarded) multiple-of-both through
+  `gcd`'s certified contract, `ext_gcd`'s Bézout
   identity over a tuple result, `gcd` dividing both of its arguments, the modular congruences,
   fast exponentiation agreeing with the naive power (through the doubling law, stepwise), and the
-  inverse and CRT checkers on their callees' domains (from the contracts) — and all 36 held both
+  inverse and CRT checkers on their callees' domains (from the contracts) — and all 37 held both
   over the bounded domain and across magnitudes.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
 - **Dates:** first published 2026-10-17, last updated 2026-10-29
@@ -977,15 +978,49 @@ verification through content addresses, a second time.
   produced it is what makes a `Maybe`-valued function COMPOSABLE by contract — `crt2` is proved
   through `mod_inverse`'s contract, not its definition.
 
+### Addendum (the same evening): `lcm` is a multiple of both of its arguments
+
+| law | before | now |
+|---|---|---|
+| `lcm`'s `a < 1 ∨ b < 1 ∨ (lcm(a, b) mod a = 0 ∧ lcm(a, b) mod b = 0)` (authored: the guarded twin) | — | **PROVED** first-order with the Euclidean rung, through `gcd`'s certified divisibility: the plain instance alone closes it in 4.3 s (10 s under load — at the one-query rung's 5 s budget), with the witness rung's instances beside it in 0.18 s |
+| the unguarded `multiple_of_both` | UNKNOWN | UNKNOWN — as it must be: at `a = 0` the law asks `0 mod 0`, which the interpreter errors on (the generative checker skips the case) and the solver leaves unconstrained; EXHAUSTIVE over the bounded domain and `--wide` as before |
+
+Totals: laws **30 PROVED / 7 UNKNOWN / 0 UNSUPPORTED** (37 laws; was 29 / 7 / 0 of 36); contracts, certifications and
+every other verdict unchanged (the rebuild's log differs from the previous one in the new law's
+three lines only). Builder, all 41 records: 32 min.
+
+**What was missing, measured first.** Nothing the ninth follow-up's note guessed: the law was
+UNPROVABLE as stated, exactly as `gcd`'s divisibility was before its `(0, 0)` guard — the same
+skipped-case gap, found the same way (a solver model with the modulus 0 that the generative
+checker never sees). Guarded, z3 closes the certificate with the rung's ONE plain instance (the
+quotient `(a·b) div g` decomposed against `gcd`'s certified divisibility) in 4.3 s on an idle
+machine and 10 s under this session's load — AT the one-query rung's 5 s budget, so the verdict
+depended on the box (the rebuild's run closed it there, inside the budget); and the stepwise
+final query cannot do it by congruence (the quotient's identity is arithmetic, not a residue). Three small things make it the engine's:
+**the quotient lift** (`euclid::div_lift`): a quotient atom `(div X n)` of another modulus is
+lifted to its quotient polynomial when the hypotheses' rules reduce `X`'s residue part modulo
+`n` to zero — `X = n·Q + 0`, so `(div X n) = Q` by uniqueness; `(a·b) div g` becomes
+`g·(a div g)·(b div g)` by `a mod g = 0` and `b mod g = 0`; **degree-one residue rules**
+(`(mod a g) = 0` as the rule `(mod a g) → 0` — a lead of degree one is admitted only for a
+residue atom, never an application atom to its unfolding); and **the goal's `ite` pushed to its
+branches** in arithmetic position (the inlined body's `case` under the goal's `mod`), as the
+accessor was through a result's `ite`. Then `g·(a div g) → a` (the divisibility read the other
+way, `a = g·(a div g)`, chosen first because its right-hand side mentions the chain's modulus)
+makes the term a multiple of `a`, and the chain's residue part is empty. Two witness instances
+per conjunct (and the two residues' decompositions modulo `g`); the one-query retry with them
+closes in 0.18 s, measured three times against the plain instance's 4.3 s — the rung takes the
+law from the budget's edge to well inside it. One cost worth knowing: of the 79 s `prove` spends
+on this one law, its own ladder is 15 s (the quantified and the point-of-use certificates, 5 s
+each, then the instances); the other 64 s re-derive `gcd`'s contract at the point of use — its
+four laws re-proved, the UNKNOWN associativity through its whole ladder — once per caller.
+
 ### Still open
 
 - **`prime_agree`**: documented negative (a theorem of number theory, not a consequence of the
   definitions); no rung reaches it and none should claim to.
-- **The unguarded `inverse_holds` / `crt_holds` laws over ALL ints** (negative moduli): true, by
-  the generative checker, but outside the callees' certified domains (`m > 1`); a contract on a
-  wider precondition would carry them.
-- **`lcm` multiple-of-both**: the quotient's residue modulo `a` needs `(div a g)·g` recombined into
-  `a − (mod a g)` against the other modulus, and `mod` pushed through the inlined body's `ite`.
+- **The unguarded `inverse_holds` / `crt_holds` / `multiple_of_both` laws over ALL ints**: true
+  by the generative checker where defined, but outside the callees' certified domains or at an
+  erroring case (`0 mod 0`); a contract on a wider precondition, or a guard, is the honest form.
 - `gcd` associativity, `binomial` symmetry and Pascal: facts no contract states.
 - The generative checker's report of skipped (erroring) cases.
 
