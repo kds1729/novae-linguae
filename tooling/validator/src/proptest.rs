@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// What kind of value to sample for a quantified variable, inferred from its usage.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum GenKind {
+pub enum GenKind {
     Int,
     /// A non-negative int: the kind of a variable fed to a `nat`-typed parameter of `self`. The
     /// signature's `nat` is a TYPE, not a refinement — a law over `gcd : nat nat -> nat` ranges over
@@ -34,6 +34,54 @@ enum GenKind {
     Bool,
     List(Box<GenKind>),
     Str,
+}
+
+thread_local! {
+    /// The function under test's DECLARED parameter kinds, by position — what a law variable
+    /// that reaches the function only as its argument ranges over. Without it such a variable
+    /// defaulted to Int: `pad_to`'s `length_is_n` (`forall xs n. n < 0 || length(self(xs, n)) ==
+    /// n`) fed an int for `xs` in 72 of its 81 bounded cases, every one skipped on "expected a
+    /// list", and read EXHAUSTIVE (9 cases) for eight rounds — the skipped-case report's first
+    /// production finding (2026-10-30). Set per record by the property checker from the
+    /// signature (`self_param_kinds_of_type`); `nat` positions keep working through
+    /// `self_nat_positions` for callers that pass only those.
+    static SELF_PARAM_KINDS: std::cell::RefCell<BTreeMap<usize, GenKind>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// Install the function under test's declared parameter kinds (see `SELF_PARAM_KINDS`),
+/// returning the previous map so a caller can restore it.
+pub fn set_self_param_kinds(kinds: BTreeMap<usize, GenKind>) -> BTreeMap<usize, GenKind> {
+    SELF_PARAM_KINDS.with(|c| std::mem::replace(&mut *c.borrow_mut(), kinds))
+}
+
+/// The generator kind of a declared type, when it has one: `int`, `nat`, `bool`, `string`, and
+/// `List <elem>` (a canonical `ref` to a builtin reads as the builtin). Tuples, sums, functions
+/// and `Json` have none — a variable of such a type stays undecidable here, as before.
+pub fn gen_kind_of_type(ty: &J) -> Option<GenKind> {
+    match crate::builtin_type_name(ty) {
+        Some("int") => return Some(GenKind::Int),
+        Some("nat") => return Some(GenKind::Nat),
+        Some("bool") => return Some(GenKind::Bool),
+        Some("string") => return Some(GenKind::Str),
+        _ => {}
+    }
+    if ty.get("kind").and_then(|k| k.as_str()) == Some("apply")
+        && ty.get("ctor").and_then(crate::builtin_type_name) == Some("List")
+    {
+        let elem = ty.get("args").and_then(|a| a.as_array()).and_then(|a| a.first()).and_then(gen_kind_of_type).unwrap_or(GenKind::Int);
+        return Some(GenKind::List(Box::new(elem)));
+    }
+    None
+}
+
+/// The declared parameter kinds of a function TYPE (a `forall` is looked through), by position.
+pub fn self_param_kinds_of_type(ty: &J) -> BTreeMap<usize, GenKind> {
+    let fn_ty = if ty.get("kind").and_then(|k| k.as_str()) == Some("forall") { ty.get("body") } else { Some(ty) };
+    fn_ty
+        .and_then(|t| t.get("params"))
+        .and_then(|p| p.as_array())
+        .map(|ps| ps.iter().enumerate().filter_map(|(i, p)| gen_kind_of_type(p).map(|k| (i, k))).collect())
+        .unwrap_or_default()
 }
 
 /// The outcome of a generative check of one property.
@@ -188,8 +236,14 @@ fn collect(
             };
             for (i, a) in args.iter().enumerate() {
                 if let Some(name) = as_qvar(a, vars) {
-                    if self_arg_position(i).is_some_and(|p| self_nat_positions.contains(&p)) {
-                        set_kind(kinds, name, GenKind::Nat);
+                    if let Some(p) = self_arg_position(i) {
+                        // The declared parameter kind when the checker was told it (a list, a
+                        // string, a nat…); else the nat positions alone, as before.
+                        match SELF_PARAM_KINDS.with(|m| m.borrow().get(&p).cloned()) {
+                            Some(k) => set_kind(kinds, name, k),
+                            None if self_nat_positions.contains(&p) => set_kind(kinds, name, GenKind::Nat),
+                            None => {}
+                        }
                     }
                     match (op, i) {
                         // Higher-order function positions ⇒ ungeneratable function variable.
@@ -519,6 +573,43 @@ mod tests {
     use super::*;
     use crate::interp::self_fn_from_body;
     use serde_json::json;
+
+    /// A law variable that reaches the function ONLY as its argument ranges over the DECLARED
+    /// parameter type once the checker is told it: `\xs n -> add(length(xs), n)` under
+    /// `forall xs n. eq(self(xs, n), self(xs, n))` — with no kinds installed `xs` is an int and
+    /// every case errors ("expected a list"); with `List int, nat` installed every case decides.
+    #[test]
+    fn a_self_argument_ranges_over_the_declared_parameter_type() {
+        let body = json!({ "kind": "lambda", "params": [{ "name": "xs" }, { "name": "n" }],
+            "body": { "kind": "app", "fn": { "kind": "var", "name": "add" }, "args": [
+                { "kind": "app", "fn": { "kind": "var", "name": "length" }, "args": [{ "kind": "var", "name": "xs" }] },
+                { "kind": "var", "name": "n" } ] } });
+        let self_fn = self_fn_from_body(&body);
+        let call = json!({ "kind": "app", "op": "self", "args": [{ "kind": "var", "name": "xs" }, { "kind": "var", "name": "n" }] });
+        let law = json!({ "kind": "forall", "vars": ["xs", "n"], "body": { "kind": "app", "op": "eq", "args": [call, call] } });
+        let nats: BTreeSet<usize> = [1].into();
+        let prev = set_self_param_kinds(BTreeMap::new());
+        let bare = generative_check(&law, &self_fn, &nats, 200, 1);
+        assert!(matches!(bare, GenOutcome::Ungeneratable(_)), "an int for xs errors every case: {bare:?}");
+        let ty = json!({ "kind": "fn", "params": [
+            { "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [{ "kind": "builtin", "name": "int" }] },
+            { "kind": "builtin", "name": "nat" } ], "result": { "kind": "builtin", "name": "int" } });
+        let kinds = self_param_kinds_of_type(&ty);
+        assert_eq!(kinds.get(&0), Some(&GenKind::List(Box::new(GenKind::Int))));
+        assert_eq!(kinds.get(&1), Some(&GenKind::Nat));
+        set_self_param_kinds(kinds);
+        let typed = generative_check(&law, &self_fn, &nats, 200, 1);
+        set_self_param_kinds(prev);
+        // Lists × nats outgrow the exhaustive budget, so this SAMPLES — what matters is that
+        // every case decides (no "expected a list") where before none did.
+        match typed {
+            GenOutcome::Exhaustive(n, skips) | GenOutcome::Held(n, skips) => {
+                assert!(n > 0);
+                assert_eq!(skips, Skips::default(), "{skips:?}");
+            }
+            other => panic!("expected every case to decide over lists, got {other:?}"),
+        }
+    }
 
     /// The same law behind its guard, `forall a b. or(eq(b, 0), eq(mod(a, b), mod(a, b)))`: the
     /// guard decides the `b = 0` cases, so NOTHING is skipped — a guarded law reads as the clean

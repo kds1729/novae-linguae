@@ -309,8 +309,13 @@ pub fn check_properties(record: &Value, body: Option<&Value>, generate: Option<u
         return Ok(());
     }
     let self_fn = body.and_then(crate::interp::self_fn_from_body);
-    // The signature's `nat` parameters bound the generator's domain for the variables fed to them.
+    // The signature's `nat` parameters bound the generator's domain for the variables fed to them,
+    // and every declared parameter kind (a list, a string, …) is what a variable reaching the
+    // function only as its argument ranges over (`proptest::SELF_PARAM_KINDS`).
     let nat_positions = crate::terminate::nat_param_positions(record);
+    let prev_kinds = crate::proptest::set_self_param_kinds(
+        record.pointer("/signature/type").map(crate::proptest::self_param_kinds_of_type).unwrap_or_default(),
+    );
     let mut contradicted = Vec::new();
     let mut refuted = Vec::new();
     for (i, prop) in props.iter().enumerate() {
@@ -351,6 +356,7 @@ pub fn check_properties(record: &Value, body: Option<&Value>, generate: Option<u
             contradicted.push(name.to_string());
         }
     }
+    crate::proptest::set_self_param_kinds(prev_kinds);
     if contradicted.is_empty() && refuted.is_empty() {
         Ok(())
     } else {

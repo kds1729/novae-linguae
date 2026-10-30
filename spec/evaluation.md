@@ -350,7 +350,12 @@ thing: the GUARDED twin (`a < 1 ∨ b < 1 ∨ …`) skipped the same 17 cases, b
 evaluated `or` strictly — so the connectives `or`/`and`/`implies` now decide from one decided
 side (the second side is evaluated only when the first leaves it open; an erroring side beside a
 deciding one never undecides the whole), the reading a guard asks for and the one the prover
-already had. **`--wide`** replaces the small
+already had. The report's first production run found a third: a law variable that reaches the
+function ONLY as its argument had no kind evidence and defaulted to Int — `pad_to`'s `forall xs
+n. n < 0 || length(self(xs, n)) == n` fed an int for `xs` in 72 of its 81 bounded cases, each
+skipped on "expected a list", and read EXHAUSTIVE (9 cases) for eight rounds. Such a variable
+now ranges over the function's DECLARED parameter type (`int`/`nat`/`bool`/`string`/`List …`,
+read from the signature; a tuple, sum, function or `Json` parameter still has no generator). **`--wide`** replaces the small
 bounded domain with sampling ACROSS MAGNITUDES (log-uniform to 2^60, nats non-negative): number
 theory's cases live far above −4..4, and a law that HELD over 200 wide samples is evidence the small
 domain cannot give — still sampling, never a proof. A CONSISTENT/UNVERIFIABLE law
