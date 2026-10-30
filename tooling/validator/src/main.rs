@@ -474,7 +474,9 @@ enum Commands {
         #[arg(long = "smt-out")]
         smt_out: Option<PathBuf>,
         /// Directory of records/bodies: a `fn_ref` callee the body applies becomes an uninterpreted
-        /// function under its CERTIFIED contract (its proved postconditions, re-derived here) — modular
+        /// function under its CERTIFIED contract (its proved postconditions, re-derived here;
+        /// `NL_DERIVED_CACHE=1` keeps each derivation on disk between runs, keyed by content address +
+        /// validator version — spec/evaluation.md) — modular
         /// verification through content addresses.
         #[arg(long)]
         records: Option<PathBuf>,

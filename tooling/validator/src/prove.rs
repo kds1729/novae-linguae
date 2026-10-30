@@ -28,7 +28,7 @@ use anyhow::{anyhow, bail, Result};
 use serde_json::Value as J;
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Sort {
     Int,
     Bool,
@@ -537,7 +537,7 @@ fn head_op(node: &J) -> Option<String> {
 // (`set_callee_contracts`), thread-locally, and the certificate records which were used.
 
 /// A linked callee's certified contract, as the prover uses it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CalleeContract {
     /// The SMT symbol standing for the callee (`callee_<address prefix>`).
     pub symbol: String,

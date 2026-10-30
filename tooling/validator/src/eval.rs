@@ -332,8 +332,8 @@ pub fn check_properties(record: &Value, body: Option<&Value>, generate: Option<u
             // Deterministic, per-property seed (principle 5): same record → same verdict.
             let outcome = generative_check_mode(expr, &self_fn, &nat_positions, cases, 0x5eed_0000 + i as u64, wide);
             let gen_label = match &outcome {
-                GenOutcome::Exhaustive(n) => format!("EXHAUSTIVE ({n} cases — bounded domain, no counterexample)"),
-                GenOutcome::Held(n) => format!("HELD ({n} cases)"),
+                GenOutcome::Exhaustive(n, skips) => format!("EXHAUSTIVE ({n} cases — bounded domain, no counterexample{})", skips.suffix()),
+                GenOutcome::Held(n, skips) => format!("HELD ({n} cases{})", skips.suffix()),
                 GenOutcome::Refuted(binding) => {
                     let cx = binding.iter().map(|(k, v)| format!("{k} = {v}")).collect::<Vec<_>>().join(", ");
                     format!("REFUTED  counterexample: {cx}")

@@ -41,11 +41,12 @@ enum GenKind {
 pub enum GenOutcome {
     /// Every case in the (finite, bounded) domain was checked — a proof over that domain. Stronger
     /// than `Held`: for an all-boolean property it is total; for bounded int/list domains it is
-    /// exhaustive over the enumerated range.
-    Exhaustive(usize),
+    /// exhaustive over the enumerated range. The count is of DECIDED cases; the skipped ones
+    /// (the body errored, or the predicate did not evaluate to a bool) ride beside it.
+    Exhaustive(usize, Skips),
     /// No counterexample found in this many *sampled* decidable cases (the domain was too large to
-    /// enumerate exhaustively).
-    Held(usize),
+    /// enumerate exhaustively), with the skipped cases beside it.
+    Held(usize, Skips),
     /// A counterexample: the variable bindings (as value-expression ASTs) that falsify the property.
     Refuted(Vec<(String, J)>),
     /// Couldn't generate (quantifies over a function, no `forall`, or never decided a case).
@@ -377,6 +378,54 @@ fn report_binding(names: &[String], binding: &BTreeMap<String, Val>) -> Vec<(Str
     names.iter().map(|n| (n.clone(), encode_value(&binding[n]))).collect()
 }
 
+/// The cases a generative run could not decide: how many, and the first one's reason with its
+/// binding — reported with the verdict, because a skipped case is where an unguarded law hides
+/// (2026-10-30: `gcd`'s divisibility and `lcm`'s multiple-of-both both read EXHAUSTIVE while
+/// their `0 mod 0` case was being skipped; the solver's model found it later each time).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Skips {
+    pub count: usize,
+    /// `"<runtime error> at a = 0, b = 0"` for the first skipped case; `None` when nothing was skipped.
+    pub first: Option<String>,
+}
+
+impl Skips {
+    fn note(&mut self, names: &[String], binding: &BTreeMap<String, Val>) {
+        self.count += 1;
+        if self.first.is_none() {
+            let why = crate::interp::take_predicate_skip_reason()
+                .unwrap_or_else(|| "undecided (the predicate did not evaluate to a bool)".to_string());
+            let at = names
+                .iter()
+                .map(|n| format!("{n} = {}", short_value(&encode_value(&binding[n]))))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut text = format!("{why} at {at}");
+            if text.chars().count() > 160 {
+                text = text.chars().take(157).collect::<String>() + "…";
+            }
+            self.first = Some(text);
+        }
+    }
+
+    /// The report suffix: empty when nothing was skipped, else `; N skipped: <first reason>`.
+    pub fn suffix(&self) -> String {
+        match &self.first {
+            None => String::new(),
+            Some(first) => format!("; {} skipped: {first}", self.count),
+        }
+    }
+}
+
+/// A value-expression AST as a short token for a report: a scalar's `value`, else its JSON.
+fn short_value(v: &J) -> String {
+    match v.get("value") {
+        Some(J::String(s)) => format!("{s:?}"),
+        Some(x) if !x.is_object() && !x.is_array() => x.to_string(),
+        _ => v.to_string(),
+    }
+}
+
 /// Generatively check one property's predicate. `expr` is the property AST; `self_fn` is the
 /// executable function-under-test (bound to `self`); `cases` is how many inputs to sample when the
 /// domain is too large to enumerate; `seed` makes a sampled run deterministic.
@@ -422,42 +471,46 @@ pub fn generative_check_mode(
     // Prefer EXHAUSTIVE checking when the bounded domain fits the budget — a proof over that domain.
     if let Some(domain) = (!wide).then(|| enumerate_domain(&names, &kinds, EXHAUSTIVE_BUDGET)).flatten() {
         let mut decided = 0usize;
+        let mut skips = Skips::default();
         for binding in domain {
+            crate::interp::clear_predicate_skip_reason();
             match eval_predicate_env(body, &binding, self_fn) {
                 Some(Val::Bool(true)) => decided += 1,
                 Some(Val::Bool(false)) => {
                     let minimal = shrink(body, self_fn, &names, binding);
                     return GenOutcome::Refuted(report_binding(&names, &minimal));
                 }
-                _ => {}
+                _ => skips.note(&names, &binding),
             }
         }
         return if decided == 0 {
             GenOutcome::Ungeneratable("no case was decidable (predicate never evaluated to a bool)")
         } else {
-            GenOutcome::Exhaustive(decided)
+            GenOutcome::Exhaustive(decided, skips)
         };
     }
 
     // Otherwise SAMPLE the (too-large) domain.
     let mut rng = Rng::new(seed);
     let mut decided = 0usize;
+    let mut skips = Skips::default();
     for _ in 0..cases {
         let binding: BTreeMap<String, Val> =
             names.iter().map(|n| (n.clone(), gen_value(&kinds[n], &mut rng, wide))).collect();
+        crate::interp::clear_predicate_skip_reason();
         match eval_predicate_env(body, &binding, self_fn) {
             Some(Val::Bool(true)) => decided += 1,
             Some(Val::Bool(false)) => {
                 let minimal = shrink(body, self_fn, &names, binding);
                 return GenOutcome::Refuted(report_binding(&names, &minimal));
             }
-            _ => {} // undecidable on this input (out of domain / unresolved) — skip
+            _ => skips.note(&names, &binding), // undecidable on this input (out of domain / errored)
         }
     }
     if decided == 0 {
         GenOutcome::Ungeneratable("no case was decidable (predicate never evaluated to a bool)")
     } else {
-        GenOutcome::Held(decided)
+        GenOutcome::Held(decided, skips)
     }
 }
 
@@ -466,6 +519,51 @@ mod tests {
     use super::*;
     use crate::interp::self_fn_from_body;
     use serde_json::json;
+
+    /// The same law behind its guard, `forall a b. or(eq(b, 0), eq(mod(a, b), mod(a, b)))`: the
+    /// guard decides the `b = 0` cases, so NOTHING is skipped — a guarded law reads as the clean
+    /// EXHAUSTIVE it is, which strict evaluation of `or` denied it.
+    #[test]
+    fn a_true_guard_decides_the_case_instead_of_skipping_it() {
+        let m = json!({ "kind": "app", "op": "mod", "args": [ { "kind": "var", "name": "a" }, { "kind": "var", "name": "b" } ] });
+        let guard = json!({ "kind": "app", "op": "eq", "args": [ { "kind": "var", "name": "b" }, { "kind": "lit", "value": 0 } ] });
+        let law = json!({ "kind": "forall", "vars": ["a", "b"], "body": { "kind": "app", "op": "or", "args": [
+            guard, { "kind": "app", "op": "eq", "args": [m, m] } ] } });
+        match generative_check(&law, &None, &Default::default(), 200, 1) {
+            GenOutcome::Exhaustive(n, skips) => {
+                assert!(n > 0);
+                assert_eq!(skips, Skips::default(), "a true guard must decide the case: {skips:?}");
+            }
+            other => panic!("expected a clean EXHAUSTIVE, got {other:?}"),
+        }
+        // And the guard on the RIGHT decides too (an erroring side beside a deciding one).
+        let m2 = json!({ "kind": "app", "op": "mod", "args": [ { "kind": "var", "name": "a" }, { "kind": "var", "name": "b" } ] });
+        let guard2 = json!({ "kind": "app", "op": "eq", "args": [ { "kind": "var", "name": "b" }, { "kind": "lit", "value": 0 } ] });
+        let law2 = json!({ "kind": "forall", "vars": ["a", "b"], "body": { "kind": "app", "op": "or", "args": [
+            { "kind": "app", "op": "eq", "args": [m2.clone(), m2] }, guard2 ] } });
+        assert!(matches!(generative_check(&law2, &None, &Default::default(), 200, 1), GenOutcome::Exhaustive(_, Skips { count: 0, .. })));
+    }
+
+    /// `forall a b. eq(mod(a, b), mod(a, b))` over the bounded int domain: true wherever it is
+    /// defined, and every case with `b = 0` errors in the interpreter and is SKIPPED — the verdict
+    /// must say so, with the first reason and binding, instead of reading as a clean EXHAUSTIVE.
+    #[test]
+    fn skipped_cases_are_counted_and_the_first_reason_is_reported() {
+        let m = json!({ "kind": "app", "op": "mod", "args": [ { "kind": "var", "name": "a" }, { "kind": "var", "name": "b" } ] });
+        let law = json!({ "kind": "forall", "vars": ["a", "b"], "body": { "kind": "app", "op": "eq", "args": [m, m] } });
+        match generative_check(&law, &None, &Default::default(), 200, 1) {
+            GenOutcome::Exhaustive(n, skips) => {
+                assert!(n > 0);
+                assert!(skips.count > 0, "the b = 0 cases must be skipped, not decided");
+                let first = skips.first.clone().expect("a reason for the first skipped case");
+                assert!(first.contains("b = 0"), "{first}");
+                assert!(first.contains(" at "), "{first}");
+                let text = skips.suffix();
+                assert!(text.starts_with(&format!("; {} skipped: ", skips.count)), "{text}");
+            }
+            other => panic!("expected EXHAUSTIVE with skips, got {other:?}"),
+        }
+    }
 
     // \n -> add(n, n)
     fn double_body() -> J {
@@ -497,7 +595,7 @@ mod tests {
                 { "kind": "app", "op": "self", "args": [{ "kind": "var", "name": "a" }, { "kind": "var", "name": "b" }] },
                 { "kind": "app", "op": "self", "args": [{ "kind": "var", "name": "b" }, { "kind": "var", "name": "a" }] }] } });
         let nats: BTreeSet<usize> = [0, 1].into();
-        assert!(matches!(generative_check(&law, &self_fn, &nats, 200, 1), GenOutcome::Exhaustive(_)),
+        assert!(matches!(generative_check(&law, &self_fn, &nats, 200, 1), GenOutcome::Exhaustive(..)),
                 "over nats the law holds exhaustively");
         assert!(matches!(generative_check(&law, &self_fn, &Default::default(), 200, 1), GenOutcome::Refuted(_)),
                 "over ints the generator finds the negative counterexample");
@@ -513,7 +611,7 @@ mod tests {
         let self_fn = self_fn_from_body(&double_body());
         // `n` is an int → the bounded domain is small, so this is checked EXHAUSTIVELY.
         match generative_check(&expr, &self_fn, &Default::default(), 200, 1) {
-            GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
+            GenOutcome::Exhaustive(n, _) | GenOutcome::Held(n, _) => assert!(n > 0),
             _ => panic!("double's doubling law should hold"),
         }
     }
@@ -546,7 +644,7 @@ mod tests {
                     { "kind": "app", "op": "reverse", "args": [{ "kind": "var", "name": "xs" }] }] },
                 { "kind": "var", "name": "xs" }] } });
         match generative_check(&expr, &None, &Default::default(), 200, 7) {
-            GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
+            GenOutcome::Exhaustive(n, _) | GenOutcome::Held(n, _) => assert!(n > 0),
             _ => panic!("reverse∘reverse = id should hold"),
         }
     }
@@ -563,7 +661,7 @@ mod tests {
                     { "kind": "app", "op": "str_split", "args": [comma, { "kind": "var", "name": "s" }] }] },
                 { "kind": "var", "name": "s" }] } });
         match generative_check(&expr, &None, &Default::default(), 200, 7) {
-            GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
+            GenOutcome::Exhaustive(n, _) | GenOutcome::Held(n, _) => assert!(n > 0),
             other => panic!("join . split should hold, got {other:?}"),
         }
     }
@@ -594,7 +692,7 @@ mod tests {
         let expr = json!({ "kind": "forall", "vars": ["xs"], "body": {
             "kind": "app", "op": "eq", "args": [join.clone(), join] } });
         match generative_check(&expr, &None, &Default::default(), 100, 3) {
-            GenOutcome::Exhaustive(n) | GenOutcome::Held(n) => assert!(n > 0),
+            GenOutcome::Exhaustive(n, _) | GenOutcome::Held(n, _) => assert!(n > 0),
             other => panic!("str_join over generated List(Str) should hold, got {other:?}"),
         }
     }
@@ -619,7 +717,7 @@ mod tests {
                     { "kind": "app", "op": "not", "args": [{ "kind": "var", "name": "b" }] }] },
                 { "kind": "var", "name": "b" }] } });
         match generative_check(&expr, &None, &Default::default(), 200, 1) {
-            GenOutcome::Exhaustive(n) => assert_eq!(n, 2),
+            GenOutcome::Exhaustive(n, _) => assert_eq!(n, 2),
             _ => panic!("a boolean law should be checked exhaustively over both cases"),
         }
     }
@@ -637,6 +735,6 @@ mod tests {
         };
         let expr = json!({ "kind": "forall", "vars": ["a", "b", "c", "d"],
             "body": { "kind": "app", "op": "eq", "args": [sum(["a", "b", "c", "d"]), sum(["d", "c", "b", "a"])] } });
-        assert!(matches!(generative_check(&expr, &None, &Default::default(), 200, 1), GenOutcome::Held(_)));
+        assert!(matches!(generative_check(&expr, &None, &Default::default(), 200, 1), GenOutcome::Held(..)));
     }
 }

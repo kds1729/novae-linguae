@@ -341,7 +341,16 @@ a variable fed to a `nat`-typed parameter of `self` ranges over nats (exhaustive
 because sampling negatives into a nat parameter manufactures counterexamples outside the function's
 domain (measured 2026-10-17: Euclid is not symmetric on negative ints) — ignoring refinements and
 preconditions; an input the body rejects at runtime is a **skipped** case, never a counterexample, so
-a partial function's domain gaps don't manufacture false refutations. **`--wide`** replaces the small
+a partial function's domain gaps don't manufacture false refutations — and the verdict SAYS how many
+were skipped and why (`EXHAUSTIVE (64 cases — …; 17 skipped: mod by zero at a = 0, b = 0)`,
+2026-10-30), because a skipped case is exactly where an unguarded law hides: `gcd`'s divisibility
+and `lcm`'s multiple-of-both both read as a clean EXHAUSTIVE while their `0 mod 0` case was being
+skipped, and the solver's model found it later each time. The report's first use found the next
+thing: the GUARDED twin (`a < 1 ∨ b < 1 ∨ …`) skipped the same 17 cases, because the checker
+evaluated `or` strictly — so the connectives `or`/`and`/`implies` now decide from one decided
+side (the second side is evaluated only when the first leaves it open; an erroring side beside a
+deciding one never undecides the whole), the reading a guard asks for and the one the prover
+already had. **`--wide`** replaces the small
 bounded domain with sampling ACROSS MAGNITUDES (log-uniform to 2^60, nats non-negative): number
 theory's cases live far above −4..4, and a law that HELD over 200 wide samples is evidence the small
 domain cannot give — still sampling, never a proof. A CONSISTENT/UNVERIFIABLE law
@@ -684,6 +693,18 @@ one instance z3 closes the modular-inverse law instantly). Also found: the gener
 SKIPS a case where the law's evaluation errors (`gcd(0, 0) = 0`, then `0 mod 0`), so the unguarded
 divisibility law read EXHAUSTIVE while the prover's model with the modulus 0 was honest; the law
 is now guarded at `(0, 0)`.
+
+**The derived-contract cache (2026-10-30).** A callee's contract is re-derived from its own body
+on the linked view, never read from its declaration — and, measured on the integer tier, that
+re-derivation was 64 of the 79 s `prove` spent on `lcm`'s one law (`gcd`'s four laws, associativity's
+whole failing ladder included), paid again by every record that applies `gcd`, each in its own
+process. With `NL_DERIVED_CACHE` set (`1` = `$XDG_CACHE_HOME`/`~/.cache/nl-validator/derived`, or a
+directory) the validator keeps each derived contract on disk, keyed by the callee's content address
+and the validator version, and the next process reads it instead of re-proving: the same facts —
+every post and law in it was proved here, from that record, by this validator — not a declaration
+taken on trust, and the address covers the body and, through its `fn_ref`s, the callees. Off by
+default, so a test run or a fresh audit never reads yesterday's proofs; the module builder turns it
+on. A contract over a per-process datatype sort is never cached.
 
 **The stepwise checker (2026-10-18, the ninth follow-up).** The rung after the one-query
 Euclidean rung, in every ladder (`euclid::retry_stepwise`), for a goal whose residues the two

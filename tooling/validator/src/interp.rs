@@ -1758,6 +1758,37 @@ fn decode_pred_lit(v: &J) -> Option<Val> {
     }
 }
 
+thread_local! {
+    /// The last runtime error that made a predicate case UNDECIDED (`eval_predicate` answers
+    /// `None` for it): the generative checker reads it to report a skipped case's reason — a
+    /// skipped case is exactly where an unguarded law hides (`0 mod 0`, found twice by the solver
+    /// before the checker said so).
+    static PRED_SKIP_REASON: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// An application's result as a predicate value: `None` on a runtime error, with the error kept
+/// for [`take_predicate_skip_reason`].
+fn noted(r: Result<Val>) -> Option<Val> {
+    match r {
+        Ok(v) => Some(v),
+        Err(e) => {
+            PRED_SKIP_REASON.with(|c| *c.borrow_mut() = Some(format!("{e:#}")));
+            None
+        }
+    }
+}
+
+/// Forget the last recorded reason (called before each generated case).
+pub fn clear_predicate_skip_reason() {
+    PRED_SKIP_REASON.with(|c| *c.borrow_mut() = None);
+}
+
+/// The runtime error behind the last undecided predicate case, if one was recorded since the
+/// last clear.
+pub fn take_predicate_skip_reason() -> Option<String> {
+    PRED_SKIP_REASON.with(|c| c.borrow_mut().take())
+}
+
 /// Evaluate a predicate-expression node. `None` == undecidable (unbound var, unknown op, or an
 /// application that errors). `self_fn` is the executable function-under-test, bound to `self`.
 fn eval_predicate(node: &J, env: &Env, self_fn: &Option<Val>) -> Option<Val> {
@@ -1816,6 +1847,39 @@ fn eval_predicate(node: &J, env: &Env, self_fn: &Option<Val>) -> Option<Val> {
         "app" => {
             let op = node.get("op")?.as_str()?;
             let arg_nodes = node.get("args")?.as_array()?;
+            // The connectives are GUARDS: `or`/`and`/`implies` decide from ONE decided side, so a
+            // guarded law (`a < 1 ∨ lcm(a, b) mod a = 0`) never SKIPS the case its guard exists
+            // for — strict evaluation did (2026-10-30: 17 of lcm's 64 bounded cases skipped on
+            // `0 mod 0` behind a true guard; the skipped-case report found it). The second side
+            // is evaluated only when the first leaves it open, and a side that errors beside a
+            // deciding one never undecides the whole. Same truth table as the builtins.
+            if matches!(op, "or" | "and" | "implies") && arg_nodes.len() == 2 {
+                let decides = |side: usize, v: &Option<Val>| -> Option<bool> {
+                    match (op, side, v) {
+                        ("or", _, Some(Val::Bool(true))) => Some(true),
+                        ("and", _, Some(Val::Bool(false))) => Some(false),
+                        ("implies", 0, Some(Val::Bool(false))) => Some(true),
+                        ("implies", 1, Some(Val::Bool(true))) => Some(true),
+                        _ => None,
+                    }
+                };
+                let l = eval_predicate(&arg_nodes[0], env, self_fn);
+                if let Some(b) = decides(0, &l) {
+                    return Some(Val::Bool(b));
+                }
+                let r = eval_predicate(&arg_nodes[1], env, self_fn);
+                if let Some(b) = decides(1, &r) {
+                    return Some(Val::Bool(b));
+                }
+                return match (l, r) {
+                    (Some(Val::Bool(a)), Some(Val::Bool(b))) => Some(Val::Bool(match op {
+                        "or" => a || b,
+                        "and" => a && b,
+                        _ => !a || b,
+                    })),
+                    _ => None,
+                };
+            }
             let args: Option<Vec<Val>> = arg_nodes.iter().map(|a| eval_predicate(a, env, self_fn)).collect();
             let args = args?;
             match op {
@@ -1831,19 +1895,19 @@ fn eval_predicate(node: &J, env: &Env, self_fn: &Option<Val>) -> Option<Val> {
                 // `self(args…)` — the surface form `parse-predicate` emits for a law about the
                 // function under test (the older `apply(self, …)` spelling reaches the builtin
                 // arm below and binds `self` as a var). Without a body there is no `self`: None.
-                "self" => apply(self_fn.clone()?, args).ok(),
+                "self" => noted(apply(self_fn.clone()?, args)),
                 // A content-address op (`fn_…`/`expr_…`) is a commons function referenced by hash —
                 // apply it as a `fn_ref` so the thread-local resolver links it (set during claim
                 // verification, see `eval_claim`). If no resolver is installed the apply errors →
                 // None → undecidable, so this never silently passes.
                 _ if op.starts_with("fn_") || op.starts_with("expr_") => {
-                    apply(Val::FnRef(op.to_string()), args).ok()
+                    noted(apply(Val::FnRef(op.to_string()), args))
                 }
                 // Everything else — eq/neq/and/or/not, arithmetic, comparisons, list ops, and the
                 // higher-order map/filter/fold/compose/apply — IS a builtin. Run it.
                 _ => {
                     let f = resolve_var(op, &Env::new()).ok()?;
-                    apply(f, args).ok()
+                    noted(apply(f, args))
                 }
             }
         }

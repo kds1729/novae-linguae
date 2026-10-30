@@ -101,6 +101,59 @@ pub fn certify_record(record: &J, body: &J, records: &HashMap<String, J>, solver
 /// (what [`crate::build_link_map`] builds). A callee's verdict is RE-DERIVED from its own body (its
 /// declaration is never read as a fact), transitively, memoized, with a cycle guard (a cycle is
 /// unresolvable — mutual recursion through addresses has no single measure here).
+/// The DERIVED-CONTRACT CACHE: where a callee's re-derived contract is kept between validator
+/// processes, when the operator opts in with `NL_DERIVED_CACHE` (`1` = the default directory,
+/// `$XDG_CACHE_HOME/nl-validator/derived` or `~/.cache/nl-validator/derived`; a path = that
+/// directory; unset, `0` or `off` = no cache). What it holds is THIS machine's own earlier
+/// derivation — every post and law in it was PROVED here, by this validator version, from the
+/// record at that content address (the key: `<fn_…>.v<version>.json`; the address covers the body
+/// and, through its `fn_ref`s, the callees' records) — so a hit is the same facts, not a declaration
+/// read as one. Measured need (2026-10-30, the integer tier): of the 79 s `prove` spent on `lcm`'s
+/// one law, 64 s re-derived `gcd`'s four laws — associativity's whole failing ladder included —
+/// and every record that applies `gcd` paid it again in its own process. Off by default so a test
+/// run or a fresh audit never reads yesterday's proofs; the module builder turns it on. A contract
+/// whose sorts name a per-process datatype (`Sort::Data`) is never cached — its indices are not
+/// portable.
+pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
+    let v = std::env::var("NL_DERIVED_CACHE").ok()?;
+    match v.trim() {
+        "" | "0" => None,
+        s if s.eq_ignore_ascii_case("off") || s.eq_ignore_ascii_case("false") => None,
+        "1" => {
+            let base = std::env::var_os("XDG_CACHE_HOME")
+                .map(std::path::PathBuf::from)
+                .filter(|p| !p.as_os_str().is_empty())
+                .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))?;
+            Some(base.join("nl-validator").join("derived"))
+        }
+        path => Some(std::path::PathBuf::from(path)),
+    }
+}
+
+fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
+    dir.join(format!("{target}.v{}.json", env!("CARGO_PKG_VERSION")))
+}
+
+/// The cached contract for `target`, if this validator version derived one here before.
+pub fn load_derived(dir: &std::path::Path, target: &str) -> Option<crate::CalleeContract> {
+    let text = std::fs::read_to_string(derived_cache_path(dir, target)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Keep a derived contract for the next process (best effort: an unwritable cache is no cache).
+pub fn store_derived(dir: &std::path::Path, target: &str, c: &crate::CalleeContract) {
+    let portable = !c.param_sorts.iter().chain(std::iter::once(&c.ret)).any(|s| matches!(s, crate::Sort::Data(_)));
+    if !portable || std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let Ok(text) = serde_json::to_string(c) else { return };
+    let path = derived_cache_path(dir, target);
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    if std::fs::write(&tmp, text).is_ok() && std::fs::rename(&tmp, &path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
 pub struct LinkedView<'a> {
     records: &'a HashMap<String, J>,
     bodies: &'a HashMap<String, J>,
@@ -291,6 +344,15 @@ impl<'a> LinkedView<'a> {
         if !self.in_progress.borrow_mut().insert(key.clone()) {
             return None;
         }
+        // This machine's own earlier derivation of the same record (same content address, same
+        // validator), when the operator opted in: see `derived_cache_dir`.
+        if self.callee(target).is_some() {
+            if let Some(c) = derived_cache_dir().and_then(|d| load_derived(&d, target)) {
+                self.in_progress.borrow_mut().remove(&key);
+                self.contracts.borrow_mut().insert(target.to_string(), Some(c.clone()));
+                return Some(c);
+            }
+        }
         let out = self.callee(target).and_then(|(rec, body)| {
             let params: Vec<String> = body
                 .get("params")
@@ -343,6 +405,9 @@ impl<'a> LinkedView<'a> {
             })
         });
         self.in_progress.borrow_mut().remove(&key);
+        if let (Some(c), Some(dir)) = (&out, derived_cache_dir()) {
+            store_derived(&dir, target, c);
+        }
         self.contracts.borrow_mut().insert(target.to_string(), out.clone());
         out
     }
@@ -786,6 +851,92 @@ pub fn certify_record_linked(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn a_contract(ret: crate::Sort) -> crate::CalleeContract {
+        crate::CalleeContract {
+            symbol: "callee_test".to_string(),
+            params: vec!["a".to_string(), "b".to_string()],
+            param_sorts: vec![crate::Sort::Int, crate::Sort::Int],
+            ret,
+            pres: vec![],
+            posts: vec![json!({ "kind": "app", "op": "gte", "args": [ { "kind": "var", "name": "result" }, { "kind": "lit", "value": 1 } ] })],
+            laws: vec![],
+            nat_positions: [0usize, 1].into_iter().collect(),
+        }
+    }
+
+    fn fresh_cache_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("nl-derived-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    #[test]
+    fn a_derived_contract_round_trips_through_the_cache() {
+        let dir = fresh_cache_dir("roundtrip");
+        let c = a_contract(crate::Sort::Int);
+        store_derived(&dir, "fn_test_roundtrip", &c);
+        assert_eq!(load_derived(&dir, "fn_test_roundtrip"), Some(c));
+        assert_eq!(load_derived(&dir, "fn_test_absent"), None);
+        // Keyed by the validator version: another version's derivation is never read.
+        let other = dir.join(format!("fn_test_roundtrip.v{}.json", "0.0.0"));
+        assert!(!other.exists());
+    }
+
+    #[test]
+    fn a_contract_over_a_per_process_datatype_is_not_cached() {
+        let dir = fresh_cache_dir("data");
+        store_derived(&dir, "fn_test_data", &a_contract(crate::Sort::Data(0)));
+        assert_eq!(load_derived(&dir, "fn_test_data"), None);
+    }
+
+    #[test]
+    fn the_cache_is_off_unless_opted_in() {
+        // The variable's spellings: unset/0/off = no cache, 1 = the default directory, a path = it.
+        // (Read through the resolver only — the test does not set the variable, so a parallel
+        // test's view of it is untouched.)
+        let resolve = |v: Option<&str>| -> Option<std::path::PathBuf> {
+            match v {
+                None => None,
+                Some(s) => match s.trim() {
+                    "" | "0" => None,
+                    s if s.eq_ignore_ascii_case("off") => None,
+                    "1" => Some(std::path::PathBuf::from("<default>")),
+                    p => Some(std::path::PathBuf::from(p)),
+                },
+            }
+        };
+        assert_eq!(resolve(None), None);
+        assert_eq!(resolve(Some("0")), None);
+        assert_eq!(resolve(Some("off")), None);
+        assert_eq!(resolve(Some("/tmp/x")), Some(std::path::PathBuf::from("/tmp/x")));
+        assert!(resolve(Some("1")).is_some());
+    }
+
+    /// The linked view takes a cached contract for a record it can resolve, without deriving: the
+    /// stored contract carries a post the record itself never declared, and that is what comes back.
+    #[test]
+    fn the_linked_view_reads_a_cached_contract_before_deriving() {
+        let dir = fresh_cache_dir("view");
+        let (rec, body) = record_named("cached_fn");
+        let hash = rec["hash"].as_str().unwrap().to_string();
+        let mut records = HashMap::new();
+        records.insert(hash.clone(), rec.clone());
+        let mut bodies = HashMap::new();
+        bodies.insert(hash.clone(), body);
+        let want = a_contract(crate::Sort::Int);
+        store_derived(&dir, &hash, &want);
+        std::env::set_var("NL_DERIVED_CACHE", dir.to_str().unwrap());
+        let got = LinkedView::new(&records, &bodies, "z3").contract(&hash);
+        std::env::remove_var("NL_DERIVED_CACHE");
+        assert_eq!(got, Some(want));
+        // An unresolvable target is never served from the cache.
+        store_derived(&dir, "fn_not_in_view", &a_contract(crate::Sort::Int));
+        std::env::set_var("NL_DERIVED_CACHE", dir.to_str().unwrap());
+        let none = LinkedView::new(&records, &bodies, "z3").contract("fn_not_in_view");
+        std::env::remove_var("NL_DERIVED_CACHE");
+        assert_eq!(none, None);
+    }
 
     /// A minimal well-formed v0.2 record over `\n -> add(n, n)` with the given primary name.
     fn record_named(name: &str) -> (J, J) {
