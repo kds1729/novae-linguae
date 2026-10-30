@@ -88,10 +88,22 @@ testimony; the trace is theirs — that is the honest scope, and it is stated).
   (the public Petstore answers 500 to its own documented writes); the description's own server
   url is not called, and a relative one (`/api/v3`) is joined onto the base you give; gate-failed
   records move to `<out>/failed/` and the closing `summary:` line counts what is left to publish.
+  To try the adapter with nothing at stake, run the in-repo fake service as the sandbox
+  (`python3 tooling/fake-service/fake_service.py --port 18878`, its README has the endpoints) and
+  compile `tooling/nl-ingest-openapi/examples/item-store.openapi.json` against it with
+  `--secret-name api_token --verify-against http://127.0.0.1:18878 --token test-token`.
+  Orchestrating a REST record the adapter made looks like `nl-validator orchestrate --node <node>
+  --verify --require-certified --intent query/lookup/get-item-status --arg base.json --arg
+  name.json --grant net.read@127.0.0.1 --secret api_token=test-token --seed <seed> --publish`:
+  the arguments follow the record's `signature` (the base URL first), a record behind bearer or
+  api-key auth needs `--secret <scheme>=<value>` (the scheme name is the adapter's
+  `--secret-name`, default the description's scheme key), and the grant's host is the base's.
 - **Publish and be verified.** `python3 tooling/commons-node/publish_records.py records/` posts
   your bodies, traces and records to a node's `/v0/records` in the right order (Arca's gate
   accepts any well-formed artifact; `201 stored` is new, `200 stored:false` means it already had
-  it — publishing is idempotent). Add `--sign <seed>` to certify and publish certifications too:
+  it — publishing is idempotent). It is also **permanent**: a commons node is append-only and
+  public, so what you publish stays, under its address, for anyone to fetch — `quickstart.sh`'s
+  own last step publishes its claim the same way. Publish what you would stand behind. Add `--sign <seed>` to certify and publish certifications too:
   without one, every consumer re-certifies your record itself (`--require-certified` does, locally);
   with one, a consumer whose policy trusts your certifier can rely on your signed `cert_…` instead.
   **A public node is append-only and world-visible: what you publish stays, under its address,

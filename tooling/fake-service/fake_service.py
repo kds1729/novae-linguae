@@ -695,8 +695,11 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._reply(404, b'{"error":"no such item"}')
 
-    def log_message(self, fmt, *args):  # quiet: the gate reads statuses, not logs
-        pass
+    log = False  # --log: one line per request on stderr (quiet by default — the gate reads statuses)
+
+    def log_message(self, fmt, *args):
+        if Handler.log:
+            sys.stderr.write(f"{self.address_string()} {fmt % args}\n")
 
 
 def main():
@@ -713,7 +716,11 @@ def main():
                     help="Cloud Control stand-in: status reads before an asynchronous request reaches SUCCESS")
     ap.add_argument("--cc-retry-after", type=float, default=1.0,
                     help="Cloud Control stand-in: seconds the RetryAfter hint lies ahead of the clock")
+    ap.add_argument("--log", action="store_true",
+                    help="print one line per request on stderr (so a live gate or an orchestrate "
+                         "run can be seen arriving); quiet by default")
     args = ap.parse_args()
+    Handler.log = args.log
     Handler.token = args.token
     Handler.api_key = args.api_key if args.api_key is not None else args.token
     Handler.oauth_client = tuple(args.oauth_client.split(":", 1))

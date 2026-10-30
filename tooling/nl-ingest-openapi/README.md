@@ -149,6 +149,10 @@ written as a `blob-<sha256>.json` sidecar destined for a node's gate-free `/v0/b
 records `example=BY-ADDRESS(<n> bytes)`, and offline replay resolves the sidecar from the records
 directory, sha256-verified.
 
+The sandbox to try all of this against is the in-repo fake service — `examples/item-store.openapi.json`
+is its description ([`../fake-service/README.md`](../fake-service/README.md) lists the rest):
+start it with `python3 ../fake-service/fake_service.py --port 8878 --log`, then
+
 ```
 python3 openapi_ingest.py examples/item-store.openapi.json --out /tmp/recs \
     --secret-name api_token --verify-against http://127.0.0.1:8878 --token test-token
@@ -176,7 +180,9 @@ net-new, certified, and published to the commons.)
 
 Reuses [`ingest-common`](../ingest-common/) (the shared BLAKE3+JCS core and body-AST builders), so
 its records agree byte-for-byte with every other adapter on canonical form and content-hash.
-Requires only `python3` (3.10+) and the built `nl-validator` on the sibling `target/release` path.
+Requires only `python3` (3.10+) and `nl-validator`: the sibling `tooling/validator/target/release`
+build if there is one, else the binary `quickstart.sh` fetched into `.quickstart/`, else the path
+in `NL_VALIDATOR`.
 
 ## At production scale
 
