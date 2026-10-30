@@ -818,6 +818,20 @@ fn callee_preamble() -> Result<(String, String, bool)> {
     let used = take_callees_used();
     let apps = take_callee_apps();
     let any = !used.is_empty();
+    // Declarations FIRST, for every callee the obligation applies — and, after the axioms are
+    // lowered, for every callee a CONTRACT applies that the obligation did not (a post such as
+    // `gcd(|fst(result)|, snd(result)) = 1` on `rat_normalize` names `gcd`; emitted after
+    // `normalize`'s axioms, or not at all, the solver answered "unknown constant" — the rational
+    // tier's lowest-terms checker, 2026-10-30).
+    let declare = |c: &CalleeContract| format!("(declare-fun {} ({}) {})\n", c.symbol, c.param_sorts.iter().map(|s| s.smt()).collect::<Vec<_>>().join(" "), c.ret.smt());
+    let mut decls = String::new();
+    let mut declared: BTreeSet<String> = BTreeSet::new();
+    for target in &used {
+        if let Some(c) = callee_contract(target) {
+            decls.push_str(&declare(&c));
+            declared.insert(target.clone());
+        }
+    }
     let mut out = String::new();
     let mut inst = String::new();
     for target in used {
@@ -825,12 +839,6 @@ fn callee_preamble() -> Result<(String, String, bool)> {
         // The applications of this callee the obligation makes: each contract fact is also stated at
         // them explicitly (below), so the solver need not instantiate a quantifier to use it.
         let at: Vec<Vec<String>> = apps.get(&target).cloned().unwrap_or_default().into_iter().filter(|a| a.len() == c.params.len()).collect();
-        out.push_str(&format!(
-            "(declare-fun {} ({}) {})\n",
-            c.symbol,
-            c.param_sorts.iter().map(|s| s.smt()).collect::<Vec<_>>().join(" "),
-            c.ret.smt()
-        ));
         if c.posts.is_empty() {
             continue;
         }
@@ -954,10 +962,19 @@ fn callee_preamble() -> Result<(String, String, bool)> {
             inst.push_str(&divisibility_instances(&c.symbol, &at));
         }
     }
-    // Lowering the axioms marked the callee used again; the preamble is complete, so clear.
-    take_callees_used();
+    // Lowering the axioms marked callees used again — the ones the obligation applies, and any a
+    // contract applies on its own: those need a declaration too (their axioms are not needed; a
+    // contract's mention of them is a term, not a use under contract).
+    for target in take_callees_used() {
+        if !declared.contains(&target) {
+            if let Some(c) = callee_contract(&target) {
+                decls.push_str(&declare(&c));
+                declared.insert(target);
+            }
+        }
+    }
     take_callee_apps();
-    Ok((out, inst, any))
+    Ok((format!("{decls}{out}"), inst, any))
 }
 
 /// Sort returned by `op` given the sorts of its operands are well-formed.
@@ -3442,6 +3459,34 @@ mod tests {
         set_callee_contracts(prev);
         let post = reports.iter().find(|r| r.label == "post[0]").expect("the post's report");
         assert!(matches!(post.outcome, crate::RefinementOutcome::Sound), "{:?}", post.outcome);
+    }
+
+    /// A callee whose CONTRACT applies another callee the obligation does not: the second is
+    /// declared before the first's axioms mention it (it was declared after them, or not at all,
+    /// and the solver answered "unknown constant" — the rational tier's lowest-terms checker).
+    #[test]
+    fn a_callee_named_only_inside_a_contract_is_declared_before_the_axioms() {
+        let Some(solver) = solver() else { return };
+        let a = format!("fn_{}", "0a".repeat(32));
+        let b = format!("fn_{}", "0b".repeat(32));
+        let contract = |symbol: &str, posts: Vec<J>| CalleeContract {
+            symbol: symbol.into(), params: vec!["x".into()], param_sorts: vec![Sort::Int], ret: Sort::Int,
+            pres: vec![], posts, laws: vec![], nat_positions: BTreeSet::new(),
+        };
+        // A's post: B(result) == 1; B's post: result >= 0.
+        let a_contract = contract("callee_aaaa", vec![op("eq", vec![op(&b, vec![v("result")]), lit(1)])]);
+        let b_contract = contract("callee_bbbb", vec![op("ge", vec![v("result"), lit(0)])]);
+        let call_a = json!({ "kind": "app", "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": a } }, "args": [v("n")] });
+        // The law applies A only: `A(n) == A(n)` (trivially true; what matters is the preamble).
+        let goal = law(&["n"], op("eq", vec![call_a.clone(), call_a]));
+        let prev = set_callee_contracts([(a.clone(), a_contract), (b.clone(), b_contract)].into_iter().collect());
+        let (out, cert) = prove_property(&goal, None, solver);
+        set_callee_contracts(prev);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        let smt = cert.unwrap().smt;
+        let decl_b = smt.find("(declare-fun callee_bbbb").expect("B declared");
+        let use_b = smt.find("(callee_bbbb ").expect("B used in A's axiom");
+        assert!(decl_b < use_b, "B must be declared before A's axioms mention it:\n{smt}");
     }
 
     /// pow_mod_naive: \b e m -> case gt(e, 0) of true -> mod(mul(self(b, sub(e, 1), m), mod(b, m)), m) | false -> mod(1, m)
