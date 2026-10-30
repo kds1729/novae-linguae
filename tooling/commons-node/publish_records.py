@@ -14,7 +14,10 @@ the node); this script lists them and tells you.
 The node answers `201 {"hash","stored":true}` for a new artifact and `200 {"hash","stored":false}`
 for one it already holds (publishing is idempotent — the address IS the identity); a rejection is a
 4xx with an `error`. Stdlib only; needs `nl-validator` (`NL_VALIDATOR` or the sibling build) only
-for `--sign`.
+for `--sign`. With `--sign` every record is re-certified first, and a callee's contract is
+re-derived from its body once per record (41 records with a shared `gcd`: ~15 min); the
+validator's derived-contract cache (`NL_DERIVED_CACHE`, spec/evaluation.md) is turned on here
+by default so that is paid once — set `NL_DERIVED_CACHE=0` to derive everything afresh.
 """
 import argparse
 import glob
@@ -69,6 +72,9 @@ def main(argv=None):
                     help="also certify each record (nl-validator certify --sign SEED) and publish the certification")
     a = ap.parse_args(argv)
     d = a.records_dir
+    # The validator's derived-contract cache (spec/evaluation.md): with --sign, every record is
+    # re-certified and each callee's contract re-derived once per record — paid once with it.
+    os.environ.setdefault("NL_DERIVED_CACHE", "1")
     names = sorted(os.path.basename(p)[:-len(".v0.2.json")] for p in glob.glob(os.path.join(d, "*.v0.2.json")))
     if not names:
         sys.exit(f"{d}: no *.v0.2.json records")
