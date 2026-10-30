@@ -15,7 +15,8 @@ introspection result, `tooling/nl-ingest-openapi/openapi_ingest.py` for an OpenA
 description, `tooling/nl-ingest-smithy/smithy_ingest.py` for an AWS Smithy model (JSON-RPC
 services; needs a signing proxy as its endpoint) — and all find
 the binary the quickstart fetched (`.quickstart/nl-validator`) on their own, or a sibling `cargo
-build`, or `NL_VALIDATOR`. To publish, `python3 tooling/commons-node/publish_records.py <out-dir>`
+build`, or `NL_VALIDATOR`; the OpenAPI adapter moves gate-failed records to `<out>/failed/` and
+ends with a `summary:` tally, so `<out-dir>` holds only what passed. To publish, `python3 tooling/commons-node/publish_records.py <out-dir>`
 posts bodies, traces and records in dependency order; then `nl-validator orchestrate --node
 <node> --verify --require-certified --intent <your record's intent tag> …` discovers, certifies,
 applies and publishes in one shot, and anyone can `verify-claim --node <node> msg_…` the result.

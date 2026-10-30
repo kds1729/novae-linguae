@@ -1291,3 +1291,30 @@ class MultiSchemeAuthGateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RelativeServerUrl(unittest.TestCase):
+    """A relative `servers[0].url` (stranger 5, the Swagger Petstore's `/api/v3`) resolves against
+    --verify-against — an absolute path replaces the live base's path, never doubled — and is left
+    as written, with a note, when there is nothing to resolve it against."""
+
+    def test_absolute_path_resolves_against_the_live_base(self):
+        spec = {"servers": [{"url": "/api/v3"}]}
+        note = oi.resolve_relative_server(spec, "https://petstore3.swagger.io/api/v3")
+        self.assertEqual(spec["servers"][0]["url"], "https://petstore3.swagger.io/api/v3")
+        self.assertIn("resolved against --verify-against", note)
+        spec = {"servers": [{"url": "/api/v3"}]}
+        oi.resolve_relative_server(spec, "https://petstore3.swagger.io")
+        self.assertEqual(spec["servers"][0]["url"], "https://petstore3.swagger.io/api/v3")
+
+    def test_without_a_live_base_it_is_reported_not_changed(self):
+        spec = {"servers": [{"url": "/api/v3"}]}
+        note = oi.resolve_relative_server(spec, None)
+        self.assertEqual(spec["servers"][0]["url"], "/api/v3")
+        self.assertIn("--verify-against", note)
+
+    def test_an_absolute_url_is_untouched_and_silent(self):
+        spec = {"servers": [{"url": "https://api.example.com/v1"}]}
+        self.assertIsNone(oi.resolve_relative_server(spec, "http://127.0.0.1:8878"))
+        self.assertEqual(spec["servers"][0]["url"], "https://api.example.com/v1")
+        self.assertIsNone(oi.resolve_relative_server({}, None))

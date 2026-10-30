@@ -122,6 +122,7 @@ provider. Reuses ingest-common (BLAKE3+JCS core, body-AST builders).
 
 import argparse
 import hashlib
+import glob
 import json
 import os
 import re
@@ -1210,6 +1211,32 @@ def _example_for(base_url, verb, path_param_names, has_body, op,
     return {"args": args, "result": {"kind": "int", "value": want}}
 
 
+def resolve_relative_server(spec, verify_against):
+    """A RELATIVE `servers[0].url` (`/api/v3`): OpenAPI resolves it against the description's own
+    location, which a saved file no longer has. Under --verify-against it is resolved against that
+    live base (an absolute path replaces the base's path, so `/api/v3` against
+    `https://host/api/v3` is `https://host/api/v3`, not doubled) and the spec is updated in place
+    — the examples' base is then a URL the gates can call. Without one it is left as written and
+    reported: nothing runs live anyway, and the records' example base says exactly what the
+    description said. Returns the note to print, or None when the url is absolute (or absent).
+    Stranger 5 (2026-10-30) hit this on the Swagger Petstore: every gate failed with the
+    interpreter's `only http:// and https:// URLs are supported: /api/v3/pet/1`."""
+    from urllib.parse import urljoin
+    servers = spec.get("servers") or []
+    first = servers[0] if servers and isinstance(servers[0], dict) else None
+    url = first.get("url") if first else None
+    if not url or "://" in url:
+        return None
+    if verify_against:
+        resolved = urljoin(verify_against if verify_against.endswith("/") else verify_against + "/", url)
+        first["url"] = resolved
+        return (f"relative server url `{url}` resolved against --verify-against -> {resolved} "
+                "(the examples' base)")
+    return (f"relative server url `{url}` — a saved description has no location to resolve it "
+            f"against, so the examples' base stays `{url}` (not a URL: nothing can run live); "
+            "give --verify-against <scheme://host/…> to resolve it")
+
+
 def walk(spec, secret_name, observe_map=None, observe_absent_delete=False):
     """-> (built, skipped, pending, observe_report): built = [(record, body_ast, notes)],
     skipped = [(op_id, reason)], pending = schema-derived projections awaiting a live
@@ -1648,6 +1675,9 @@ def main(argv=None):
         sys.exit("--observe-absent-delete records a live observation; it requires "
                  "--verify-against (an observation needs a live service)")
 
+    server_note = resolve_relative_server(spec, args.verify_against)
+    if server_note:
+        print(f"{'servers[0]':16} note: {server_note}")
     ops, skipped, pending, observe_report = walk(spec, secret_name, observe_map,
                                                  observe_absent_delete=args.observe_absent_delete)
     for op_id, reason in skipped:
@@ -1664,6 +1694,8 @@ def main(argv=None):
         elif status != "consumed":
             unheeded.append(f"--observe-arg for `{op_id}` refused — {status}")
     if unheeded:
+        unheeded.append("(a binding that cannot be met halts before any artifact is written, by "
+                        "rule — drop it to ingest the rest)")
         sys.exit("\n".join(unheeded))
     if not ops and not pending:
         sys.exit("no supported operations found in the spec")
@@ -1726,6 +1758,7 @@ def main(argv=None):
             written.append((name, rp, bp, got))
             observed[name] = label
 
+    failed = []  # names whose live gate, certification or replay failed: not for publishing
     for name, rp, bp, record in written:
         line = f"{name:16} body={record['body_hash'][:20]}…"
         effectful = bool((record.get("signature") or {}).get("effects"))
@@ -1742,6 +1775,7 @@ def main(argv=None):
                                                     blob_threshold=args.blob_threshold)
             if not att_ok:
                 ok = False
+                failed.append(name)
                 print(f"{line}  live-gate=FAIL: {att_msg}")
                 continue
             line += "  live=PASS+traces"
@@ -1761,12 +1795,41 @@ def main(argv=None):
             label = "PASS (replayed offline)" if effectful else "PASS"
             line += f"  examples={label if run_ok else 'FAIL: ' + run_msg}"
             ok = ok and run_ok
+            if not run_ok:
+                failed.append(name)
+        if not cert_ok and name not in failed:
+            failed.append(name)
+        tags = record.get("intent_tags") or []
+        if tags:
+            line += f"  intent={tags[-1]}"  # the record's discovery tag (what `orchestrate --intent` takes)
         print(line)
         if not cert_ok:
             print(f"    {cert_msg}")
 
+    # A record that failed its gate is evidence, not a product: it leaves the output directory
+    # (publish_records.py reads `<out>/*.v0.2.json`, and a public node is append-only) for
+    # `<out>/failed/`, with its body and any traces it had earned — kept for the operator to read,
+    # never published by accident (stranger 5, 2026-10-30: 8 gate-failed Petstore records sat
+    # beside 12 good ones and "wrote 20 records" was the only count).
+    fdir = os.path.join(args.out, "failed")
+    if failed:
+        os.makedirs(fdir, exist_ok=True)
+        for name in failed:
+            sidecars = [f"{name}.v0.2.json", f"body-{name}.json"] + \
+                [os.path.basename(t) for t in glob.glob(os.path.join(args.out, f"trace-{name}-*.json"))]
+            for fn in sidecars:
+                src = os.path.join(args.out, fn)
+                if os.path.exists(src):
+                    os.replace(src, os.path.join(fdir, fn))
+    kept = [w for w in written if w[0] not in failed]
+    compiled = len(ops) + len(pending)
     placeholders = ", ".join(f"{{{{secret:{n}}}}}" for n in secret_names)
-    print(f"\nwrote {len(written)} records -> {args.out}  (secret placeholders: {placeholders})")
+    verdict = "all certified" + (" + replayed" if args.verify_against else "") if ok else "FAILURES above"
+    if failed:
+        verdict += f" — {len(failed)} gate-failed record(s) moved to {fdir} (not for publishing)"
+    print(f"\nsummary: {len(kept)} records materialized of {compiled} operations compiled "
+          f"({len(skipped)} skipped); {verdict}")
+    print(f"wrote {len(kept)} records -> {args.out}  (secret placeholders: {placeholders})")
     sys.exit(0 if ok else 1)
 
 

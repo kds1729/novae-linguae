@@ -18,7 +18,8 @@ against each, checksum-verified by the script; anything else: `cd tooling/valida
 --release` with stable Rust — the script finds that build). It canonicalizes, hashes, signs, type-checks, proves, certifies, runs,
 and replays every artifact the project defines. Everything below is that one binary plus a
 stdlib-only Python script, and everything the script writes — the binary, the records, the loop's
-files — goes into `.quickstart/` inside the clone (ignored by git).
+files — goes into `.quickstart/` inside the clone (ignored by git); the binary itself is
+`.quickstart/nl-validator`.
 
 ## 2. A real API becomes verified functions
 
@@ -81,7 +82,11 @@ testimony; the trace is theirs — that is the honest scope, and it is stated).
   the server's own error comes back verbatim, with the arguments the adapter sent. Each record's
   discovery tag is `parse/<lowercase-hyphenated-field>` (`countryCapital` → `parse/country-capital`)
   and its argument order is the record's `signature` (base URL first, then the observed arguments)
-  — both are in the `.v0.2.json` the adapter prints next to each record.
+  — both are in the `.v0.2.json` the adapter prints next to each record, and each adapter's
+  per-record line ends with `intent=<tag>`. For OpenAPI: `--verify-against` runs every documented
+  example live, mutating verbs included, so aim it at a sandbox (the public Petstore answers 500 to
+  its own documented writes); a relative `servers[0].url` is resolved against it; gate-failed
+  records move to `<out>/failed/` and the closing `summary:` line counts what is left to publish.
 - **Publish and be verified.** `python3 tooling/commons-node/publish_records.py records/` posts
   your bodies, traces and records to a node's `/v0/records` in the right order (Arca's gate
   accepts any well-formed artifact; `201 stored` is new, `200 stored:false` means it already had

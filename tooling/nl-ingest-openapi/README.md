@@ -113,7 +113,20 @@ Every generated record is gated through `nl-validator certify` (typecheck / effe
 complexity). With `--verify-against <base-url>` the worked examples are additionally **run** against
 a live service — the "gate = examples vs an emulator" step — so a generated record is
 verified-by-default exactly like a hand-authored one. The in-repo
-[`tooling/fake-service`](../fake-service/) is a reference service to verify against.
+[`tooling/fake-service`](../fake-service/) is a reference service to verify against. **Every
+documented example runs, mutating verbs included** (a `POST /order` with a documented `200` is
+sent, once): point `--verify-against` at an emulator or a sandbox, not at production — the
+*observation* gate is read-only by rule (below), the *example* gate is not, because the
+documented example is the description's own claim about that call. A **relative `servers[0].url`**
+(`/api/v3`, resolved by OpenAPI against the description's own location, which a saved file has
+lost) is resolved against `--verify-against` and said so (`servers[0] note: …`); without one it is
+left as written and nothing can run live. A record whose gate, certification or replay **fails
+leaves the output directory** for `<out>/failed/` (record, body, any traces it earned) so
+`publish_records.py <out>` never posts it; the run ends with a tally —
+`summary: N records materialized of M operations compiled (K skipped); all certified + replayed`,
+or `FAILURES above — F gate-failed record(s) moved to <out>/failed (not for publishing)` — and each
+record's line ends with its discovery tag (`intent=parse/get-user-by-name-email`), the value
+`orchestrate --intent` takes.
 
 For an **effectful** record the live gate is also the trace capture (GW12, replay-checkable
 examples): each example runs exactly once — grants and secrets supplied by the operator — must
