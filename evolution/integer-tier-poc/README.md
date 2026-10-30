@@ -11,11 +11,12 @@
   credential. Final tally (tenth follow-up and its `lcm` addendum): 41/41 certify, termination AND complexity SOUND on
   all 41 (the NTT chain at `O(n log n)`, with no fuel parameter), every declared contract SOUND
   (23 — including the **modular inverse's and the Chinese remainder's `Maybe`-valued contracts**)
-  and 30 of 37 laws proved — `lcm`'s commutativity and its (guarded) multiple-of-both through
-  `gcd`'s certified contract, `ext_gcd`'s Bézout
+  and 32 of 38 laws proved — `gcd`'s associativity (through the divisibility rung, from the
+  greatest-divisor law — eleventh follow-up), `lcm`'s commutativity and its (guarded)
+  multiple-of-both through `gcd`'s certified contract, `ext_gcd`'s Bézout
   identity over a tuple result, `gcd` dividing both of its arguments, the modular congruences,
   fast exponentiation agreeing with the naive power (through the doubling law, stepwise), and the
-  inverse and CRT checkers on their callees' domains (from the contracts) — and all 37 held both
+  inverse and CRT checkers on their callees' domains (from the contracts) — and all 38 held both
   over the bounded domain and across magnitudes.
 - **Author:** Keith Sprochi <kds1729@gmail.com>
 - **Dates:** first published 2026-10-17, last updated 2026-10-29
@@ -1077,13 +1078,65 @@ default, so a test run or a fresh audit never reads yesterday's proofs.
 Totals unchanged: 41/41 certified, contracts **23 SOUND / 0**, laws **30 PROVED / 7 UNKNOWN / 0
 UNSUPPORTED** (37 laws), 37/37 held.
 
-### Still open
+### Still open after the addendum (the first of the last item closed in the eleventh, below)
 
 - **`prime_agree`**: documented negative.
 - **The unguarded `inverse_holds` / `crt_holds` / `multiple_of_both` laws over ALL ints**: the
   checker now SAYS which cases it skips for them; a contract on a wider precondition, or a
   guard, remains the honest form.
 - `gcd` associativity, `binomial` symmetry and Pascal: facts no contract states.
+
+## Eleventh follow-up (2026-10-30): the divisibility rung — `gcd` associativity PROVED
+
+| law | before | now |
+|---|---|---|
+| `gcd`'s `greatest_divisor`: `∀ a b d. a < 0 ∨ b < 0 ∨ d < 1 ∨ a mod d > 0 ∨ b mod d > 0 ∨ gcd(a, b) mod d = 0` (authored: every common divisor divides the gcd) | — | **PROVED** by numeric induction on `b` with the Euclidean rung, no self fact needed |
+| `gcd`'s `associative` | UNKNOWN since the first follow-up ("a fact no contract states") | **PROVED** by numeric induction on `b + c` with `self`'s certified facts at the instantiated points, by unfolding alone once they are there |
+| `binomial`'s `symmetry`, `pascal` | UNKNOWN | UNKNOWN — the record's definition divides (`binomial(n, k−1)·(n−k+1) div k`), and that `k` divides the product is a theorem about factorials no contract states; recorded, not reached |
+
+Totals: laws **32 PROVED / 6 UNKNOWN / 0 UNSUPPORTED** (38 laws; was 30 / 7 / 0 of 37), 38/38 held
+(the new law EXHAUSTIVE over 729 bounded cases, nothing skipped); contracts 23/0, 41/41 certified,
+everything else unchanged — the builder's log differs from round 13 in `gcd`'s two new lines only.
+`gcd` and `lcm` re-minted (`lcm` applies `gcd` by content address; the other 39 records keep their
+addresses); builder 25.2 min.
+
+**Measured first, by hand.** Associativity follows from two facts gcd's contract CAN state —
+it divides both arguments (certified since the eighth follow-up) and every common divisor
+divides it (authored now, and it proves) — through transitivity and antisymmetry of
+divisibility: `g₁ = gcd(gcd(a, b), c)` divides `gcd(a, b)` and `c`, hence `a` and `b`
+(transitivity), hence `gcd(b, c)` and then `g₂ = gcd(a, gcd(b, c))` (the greatest-divisor law,
+twice); symmetrically `g₂ | g₁`; both positive, so equal (antisymmetry). On the induction
+certificate, by hand: with those instances z3 closes it in 10 ms; without transitivity,
+unknown; without the greatest-divisor law, satisfiable. Two things the engine lacked:
+
+- **A law with a free variable was never instantiated.** The contract rung instantiates a self
+  law at an application only when one of the law's own applications fixes every law variable —
+  `greatest_divisor`'s `d` is fixed by none, so for the whole tenth follow-up the law would have
+  been proved and then said nothing. Now one free Int variable ranges over the certificate's
+  own self-application terms: the gcds the goal mentions are the only candidates such a law
+  needs. Over the GOAL's applications only — over all eight a certificate states (the
+  unfoldings' inner calls too) the instances reached 234 assertions and the solver timed out;
+  the goal's four close in 10 ms.
+- **Divisibility's transitivity and antisymmetry as lemmas.** Discharged once per solver —
+  transitivity in the form a solver proves it, with the uniqueness lemma's instance at the
+  composed witness `(x div y)·(y div z)` (bare, z3 answers unknown at 30 s); antisymmetry on
+  positives bare — then stated at the goal's applications: a divisor of an application divides
+  its arguments, two applications dividing each other are equal. Emitted only when the self
+  facts include a divisibility law. `prove --smt-out` writes `.lemma-div-trans` and
+  `.lemma-div-antisym` beside the proof, so it re-checks end to end.
+
+And one ordering fact in the self-facts derivation: a law proved in its third phase (with the
+posts) is now a fact for the laws after it in the record's order — associativity rests on the
+greatest-divisor law, which is why the new law is authored before it.
+
+### Still open
+
+- **`prime_agree`**: documented negative.
+- **The unguarded `inverse_holds` / `crt_holds` / `multiple_of_both` laws over ALL ints**: a
+  contract on a wider precondition, or a guard, remains the honest form; the checker says which
+  cases it skips.
+- **`binomial` symmetry and Pascal**: the multiplicative definition's `div`; a factorial
+  theorem no contract states.
 
 ## Open questions (as they stood before the follow-up)
 

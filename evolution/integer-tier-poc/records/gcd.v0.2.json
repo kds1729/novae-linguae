@@ -83,7 +83,7 @@
    }
   }
  ],
- "hash": "fn_0a35b52c57653f69ac62b0ae61f731270437b59bf20042777742f2e22c78ac2f",
+ "hash": "fn_7875d6be2650b66990fd3851ac8181787c70b7dc6d445fbe1ff2cc1c440a3c2c",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -295,6 +295,171 @@
     ]
    },
    "name": "divides_both"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "a"
+                },
+                {
+                 "kind": "lit",
+                 "value": 0
+                }
+               ],
+               "kind": "app",
+               "op": "lt"
+              },
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "b"
+                },
+                {
+                 "kind": "lit",
+                 "value": 0
+                }
+               ],
+               "kind": "app",
+               "op": "lt"
+              }
+             ],
+             "kind": "app",
+             "op": "or"
+            },
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "d"
+              },
+              {
+               "kind": "lit",
+               "value": 1
+              }
+             ],
+             "kind": "app",
+             "op": "lt"
+            }
+           ],
+           "kind": "app",
+           "op": "or"
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "a"
+              },
+              {
+               "kind": "var",
+               "name": "d"
+              }
+             ],
+             "kind": "app",
+             "op": "mod"
+            },
+            {
+             "kind": "lit",
+             "value": 0
+            }
+           ],
+           "kind": "app",
+           "op": "gt"
+          }
+         ],
+         "kind": "app",
+         "op": "or"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "b"
+            },
+            {
+             "kind": "var",
+             "name": "d"
+            }
+           ],
+           "kind": "app",
+           "op": "mod"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "gt"
+        }
+       ],
+       "kind": "app",
+       "op": "or"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          },
+          {
+           "kind": "var",
+           "name": "d"
+          }
+         ],
+         "kind": "app",
+         "op": "mod"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b",
+     "d"
+    ]
+   },
+   "name": "greatest_divisor"
   },
   {
    "expr": {

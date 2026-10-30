@@ -247,6 +247,9 @@ def main():
                  # EXHAUSTIVE) while the prover must be told the domain — a model with the modulus
                  # 0 is honest, not spurious.
                  ("divides_both", "forall a b. (a == 0 && b == 0) || (a % self(a, b) == 0 && b % self(a, b) == 0)"),
+                 # The universal property: every common divisor divides the gcd (the fact associativity
+                 # rests on, through the divisibility rung — eleventh follow-up).
+                 ("greatest_divisor", "forall a b d. a < 0 || b < 0 || d < 1 || a % d > 0 || b % d > 0 || self(a, b) % d == 0"),
                  ("associative", "forall a b c. self(self(a, b), c) == self(a, self(b, c))")],
           # Positivity: a certified contract `lcm` relies on through composition (its `div` by gcd is sound
           # only because gcd ≥ 1 whenever an argument is).

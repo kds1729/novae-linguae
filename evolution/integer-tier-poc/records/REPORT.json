@@ -26,19 +26,22 @@
    "commutative: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "right_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
    "divides_both: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "greatest_divisor: UNVERIFIABLE  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)",
    "associative: UNVERIFIABLE  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
    "commutative: CONSISTENT  |  generative: HELD (200 cases)",
    "right_zero: CONSISTENT  |  generative: HELD (200 cases)",
    "divides_both: CONSISTENT  |  generative: HELD (200 cases)",
+   "greatest_divisor: UNVERIFIABLE  |  generative: HELD (200 cases)",
    "associative: UNVERIFIABLE  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "commutative: PROVED       by numeric induction on `a+b (by unfolding alone)` (strong induction over the measure; unsat)",
    "right_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
    "divides_both: PROVED       by numeric induction on `b, with self's certified contract at the instantiated points (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms]",
-   "associative: UNKNOWN      numeric induction on `b+c (hypothesis as instances at the recursive calls)` did not close (the step needs a lemma, or the arithmetic is nonlinear)"
+   "greatest_divisor: PROVED       by numeric induction on `b (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms]",
+   "associative: PROVED       by numeric induction on `b+c, with self's certified contract at the instantiated points (by unfolding alone)` (strong induction over the measure; unsat)"
   ]
  },
  {
