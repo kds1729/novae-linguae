@@ -1569,7 +1569,18 @@ fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<I
             if binders.is_empty() {
                 String::new()
             } else {
-                format!("(assert (forall ({}) {ih}))\n", binders.join(" "))
+                // Pinned with the same trigger a lemma axiom gets (`lhs_trigger`): z3 4.16 finds no
+                // trigger for this quantifier on its own and answers UNKNOWN at the step case of
+                // `foldr` over `append` (CI's pin, 2026-10-30; 4.13 closed it untriggered in 0 s).
+                let binder_names: Vec<String> = var_sorts
+                    .iter()
+                    .filter(|(v, s)| **v != induction_var && !matches!(s, Sort3::Func | Sort3::Pred))
+                    .map(|(v, _)| v.clone())
+                    .collect();
+                match lhs_trigger(pred, &ih_env, &binder_names)? {
+                    Some(t) => format!("(assert (forall ({}) (! {ih} :pattern ({t}))))\n", binders.join(" ")),
+                    None => format!("(assert (forall ({}) {ih}))\n", binders.join(" ")),
+                }
             }
         } else {
             String::new()
@@ -1619,30 +1630,26 @@ fn lemma_axiom(lemma: &J) -> Result<String> {
     if binders.is_empty() {
         return Ok(format!("(assert {body})\n"));
     }
-    // Pin the quantifier with an explicit e-matching trigger: the lemma's left-hand side (its
-    // "rewrite-from" term) when it mentions every bound variable. Without this z3 picks a trigger
-    // heuristically and instantiation becomes sensitive to *assertion order* — the same minimal lemma set
-    // closes a goal in one order and returns UNKNOWN in another. An LHS trigger makes it order-independent.
-    // Falls back to z3's auto-trigger when the LHS is unsuitable (not an equation, or misses a variable).
-    let trigger = if head_op(pred).as_deref() == Some("eq") {
-        match args_of(pred).first() {
-            Some(lhs) => {
-                let t = lower(lhs, &BTreeMap::new())?;
-                if binder_names.iter().all(|v| token_present(&t, v)) {
-                    Some(t)
-                } else {
-                    None
-                }
-            }
-            None => None,
-        }
-    } else {
-        None
-    };
-    Ok(match trigger {
+    Ok(match lhs_trigger(pred, &BTreeMap::new(), &binder_names)? {
         Some(t) => format!("(assert (forall ({}) (! {body} :pattern ({t}))))\n", binders.join(" ")),
         None => format!("(assert (forall ({}) {body}))\n", binders.join(" ")),
     })
+}
+
+/// An explicit e-matching trigger for a quantified equation: its left-hand side (the "rewrite-from"
+/// term), lowered in `env`, when it mentions every bound variable. Without one z3 picks a trigger
+/// heuristically and instantiation becomes sensitive to *assertion order* — the same minimal lemma
+/// set closes a goal in one order and returns UNKNOWN in another — and z3 4.16 finds none at all for
+/// the generalized induction hypothesis. `None` (z3's auto-trigger) when the LHS is unsuitable: not
+/// an equation, or missing a variable.
+fn lhs_trigger(pred: &J, env: &BTreeMap<String, String>, binder_names: &[String]) -> Result<Option<String>> {
+    if head_op(pred).as_deref() != Some("eq") {
+        return Ok(None);
+    }
+    let args = args_of(pred);
+    let Some(lhs) = args.first() else { return Ok(None) };
+    let t = lower(lhs, env)?;
+    Ok(if binder_names.iter().all(|v| token_present(&t, v)) { Some(t) } else { None })
 }
 
 /// The default per-check solver timeout (seconds) for discharging an obligation.

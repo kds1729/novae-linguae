@@ -522,7 +522,9 @@ more parameters are out of fragment and reported UNSUPPORTED.
 uninterpreted binary `foldfn`, so a fold law is proved for **every** `f`. `foldr` discharges with the
 ordinary induction hypothesis; `foldl` threads its accumulator, so for fold laws the step additionally
 asserts the hypothesis **generalized over the non-induction variables** (`forall others. P(t, others)`),
-which the solver instantiates at the changed accumulator. Demonstrated live: both `foldr` and `foldl`
+which the solver instantiates at the changed accumulator; the quantifier carries the hypothesis's
+left-hand side as its e-matching trigger, as a lemma axiom does (z3 4.16 finds no trigger for it
+on its own and answers UNKNOWN; 4.13 closed it untriggered — 2026-10-30). Demonstrated live: both `foldr` and `foldl`
 are **proved to distribute over `append`** (`fold(f, z, append(xs, ys)) = …`), each certificate
 re-checking. A law about a user-defined `self` gets the same generalized hypothesis (2026-10-17): a
 recursion may change a spectator at its recursive call — `pointwise_mod` tails BOTH lists — and the
