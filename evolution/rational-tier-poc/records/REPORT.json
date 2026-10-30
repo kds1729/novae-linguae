@@ -10,6 +10,7 @@
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
    "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -19,6 +20,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
    "refinement:post[1]": "",
+   "refinement:post[2]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
@@ -32,7 +34,7 @@
   ],
   "prove": [
    "value_preserved: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
-   "idempotent: UNKNOWN      solver could not decide"
+   "idempotent: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]"
   ]
  },
  {
@@ -63,7 +65,7 @@
    "lowest_terms: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "lowest_terms: UNKNOWN      solver could not decide"
+   "lowest_terms: PROVED       holds for all inputs (unsat negation)"
   ]
  },
  {
@@ -152,7 +154,7 @@
    "refinement:post[0]": "",
    "refinement:post[1]": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies `fn_07bd6d6e51692248d5afeb0dfad470428082a7713869d3841f95cbf0a93c0cb2` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "declared `O(log n)`, not established: applies `fn_181a9d7fcdf17bcfb7ad913557c6ad2397dec2a1aed6cf374a50f6244f930185` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
    "commutative: CONSISTENT  |  generative: HELD (400 cases)"
@@ -185,7 +187,7 @@
    "refinement:post[0]": "",
    "refinement:post[1]": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies `fn_07bd6d6e51692248d5afeb0dfad470428082a7713869d3841f95cbf0a93c0cb2` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "declared `O(log n)`, not established: applies `fn_181a9d7fcdf17bcfb7ad913557c6ad2397dec2a1aed6cf374a50f6244f930185` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
    "self_difference_is_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -218,7 +220,7 @@
    "refinement:post[0]": "",
    "refinement:post[1]": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies `fn_07bd6d6e51692248d5afeb0dfad470428082a7713869d3841f95cbf0a93c0cb2` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "declared `O(log n)`, not established: applies `fn_181a9d7fcdf17bcfb7ad913557c6ad2397dec2a1aed6cf374a50f6244f930185` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
    "commutative: CONSISTENT  |  generative: HELD (400 cases)",
@@ -354,7 +356,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_493b408c85e33f13cdae90ef5d476d9ad7f6fe1cabe5588612640e5bac5a71c0` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_509628a8b1ba0703f99e1601d9dfdf801025b175667e16fc32db224d82a307bc` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
    "add_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -363,7 +365,7 @@
    "add_zero: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "add_zero: UNKNOWN      solver could not decide"
+   "add_zero: PROVED       by induction through the callees' definitions, on `<unfolding>` (unsat)"
   ]
  },
  {
@@ -385,7 +387,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_43882ce1950b1c0a0b4829292902f210876060a80ff7cf6ff3dbe6355f199228` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_73d608ba92b14f5e5e44e07e4f10331e22c2a669693f2e3bfeb6dc046db32916` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
    "mul_one: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -394,7 +396,7 @@
    "mul_one: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "mul_one: UNKNOWN      solver could not decide"
+   "mul_one: PROVED       by induction through the callees' definitions, on `<unfolding>` (unsat)"
   ]
  },
  {
@@ -447,7 +449,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_493b408c85e33f13cdae90ef5d476d9ad7f6fe1cabe5588612640e5bac5a71c0` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_509628a8b1ba0703f99e1601d9dfdf801025b175667e16fc32db224d82a307bc` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
    "associative: CONSISTENT  |  generative: HELD (400 cases)"

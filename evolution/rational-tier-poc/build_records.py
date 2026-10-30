@@ -73,11 +73,16 @@ REPORT = []
 
 def build(name, surface, sig, examples, props=(), refinements=(), tags=(), hints=(), complexity=None,
           terminates="always"):
-    text = surface
-    for k, v in ADDR.items():
-        text = text.replace("{" + k + "}", v)
-    body = parse_body(text)
+    def subst(t):
+        for k, v in ADDR.items():
+            t = t.replace("{" + k + "}", v)
+        return t
+    body = parse_body(subst(surface))
     body_hash = hash_artifact(body, "body")
+    # `{name}` placeholders resolve in predicates too: a post may apply a callee by address
+    # (`{gcd}(abs(fst(result)), snd(result)) == 1`).
+    refinements = [(k, subst(e)) for k, e in refinements]
+    props = [(n, subst(e)) for n, e in props]
     record = {
         "schema_version": "0.2.0",
         "hash": "fn_" + "0" * 64,
@@ -184,7 +189,11 @@ def main():
                        # The denominator is positive: d ≠ 0, g = gcd(|n|, |d|) ≥ 1 and g | |d|.
                        ("post", "snd(result) >= 1"),
                        # Zero normalizes to (0, 1) — a first-order case the body states.
-                       ("post", "n != 0 || (fst(result) == 0 && snd(result) == 1)")],
+                       ("post", "n != 0 || (fst(result) == 0 && snd(result) == 1)"),
+                       # LOWEST TERMS: gcd(|p|, q) = 1 — the module's headline fact, SOUND through the
+                       # callee-side divisibility rung (gcd's greatest-divisor law at the product
+                       # witness e·g, with the scaling lemma), round 3.
+                       ("post", "{gcd}(abs(fst(result)), snd(result)) == 1")],
           # The two facts everything above rests on, as laws: the value is preserved (cross-
           # multiplication) and the result is in lowest terms. Coprimality is the module's headline
           # question — it follows from gcd's greatest-divisor law through the divisibility rung,
