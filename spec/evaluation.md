@@ -219,7 +219,21 @@ call (a cycle through addresses stays unresolved). A recursion on the COMPONENTS
 result (`ntt_rec` on the halves `ntt_split` returns) is well-founded when the callee's own body shows
 each component strictly shorter than its list input — a `tail^k` recursion, `k ≥ 2`, consing at most
 `k − 1` elements per component per step, so a component is at most `n − ⌊n/k⌋` long — and the guards
-in force establish `length ≥ k` (the FALSE arm of `null(tail^(k−1)(p))`). Verdicts: **SOUND** (declared
+in force establish `length ≥ k` (the FALSE arm of `null(tail^(k−1)(p))`). **A measure that is a callee
+of several positions** (the Gaussian-integer tier, 2026-10-31): Euclid's algorithm on the Gaussian
+integers, `gcd(z, w) = gcd(w, rem(z, w))`, descends on no one argument — it descends on `N(w) = c² +
+d²`, a certified function of two positions, and the fact that it descends is another callee's
+certified post, `N(z − q·w) < N(w)` on `rem`. Over the linked view the checker reads that vocabulary
+off the contracts it re-derives: a callee `f` whose PROVED post has the shape `M(fst(result),
+snd(result)) < M(p_i, p_j)` (or `M(result) < M(p_i)`), with `M` a terminating callee whose result is
+PROVED bounded below (`result ≥ k`, or a `nat` result), makes the components bound by `case f(args) of
+(r1, r2) => …` a well-founded descent of the caller's positions `M` is taken at — when the self-call
+puts every component at its own position, and when `f`'s PRECONDITIONS hold at the call. A post is
+certified only under its pre, so the pre is discharged, not assumed: the solver decides whether the
+boolean branch conditions in force (a `true` arm's scrutinee, a `false` arm's negation, over unshadowed
+names) entail the pre instantiated at the call's arguments (`c ≠ 0 ∨ d ≠ 0` from the false arm of
+`c = 0 ∧ d = 0`); anything but UNSAT of `facts ∧ ¬pre` is no descent. The measure is the same one the
+prover's induction rung inducts on (below). Verdicts: **SOUND** (declared
 `always`, verified), **VERIFIED** (provably always but declared weaker, so the declaration could be
 strengthened), or **UNVERIFIABLE** (declared `always`, not provable by this structural analysis). There is
 no refutation path — structural analysis cannot disprove termination, only fail to prove it.
@@ -611,6 +625,24 @@ ended UNKNOWN as well as after one that refused. Measured: `pad_to`'s `length(se
 PROVED by induction on `n`; `from_digits ≥ 0` SOUND by induction on the structure of `ds`; the false
 strengthening `≥ 1` and the Int-element variant stay UNKNOWN; the first-order prover still reports a
 list law UNSUPPORTED.
+
+**The measure as a callee (2026-10-31, the Gaussian-integer tier).** When the termination checker's
+measure is a callee of several positions decreasing by another callee's certified post (the measured
+descent above — the Gaussian `gcd` on `N(c, d)`), the rung inducts on THAT: the order of the hypothesis
+is the measure callee's value, `M(v'…) < M(v…)` over the law variables the applications put at the
+measure positions (the same distinct variables at every application, or all literals — then an
+unfolding), and the measure callee is declared under its contract so `M ≥ k` is in force; strong
+induction on a value certified bounded below is well-founded, and no floor is stated separately. The
+measure comes from the LINKED analysis, which alone sees the descent — the caller that holds the view
+(`certify`, `check-refinement`, `prove --records`, the view's own contract derivation) installs it for the
+record under proof. One more thing the descent needs: the recursive call's arguments are a pattern's
+components (`self(c, d, r1, r2)` after `case rem(a, b, c, d) of (r1, r2)`), which the rung resolves to
+their definitions (`fst(rem(a, b, c, d))`, `snd(…)`, and a `let`'s value) so the call lowers in parameter
+scope and the hypothesis can be stated at it — before this, a recursive call that mentioned a local
+refused the whole certificate. Measured: `gi_gcd`'s `right_zero` PROVED by unfolding (its measure
+arguments are literals) and `nonzero` — the result is nonzero unless both inputs are — PROVED by
+induction on `N(c, d)` with the quantified hypothesis, the remainder's post supplying `N(r) < N(w)` at
+the recursive call under the pre the guard establishes.
 
 **Contracts instantiated, and a law decided from the function's own contract (2026-10-17, the
 sixth follow-up).** A callee's certified contract entered an obligation as quantified axioms only.

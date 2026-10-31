@@ -1849,6 +1849,11 @@ fn cmd_prove(
     let own_view = own_maps.as_ref().map(|(r, b)| nl_validator::LinkedView::new(r, b, solver));
     let contract_view = view.as_ref().or(own_view.as_ref());
     nl_validator::set_self_type(value.pointer("/signature/type").cloned());
+    // The body's measure over the linked view — the measured descent (a callee of several positions,
+    // smaller by another callee's post) is visible only there — for the induction rungs below.
+    if let (Some(v), Some(b)) = (contract_view, &body_ast) {
+        nl_validator::set_self_measure(v.self_measure(b, &nl_validator::nat_param_positions(&value)));
+    }
     let props = value.get("properties").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     if props.is_empty() {
         println!("no properties to prove");

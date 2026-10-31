@@ -30,7 +30,7 @@ pub mod proptest;
 pub mod prove;
 pub use prove::{
     build_certificate, build_certificate_in_domain, prove_by_callee_induction, prove_by_numeric_induction, prove_from_self_contract, prove_property, prove_property_in_domain,
-    set_callee_contracts, set_callee_refusals, set_self_facts, set_self_type, sort_of_type, type_mentions_float, CalleeContract,
+    set_callee_contracts, set_callee_refusals, set_self_facts, set_self_measure, set_self_type, sort_of_type, type_mentions_float, CalleeContract,
     Certificate, ProofOutcome, Sort,
 };
 /// The Euclidean rung: residue normal forms of a certificate's `mod`/`div` terms as instances
@@ -65,8 +65,8 @@ pub use refine::{check_nat_refinement, check_refinements, RefinementOutcome, Ref
 
 pub mod terminate;
 pub use terminate::{
-    analyze_termination, analyze_termination_linked, analyze_termination_typed, induction_measure, nat_param_positions,
-    CalleeTerminates, LinkedTermination, Measure, TerminationOutcome,
+    analyze_termination, analyze_termination_linked, analyze_termination_typed, induction_measure, induction_measure_linked,
+    nat_param_positions, CalleeTerminates, LinkedTermination, Measure, MeasuredBy, MeasuredPost, TerminationOutcome,
 };
 
 pub mod complexity;

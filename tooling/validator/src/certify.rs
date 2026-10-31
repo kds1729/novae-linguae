@@ -387,8 +387,10 @@ impl<'a> LinkedView<'a> {
             let prev_refusals = crate::prove::set_callee_refusals(self.refusals_for(body));
             let prev = crate::set_callee_contracts(deps);
             let prev_ty = crate::prove::set_self_type(Some(sig_type.clone()));
+            let prev_measure = crate::prove::set_self_measure(self.self_measure(body, &nat_positions));
             let all_laws: Vec<J> = law_exprs(rec);
             let (reports, laws) = derive_self_facts(sig_type, &refinements, &all_laws, body, &nat_positions, &self.solver);
+            crate::prove::set_self_measure(prev_measure);
             crate::prove::set_self_type(prev_ty);
             crate::set_callee_contracts(prev);
             crate::prove::set_callee_refusals(prev_refusals);
@@ -682,6 +684,97 @@ impl crate::terminate::LinkedTermination for LinkedView<'_> {
     fn components_shrink_by(&self, target: &str) -> Option<u32> {
         self.shrink(target)
     }
+    fn measured_post(&self, target: &str) -> Option<crate::terminate::MeasuredPost> {
+        LinkedView::measured_post(self, target)
+    }
+    fn entails(&self, facts: &[J], goal: &J) -> bool {
+        crate::prove::entails(facts, goal, &self.solver)
+    }
+}
+
+impl LinkedView<'_> {
+    /// The callee's certified post that measures its result smaller than a measure of its arguments
+    /// — `M(fst(result), snd(result)) < M(p_i, p_j)` or `M(result) < M(p_i)`, `M` a callee applied
+    /// by address inside the predicate — when `M` itself terminates and its result is certified
+    /// bounded below (a post `result ≥ k` / `result > k`, or a `nat` result). All from re-derived
+    /// facts: the post is one `check-refinement` PROVED on this view (the contract), as is `M`'s
+    /// bound. The vocabulary of the termination checker's measured descent.
+    pub fn measured_post(&self, target: &str) -> Option<crate::terminate::MeasuredPost> {
+        let c = self.contract(target)?;
+        let var = |n: &J| (n.get("kind").and_then(|k| k.as_str()) == Some("var")).then(|| n.get("name").and_then(|x| x.as_str()).map(String::from)).flatten();
+        let proj_of_result = |n: &J, proj: &str| {
+            n.get("kind").and_then(|k| k.as_str()) == Some("app")
+                && n.get("op").and_then(|o| o.as_str()) == Some(proj)
+                && n.get("args").and_then(|a| a.as_array()).is_some_and(|a| a.len() == 1 && var(&a[0]).as_deref() == Some("result"))
+        };
+        for post in &c.posts {
+            if post.get("op").and_then(|o| o.as_str()) != Some("lt") {
+                continue;
+            }
+            let Some(sides) = post.get("args").and_then(|a| a.as_array()).filter(|a| a.len() == 2) else { continue };
+            let (lhs, rhs) = (&sides[0], &sides[1]);
+            let head = |n: &J| n.get("op").and_then(|o| o.as_str()).filter(|o| o.starts_with("fn_")).map(String::from);
+            let (Some(m_l), Some(m_r)) = (head(lhs), head(rhs)) else { continue };
+            if m_l != m_r {
+                continue;
+            }
+            let largs = lhs.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+            let rargs = rhs.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+            if largs.is_empty() || largs.len() != rargs.len() {
+                continue;
+            }
+            // The left side: the result's components in order (`fst(result)`, `snd(result)`), or the
+            // whole result.
+            let components = if largs.len() == 1 && var(&largs[0]).as_deref() == Some("result") {
+                1
+            } else if largs.len() == 2 && proj_of_result(&largs[0], "fst") && proj_of_result(&largs[1], "snd") {
+                2
+            } else {
+                continue;
+            };
+            // The right side: distinct parameters of the callee.
+            let mut arg_positions = Vec::new();
+            for a in &rargs {
+                let Some(name) = var(a) else { break };
+                let Some(i) = c.params.iter().position(|p| *p == name) else { break };
+                if arg_positions.contains(&i) {
+                    break;
+                }
+                arg_positions.push(i);
+            }
+            if arg_positions.len() != rargs.len() {
+                continue;
+            }
+            // The measure: a terminating callee whose result is certified bounded below.
+            if self.terminates(&m_l) != Some(true) {
+                continue;
+            }
+            let Some(mc) = self.contract(&m_l) else { continue };
+            let bounded_below = mc.posts.iter().any(|p| {
+                let op = p.get("op").and_then(|o| o.as_str());
+                let args = p.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+                matches!(op, Some("ge") | Some("gt"))
+                    && args.len() == 2
+                    && var(&args[0]).as_deref() == Some("result")
+                    && args[1].get("kind").and_then(|k| k.as_str()) == Some("lit")
+            });
+            if !bounded_below {
+                continue;
+            }
+            return Some(crate::terminate::MeasuredPost { measure: m_l, arg_positions, components, params: c.params.clone(), pres: c.pres.clone() });
+        }
+        None
+    }
+
+    /// The body's induction measure over THIS view (`terminate::induction_measure_linked`): what the
+    /// prover's measure-induction rung inducts on, installed by the callers that derive a record's
+    /// facts (`prove::set_self_measure`). `None` for a non-recursive body.
+    pub fn self_measure(&self, body: &J, nat_positions: &std::collections::BTreeSet<usize>) -> Option<crate::terminate::Measure> {
+        if !crate::prove::references_self(body) {
+            return None;
+        }
+        crate::terminate::induction_measure_linked(body, nat_positions, Some(self))
+    }
 }
 
 /// The variables of a predicate term whose VALUE is linear in them: variables, literals, `add`/`sub`/
@@ -832,7 +925,11 @@ pub fn certify_record_linked(
         // The same phased derivation the linked view uses for a callee (its own plain-proved laws
         // may enter a post's induction), so this report and a dependent's view of it agree.
         let nat_positions = crate::terminate::nat_param_positions(record);
+        let prev_measure = view.as_ref().map(|v| crate::prove::set_self_measure(v.self_measure(body, &nat_positions)));
         let (reports, _) = derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, solver);
+        if let Some(p) = prev_measure {
+            crate::prove::set_self_measure(p);
+        }
         if let Some(p) = prev {
             crate::set_callee_contracts(p);
         }

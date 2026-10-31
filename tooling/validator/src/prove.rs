@@ -2027,6 +2027,46 @@ enum MeasureSpec {
     /// those terms mention — well-founded over the nats, and the hypothesis then covers every
     /// application whose measure arguments add up to less.
     Sum(Vec<String>),
+    /// A measure that is a CALLEE of several positions (`terminate::MeasuredBy`): every application
+    /// puts the same distinct quantified variables there, in order — strong induction on the measure
+    /// callee's value at them (`N(c, d)`), well-founded because that value is certified bounded below.
+    Vars(Vec<String>),
+}
+
+/// The measure positions of a measured (callee) measure, read off the law's applications: all
+/// literals → unfolding; the same distinct variables everywhere → [`MeasureSpec::Vars`].
+fn measured_spec(pred: &J, positions: &[usize], vars: &[String]) -> Result<MeasureSpec> {
+    let mut tuple: Option<Vec<String>> = None;
+    let mut any = false;
+    for call in collect_self_applications(pred) {
+        any = true;
+        let args: Vec<&J> = positions
+            .iter()
+            .map(|p| call.get(*p).ok_or_else(|| anyhow!("a `self` application in the law has no argument at the measure position {p}")))
+            .collect::<Result<_>>()?;
+        if args.iter().all(|a| a.get("kind").and_then(|k| k.as_str()) == Some("lit")) {
+            continue;
+        }
+        let names: Option<Vec<String>> = args.iter().map(|a| var_name(a).filter(|v| vars.iter().any(|x| x == v)).map(String::from)).collect();
+        let Some(names) = names else {
+            bail!("the law applies `self` with a compound term at a position of its callee measure — the induction needs a quantified variable at each");
+        };
+        if names.iter().collect::<BTreeSet<_>>().len() != names.len() {
+            bail!("the law applies `self` with one variable at two positions of its callee measure");
+        }
+        match &tuple {
+            None => tuple = Some(names),
+            Some(t) if *t == names => {}
+            Some(_) => bail!("the law applies `self` with different variables at the positions of its callee measure across applications"),
+        }
+    }
+    if !any {
+        bail!("the law does not apply `self`");
+    }
+    Ok(match tuple {
+        None => MeasureSpec::Literal,
+        Some(vs) => MeasureSpec::Vars(vs),
+    })
 }
 
 fn measure_spec(pred: &J, position: usize, vars: &[String], nat_vars: &BTreeSet<String>) -> Result<MeasureSpec> {
@@ -2091,6 +2131,110 @@ fn quantified_vars_in(node: &J, vars: &[String]) -> BTreeSet<String> {
     }
     go(node, vars, &mut out);
     out
+}
+
+/// A body with every `let`-bound and tuple-/bind-pattern-bound local replaced by its definition — a
+/// `let x = e in …` by `e`, the components of `case s of (p, q) => …` by `fst(s)` / `snd(s)`, a bare
+/// bind by the scrutinee — so a term read out of it (a recursive call's arguments) makes sense in
+/// the lambda's parameter scope. Variant and literal patterns bind nothing resolvable: their names
+/// stay (and shadow). Nested lambdas' parameters shadow too.
+fn resolve_body_locals(node: &J) -> J {
+    fn go(node: &J, env: &BTreeMap<String, J>) -> J {
+        let kind = node.get("kind").and_then(|k| k.as_str()).unwrap_or_default();
+        match kind {
+            "var" => node.get("name").and_then(|n| n.as_str()).and_then(|n| env.get(n)).cloned().unwrap_or_else(|| node.clone()),
+            "let" => {
+                let value = node.get("value").map(|v| go(v, env)).unwrap_or(J::Null);
+                let mut e2 = env.clone();
+                if let Some(n) = node.get("name").and_then(|n| n.as_str()) {
+                    e2.insert(n.to_string(), value.clone());
+                }
+                let body = node.get("body").map(|b| go(b, &e2)).unwrap_or(J::Null);
+                let mut m = node.as_object().cloned().unwrap_or_default();
+                m.insert("value".into(), value);
+                m.insert("body".into(), body);
+                J::Object(m)
+            }
+            "lambda" => {
+                let mut e2 = env.clone();
+                for p in node.get("params").and_then(|p| p.as_array()).into_iter().flatten() {
+                    if let Some(n) = p.get("name").and_then(|n| n.as_str()) {
+                        e2.remove(n);
+                    }
+                }
+                let mut m = node.as_object().cloned().unwrap_or_default();
+                if let Some(b) = node.get("body") {
+                    m.insert("body".into(), go(b, &e2));
+                }
+                J::Object(m)
+            }
+            "case" => {
+                let scrut = node.get("scrutinee").map(|s| go(s, env)).unwrap_or(J::Null);
+                let arms: Vec<J> = node
+                    .get("arms")
+                    .and_then(|a| a.as_array())
+                    .into_iter()
+                    .flatten()
+                    .map(|arm| {
+                        let mut e2 = env.clone();
+                        let pat = arm.get("pattern").cloned().unwrap_or(J::Null);
+                        let elems: Vec<&J> = pat.get("elems").and_then(|e| e.as_array()).map(|a| a.iter().collect()).unwrap_or_default();
+                        match pat.get("kind").and_then(|k| k.as_str()) {
+                            Some("bind") => {
+                                if let Some(n) = pat.get("name").and_then(|n| n.as_str()) {
+                                    e2.insert(n.to_string(), scrut.clone());
+                                }
+                            }
+                            Some("tuple") if elems.len() == 2 => {
+                                for (i, e) in elems.iter().enumerate() {
+                                    if let (Some("bind"), Some(n)) = (e.get("kind").and_then(|k| k.as_str()), e.get("name").and_then(|n| n.as_str())) {
+                                        let proj = if i == 0 { "fst" } else { "snd" };
+                                        e2.insert(n.to_string(), serde_json::json!({ "kind": "app", "op": proj, "args": [scrut.clone()] }));
+                                    }
+                                }
+                            }
+                            _ => {
+                                let mut bound = Vec::new();
+                                fn binds(p: &J, out: &mut Vec<String>) {
+                                    match p {
+                                        J::Object(m) => {
+                                            if m.get("kind").and_then(|k| k.as_str()) == Some("bind") {
+                                                if let Some(n) = m.get("name").and_then(|n| n.as_str()) {
+                                                    out.push(n.to_string());
+                                                }
+                                            }
+                                            m.values().for_each(|v| binds(v, out));
+                                        }
+                                        J::Array(xs) => xs.iter().for_each(|v| binds(v, out)),
+                                        _ => {}
+                                    }
+                                }
+                                binds(&pat, &mut bound);
+                                for n in bound {
+                                    e2.remove(&n);
+                                }
+                            }
+                        }
+                        let mut m = arm.as_object().cloned().unwrap_or_default();
+                        if let Some(b) = arm.get("body") {
+                            m.insert("body".into(), go(b, &e2));
+                        }
+                        J::Object(m)
+                    })
+                    .collect();
+                let mut m = node.as_object().cloned().unwrap_or_default();
+                m.insert("scrutinee".into(), scrut);
+                m.insert("arms".into(), J::Array(arms));
+                J::Object(m)
+            }
+            _ => match node {
+                J::Object(m) => J::Object(m.iter().map(|(k, v)| (k.clone(), if k == "pattern" { v.clone() } else { go(v, env) })).collect()),
+                J::Array(xs) => J::Array(xs.iter().map(|v| go(v, env)).collect()),
+                other => other.clone(),
+            },
+        }
+    }
+    go(node, &BTreeMap::new())
 }
 
 /// Every application of `target` (an op-form app) in a predicate AST, as its argument list.
@@ -2278,6 +2422,11 @@ thread_local! {
     /// the divisibility rung states its lemma instances only for a solver that has discharged
     /// the lemmas (`euclid::divisibility_discharged`). `None` = no rung.
     static DIVISIBILITY_SOLVER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// The measure of the body under proof as the LINKED termination analysis found it — installed by
+    /// a caller that holds the view (`set_self_measure`), since the measured descent (a callee of
+    /// several positions decreasing by another callee's certified post, `terminate::MeasuredBy`) is
+    /// not visible to the view-less `induction_measure` this rung falls back to. `None` = fall back.
+    static SELF_MEASURE: std::cell::RefCell<Option<crate::terminate::Measure>> = const { std::cell::RefCell::new(None) };
     /// The divisibility rung for CALLEE laws (a retry in `prove_property_in_domain`): a callee law
     /// with a free variable instantiated over the obligation's applications of that callee &&
     /// their pairwise products — the product witness `e·g` the lowest-terms proof needs — plus
@@ -2380,6 +2529,70 @@ fn divisibility_instances(symbol: &str, at: &[Vec<String>]) -> String {
 
 /// Install (or clear) the function's own certified facts for the measure-induction rung,
 /// returning the previous setting. See `SELF_FACTS`.
+/// Install the body-under-proof's measure from a LINKED termination analysis (see `SELF_MEASURE`);
+/// returns the previous value for restoring.
+pub fn set_self_measure(measure: Option<crate::terminate::Measure>) -> Option<crate::terminate::Measure> {
+    SELF_MEASURE.with(|m| m.replace(measure))
+}
+
+/// Do the boolean `facts` entail `goal`, over the Int/Bool/String fragment with every variable
+/// free? `facts ∧ ¬goal` UNSAT ⇒ yes; anything else (sat, unknown, out of fragment, no solver) ⇒
+/// `false` — never a false entailment. Used by the linked termination analysis to discharge a
+/// callee's precondition at a call site from the branch conditions in force. Leaves the prover's
+/// callee bookkeeping as it found it (a callee the facts apply is a term here, not a use).
+pub fn entails(facts: &[J], goal: &J, solver: &str) -> bool {
+    let saved_used = take_callees_used();
+    let saved_apps = take_callee_apps();
+    let out = entails_inner(facts, goal, solver);
+    take_callees_used();
+    take_callee_apps();
+    for t in saved_used {
+        mark_callee_used(&t);
+    }
+    for (t, apps) in saved_apps {
+        for a in apps {
+            push_callee_app(&t, &a);
+        }
+    }
+    out
+}
+
+fn entails_inner(facts: &[J], goal: &J, solver: &str) -> bool {
+    let not_goal = serde_json::json!({ "kind": "app", "op": "not", "args": [goal.clone()] });
+    let mut conj = not_goal;
+    for f in facts {
+        conj = serde_json::json!({ "kind": "app", "op": "and", "args": [f.clone(), conj] });
+    }
+    let conj = uncurry(&conj);
+    let mut vars: BTreeSet<String> = BTreeSet::new();
+    fn collect_vars(node: &J, out: &mut BTreeSet<String>) {
+        if let Some(v) = var_name(node) {
+            out.insert(v.to_string());
+        }
+        match node {
+            J::Object(m) => m.values().for_each(|v| collect_vars(v, out)),
+            J::Array(xs) => xs.iter().for_each(|v| collect_vars(v, out)),
+            _ => {}
+        }
+    }
+    collect_vars(&conj, &mut vars);
+    let vars: Vec<String> = vars.into_iter().filter(|v| v != "nil").collect();
+    let Ok(sorts) = infer_var_sorts(&conj, &vars, None) else { return false };
+    let mut env: BTreeMap<String, Sort> = sorts.clone();
+    if sort_of(&conj, &env, None).ok() != Some(Sort::Bool) {
+        return false;
+    }
+    let Ok(smt) = lower(&conj, &mut env, None) else { return false };
+    let Ok((callees, _, _)) = callee_preamble() else { return false };
+    let mut out = String::from("(set-logic ALL)\n");
+    out.push_str(&callees);
+    for v in &vars {
+        out.push_str(&format!("(declare-const {v} {})\n", sorts[v].smt()));
+    }
+    out.push_str(&format!("(assert {smt})\n(check-sat)\n"));
+    matches!(run_smt_secs(&with_datatypes(out), solver, 5), Ok(SatAnswer::Unsat))
+}
+
 pub fn set_self_facts(facts: Option<CalleeContract>) -> Option<CalleeContract> {
     SELF_FACTS.with(|s| std::mem::replace(&mut *s.borrow_mut(), facts))
 }
@@ -2517,12 +2730,29 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     if !references_self(pred) {
         bail!("the law does not mention `self` — nothing to induct on");
     }
-    let measure = crate::terminate::induction_measure(&body, nat_positions)
+    // The measure: the linked analysis's when a caller installed it (it alone sees the measured
+    // descent — a callee of several positions decreasing by another callee's certified post), else
+    // the view-less one.
+    let measure = SELF_MEASURE
+        .with(|m| m.borrow().clone())
+        .or_else(|| crate::terminate::induction_measure(&body, nat_positions))
         .ok_or_else(|| anyhow!("the body's recursion has no provable numeric measure (structural list recursion, or termination not established)"))?;
     let sd = lower_self_uninterpreted(&body)?;
-    if measure.position >= sd.params.len() {
+    let positions: Vec<usize> = measure.by_callee.as_ref().map(|b| b.positions.clone()).unwrap_or_else(|| vec![measure.position]);
+    if positions.iter().any(|p| *p >= sd.params.len()) {
         bail!("measure position out of range");
     }
+    // The measure callee's symbol, for the hypothesis's order `M(v') < M(v)`: its contract must be
+    // installed (the view's closure installs it — a post that applies it names it).
+    let measure_symbol: Option<String> = match &measure.by_callee {
+        Some(by) => {
+            let Some(c) = callee_contract(&by.target) else {
+                bail!("the measure callee `{}` has no contract here — pass --records so its certified bound is available", by.target);
+            };
+            Some(c.symbol.clone())
+        }
+        None => None,
+    };
     // Domain facts: a law variable fed to a nat-typed `self` parameter ranges over nats.
     let mut nat_vars: BTreeSet<String> = BTreeSet::new();
     for call in collect_self_applications(pred) {
@@ -2550,12 +2780,23 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
             }
         }
     }
-    let spec = measure_spec(pred, measure.position, &vars, &nat_vars)?;
-    let m = match &spec {
-        MeasureSpec::Var(v) => v.clone(),
-        MeasureSpec::Literal => "<unfolding>".to_string(),
-        MeasureSpec::Sum(vs) => vs.join("+"),
+    let spec = match &measure.by_callee {
+        Some(_) => measured_spec(pred, &positions, &vars)?,
+        None => measure_spec(pred, measure.position, &vars, &nat_vars)?,
     };
+    let m = match (&spec, &measure.by_callee) {
+        (MeasureSpec::Literal, _) => "<unfolding>".to_string(),
+        (MeasureSpec::Vars(vs), Some(by)) => format!("{}…({})", &by.target[..by.target.len().min(11)], vs.join(", ")),
+        (MeasureSpec::Var(v), _) => v.clone(),
+        (MeasureSpec::Sum(vs), _) => vs.join("+"),
+        (MeasureSpec::Vars(vs), None) => vs.join(", "),
+    };
+    if measure_symbol.is_some() && !matches!(spec, MeasureSpec::Literal) {
+        // The order's symbol must be declared: a use, for the preamble below.
+        if let Some(by) = &measure.by_callee {
+            mark_callee_used(&by.target);
+        }
+    }
 
     let var_sorts = infer_var_sorts(pred, &vars, Some(&sd.param_sorts))?;
     let mut env: BTreeMap<String, Sort> = var_sorts.clone();
@@ -2573,7 +2814,12 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
 
     let mut out = String::new();
     out.push_str("(set-logic ALL)\n");
-    if measure.structural {
+    if let Some(by) = &measure.by_callee {
+        out.push_str(&format!(
+            ";; induction on the measure `{m}` — the callee {} applied to positions {:?}, which every recursive call\n;; makes smaller by a callee's certified post (the termination checker's measured descent); the measure's\n;; value is certified bounded below, so the order is well-founded. self is uninterpreted, its defining\n;; equation instantiated at every application the law makes and at the recursive calls inside them.\n",
+            by.target, by.positions
+        ));
+    } else if measure.structural {
         out.push_str(&format!(
             ";; structural induction on `{m}` (measure position {}: the list every recursive call tails): self is\n;; uninterpreted, its defining equation instantiated at every application the law makes and at the\n;; recursive calls inside them; the hypothesis is instantiated at each tail-descending call.\n",
             measure.position
@@ -2616,6 +2862,19 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
         // recursive calls, guarded by the descended list being a cons — the form in which the
         // termination checker proved the descent (below, with the defining-equation instances).
         MeasureSpec::Var(_) if measure.structural => None,
+        // A callee measure: the order is the measure callee's value, `M(v'…) < M(v…)`.
+        MeasureSpec::Var(v) if measure_symbol.is_some() => {
+            let sym = measure_symbol.as_deref().unwrap_or_default();
+            Some(vec![format!("(< ({sym} {}) ({sym} {v}))", prime(v))])
+        }
+        MeasureSpec::Vars(vs) => {
+            let Some(sym) = measure_symbol.as_deref() else { bail!("a tuple of measure variables without a measure callee") };
+            Some(vec![format!(
+                "(< ({sym} {}) ({sym} {}))",
+                vs.iter().map(|v| prime(v)).collect::<Vec<_>>().join(" "),
+                vs.join(" ")
+            )])
+        }
         MeasureSpec::Var(m) => Some(vec![format!("(>= {} {})", prime(m), smt_int_lit(measure.floor)), format!("(< {} {m})", prime(m))]),
         MeasureSpec::Sum(vs) => {
             let sum = |f: &dyn Fn(&str) -> String| if vs.len() == 1 { f(&vs[0]) } else { format!("(+ {})", vs.iter().map(|v| f(v)).collect::<Vec<_>>().join(" ")) };
@@ -2639,7 +2898,10 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
         let _ = pred_ih_smt;
     }
     // Defining-equation instantiations: at the law's applications, and at the recursive calls inside them.
-    let recursive_calls = collect_self_applications(body.get("body").unwrap_or(&J::Null));
+    // The recursive calls' arguments are read in PARAMETER scope: a `let`- or pattern-bound local they
+    // mention (`case rem(a, b, c, d) of (r1, r2) => self(c, d, r1, r2)`) is resolved to its definition
+    // (`fst(rem(a, b, c, d))`), so the call lowers and the hypothesis can be stated at it.
+    let recursive_calls = collect_self_applications(&resolve_body_locals(body.get("body").unwrap_or(&J::Null)));
     let mut seen: BTreeSet<String> = BTreeSet::new();
     // Every `self` application the certificate states, by its argument terms in goal scope — where
     // the function's own certified facts are instantiated (`SELF_FACTS`).
@@ -2889,7 +3151,7 @@ fn build_callee_induction(
         let cinner_t = law_about(&cinner, t);
         let mut cenv: BTreeMap<String, Sort> = fresh.iter().cloned().zip(c.param_sorts.iter().copied()).collect();
         let body_smt = lower(&cinner_t, &mut cenv, None)?;
-        let measure = crate::terminate::induction_measure(&cbody, &cnat).filter(|m| !m.structural);
+        let measure = crate::terminate::induction_measure(&cbody, &cnat).filter(|m| !m.structural && m.by_callee.is_none());
         defs.insert(t.clone(), CalleeDef { params: fresh, body_smt, rec_calls, measure });
     }
 
@@ -2900,7 +3162,7 @@ fn build_callee_induction(
     let mut induct_var: Option<(String, usize)> = None; // (law var, self param index)
     let mut inducts: BTreeMap<String, usize> = BTreeMap::new(); // callee → its measure position
     for (t, args) in &body_apps {
-        let Some(m) = defs[t].measure else { continue };
+        let Some(m) = defs[t].measure.as_ref() else { continue };
         let Some(p) = args.get(m.position).and_then(|a| var_name(a)) else { continue };
         let Some(i) = sd.params.iter().position(|x| x == p) else { continue };
         match &induct_var {
@@ -2985,7 +3247,7 @@ fn build_callee_induction(
                 // parameter at the measure position is bound to the goal's term for it).
                 if let (true, Some((v, i)), Some(p)) = (with_ih, induct_var.as_ref(), inducts.get(t)) {
                     if call.get(*i).and_then(|x| var_name(x)) == Some(v.as_str()) {
-                        let m = d.measure.expect("chosen callee has a measure");
+                        let m = d.measure.as_ref().expect("chosen callee has a measure");
                         let smaller = &r[*p];
                         let guard = format!("(and (>= {smaller} {}) (< {smaller} {}))", smt_int_lit(m.floor), d.params[*p]);
                         let ih = format!("(=> {guard} (let (({v} {smaller})) {pred_smt}))");
@@ -3302,6 +3564,71 @@ mod tests {
 
     /// A typed integer literal, the form the termination checker reads guards from (a bare `lit`
     /// is fine for the prover, not for the measure).
+    /// The Gaussian `gcd`'s law `nonzero` by induction on the MEASURED descent — the measure a callee
+    /// (`norm`) of positions 2 and 3, smaller by the remainder's certified post (the Gaussian tier,
+    /// 2026-10-31). The measure is the linked termination analysis's, installed here as the view
+    /// installs it; without it the view-less analysis sees an opaque callee and the rung refuses.
+    #[test]
+    fn induction_on_a_callee_measure_proves_the_gaussian_gcd_nonzero() {
+        let Some(solver) = solver() else { return };
+        let rem = format!("fn_{}", "4e".repeat(32));
+        let norm = format!("fn_{}", "83".repeat(32));
+        let int = json!({ "kind": "builtin", "name": "int" });
+        let pair_ty = json!({ "kind": "tuple", "elems": [int.clone(), int.clone()] });
+        let pair_sort = sort_of_type(&pair_ty).expect("a tuple sort");
+        let names = |ns: &[&str]| ns.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let r = |acc: &str| op(acc, vec![v("result")]);
+        let norm_contract = CalleeContract {
+            symbol: "callee_norm".into(), params: names(&["a", "b"]), param_sorts: vec![Sort::Int; 2], ret: Sort::Int, pres: vec![],
+            posts: vec![
+                op("ge", vec![v("result"), lit(0)]),
+                op("eq", vec![v("result"), op("add", vec![op("mul", vec![v("a"), v("a")]), op("mul", vec![v("b"), v("b")])])]),
+            ],
+            laws: vec![], nat_positions: BTreeSet::new(),
+        };
+        let rem_contract = CalleeContract {
+            symbol: "callee_rem".into(), params: names(&["a", "b", "c", "d"]), param_sorts: vec![Sort::Int; 4], ret: pair_sort,
+            pres: vec![op("or", vec![op("neq", vec![v("c"), lit(0)]), op("neq", vec![v("d"), lit(0)])])],
+            posts: vec![op("lt", vec![op(&norm, vec![r("fst"), r("snd")]), op(&norm, vec![v("c"), v("d")])])],
+            laws: vec![], nat_positions: BTreeSet::new(),
+        };
+        // \a b c d -> case and(eq(c, 0), eq(d, 0)) of true -> (a, b) | false -> case rem(a, b, c, d) of (r1, r2) -> self(c, d, r1, r2)
+        let bapp = |name: &str, args: Vec<J>| json!({ "kind": "app", "fn": { "kind": "var", "name": name }, "args": args });
+        let blit = |b: bool| json!({ "kind": "lit", "value": { "kind": "bool", "value": b } });
+        let rem_app = json!({ "kind": "app", "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": rem } }, "args": [v("a"), v("b"), v("c"), v("d")] });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "a" }, { "name": "b" }, { "name": "c" }, { "name": "d" }], "body": { "kind": "case",
+            "scrutinee": bapp("and", vec![bapp("eq", vec![v("c"), ilit(0)]), bapp("eq", vec![v("d"), ilit(0)])]),
+            "arms": [
+                { "pattern": blit(true), "body": { "kind": "tuple", "elems": [v("a"), v("b")] } },
+                { "pattern": blit(false), "body": { "kind": "case", "scrutinee": rem_app, "arms": [{
+                    "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "r1" }, { "kind": "bind", "name": "r2" }] },
+                    "body": self_app(vec![v("c"), v("d"), v("r1"), v("r2")]) }] } } ] } });
+        let all_zero = op("and", vec![
+            op("and", vec![op("eq", vec![v("a"), lit(0)]), op("eq", vec![v("b"), lit(0)])]),
+            op("and", vec![op("eq", vec![v("c"), lit(0)]), op("eq", vec![v("d"), lit(0)])]),
+        ]);
+        let g = self_app(vec![v("a"), v("b"), v("c"), v("d")]);
+        let nonzero = law(&["a", "b", "c", "d"], op("or", vec![all_zero, op("or", vec![op("neq", vec![op("fst", vec![g.clone()]), lit(0)]), op("neq", vec![op("snd", vec![g]), lit(0)])])]));
+        let prev_c = set_callee_contracts([(rem.clone(), rem_contract), (norm.clone(), norm_contract)].into_iter().collect());
+        let prev_ty = set_self_type(Some(json!({ "kind": "fn", "params": [int.clone(), int.clone(), int.clone(), int], "result": pair_ty })));
+        let measure = crate::terminate::Measure {
+            position: 2, floor: 0, structural: false,
+            by_callee: Some(crate::terminate::MeasuredBy { target: norm.clone(), positions: vec![2, 3] }),
+        };
+        let prev_m = set_self_measure(Some(measure));
+        let (out, cert, m) = prove_by_numeric_induction(&nonzero, Some(&body), &BTreeSet::new(), solver);
+        set_self_measure(None);
+        // Without the linked measure the callee is opaque to the view-less analysis: no measure, refused.
+        let (without, _, _) = prove_by_numeric_induction(&nonzero, Some(&body), &BTreeSet::new(), solver);
+        set_self_measure(prev_m);
+        set_self_type(prev_ty);
+        set_callee_contracts(prev_c);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?} ({m:?})");
+        let smt = cert.expect("a certificate").smt;
+        assert!(smt.contains("(< (callee_norm c__ih d__ih) (callee_norm c d))"), "the hypothesis is ordered by the measure callee:\n{smt}");
+        assert!(matches!(without, ProofOutcome::Unsupported(_)), "{without:?}");
+    }
+
     fn ilit(n: i64) -> J {
         json!({ "kind": "lit", "value": { "kind": "int", "value": n } })
     }

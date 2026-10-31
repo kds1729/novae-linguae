@@ -19,7 +19,17 @@
 //!       * `sub(params[j], 1)` under a dominating `p != 0` guard (`eq(p, 0)`'s false arm / `neq(p, 0)`'s
 //!         true arm) when position `j` is `nat`-typed ([`analyze_termination_typed`]) — the type
 //!         supplies the floor, and the unit step keeps the value a nat (a larger step could tunnel
-//!         below zero and recurse forever, so it is refused).
+//!         below zero and recurse forever, so it is refused);
+//!   - or SEVERAL positions together descend on a MEASURE THAT IS A CALLEE — over a linked view
+//!     ([`LinkedTermination::measured_post`]): a callee `f` with a certified post `M(fst(result),
+//!     snd(result)) < M(p_i, p_j)` (or `M(result) < M(p_i)`), where `M` is itself a terminating callee
+//!     whose result is certified bounded below (`result ≥ k`), makes the pair bound by `case f(args) of
+//!     (r1, r2) => … self(…, r1, r2, …)` a well-founded descent of the caller's positions that `M` is
+//!     taken at — provided `f`'s PRECONDITIONS hold at the call, which the view decides from the
+//!     branch facts in force ([`LinkedTermination::entails`]; a post is certified only under its
+//!     pre). Euclid's algorithm on the Gaussian integers descends on `N(w)` by the remainder's post
+//!     `N(z − q·w) < N(w)` — the measure `N` a function of two argument positions, decreasing by
+//!     another callee's certified fact (the Gaussian tier, 2026-10-31).
 //!
 //! Anything else is reported `Unknown`, never a false `Always`: a recursion whose argument is *not* a
 //! provable descent (it might not be well-founded), `self`-calls with no common descending position,
@@ -357,18 +367,46 @@ fn pattern_binds(pattern: &J, out: &mut std::collections::BTreeSet<String>) {
 pub enum DescentKind {
     Structural,
     Numeric { floor: i64 },
+    /// By a callee's certified post, on a measure that is a callee of the descending positions
+    /// (the key names both) — bounded below by the measure callee's own certified bound.
+    Measured,
+}
+
+/// A measure that is a CALLEE of several argument positions: `target` applied to the caller's
+/// parameters at `positions`, in order — `gi_norm(c, d)` over positions 2 and 3.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeasuredBy {
+    pub target: String,
+    pub positions: Vec<usize>,
 }
 
 /// The well-founded measure a recursive body descends on — the one argument position every
 /// `self`-call provably shrinks — with the floor it is bounded below by. Numeric (the parameter
 /// itself, bounded by `floor`) or structural (`structural`: the parameter is a list every call
-/// tails — the measure is its `length`, floor 0). `None` when no single position descends the same
-/// way in every call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// tails — the measure is its `length`, floor 0), or — `by_callee` — a callee applied to several
+/// positions (`position` is then the first of them, `floor` 0: the measure callee's result is
+/// certified bounded below, and the descent is another callee's certified post). `None` when no
+/// single measure descends the same way in every call.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Measure {
     pub position: usize,
     pub floor: i64,
     pub structural: bool,
+    pub by_callee: Option<MeasuredBy>,
+}
+
+/// A callee's certified fact that its result is SMALLER, under a measure callee `measure`, than the
+/// same measure of some of its arguments: `measure(fst(result), snd(result)) < measure(p_i, p_j)`
+/// (`components` 2) or `measure(result) < measure(p_i)` (`components` 1), with `arg_positions` the
+/// callee's parameter positions `p_i, p_j` sit at. `params` and `pres` are the callee's, so a call
+/// site can instantiate the preconditions the post is certified under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeasuredPost {
+    pub measure: String,
+    pub arg_positions: Vec<usize>,
+    pub components: usize,
+    pub params: Vec<String>,
+    pub pres: Vec<J>,
 }
 
 /// A linked view of other records, for folding a `fn_ref` callee into the analysis: does the callee
@@ -380,6 +418,19 @@ pub trait LinkedTermination {
     /// For a callee returning a tuple of lists each strictly shorter than its list input (for inputs of
     /// length ≥ k) — re-derived from its body — the `k`; see `complexity::component_shrink`.
     fn components_shrink_by(&self, target: &str) -> Option<u32>;
+    /// A certified post of the callee at `target` that measures its result smaller than a measure of
+    /// its arguments (see [`MeasuredPost`]), when the measure callee terminates and its result is
+    /// certified bounded below — the facts that make the pair a well-founded descent. `None` by
+    /// default: a view without contracts has no such vocabulary.
+    fn measured_post(&self, _target: &str) -> Option<MeasuredPost> {
+        None
+    }
+    /// Do the boolean `facts` (predicates over the caller's parameters, the branch conditions in
+    /// force) entail `goal` — a callee's precondition instantiated at the call? Decided by the
+    /// solver over the view; `false` by default (never a false entailment).
+    fn entails(&self, _facts: &[J], _goal: &J) -> bool {
+        false
+    }
 }
 
 pub type CalleeTerminates<'a> = &'a dyn LinkedTermination;
@@ -395,21 +446,137 @@ struct Ctx<'a> {
 /// wherever the guards establish `length ≥ k`.
 type Components = std::collections::BTreeMap<String, (String, u32)>;
 
+/// Pattern variables bound as the components of a MEASURED callee's result (a post `M(fst(result),
+/// snd(result)) < M(p_i, p_j)` whose pre the branch facts discharge): name → (the measure callee, the
+/// CALLER's positions the measure is taken at, which component this name is). The self-call that puts
+/// every component at its position descends on that measure.
+type MeasuredComponents = std::collections::BTreeMap<String, (String, Vec<usize>, usize)>;
+
+/// What a self-call descends on: one argument position (`by` None), or several together under a
+/// measure callee (`by` its address). Per-call descents intersect on this key.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MeasureKey {
+    pub positions: Vec<usize>,
+    pub by: Option<String>,
+}
+
+impl MeasureKey {
+    fn at(j: usize) -> Self {
+        MeasureKey { positions: vec![j], by: None }
+    }
+}
+
+/// The names bound by pattern, `let` or lambda in scope, and the boolean facts in force: what a
+/// `walk` carries down besides the guards.
+#[derive(Clone, Default)]
+struct Scope {
+    comps: Components,
+    measured: MeasuredComponents,
+    /// The boolean scrutinees in force (a `true` arm's scrutinee, a `false` arm's negation) over
+    /// UNSHADOWED names — what a callee's precondition is discharged from.
+    preds: Vec<J>,
+}
+
+/// Does `node` mention the variable `name`?
+fn mentions(node: &J, name: &str) -> bool {
+    match node {
+        J::Object(m) => {
+            if m.get("kind").and_then(|k| k.as_str()) == Some("var") && m.get("name").and_then(|n| n.as_str()) == Some(name) {
+                return true;
+            }
+            m.values().any(|v| mentions(v, name))
+        }
+        J::Array(items) => items.iter().any(|v| mentions(v, name)),
+        _ => false,
+    }
+}
+
+/// Drop the facts that mention any newly shadowed name (a same-named binding is a different value).
+fn drop_shadowed_preds(preds: &[J], shadowed_now: &std::collections::BTreeSet<String>) -> Vec<J> {
+    preds.iter().filter(|p| !shadowed_now.iter().any(|n| mentions(p, n))).cloned().collect()
+}
+
+/// A measured callee application at a call site: `target(cargs)` whose [`MeasuredPost`] takes its
+/// measure at caller parameters (unshadowed) and whose preconditions the facts in force entail.
+/// Returns the measure callee and the CALLER positions the measure is taken at.
+fn measured_application(target: &str, cargs: &[J], ctx: &Ctx, shadowed: &std::collections::BTreeSet<String>, preds: &[J]) -> Option<(String, Vec<usize>, usize)> {
+    let view = ctx.callee?;
+    let post = view.measured_post(target)?;
+    if cargs.len() != post.params.len() {
+        return None;
+    }
+    let mut positions = Vec::new();
+    for i in &post.arg_positions {
+        let a = cargs.get(*i)?;
+        if a.get("kind").and_then(|k| k.as_str()) != Some("var") {
+            return None;
+        }
+        let name = a.get("name")?.as_str()?;
+        if shadowed.contains(name) {
+            return None;
+        }
+        let j = ctx.params.iter().position(|p| p == name)?;
+        if positions.contains(&j) {
+            return None;
+        }
+        positions.push(j);
+    }
+    // The post is certified under the callee's preconditions: each must hold here, instantiated
+    // at the call's arguments, from the branch facts in force.
+    let subst: std::collections::BTreeMap<String, J> = post.params.iter().cloned().zip(cargs.iter().cloned()).collect();
+    for pre in &post.pres {
+        let inst = crate::equiv::subst_many(pre, &subst);
+        if !view.entails(preds, &inst) {
+            return None;
+        }
+    }
+    Some((post.measure, positions, post.components))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn walk(
     node: &J,
     ctx: &Ctx,
     shadowed: &std::collections::BTreeSet<String>,
     facts: &[Guard],
-    comps: &Components,
-    descents: &mut Vec<std::collections::BTreeMap<usize, DescentKind>>,
+    scope: &Scope,
+    descents: &mut Vec<std::collections::BTreeMap<MeasureKey, DescentKind>>,
     opaque: &mut Option<String>,
 ) {
     if opaque.is_some() {
         return;
     }
+    let comps = &scope.comps;
     if let Some(sargs) = self_call_args(node) {
-        let mut call_descents: std::collections::BTreeMap<usize, DescentKind> = Default::default();
+        let mut call_descents: std::collections::BTreeMap<MeasureKey, DescentKind> = Default::default();
+        // A measured descent of SEVERAL positions: every component of a measured callee's result
+        // sits at the caller position the measure is taken at (`self c d r1 r2` after `case
+        // rem(a, b, c, d) of (r1, r2)`, the measure `norm(c, d)`).
+        let mut groups: std::collections::BTreeMap<(String, Vec<usize>), Vec<bool>> = Default::default();
+        for (j, a) in sargs.iter().enumerate() {
+            let Some(name) = a.get("name").and_then(|n| n.as_str()).filter(|_| a.get("kind").and_then(|k| k.as_str()) == Some("var")) else { continue };
+            let Some((m, positions, k)) = scope.measured.get(name) else { continue };
+            if positions.get(*k) == Some(&j) {
+                let slot = groups.entry((m.clone(), positions.clone())).or_insert_with(|| vec![false; positions.len()]);
+                slot[*k] = true;
+            }
+        }
+        for ((m, positions), seen) in groups {
+            if seen.iter().all(|s| *s) {
+                call_descents.insert(MeasureKey { positions, by: Some(m) }, DescentKind::Measured);
+            }
+        }
+        for (j, a) in sargs.iter().enumerate() {
+            // A measured descent of ONE position, the callee applied directly: `self(…, f(…, p, …), …)`
+            // with `M(result) < M(p)` certified on `f` and `p` the parameter at this position.
+            if let Some((target, cargs)) = fn_ref_spine(a) {
+                if let Some((m, positions, 1)) = measured_application(&target, &cargs, ctx, shadowed, &scope.preds) {
+                    if positions == [j] {
+                        call_descents.insert(MeasureKey { positions, by: Some(m) }, DescentKind::Measured);
+                    }
+                }
+            }
+        }
         for (j, a) in sargs.iter().enumerate() {
             // A descent must track the PARAMETER at this position — a shadowing `let`/pattern
             // binding of the same name is a different value (`let xs = cons(1, xs) in
@@ -419,13 +586,13 @@ fn walk(
                 continue;
             }
             if tail_descent(a).is_some_and(|(p, _)| p == *pj) {
-                call_descents.insert(j, DescentKind::Structural);
+                call_descents.insert(MeasureKey::at(j), DescentKind::Structural);
                 continue;
             }
             // A component of a shrinking callee's result, where the guards say the input is long enough.
             if let Some((q, k)) = a.get("name").and_then(|n| n.as_str()).and_then(|n| comps.get(n)) {
                 if q == pj && facts.iter().any(|g| matches!(g, Guard::MinLength(v, m) if v == q && *m >= *k)) {
-                    call_descents.insert(j, DescentKind::Structural);
+                    call_descents.insert(MeasureKey::at(j), DescentKind::Structural);
                     continue;
                 }
             }
@@ -446,7 +613,7 @@ fn walk(
             // The floor the induction principle may use: the guard's, else the nat type's 0.
             let induction_floor = |f: Option<i64>| f.or(type_floor).unwrap_or(0);
             if sub_descent(a).is_some_and(|(p, c)| p == *pj && (guard_floor(pj).is_some() || (c == 1 && nat_nonzero))) {
-                call_descents.insert(j, DescentKind::Numeric { floor: induction_floor(guard_floor(pj)) });
+                call_descents.insert(MeasureKey::at(j), DescentKind::Numeric { floor: induction_floor(guard_floor(pj)) });
                 continue;
             }
             // Halving-shaped descent: `(p + k) div c < p` must hold at the floor (then everywhere above
@@ -459,7 +626,7 @@ fn walk(
                     };
                     if let (Some(f), Some(c)) = (positive_floor, c) {
                         if (f.saturating_add(k)).div_euclid(c) < f {
-                            call_descents.insert(j, DescentKind::Numeric { floor: induction_floor(guard_floor(pj)) });
+                            call_descents.insert(MeasureKey::at(j), DescentKind::Numeric { floor: induction_floor(guard_floor(pj)) });
                             continue;
                         }
                     }
@@ -467,12 +634,12 @@ fn walk(
             }
             // Euclid's step: the slot receives a remainder modulo its own parameter, `< p` for `p ≥ 1`.
             if mod_descent(a).is_some_and(|p| p == *pj && positive_floor.is_some_and(|f| f >= 1)) {
-                call_descents.insert(j, DescentKind::Numeric { floor: induction_floor(guard_floor(pj)) });
+                call_descents.insert(MeasureKey::at(j), DescentKind::Numeric { floor: induction_floor(guard_floor(pj)) });
             }
         }
         descents.push(call_descents);
         for a in &sargs {
-            walk(a, ctx, shadowed, facts, comps, descents, opaque);
+            walk(a, ctx, shadowed, facts, scope, descents, opaque);
         }
         return;
     }
@@ -485,7 +652,7 @@ fn walk(
                 match ctx.callee.and_then(|c| c.terminates(&target)) {
                     Some(true) => {
                         for a in &cargs {
-                            walk(a, ctx, shadowed, facts, comps, descents, opaque);
+                            walk(a, ctx, shadowed, facts, scope, descents, opaque);
                         }
                         return;
                     }
@@ -516,37 +683,52 @@ fn walk(
         // A `let` rebinding a parameter name SHADOWS it for the rest of the body.
         Some("let") => {
             if let Some(v) = node.get("value") {
-                walk(v, ctx, shadowed, facts, comps, descents, opaque);
+                walk(v, ctx, shadowed, facts, scope, descents, opaque);
             }
             let mut inner = shadowed.clone();
+            let mut inner_scope = scope.clone();
             if let Some(n) = node.get("name").and_then(|n| n.as_str()) {
                 if ctx.params.contains(&n.to_string()) {
                     inner.insert(n.to_string());
                 }
+                let now: std::collections::BTreeSet<String> = [n.to_string()].into();
+                inner_scope.preds = drop_shadowed_preds(&scope.preds, &now);
+                inner_scope.measured.remove(n);
             }
             if let Some(b) = node.get("body") {
-                walk(b, ctx, &inner, facts, comps, descents, opaque);
+                walk(b, ctx, &inner, facts, &inner_scope, descents, opaque);
             }
         }
         // A nested lambda's parameters shadow too.
         Some("lambda") => {
             let mut inner = shadowed.clone();
-            for p in lambda_params(node).unwrap_or_default() {
-                if ctx.params.contains(&p) {
-                    inner.insert(p);
+            let mut inner_scope = scope.clone();
+            let ps = lambda_params(node).unwrap_or_default();
+            for p in &ps {
+                if ctx.params.contains(p) {
+                    inner.insert(p.clone());
                 }
+                inner_scope.measured.remove(p);
             }
+            inner_scope.preds = drop_shadowed_preds(&scope.preds, &ps.iter().cloned().collect());
             if let Some(b) = node.get("body") {
-                walk(b, ctx, &inner, facts, comps, descents, opaque);
+                walk(b, ctx, &inner, facts, &inner_scope, descents, opaque);
             }
         }
         // A `case` over a boolean guard: each arm walks under the facts its pattern establishes
         // (and under any names its pattern binds, which shadow).
         Some("case") => {
             if let Some(scrutinee) = node.get("scrutinee") {
-                walk(scrutinee, ctx, shadowed, facts, comps, descents, opaque);
+                walk(scrutinee, ctx, shadowed, facts, scope, descents, opaque);
             }
             let (true_facts, false_facts) = node.get("scrutinee").map(arm_facts).unwrap_or_default();
+            // `case f(args) of (r1, r2) => …` over a MEASURED callee (linked view): r1 and r2 are the
+            // components its certified post measures smaller than the measure of the caller's
+            // parameters at `positions` — when f's preconditions hold here.
+            let measured_of: Option<(String, Vec<usize>, usize)> = node
+                .get("scrutinee")
+                .and_then(fn_ref_spine)
+                .and_then(|(target, cargs)| measured_application(&target, &cargs, ctx, shadowed, &scope.preds));
             // `case callee(p) of (a, b) => …` over a shrinking callee (linked view): a and b are
             // components of p, shorter than it once the guards say length(p) ≥ k.
             let shrink_of: Option<(String, u32)> = node.get("scrutinee").and_then(fn_ref_spine).and_then(|(target, cargs)| {
@@ -563,27 +745,62 @@ fn walk(
             });
             for arm in node.get("arms").and_then(|a| a.as_array()).into_iter().flatten() {
                 let mut arm_facts_ctx = facts.to_vec();
+                let mut inner_scope = scope.clone();
                 match arm.pointer("/pattern/value/value").and_then(|b| b.as_bool()) {
-                    Some(true) => arm_facts_ctx.extend(true_facts.iter().cloned()),
-                    Some(false) => arm_facts_ctx.extend(false_facts.iter().cloned()),
+                    Some(true) => {
+                        arm_facts_ctx.extend(true_facts.iter().cloned());
+                        if let Some(s) = node.get("scrutinee") {
+                            inner_scope.preds.push(s.clone());
+                        }
+                    }
+                    Some(false) => {
+                        arm_facts_ctx.extend(false_facts.iter().cloned());
+                        if let Some(s) = node.get("scrutinee") {
+                            inner_scope.preds.push(serde_json::json!({ "kind": "app", "op": "not", "args": [s.clone()] }));
+                        }
+                    }
                     None => {}
                 }
                 let mut binds = std::collections::BTreeSet::new();
                 if let Some(p) = arm.get("pattern") {
                     pattern_binds(p, &mut binds);
                 }
-                let mut inner_comps = comps.clone();
+                // Names a pattern binds are new values: no fact or component about an older same-named
+                // binding survives into the arm.
+                inner_scope.preds = drop_shadowed_preds(&inner_scope.preds, &binds);
+                for n in &binds {
+                    inner_scope.measured.remove(n);
+                    inner_scope.comps.remove(n);
+                }
                 if let (Some((q, k)), Some(p)) = (&shrink_of, arm.get("pattern")) {
                     if p.get("kind").and_then(|x| x.as_str()) == Some("tuple") {
                         for n in &binds {
-                            inner_comps.insert(n.clone(), (q.clone(), *k));
+                            inner_scope.comps.insert(n.clone(), (q.clone(), *k));
+                        }
+                    }
+                }
+                // The components of a measured callee's result, in pattern order: `(r1, r2)` binds
+                // component 0 and 1 of a pair post; a single bind takes the whole (scalar) result.
+                if let (Some((m, positions, components)), Some(p)) = (&measured_of, arm.get("pattern")) {
+                    let elems: Vec<&J> = match p.get("kind").and_then(|x| x.as_str()) {
+                        Some("tuple") => p.get("elems").and_then(|e| e.as_array()).map(|a| a.iter().collect()).unwrap_or_default(),
+                        Some("bind") => vec![p],
+                        _ => vec![],
+                    };
+                    if elems.len() == *components && elems.len() == positions.len() {
+                        for (k, e) in elems.iter().enumerate() {
+                            if e.get("kind").and_then(|x| x.as_str()) == Some("bind") {
+                                if let Some(n) = e.get("name").and_then(|n| n.as_str()) {
+                                    inner_scope.measured.insert(n.to_string(), (m.clone(), positions.clone(), k));
+                                }
+                            }
                         }
                     }
                 }
                 let mut inner = shadowed.clone();
                 inner.extend(binds.into_iter().filter(|n| ctx.params.contains(n)));
                 if let Some(body) = arm.get("body") {
-                    walk(body, ctx, &inner, &arm_facts_ctx, &inner_comps, descents, opaque);
+                    walk(body, ctx, &inner, &arm_facts_ctx, &inner_scope, descents, opaque);
                 }
             }
         }
@@ -594,10 +811,10 @@ fn walk(
                     if k == "pattern" {
                         continue; // patterns bind, they don't compute
                     }
-                    walk(v, ctx, shadowed, facts, comps, descents, opaque);
+                    walk(v, ctx, shadowed, facts, scope, descents, opaque);
                 }
             }
-            J::Array(items) => items.iter().for_each(|v| walk(v, ctx, shadowed, facts, comps, descents, opaque)),
+            J::Array(items) => items.iter().for_each(|v| walk(v, ctx, shadowed, facts, scope, descents, opaque)),
             _ => {}
         },
     }
@@ -669,36 +886,58 @@ pub fn analyze_termination_linked(
 /// order well-founded). `None` for a non-recursive body, a structural (list) recursion, or an
 /// unprovable one.
 pub fn induction_measure(body: &J, nat_positions: &std::collections::BTreeSet<usize>) -> Option<Measure> {
-    let common = descent_analysis(body, nat_positions, None).ok()??;
-    // A numeric position first (the historical principle), else a position every call descends
-    // structurally; a position mixing the two kinds across calls is no single measure.
-    let numeric = common.iter().find_map(|(position, kinds)| {
+    induction_measure_linked(body, nat_positions, None)
+}
+
+/// [`induction_measure`] over a LINKED view, which adds the measured descent — a callee of several
+/// positions decreasing by another callee's certified post (`Measure::by_callee`). A numeric
+/// position first (the historical principle), else a position every call descends structurally,
+/// else the measured one; a position mixing the kinds across calls is no single measure.
+pub fn induction_measure_linked(
+    body: &J,
+    nat_positions: &std::collections::BTreeSet<usize>,
+    callee: Option<CalleeTerminates<'_>>,
+) -> Option<Measure> {
+    let common = descent_analysis(body, nat_positions, callee).ok()??;
+    let numeric = common.iter().filter(|(key, _)| key.by.is_none()).find_map(|(key, kinds)| {
         let floors: Option<Vec<i64>> = kinds
             .iter()
             .map(|k| match k {
                 DescentKind::Numeric { floor } => Some(*floor),
-                DescentKind::Structural => None,
+                DescentKind::Structural | DescentKind::Measured => None,
             })
             .collect();
-        floors.and_then(|fs| fs.into_iter().min()).map(|floor| Measure { position: *position, floor, structural: false })
+        floors.and_then(|fs| fs.into_iter().min()).map(|floor| Measure { position: key.positions[0], floor, structural: false, by_callee: None })
     });
-    numeric.or_else(|| {
-        common
-            .iter()
-            .find(|(_, kinds)| !kinds.is_empty() && kinds.iter().all(|k| matches!(k, DescentKind::Structural)))
-            .map(|(position, _)| Measure { position: *position, floor: 0, structural: true })
-    })
+    numeric
+        .or_else(|| {
+            common
+                .iter()
+                .find(|(key, kinds)| key.by.is_none() && !kinds.is_empty() && kinds.iter().all(|k| matches!(k, DescentKind::Structural)))
+                .map(|(key, _)| Measure { position: key.positions[0], floor: 0, structural: true, by_callee: None })
+        })
+        .or_else(|| {
+            common
+                .iter()
+                .find(|(key, kinds)| key.by.is_some() && !kinds.is_empty() && kinds.iter().all(|k| matches!(k, DescentKind::Measured)))
+                .map(|(key, _)| Measure {
+                    position: key.positions[0],
+                    floor: 0,
+                    structural: false,
+                    by_callee: Some(MeasuredBy { target: key.by.clone().unwrap_or_default(), positions: key.positions.clone() }),
+                })
+        })
 }
 
 /// Shared core: `Ok(None)` for a non-recursive body, `Ok(Some(common))` with, per commonly-descending
-/// position, the descent kinds the self-calls establish there; `Err(reason)` when not provably
-/// well-founded.
+/// measure key (a position, or several under a measure callee), the descent kinds the self-calls
+/// establish there; `Err(reason)` when not provably well-founded.
 #[allow(clippy::type_complexity)]
 fn descent_analysis(
     body: &J,
     nat_positions: &std::collections::BTreeSet<usize>,
     callee: Option<CalleeTerminates<'_>>,
-) -> Result<Option<std::collections::BTreeMap<usize, Vec<DescentKind>>>, String> {
+) -> Result<Option<std::collections::BTreeMap<MeasureKey, Vec<DescentKind>>>, String> {
     let Some(params) = lambda_params(body) else {
         return Err("body is not a `lambda`".into());
     };
@@ -706,10 +945,10 @@ fn descent_analysis(
         return Err("lambda has no body".into());
     };
 
-    let mut descents: Vec<std::collections::BTreeMap<usize, DescentKind>> = Vec::new();
+    let mut descents: Vec<std::collections::BTreeMap<MeasureKey, DescentKind>> = Vec::new();
     let mut opaque: Option<String> = None;
     let ctx = Ctx { params: &params, nat_positions, callee };
-    walk(inner, &ctx, &std::collections::BTreeSet::new(), &[], &Components::new(), &mut descents, &mut opaque);
+    walk(inner, &ctx, &std::collections::BTreeSet::new(), &[], &Scope::default(), &mut descents, &mut opaque);
 
     if let Some(why) = opaque {
         return Err(why);
@@ -718,28 +957,30 @@ fn descent_analysis(
         // Non-recursive over the first-order fragment: every builtin halts on finite input.
         return Ok(None);
     }
-    // Recursive: some ONE argument position must provably descend in EVERY self-call — a single
-    // well-founded measure. (Any fixed position works, not just the first: `nth(i, xs)` descends
-    // position 2; `range_from(a, n)` descends its guarded nat at position 2.)
-    let positions: std::collections::BTreeSet<usize> = descents
+    // Recursive: some ONE measure must provably descend in EVERY self-call — a single well-founded
+    // measure. (Any fixed position works, not just the first: `nth(i, xs)` descends position 2;
+    // `range_from(a, n)` descends its guarded nat at position 2; the Gaussian `gcd` descends
+    // positions 2 and 3 together under the norm.)
+    let keys: std::collections::BTreeSet<MeasureKey> = descents
         .iter()
         .skip(1)
-        .fold(descents[0].keys().cloned().collect(), |acc: std::collections::BTreeSet<usize>, s| {
+        .fold(descents[0].keys().cloned().collect(), |acc: std::collections::BTreeSet<MeasureKey>, s| {
             acc.intersection(&s.keys().cloned().collect()).cloned().collect()
         });
-    if positions.is_empty() {
+    if keys.is_empty() {
         return Err(
             "no single argument position provably descends in every self-call (structural `tail`; \
              a guarded constant decrement — `gt(p, lit)`-guarded `sub(p, c)`, or a nat's \
              non-zero-guarded `sub(p, 1)`; a halving `div(p, c)` / `div(add(p, k), c)` under a floor \
-             it descends from, the divisor a literal ≥ 2 or a variable guarded ≥ 2; or Euclid's \
-             `mod(_, p)` under a floor ≥ 1)".into(),
+             it descends from, the divisor a literal ≥ 2 or a variable guarded ≥ 2; Euclid's \
+             `mod(_, p)` under a floor ≥ 1; or, over --records, the components of a callee's result \
+             its certified post measures smaller than the same measure of the parameters)".into(),
         );
     }
     Ok(Some(
-        positions
+        keys
             .into_iter()
-            .map(|j| (j, descents.iter().map(|d| d[&j]).collect::<Vec<_>>()))
+            .map(|k| (k.clone(), descents.iter().map(|d| d[&k]).collect::<Vec<_>>()))
             .collect(),
     ))
 }
@@ -921,6 +1162,75 @@ mod tests {
         assert!(matches!(analyze_termination_linked(&unguarded, &Default::default(), Some(&SplitView)), TerminationOutcome::Unknown(_)));
         // Without the view the callee is opaque.
         assert!(matches!(analyze_termination_typed(&guarded, &Default::default()), TerminationOutcome::Unknown(_)));
+    }
+
+    /// A view with one measured callee (the Gaussian remainder's shape: `N(fst(result), snd(result)) <
+    /// N(c, d)` under the pre `c != 0 || d != 0`), whose entailment answer is fixed.
+    struct MeasuredView {
+        rem: String,
+        norm: String,
+        pre_holds: bool,
+    }
+    impl LinkedTermination for MeasuredView {
+        fn terminates(&self, _: &str) -> Option<bool> {
+            Some(true)
+        }
+        fn components_shrink_by(&self, _: &str) -> Option<u32> {
+            None
+        }
+        fn measured_post(&self, target: &str) -> Option<MeasuredPost> {
+            (target == self.rem).then(|| MeasuredPost {
+                measure: self.norm.clone(),
+                arg_positions: vec![2, 3],
+                components: 2,
+                params: ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect(),
+                pres: vec![app("or", vec![app("neq", vec![v("c"), lit_i(0)]), app("neq", vec![v("d"), lit_i(0)])])],
+            })
+        }
+        fn entails(&self, facts: &[J], goal: &J) -> bool {
+            // The caller passes the branch facts in force and the pre at the call's arguments.
+            assert!(!facts.is_empty(), "the false arm's fact must be in force");
+            assert_eq!(goal.get("op").and_then(|o| o.as_str()), Some("or"));
+            self.pre_holds
+        }
+    }
+
+    /// The Gaussian `gcd`: \a b c d -> case and(eq(c,0), eq(d,0)) of true -> (a, b) | false -> case
+    /// rem(a, b, c, d) of (r1, r2) -> self(c, d, <first>, <second>).
+    fn gaussian_gcd(rem: &str, first: &str, second: &str) -> J {
+        let callee = json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": rem } });
+        let rem_app = json!({ "kind": "app", "fn": callee, "args": [v("a"), v("b"), v("c"), v("d")] });
+        let rec = json!({ "kind": "case", "scrutinee": rem_app, "arms": [{
+            "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "r1" }, { "kind": "bind", "name": "r2" }] },
+            "body": json!({ "kind": "app", "op": "self", "args": [v("c"), v("d"), v(first), v(second)] }) }] });
+        lambda(&["a", "b", "c", "d"], json!({ "kind": "case",
+            "scrutinee": app("and", vec![app("eq", vec![v("c"), lit_i(0)]), app("eq", vec![v("d"), lit_i(0)])]),
+            "arms": [
+                { "pattern": lit_b(true), "body": { "kind": "tuple", "elems": [v("a"), v("b")] } },
+                { "pattern": lit_b(false), "body": rec }] }))
+    }
+
+    #[test]
+    fn a_callees_measured_post_is_a_descent_of_several_positions() {
+        let rem = format!("fn_{}", "4e".repeat(32));
+        let norm = format!("fn_{}", "83".repeat(32));
+        let view = MeasuredView { rem: rem.clone(), norm: norm.clone(), pre_holds: true };
+        let body = gaussian_gcd(&rem, "r1", "r2");
+        assert_eq!(analyze_termination_linked(&body, &Default::default(), Some(&view)), TerminationOutcome::Always);
+        let m = induction_measure_linked(&body, &Default::default(), Some(&view)).expect("a measure");
+        assert_eq!(m.by_callee, Some(MeasuredBy { target: norm, positions: vec![2, 3] }));
+        assert_eq!(m.position, 2);
+        // The components must land at the positions the measure is taken at, in order: swapped,
+        // the next activation's norm is of (r2, r1) — which the post says nothing about.
+        let swapped = gaussian_gcd(&rem, "r2", "r1");
+        assert!(matches!(analyze_termination_linked(&swapped, &Default::default(), Some(&view)), TerminationOutcome::Unknown(_)));
+        // The post is certified under the callee's precondition: not discharged, no descent.
+        let undischarged = MeasuredView { rem: rem.clone(), norm: "fn_x".into(), pre_holds: false };
+        assert!(matches!(analyze_termination_linked(&body, &Default::default(), Some(&undischarged)), TerminationOutcome::Unknown(_)));
+        // A view without the measured vocabulary (or no view) leaves the recursion unproven.
+        assert!(matches!(analyze_termination_linked(&body, &Default::default(), Some(&SplitView)), TerminationOutcome::Unknown(_)));
+        assert!(matches!(analyze_termination_typed(&body, &Default::default()), TerminationOutcome::Unknown(_)));
+        assert!(induction_measure(&body, &Default::default()).is_none());
     }
 
     #[test]
