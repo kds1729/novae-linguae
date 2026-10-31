@@ -26,15 +26,18 @@
   },
   "properties_generative": [
    "value_preserved: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
-   "idempotent: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+   "idempotent: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "cross: UNVERIFIABLE  |  generative: HELD (400 cases)"
   ],
   "properties_wide": [
    "value_preserved: CONSISTENT  |  generative: HELD (200 cases)",
-   "idempotent: CONSISTENT  |  generative: HELD (200 cases)"
+   "idempotent: CONSISTENT  |  generative: HELD (200 cases)",
+   "cross: UNVERIFIABLE  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "value_preserved: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
-   "idempotent: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]"
+   "value_preserved: PROVED       holds for all inputs (unsat negation)",
+   "idempotent: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
+   "cross: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)"
   ]
  },
  {
@@ -154,7 +157,7 @@
    "refinement:post[0]": "",
    "refinement:post[1]": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies `fn_181a9d7fcdf17bcfb7ad913557c6ad2397dec2a1aed6cf374a50f6244f930185` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "declared `O(log n)`, not established: applies `fn_5b5c272a5b805c3d472991b916f6a2c9e90bb2ef9d1b32f527183874d3e308c9` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
    "commutative: CONSISTENT  |  generative: HELD (400 cases)"
@@ -187,7 +190,7 @@
    "refinement:post[0]": "",
    "refinement:post[1]": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies `fn_181a9d7fcdf17bcfb7ad913557c6ad2397dec2a1aed6cf374a50f6244f930185` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "declared `O(log n)`, not established: applies `fn_5b5c272a5b805c3d472991b916f6a2c9e90bb2ef9d1b32f527183874d3e308c9` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
    "self_difference_is_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -220,7 +223,7 @@
    "refinement:post[0]": "",
    "refinement:post[1]": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies `fn_181a9d7fcdf17bcfb7ad913557c6ad2397dec2a1aed6cf374a50f6244f930185` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "declared `O(log n)`, not established: applies `fn_5b5c272a5b805c3d472991b916f6a2c9e90bb2ef9d1b32f527183874d3e308c9` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
    "commutative: CONSISTENT  |  generative: HELD (400 cases)",
@@ -244,7 +247,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:refinements": "N/A",
+   "refinement:post[0]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -252,7 +255,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int, int, int) -> bool",
    "effects": "effects [] \u2286 declared",
-   "refinement:refinements": "",
+   "refinement:post[0]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(1)` (inferred O(1))"
   },
@@ -356,7 +359,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_509628a8b1ba0703f99e1601d9dfdf801025b175667e16fc32db224d82a307bc` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_43367cd17bdb289e2ff43cf555952b75bcb78e2f2995b0c207b280eedf7cad29` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
    "add_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -387,7 +390,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_73d608ba92b14f5e5e44e07e4f10331e22c2a669693f2e3bfeb6dc046db32916` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_53a16a1d5b3186d28fc5b2f1543d40f17c99cabb87c48930c8fd8099078763a6` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
    "mul_one: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -449,7 +452,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_509628a8b1ba0703f99e1601d9dfdf801025b175667e16fc32db224d82a307bc` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_43367cd17bdb289e2ff43cf555952b75bcb78e2f2995b0c207b280eedf7cad29` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
    "associative: CONSISTENT  |  generative: HELD (400 cases)"

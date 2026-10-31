@@ -75,7 +75,7 @@
    }
   }
  ],
- "hash": "fn_6537ebee97ad60532758b11e637922735995751eaf1de7349c108c16c9670911",
+ "hash": "fn_abedd8edbe0464f769e22ea0e72b715ea8063f88a28d9ee7d99eaa92d3ad0e1e",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -197,7 +197,55 @@
   "capabilities": [],
   "complexity": "O(1)",
   "effects": [],
-  "refinements": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "result"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "d"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "c"
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "post"
+   }
+  ],
   "terminates": "always",
   "type": {
    "kind": "fn",

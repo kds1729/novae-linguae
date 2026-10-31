@@ -197,9 +197,13 @@ def main():
           # The two facts everything above rests on, as laws: the value is preserved (cross-
           # multiplication) and the result is in lowest terms. Coprimality is the module's headline
           # question — it follows from gcd's greatest-divisor law through the divisibility rung,
-          # IF the prover can carry the quotients.
+          # IF the prover can carry the quotients. Round 6: `cross` — equal values have CROSS-EQUAL
+          # normal forms (p·s = r·q) — the first half of uniqueness, from value_preserved at both
+          # applications by cancellation (b·d ≠ 0); the second half (p = r ∧ q = s from p·s = r·q and
+          # both in lowest terms) is Euclid's lemma — measured to need a STAGED query, see README.
           props=[("value_preserved", "forall n d. d == 0 || fst(self(n, d)) * d == n * snd(self(n, d))"),
-                 ("idempotent", "forall n d. d == 0 || self(fst(self(n, d)), snd(self(n, d))) == self(n, d)")],
+                 ("idempotent", "forall n d. d == 0 || self(fst(self(n, d)), snd(self(n, d))) == self(n, d)"),
+                 ("cross", "forall n d m e. d == 0 || e == 0 || n * e != m * d || fst(self(n, d)) * snd(self(m, e)) == fst(self(m, e)) * snd(self(n, d))")],
           hints=["normalize_fraction", "lowest_terms"], complexity="O(log n)")
     gauntlet("rat_normalize", prove)
 
@@ -263,9 +267,12 @@ def main():
           hints=["multiply_fractions"], complexity="O(log n)")
     gauntlet("rat_mul", prove)
 
-    # 5. rat_eq / rat_lt — decided by cross-multiplication, no normalization needed.
+    # 5. rat_eq / rat_lt — decided by cross-multiplication, no normalization needed. Round 6: the
+    # decision as a POST, so a caller's proof reads `a·d = c·b` from the contract (the checker laws
+    # below saw rat_eq only as an opaque callee, or through the callee-induction rung's unfolding).
     build("rat_eq", r"\a b c d -> eq (mul a d) (mul c b)", FN([INT, INT, INT, INT], BOOL),
           [ex((1, 2, 2, 4), blit(True)), ex((1, 2, 1, 3), blit(False)), ex((-3, 6, 1, -2), blit(True))],
+          refinements=[("post", "result == (a * d == c * b)")],
           props=[("reflexive", "forall a b. self(a, b, a, b) == true"),
                  ("symmetric", "forall a b c d. self(a, b, c, d) == self(c, d, a, b)")],
           tags=["predicate/check"], hints=["fractions_equal"], complexity="O(1)")
