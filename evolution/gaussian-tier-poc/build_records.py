@@ -334,13 +334,18 @@ def main():
     gauntlet("gi_euclid_holds", prove)
 
     # 9. Euclid's algorithm on Gaussian integers: descends by gi_rem, whose norm is smaller — a
-    # measure the termination checker must read off a callee's post, and a NONLINEAR one (a² + b²).
+    # measure the termination checker reads off a CALLEE's post (round 4: the measured descent —
+    # N(c, d) over positions 2 and 3, smaller by gi_rem's certified `N(r) < N(w)` under its pre,
+    # which the false arm of the guard discharges), and a NONLINEAR one (a² + b²). `right_zero`
+    # is an unfolding; `nonzero` is a genuine strong induction on N(c, d): the result is nonzero
+    # unless both inputs are — the hypothesis at (c, d, rem(z, w)) under N(rem) < N(w).
     build("gi_gcd",
           r"\a b c d -> case and (eq c 0) (eq d 0) of { true => (a, b); false => case {gi_rem} a b c d of { (r1, r2) => self c d r1 r2 } }",
           FN([INT, INT, INT, INT], GI),
           [ex((4, 2, 2, 0), gi(*gcd(4, 2, 2, 0))), ex((7, 3, 2, 1), gi(*gcd(7, 3, 2, 1))), ex((5, 0, 0, 0), gi(5, 0)),
            ex((6, 8, 4, -2), gi(*gcd(6, 8, 4, -2))), ex((0, 0, 3, 1), gi(3, 1))],
-          props=[("right_zero", "forall a b. fst(self(a, b, 0, 0)) == a && snd(self(a, b, 0, 0)) == b")],
+          props=[("right_zero", "forall a b. fst(self(a, b, 0, 0)) == a && snd(self(a, b, 0, 0)) == b"),
+                 ("nonzero", "forall a b c d. (a == 0 && b == 0 && c == 0 && d == 0) || fst(self(a, b, c, d)) != 0 || snd(self(a, b, c, d)) != 0")],
           hints=["gaussian_gcd", "euclid_gaussian"], complexity="O(log n)")
     gauntlet("gi_gcd", prove)
 

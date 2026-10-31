@@ -163,14 +163,13 @@
   "properties_generative": [
    "commutative: CONSISTENT  |  generative: HELD (400 cases)",
    "one_identity: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
-   "i_squared_is_minus_one: CONSISTENT  |  generative: UNGENERATABLE (not a forall \u2014 no domain to sample)",
+   "i_squared_is_minus_one: CONSISTENT  |  generative: EXHAUSTIVE (1 cases \u2014 bounded domain, no counterexample)",
    "zero_annihilates: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "associative: UNVERIFIABLE  |  generative: HELD (400 cases)"
   ],
   "properties_wide": [
    "commutative: CONSISTENT  |  generative: HELD (200 cases)",
    "one_identity: CONSISTENT  |  generative: HELD (200 cases)",
-   "i_squared_is_minus_one: CONSISTENT  |  generative: UNGENERATABLE (not a forall \u2014 no domain to sample)",
    "zero_annihilates: CONSISTENT  |  generative: HELD (200 cases)",
    "associative: UNVERIFIABLE  |  generative: HELD (129 cases; 71 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at a = 20406979942701, b = -298270703168, c = 1871720281, d = 1, e = -508375471504\u2026)"
   ],
@@ -306,11 +305,10 @@
   },
   "properties_generative": [
    "units_lie_on_an_axis: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
-   "the_four_units: CONSISTENT  |  generative: UNGENERATABLE (not a forall \u2014 no domain to sample)"
+   "the_four_units: CONSISTENT  |  generative: EXHAUSTIVE (1 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "units_lie_on_an_axis: CONSISTENT  |  generative: HELD (200 cases)",
-   "the_four_units: CONSISTENT  |  generative: UNGENERATABLE (not a forall \u2014 no domain to sample)"
+   "units_lie_on_an_axis: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "units_lie_on_an_axis: PROVED       holds for all inputs (unsat negation)",
@@ -462,7 +460,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
-   "termination": "UNVERIFIABLE",
+   "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
   "check_details": {
@@ -470,17 +468,20 @@
    "typecheck": "(int, int, int, int) -> (int, int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
-   "termination": "declared `always`, not proven: no single argument position provably descends in every self-call (structural `tail`; a guarded constant decrement \u2014 `gt(p, lit)`-guarded `sub(p, c)`, or a nat's non-zero-guarded `sub(p, 1)`; a halving `div(p, ",
+   "termination": "provably always-terminates",
    "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_4ed7be4134ced1fa06c4171138d76548af271221fe7e6da2fb61d878a40e4e00` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
-   "right_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+   "right_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "nonzero: CONSISTENT  |  generative: HELD (400 cases)"
   ],
   "properties_wide": [
-   "right_zero: CONSISTENT  |  generative: HELD (200 cases)"
+   "right_zero: CONSISTENT  |  generative: HELD (200 cases)",
+   "nonzero: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "right_zero: UNSUPPORTED  recursive body \u2014 structural induction: unsupported expression kind `tuple` (out of fragment); numeric induction: the body's recursion has no provable numeric measure (structural list recursion, or termination not established)"
+   "right_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
+   "nonzero: PROVED       by numeric induction on `fn_83282609\u2026(c, d)` (strong induction over the measure; unsat)"
   ]
  }
 ]

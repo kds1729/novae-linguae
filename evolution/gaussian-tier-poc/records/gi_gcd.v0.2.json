@@ -168,7 +168,7 @@
    }
   }
  ],
- "hash": "fn_6146ec75733d0fae76381b3f0bbb9201a92448e871d13d261034ee7fa395eaf5",
+ "hash": "fn_b588aa048729833915587ad136608a9151a622b8b0051f1ff2cfeff622f06d1c",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -271,6 +271,180 @@
     ]
    },
    "name": "right_zero"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "a"
+                },
+                {
+                 "kind": "lit",
+                 "value": 0
+                }
+               ],
+               "kind": "app",
+               "op": "eq"
+              },
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "b"
+                },
+                {
+                 "kind": "lit",
+                 "value": 0
+                }
+               ],
+               "kind": "app",
+               "op": "eq"
+              }
+             ],
+             "kind": "app",
+             "op": "and"
+            },
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "c"
+              },
+              {
+               "kind": "lit",
+               "value": 0
+              }
+             ],
+             "kind": "app",
+             "op": "eq"
+            }
+           ],
+           "kind": "app",
+           "op": "and"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "d"
+            },
+            {
+             "kind": "lit",
+             "value": 0
+            }
+           ],
+           "kind": "app",
+           "op": "eq"
+          }
+         ],
+         "kind": "app",
+         "op": "and"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "a"
+              },
+              {
+               "kind": "var",
+               "name": "b"
+              },
+              {
+               "kind": "var",
+               "name": "c"
+              },
+              {
+               "kind": "var",
+               "name": "d"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            }
+           ],
+           "kind": "app",
+           "op": "fst"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "neq"
+        }
+       ],
+       "kind": "app",
+       "op": "or"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            },
+            {
+             "kind": "var",
+             "name": "c"
+            },
+            {
+             "kind": "var",
+             "name": "d"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "snd"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "neq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b",
+     "c",
+     "d"
+    ]
+   },
+   "name": "nonzero"
   }
  ],
  "schema_version": "0.2.0",
