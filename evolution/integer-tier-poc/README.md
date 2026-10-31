@@ -8,10 +8,11 @@
   function's own facts in its inductions, the witness rung and `case` in predicates
   (`tooling/validator`); the records published to the commons with signed certifications. The 43
   records and their builder live here (`records/`, `build_records.py`) — reproducible with no
-  credential. Final tally (twelfth note): 43/43 certify, termination SOUND on all 43, complexity
+  credential. Final tally (thirteenth note): 43/43 certify, termination SOUND on all 43, complexity
   SOUND on the 41 that declare a bound (the NTT chain at `O(n log n)`, with no fuel parameter),
-  every declared contract SOUND (23 — including the **modular inverse's and the Chinese
-  remainder's `Maybe`-valued contracts**) and 36 of 43 laws proved — `gcd`'s associativity
+  every declared contract SOUND (24 — including the **modular inverse's and the Chinese
+  remainder's `Maybe`-valued contracts** and the link `fst(ext_gcd) = gcd`) and 38 of 45 laws
+  proved — Euclid's step and Euclid's lemma with its quotient named (thirteenth note), `gcd`'s associativity
   (through the divisibility rung, from the greatest-divisor law — eleventh follow-up), binomial
   symmetry and Pascal's identity on the Pascal-rule record (twelfth note), `lcm`'s commutativity
   and its (guarded) multiple-of-both through `gcd`'s certified contract, `ext_gcd`'s Bézout
@@ -20,7 +21,7 @@
   inverse and CRT checkers on their callees' domains (from the contracts) — and all 43 held over
   the bounded domain and across magnitudes (the generative checker now says what it skips).
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-10-17, last updated 2026-10-29
+- **Dates:** first published 2026-10-17, last updated 2026-10-31 (thirteenth note)
 - **Scope:** `tooling/validator` (`interp.rs` arithmetic + comparison + recursion depth,
   `proptest.rs`, `eval.rs`, `prove.rs`, `induct.rs`, `terminate.rs`, `complexity.rs`, `main.rs`),
   `spec/evaluation.md`; read against `spec/surface-syntax.md` §2 (predicate surface) and
@@ -1193,6 +1194,37 @@ the budget.
 - The exponential record's complexity: no bound declared (N/A), and none the checker could
   verify as written — a memoized or multiplicative-by-Pascal hybrid would be the shape to
   certify, if anyone needs the additive definition fast.
+
+## Thirteenth note (2026-10-31): Euclid's step as a law, the link `fst(ext_gcd) = gcd`, and Euclid's lemma with its quotient named
+
+Round 16 (58.8 min, log `integer-build-round16.log`, nl-validator at `e7c307d` plus the measured
+descent — no validator change for this round; the records changed) authored three facts the
+rational tier's uniqueness of lowest terms was measured to need (that module's round 6):
+
+| fact | verdict |
+|---|---|
+| `gcd`'s `euclid_step` — `b ≠ 0 ⇒ gcd(a, b) = gcd(b, a mod b)` | **PROVED** by unfolding alone: it is the definition as a law, so a dependent's induction can take Euclid's step from the CONTRACT |
+| `ext_gcd`'s post `fst(result) = gcd(a, b)` (the LINK: the gcd the Bézout coefficients belong to IS the `gcd` every other record names) | **SOUND** — by numeric induction on `b`, the step through `euclid_step`; UNVERIFIABLE without that law (measured on the scratch copy first: the step `gcd(a, b) = gcd(b, a mod b)` is no consequence of the other five laws the prover could find) |
+| `ext_gcd`'s law `euclid_lemma` — `b ≠ 0 ∧ gcd(a, b) = 1 ∧ b \| a·s ⇒ s = b·(x·((a·s) div b) + y·s)` with `(x, y)` the record's own coefficients | **PROVED** from `self`'s certified contract (the Bézout identity and the link at the law's application): `s = s·(a·x + b·y) = x·(a·s) + y·b·s = b·(x·((a·s) div b) + y·s)`. Stated with the quotient EXPLICIT because the solver does not find it: the pure-mod form `s mod b = 0` from the same facts is unknown at 60 s (`~/sandbox/uniq_h1b.smt2`), this form unsat in 10 ms (`uniq_h1.smt2`) |
+
+Totals: laws **38 PROVED / 7 UNKNOWN / 0 UNSUPPORTED** (45 laws; was 36 / 7 / 0 of 43); contracts
+**24 / 0** (was 23); 43/43 certified, termination 43/43; every other verdict in `REPORT.md` is
+unchanged from round 15 (the report's diff is the two rows). The builder's `build()` now resolves
+`{name}` placeholders in predicates too, as the rational builder's does — a post may apply a callee
+by address.
+
+**Argued.** Euclid's lemma is the fact uniqueness of lowest terms rests on, and it belongs to the
+record that holds its proof's witness: `ext_gcd`, whose Bézout identity makes the lemma a linear
+step. A caller that never applies `ext_gcd` reaches it only if the prover can bring a WITNESS
+record in at the gcd terms the goal mentions and connect its first component to `gcd` — which is
+what the link post is for, and what the prover's witness-callee lookup (the rational tier's round
+7) does with it. The quotient is named in the law for the same reason the Euclidean rung names
+quotients: the solver verifies a witness it is given and does not search for one.
+
+### Still open after the thirteenth note
+
+- As after the twelfth: `prime_agree` (documented negative), the unguarded laws over all ints, the
+  multiplicative binomial's division, the exponential record's complexity.
 
 ## Open questions (as they stood before the follow-up)
 

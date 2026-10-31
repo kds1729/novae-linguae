@@ -83,7 +83,7 @@
    }
   }
  ],
- "hash": "fn_7875d6be2650b66990fd3851ac8181787c70b7dc6d445fbe1ff2cc1c440a3c2c",
+ "hash": "fn_29c0f131454ed433bfc54ffbdae2f0afc0448a41d9833351e6824ec0b787d8f6",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -95,6 +95,80 @@
   "euclid"
  ],
  "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "b"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "mod"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "euclid_step"
+  },
   {
    "expr": {
     "body": {

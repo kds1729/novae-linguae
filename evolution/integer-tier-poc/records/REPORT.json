@@ -23,6 +23,7 @@
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
+   "euclid_step: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "commutative: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "right_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
    "divides_both: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
@@ -30,6 +31,7 @@
    "associative: UNVERIFIABLE  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
+   "euclid_step: CONSISTENT  |  generative: HELD (200 cases)",
    "commutative: CONSISTENT  |  generative: HELD (200 cases)",
    "right_zero: CONSISTENT  |  generative: HELD (200 cases)",
    "divides_both: CONSISTENT  |  generative: HELD (200 cases)",
@@ -37,11 +39,12 @@
    "associative: UNVERIFIABLE  |  generative: HELD (200 cases)"
   ],
   "prove": [
+   "euclid_step: PROVED       by numeric induction on `a+b (by unfolding alone)` (strong induction over the measure; unsat)",
    "commutative: PROVED       by numeric induction on `a+b (by unfolding alone)` (strong induction over the measure; unsat)",
    "right_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
    "divides_both: PROVED       by numeric induction on `b, with self's certified contract at the instantiated points (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms]",
    "greatest_divisor: PROVED       by numeric induction on `b (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms]",
-   "associative: PROVED       by numeric induction on `b+c, with self's certified contract at the instantiated points (by unfolding alone)` (strong induction over the measure; unsat)"
+   "associative: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)"
   ]
  },
  {
@@ -91,6 +94,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -99,9 +103,19 @@
    "typecheck": "(int, int) -> (int, (int, int))",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
+   "refinement:post[1]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
-  }
+  },
+  "properties_generative": [
+   "euclid_lemma: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "euclid_lemma: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "euclid_lemma: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)"
+  ]
  },
  {
   "name": "bezout_holds",
@@ -323,7 +337,7 @@
    "double_exponent: CONSISTENT  |  generative: HELD (76 cases; 124 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
   ],
   "prove": [
-   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 159 of 161 premises verified separately, the final query over uninterpreted mod/div]"
+   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 158 of 161 premises verified separately, the final query over uninterpreted mod/div]"
   ]
  },
  {

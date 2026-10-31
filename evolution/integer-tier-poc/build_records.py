@@ -80,11 +80,16 @@ REPORT = []
 
 def build(name, surface, sig, examples, props=(), refinements=(), tags=(), hints=(), complexity=None,
           terminates="always"):
-    text = surface
-    for k, v in ADDR.items():
-        text = text.replace("{" + k + "}", v)
-    body = parse_body(text)
+    def subst(t):
+        for k, v in ADDR.items():
+            t = t.replace("{" + k + "}", v)
+        return t
+    body = parse_body(subst(surface))
     body_hash = hash_artifact(body, "body")
+    # `{name}` placeholders resolve in predicates too (round 16): a post or law may apply a callee
+    # by address — ext_gcd's `fst(result) == {gcd}(a, b)`.
+    refinements = [(k, subst(e)) for k, e in refinements]
+    props = [(n, subst(e)) for n, e in props]
     record = {
         "schema_version": "0.2.0",
         "hash": "fn_" + "0" * 64,
@@ -240,7 +245,11 @@ def main():
           [{"args": [nlit(48), nlit(18)], "result": nlit(6)}, {"args": [nlit(17), nlit(5)], "result": nlit(1)},
            {"args": [nlit(0), nlit(9)], "result": nlit(9)}, {"args": [nlit(2**61 - 1), nlit(3 * (2**61 - 1))], "result": nlit(2**61 - 1)},
            {"args": [nlit(1071), nlit(462)], "result": nlit(21)}],
-          props=[("commutative", "forall a b. self(a, b) == self(b, a)"),
+          props=[# Euclid's step — the defining equation as a law (an unfolding), so a dependent's
+                 # induction can take the step gcd(a, b) = gcd(b, a mod b) from the CONTRACT: the link
+                 # post on ext_gcd, `fst(result) == gcd(a, b)`, is UNVERIFIABLE without it (round 16).
+                 ("euclid_step", "forall a b. b == 0 || self(a, b) == self(b, a % b)"),
+                 ("commutative", "forall a b. self(a, b) == self(b, a)"),
                  ("right_zero", "forall a. self(a, 0) == a"),
                  # Guarded at (0, 0): gcd(0, 0) = 0 and `0 % 0` is an error, which the generative
                  # checker SKIPS (an erroring case is undecided, so the unguarded law read
@@ -283,7 +292,17 @@ def main():
            {"args": [ilit(7), ilit(0)], "result": tup(ilit(7), tup(ilit(1), ilit(0)))}],
           # Bézout as a contract on the tuple result: g = a·x + b·y — the prover reads the tuple as an SMT
           # datatype, and the law composes into bezout_holds through the certified contract.
-          refinements=[("post", "fst(result) == a * fst(snd(result)) + b * snd(snd(result))")],
+          # Round 16: the LINK — the first component IS gcd by address (numeric induction on b, the
+          # step through gcd's euclid_step law), so a Bézout identity found here speaks about the
+          # gcd every other record names; and EUCLID'S LEMMA with its quotient explicit, from the
+          # two posts: gcd(a, b) = 1 ∧ b | a·s ⇒ s = b·(x·((a·s) div b) + y·s). Hand-measured first
+          # (`~/sandbox/uniq_h1.smt2`, unsat in 10 ms): the solver finds no witness for the
+          # pure-mod form `s mod b = 0`, and does with the quotient named — the rational tier's
+          # uniqueness of lowest terms is what this is for.
+          refinements=[("post", "fst(result) == a * fst(snd(result)) + b * snd(snd(result))"),
+                       ("post", "fst(result) == {gcd}(a, b)")],
+          props=[("euclid_lemma", "forall a b s. b == 0 || {gcd}(a, b) != 1 || (a * s) % b != 0 || "
+                                  "s == b * (fst(snd(self(a, b))) * ((a * s) / b) + snd(snd(self(a, b))) * s)")],
           hints=["extended_euclid", "bezout"], complexity="O(log n)")
     gauntlet("ext_gcd", prove)
 
