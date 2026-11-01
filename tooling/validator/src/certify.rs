@@ -833,6 +833,10 @@ impl crate::complexity::LinkedCallees for LinkedView<'_> {
     fn components_preserved_by(&self, target: &str) -> Option<Vec<usize>> {
         self.preserve(target)
     }
+    fn measured_halving(&self, body: &J) -> Option<String> {
+        let m = crate::terminate::induction_measure_linked(body, &std::collections::BTreeSet::new(), Some(self))?;
+        m.by_callee.filter(|b| b.halving).map(|b| b.target)
+    }
     fn result_poly_bounded(&self, target: &str) -> bool {
         // Re-derived from the callee's body over this same view; a cycle is "not known".
         let key = format!("poly:{target}");
@@ -929,7 +933,20 @@ impl LinkedView<'_> {
             if !bounded_below {
                 continue;
             }
-            return Some(crate::terminate::MeasuredPost { measure: m_l, arg_positions, components, params: c.params.clone(), pres: c.pres.clone() });
+            // HALVING (2026-11-01): another certified post `2·M(lhs) ≤ M(rhs)` — the same measure
+            // applications as this one, scaled by the literal 2 (either factor order). The
+            // complexity fold reads a descent that halves its measure as a halving recursion.
+            let two = |n: &J| n.get("kind").and_then(|k| k.as_str()) == Some("lit") && (n.get("value") == Some(&serde_json::json!(2)) || n.pointer("/value/value") == Some(&serde_json::json!(2)));
+            let halving = c.posts.iter().any(|p| {
+                let op = p.get("op").and_then(|o| o.as_str());
+                let Some(a) = p.get("args").and_then(|a| a.as_array()).filter(|a| a.len() == 2) else { return false };
+                if op != Some("le") || &a[1] != rhs {
+                    return false;
+                }
+                let Some(m) = a[0].get("args").and_then(|x| x.as_array()).filter(|x| x.len() == 2) else { return false };
+                a[0].get("op").and_then(|o| o.as_str()) == Some("mul") && ((two(&m[0]) && &m[1] == lhs) || (two(&m[1]) && &m[0] == lhs))
+            });
+            return Some(crate::terminate::MeasuredPost { halving, measure: m_l, arg_positions, components, params: c.params.clone(), pres: c.pres.clone() });
         }
         None
     }

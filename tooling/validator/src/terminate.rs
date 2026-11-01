@@ -369,13 +369,17 @@ pub enum DescentKind {
     Numeric { floor: i64 },
     /// By a callee's certified post, on a measure that is a callee of the descending positions
     /// (the key names both) — bounded below by the measure callee's own certified bound.
-    Measured,
+    /// `halving`: the callee ALSO certifies `2·M(result) ≤ M(params)` — the measure at least halves.
+    Measured { halving: bool },
 }
 
 /// A measure that is a CALLEE of several argument positions: `target` applied to the caller's
 /// parameters at `positions`, in order — `gi_norm(c, d)` over positions 2 and 3.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeasuredBy {
+    /// Every self-call's descent HALVES the measure (`MeasuredPost::halving` at each): the depth is
+    /// logarithmic in the measure — what the complexity fold reads (2026-11-01).
+    pub halving: bool,
     pub target: String,
     pub positions: Vec<usize>,
 }
@@ -402,6 +406,8 @@ pub struct Measure {
 /// site can instantiate the preconditions the post is certified under.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeasuredPost {
+    /// The callee also certifies `2·measure(result…) ≤ measure(params…)` (same measure, same sides).
+    pub halving: bool,
     pub measure: String,
     pub arg_positions: Vec<usize>,
     pub components: usize,
@@ -450,7 +456,7 @@ type Components = std::collections::BTreeMap<String, (String, u32)>;
 /// snd(result)) < M(p_i, p_j)` whose pre the branch facts discharge): name → (the measure callee, the
 /// CALLER's positions the measure is taken at, which component this name is). The self-call that puts
 /// every component at its position descends on that measure.
-type MeasuredComponents = std::collections::BTreeMap<String, (String, Vec<usize>, usize)>;
+type MeasuredComponents = std::collections::BTreeMap<String, (String, Vec<usize>, usize, bool)>;
 
 /// What a self-call descends on: one argument position (`by` None), or several together under a
 /// measure callee (`by` its address). Per-call descents intersect on this key.
@@ -499,7 +505,7 @@ fn drop_shadowed_preds(preds: &[J], shadowed_now: &std::collections::BTreeSet<St
 /// A measured callee application at a call site: `target(cargs)` whose [`MeasuredPost`] takes its
 /// measure at caller parameters (unshadowed) and whose preconditions the facts in force entail.
 /// Returns the measure callee and the CALLER positions the measure is taken at.
-fn measured_application(target: &str, cargs: &[J], ctx: &Ctx, shadowed: &std::collections::BTreeSet<String>, preds: &[J]) -> Option<(String, Vec<usize>, usize)> {
+fn measured_application(target: &str, cargs: &[J], ctx: &Ctx, shadowed: &std::collections::BTreeSet<String>, preds: &[J]) -> Option<(String, Vec<usize>, usize, bool)> {
     let view = ctx.callee?;
     let post = view.measured_post(target)?;
     if cargs.len() != post.params.len() {
@@ -530,7 +536,7 @@ fn measured_application(target: &str, cargs: &[J], ctx: &Ctx, shadowed: &std::co
             return None;
         }
     }
-    Some((post.measure, positions, post.components))
+    Some((post.measure, positions, post.components, post.halving))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -552,27 +558,28 @@ fn walk(
         // A measured descent of SEVERAL positions: every component of a measured callee's result
         // sits at the caller position the measure is taken at (`self c d r1 r2` after `case
         // rem(a, b, c, d) of (r1, r2)`, the measure `norm(c, d)`).
-        let mut groups: std::collections::BTreeMap<(String, Vec<usize>), Vec<bool>> = Default::default();
+        let mut groups: std::collections::BTreeMap<(String, Vec<usize>), (Vec<bool>, bool)> = Default::default();
         for (j, a) in sargs.iter().enumerate() {
             let Some(name) = a.get("name").and_then(|n| n.as_str()).filter(|_| a.get("kind").and_then(|k| k.as_str()) == Some("var")) else { continue };
-            let Some((m, positions, k)) = scope.measured.get(name) else { continue };
+            let Some((m, positions, k, halving)) = scope.measured.get(name) else { continue };
             if positions.get(*k) == Some(&j) {
-                let slot = groups.entry((m.clone(), positions.clone())).or_insert_with(|| vec![false; positions.len()]);
-                slot[*k] = true;
+                let slot = groups.entry((m.clone(), positions.clone())).or_insert_with(|| (vec![false; positions.len()], true));
+                slot.0[*k] = true;
+                slot.1 &= *halving;
             }
         }
-        for ((m, positions), seen) in groups {
+        for ((m, positions), (seen, halving)) in groups {
             if seen.iter().all(|s| *s) {
-                call_descents.insert(MeasureKey { positions, by: Some(m) }, DescentKind::Measured);
+                call_descents.insert(MeasureKey { positions, by: Some(m) }, DescentKind::Measured { halving });
             }
         }
         for (j, a) in sargs.iter().enumerate() {
             // A measured descent of ONE position, the callee applied directly: `self(…, f(…, p, …), …)`
             // with `M(result) < M(p)` certified on `f` and `p` the parameter at this position.
             if let Some((target, cargs)) = fn_ref_spine(a) {
-                if let Some((m, positions, 1)) = measured_application(&target, &cargs, ctx, shadowed, &scope.preds) {
+                if let Some((m, positions, 1, halving)) = measured_application(&target, &cargs, ctx, shadowed, &scope.preds) {
                     if positions == [j] {
-                        call_descents.insert(MeasureKey { positions, by: Some(m) }, DescentKind::Measured);
+                        call_descents.insert(MeasureKey { positions, by: Some(m) }, DescentKind::Measured { halving });
                     }
                 }
             }
@@ -725,7 +732,7 @@ fn walk(
             // `case f(args) of (r1, r2) => …` over a MEASURED callee (linked view): r1 and r2 are the
             // components its certified post measures smaller than the measure of the caller's
             // parameters at `positions` — when f's preconditions hold here.
-            let measured_of: Option<(String, Vec<usize>, usize)> = node
+            let measured_of: Option<(String, Vec<usize>, usize, bool)> = node
                 .get("scrutinee")
                 .and_then(fn_ref_spine)
                 .and_then(|(target, cargs)| measured_application(&target, &cargs, ctx, shadowed, &scope.preds));
@@ -781,7 +788,7 @@ fn walk(
                 }
                 // The components of a measured callee's result, in pattern order: `(r1, r2)` binds
                 // component 0 and 1 of a pair post; a single bind takes the whole (scalar) result.
-                if let (Some((m, positions, components)), Some(p)) = (&measured_of, arm.get("pattern")) {
+                if let (Some((m, positions, components, halving)), Some(p)) = (&measured_of, arm.get("pattern")) {
                     let elems: Vec<&J> = match p.get("kind").and_then(|x| x.as_str()) {
                         Some("tuple") => p.get("elems").and_then(|e| e.as_array()).map(|a| a.iter().collect()).unwrap_or_default(),
                         Some("bind") => vec![p],
@@ -791,7 +798,7 @@ fn walk(
                         for (k, e) in elems.iter().enumerate() {
                             if e.get("kind").and_then(|x| x.as_str()) == Some("bind") {
                                 if let Some(n) = e.get("name").and_then(|n| n.as_str()) {
-                                    inner_scope.measured.insert(n.to_string(), (m.clone(), positions.clone(), k));
+                                    inner_scope.measured.insert(n.to_string(), (m.clone(), positions.clone(), k, *halving));
                                 }
                             }
                         }
@@ -904,7 +911,7 @@ pub fn induction_measure_linked(
             .iter()
             .map(|k| match k {
                 DescentKind::Numeric { floor } => Some(*floor),
-                DescentKind::Structural | DescentKind::Measured => None,
+                DescentKind::Structural | DescentKind::Measured { .. } => None,
             })
             .collect();
         floors.and_then(|fs| fs.into_iter().min()).map(|floor| Measure { position: key.positions[0], floor, structural: false, by_callee: None })
@@ -919,12 +926,16 @@ pub fn induction_measure_linked(
         .or_else(|| {
             common
                 .iter()
-                .find(|(key, kinds)| key.by.is_some() && !kinds.is_empty() && kinds.iter().all(|k| matches!(k, DescentKind::Measured)))
-                .map(|(key, _)| Measure {
+                .find(|(key, kinds)| key.by.is_some() && !kinds.is_empty() && kinds.iter().all(|k| matches!(k, DescentKind::Measured { .. })))
+                .map(|(key, kinds)| Measure {
                     position: key.positions[0],
                     floor: 0,
                     structural: false,
-                    by_callee: Some(MeasuredBy { target: key.by.clone().unwrap_or_default(), positions: key.positions.clone() }),
+                    by_callee: Some(MeasuredBy {
+                        halving: kinds.iter().all(|k| matches!(k, DescentKind::Measured { halving: true })),
+                        target: key.by.clone().unwrap_or_default(),
+                        positions: key.positions.clone(),
+                    }),
                 })
         })
 }
@@ -1180,6 +1191,7 @@ mod tests {
         }
         fn measured_post(&self, target: &str) -> Option<MeasuredPost> {
             (target == self.rem).then(|| MeasuredPost {
+                halving: false,
                 measure: self.norm.clone(),
                 arg_positions: vec![2, 3],
                 components: 2,
@@ -1218,7 +1230,7 @@ mod tests {
         let body = gaussian_gcd(&rem, "r1", "r2");
         assert_eq!(analyze_termination_linked(&body, &Default::default(), Some(&view)), TerminationOutcome::Always);
         let m = induction_measure_linked(&body, &Default::default(), Some(&view)).expect("a measure");
-        assert_eq!(m.by_callee, Some(MeasuredBy { target: norm, positions: vec![2, 3] }));
+        assert_eq!(m.by_callee, Some(MeasuredBy { halving: false, target: norm, positions: vec![2, 3] }));
         assert_eq!(m.position, 2);
         // The components must land at the positions the measure is taken at, in order: swapped,
         // the next activation's norm is of (r2, r1) — which the post says nothing about.

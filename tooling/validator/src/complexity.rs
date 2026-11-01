@@ -327,6 +327,13 @@ pub trait LinkedCallees {
     fn result_poly_bounded(&self, _target: &str) -> bool {
         false
     }
+    /// The measure callee of `body`'s recursion when it is a MEASURED descent (the termination
+    /// checker's: a callee's certified `M(result) < M(params)`) in which every self-call also
+    /// HALVES the measure (`2·M(result) ≤ M(params)` certified too) — `gi_gcd` over `gi_rem`'s
+    /// posts on the norm. Default: none.
+    fn measured_halving(&self, _body: &J) -> Option<String> {
+        None
+    }
 }
 
 /// Does `body`'s result — every component, through `let` and `case` — have a value bounded by a
@@ -1003,6 +1010,18 @@ pub fn analyze_complexity_typed(body: &J, result_ty: Option<&J>, callee: Option<
 
     // Every self-call must descend on ONE fixed parameter; the kind is Constant unless every descent halves.
     if descents.iter().any(|d| d.iter().all(|(p, _)| !params.contains(p))) {
+        // A MEASURED HALVING descent (2026-11-01): every self-call strictly decreases a measure
+        // callee of the parameters AND at least halves it, both by certified callee posts, so the
+        // depth is ≤ log₂ M + 1; with M's result polynomial in its arguments (the parameters),
+        // log M = O(log n). `gi_gcd` over `gi_rem`'s `N(r) < N(w)` and `2·N(r) ≤ N(w)`.
+        if let Some(m) = callee.and_then(|c| c.measured_halving(body)) {
+            if callee.is_some_and(|c| c.result_poly_bounded(&m)) {
+                let branch = path_self_count(inner).max(1);
+                if let Some(c) = combine(Descent::Halving, branch, path_work(inner, callee)) {
+                    return ComplexityOutcome::Bound(c);
+                }
+            }
+        }
         return ComplexityOutcome::Opaque(
             "a self-call's recursion argument is not a recognized structural/numeric descent".into(),
         );
@@ -1519,6 +1538,50 @@ mod tests {
         // A recursive result is never polynomial by structure.
         let rec = lambda(&["x"], self_call(vec![app("sub", vec![v("x"), lit_i(1)])]));
         assert!(!result_poly_bounded(&rec, Some(&none)));
+    }
+
+    /// `measured_halving` answers `halving`; every callee is O(1) with a polynomial result iff `poly`.
+    struct HalvingView {
+        halving: bool,
+        poly: bool,
+    }
+    impl LinkedCallees for HalvingView {
+        fn class_of(&self, _: &str) -> Option<Class> {
+            Some(Class::CONST)
+        }
+        fn result_bounded_by(&self, _: &str) -> Option<Vec<usize>> {
+            None
+        }
+        fn components_shrink_by(&self, _: &str) -> Option<u32> {
+            None
+        }
+        fn components_preserved_by(&self, _: &str) -> Option<Vec<usize>> {
+            None
+        }
+        fn result_poly_bounded(&self, _: &str) -> bool {
+            self.poly
+        }
+        fn measured_halving(&self, _: &J) -> Option<String> {
+            self.halving.then(|| format!("fn_{}", "ab".repeat(32)))
+        }
+    }
+
+    #[test]
+    fn a_measured_descent_that_halves_a_polynomial_measure_is_logarithmic() {
+        // gi_gcd's shape: \a b c d -> case eq(c, 0) of true -> (a, b) | false ->
+        //   case rem(a, b, c, d) of (r1, r2) -> self(c, d, r1, r2). No parameter descends by structure.
+        let fref = json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", "cd".repeat(32)) } });
+        let rem = json!({ "kind": "app", "fn": fref, "args": [v("a"), v("b"), v("c"), v("d")] });
+        let step = json!({ "kind": "case", "scrutinee": rem, "arms": [{
+            "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "r1" }, { "kind": "bind", "name": "r2" }] },
+            "body": self_call(vec![v("c"), v("d"), v("r1"), v("r2")]) }] });
+        let body = lambda(&["a", "b", "c", "d"], case2(app("eq", vec![v("c"), lit_i(0)]), json!({ "kind": "tuple", "elems": [v("a"), v("b")] }), step));
+        let yes = HalvingView { halving: true, poly: true };
+        assert_eq!(analyze_complexity_linked(&body, Some(&yes)), ComplexityOutcome::Bound(Class::LOG));
+        // Only a strict decrease (no halving post): the depth is the measure itself — refused.
+        assert!(matches!(analyze_complexity_linked(&body, Some(&HalvingView { halving: false, poly: true })), ComplexityOutcome::Opaque(_)));
+        // A measure not polynomial in the parameters: log M is not O(log n) — refused.
+        assert!(matches!(analyze_complexity_linked(&body, Some(&HalvingView { halving: true, poly: false })), ComplexityOutcome::Opaque(_)));
     }
 
     struct Shrinks;

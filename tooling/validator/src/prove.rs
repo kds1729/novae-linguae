@@ -3946,7 +3946,7 @@ mod tests {
         let prev_ty = set_self_type(Some(json!({ "kind": "fn", "params": [int.clone(), int.clone(), int.clone(), int], "result": pair_ty })));
         let measure = crate::terminate::Measure {
             position: 2, floor: 0, structural: false,
-            by_callee: Some(crate::terminate::MeasuredBy { target: norm.clone(), positions: vec![2, 3] }),
+            by_callee: Some(crate::terminate::MeasuredBy { halving: false, target: norm.clone(), positions: vec![2, 3] }),
         };
         let prev_m = set_self_measure(Some(measure));
         let (out, cert, m) = prove_by_numeric_induction(&nonzero, Some(&body), &BTreeSet::new(), solver);
