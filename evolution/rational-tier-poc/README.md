@@ -2,7 +2,7 @@
 
 - **Status:** published (2026-10-30). <!-- exploring | published | absorbed | superseded -->
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-10-30, last updated 2026-11-01 (round 8 — uniqueness as a law on `rat_normalize`, inherited by callers; ADDITIVE ASSOCIATIVITY PROVED; every law PROVED)
+- **Dates:** first published 2026-10-30, last updated 2026-11-01 (round 8 — uniqueness as a law on `rat_normalize`, inherited by callers; ADDITIVE ASSOCIATIVITY PROVED; every law PROVED; round 9 — complexity SOUND 14/14)
 - **Scope:** `tooling/validator` (the prover's contract composition, the divisibility rung, the
   generative checker), `evolution/integer-tier-poc` (its `gcd` record, applied by address),
   `spec/evaluation.md`.
@@ -12,7 +12,8 @@
   on `d566569` (nl-validator 0.1.7 in-tree after the witness rung and the staged rung `9be3a64`,
   the depth-0 restriction `4590d8d` and the tuple-sorted derived cache `d566569`); round 8 on
   `d34c50f` (the staged rung in a derivation's self-contract phase `77a24eb`, the staged rung's
-  quotient abstraction `b0e0996`, derived-cache version 5 `d34c50f`); the integer
+  quotient abstraction `b0e0996`, derived-cache version 5 `d34c50f`); round 9 on `78ba9fc`
+(the polylogarithmic complexity fold `6a14d11`, the witness-scan fix `78ba9fc`); the integer
   tier's `gcd` at `fn_7875d6be2650b6699…` for rounds 1–6 (its eleventh-follow-up record, with the
   greatest-divisor law) and, from round 7, the integer tier's round-16 `gcd` at
   `fn_29c0f131454ed433b…` (six laws, among them Euclid's step by unfolding) with its `ext_gcd` at
@@ -66,8 +67,9 @@ constant p`, 8785d85); a caller's preamble emitted `rat_normalize`'s axioms befo
 declaration (`unknown constant callee_7875…`, cf72df4); and a caller's contract set came from its
 *body's* callees only, so `rat_inv`'s law read UNSUPPORTED ("`gcd`'s certified contract is not
 available here") and the arithmetic records' value posts fell to UNVERIFIABLE until the set closed
-over the callees a contract applies (e16a8f0). One cost stands as measured: the complexity fold is
-UNVERIFIABLE for every record that passes a product to a callee (7 of 14).
+over the callees a contract applies (e16a8f0). One cost stood as measured through round 8: the complexity
+fold was UNVERIFIABLE for every record that passes a product to a callee (7 of 14); round 9's
+validator change (a polylogarithmic callee over polynomially bounded arguments) made all 14 SOUND.
 
 ## Provenance of the inputs
 
@@ -104,10 +106,9 @@ tuple-sorted contracts, which every process of a round had been re-deriving):
 | `rat_eq_normalize_holds` | checker | — | `equality_is_normal_form_equality` **PROVED** (round 8: plainly, from normalize's inherited `unique`; round 7: STAGED, 100 conclusions; rounds 2–6: UNKNOWN — uniqueness of lowest terms, Euclid's lemma) | HELD 400 |
 | `rat_add_assoc_holds` | checker | — | `associative` **PROVED** (round 8: plainly — two value posts and one instance of `rat_add`'s `congruent`; rounds 2–7: UNKNOWN) | HELD 400 |
 
-Totals: 14/14 run PASS, 14/14 certified, termination SOUND 14/14, complexity SOUND 7 /
-UNVERIFIABLE 7 (every record passing a product to a callee: add/sub/mul and the checkers over
-them, plus `rat_coprime_holds`), contracts 12 SOUND / 0, laws 21 PROVED / 1 UNKNOWN / 0
-UNSUPPORTED, 22/22 held (bounded; no skipped cases anywhere — every law is guarded, `d == 0 ||`,
+Totals: 14/14 run PASS, 14/14 certified, termination SOUND 14/14, **complexity SOUND 14/14**
+(round 9; rounds 1–8: SOUND 7 / UNVERIFIABLE 7 — every record passing a product to a callee),
+contracts 12 SOUND / 0, laws 24 PROVED / 0 UNKNOWN / 0 UNSUPPORTED, 24/24 held (bounded; no skipped cases anywhere — every law is guarded, `d == 0 ||`,
 `b < 1 ||`, and the guards decide) and 22/22 held (`--wide`, 200 cases sampled across magnitudes;
 `associative` reports 194 held and 6 skipped — three-fraction sums at numerators near 10¹⁷
 overflow the evaluator's 128-bit integers, and the skipped-case report says so rather than
@@ -122,6 +123,14 @@ Round 6 (98.3 min, log `rational-build-round6.log`, nl-validator at `e7c307d`, n
 change): the `cross` law PROVED from `rat_normalize`'s own certified contract (`value_preserved`
 at both applications, the cancellation by the solver), `rat_eq`'s decision post SOUND — the table
 above; the two checkers stay UNKNOWN, now for the measured reason recorded under "What is argued".
+Round 9 (38.1 min, log `rational-build-round9.log`, peak 979 MB, nl-validator at `78ba9fc`): no
+record changed; complexity SOUND 14/14 (rounds 1–8: 7/14) from the validator's polylogarithmic
+fold (`6a14d11`); laws 24/0/0 and every contract as in round 8. A first round-9 start ran beside
+another module's builder and lost `unique` inside `rat_normalize`'s derivation to the staged
+rung's wall-clock budget — and the derived cache kept the short contract; that entry was
+deleted and the round re-run alone (the hazard is recorded with the validator's notes).
+Published to Arca: 16 records with certificates, 0 failures, 12.1 min.
+
 Round 8 (40.7 min, log `rational-build-round8.log`, peak 970 MB under the 9 GiB guard,
 nl-validator at `d34c50f`): `unique` authored on `rat_normalize` and `congruent` on `rat_add`;
 14/14 certified, laws **24 / 0 / 0 of 24**; `unique` PROVED [STAGED: 106 conclusions], `congruent`,
@@ -239,9 +248,15 @@ records; which of the intervening validator changes flipped them was not isolate
   on the captured input found the final-query cause in minutes. A stale derived-cache entry
   (version 4, written by a trial for the same content address before the quotient fix) made the
   first round-8 start prove `congruent` only by staging; derived-cache version 5 (`d34c50f`).
-- **Complexity through products is a fold limit, not a defect.** The class fold reads a callee's
-  cost only for size-bounded arguments; `normalize(a·d + c·b, b·d)` is `O(log(a·d + c·b))`, which
-  is `O(log n)` in the inputs' magnitude but not in the fold's vocabulary. Stated, not changed.
+- **Complexity through products — closed in round 9 (2026-11-01).** The class fold read a
+  callee's cost only for size-bounded arguments; `normalize(a·d + c·b, b·d)` is `O(log(a·d +
+  c·b))`, which is `O(log n)` in the inputs' magnitude but was not in the fold's vocabulary. The
+  validator (`6a14d11`) now lets a POLYLOGARITHMIC callee (class `O(1)`, `O(log n)`) take a
+  polynomially bounded argument — `log^k(p(n)) = O(log^k n)` — and re-derives from a callee's
+  body whether its RESULT is polynomial in its arguments (non-recursive; `x div y` bounded by `x`
+  whatever the divisor, `x mod y` by `y` only), so a component of `rat_add`'s or
+  `rat_normalize`'s pair is such an argument too. A callee of polynomial class still needs a
+  size-bounded argument (`O(m)` of `m = n²` is `O(n²)`). All seven folds now SOUND.
 - **The gauntlet is the point.** Five rounds of one module found three defects in a prover with
   640-odd tests, each in a place no unit test had reached because no record had yet applied a
   callee inside a contract; rounds 6 and 7 forced two prover rungs that the hand-measurement had
@@ -273,8 +288,7 @@ records; which of the intervening validator changes flipped them was not isolate
 - **Uniqueness of lowest terms** — CLOSED in round 7 (`equality_is_normal_form_equality` PROVED
   by the staged rung over `ext_gcd`'s witness instances). Kept here as the record of what it took:
   the staged query, the witness-callee lookup, and `ext_gcd`'s link post via `gcd`'s unfolding law.
-- **Complexity through product arguments**: seven UNVERIFIABLE folds; a magnitude-based size
-  measure for `log` classes would decide them. Driver-gated.
+- **Complexity through product arguments** — CLOSED in round 9 (all 14 records SOUND).
 - Which validator change flipped `add_zero`/`mul_one` from UNKNOWN to PROVED was not isolated.
 - A Gaussian-integer tier over these pairs was the natural next module and now exists
   (`evolution/gaussian-tier-poc`, 2026-10-30); a Gaussian-rational tier over both remains open.

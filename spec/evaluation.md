@@ -272,7 +272,14 @@ parameters consing at most `k` elements per component per step — `ntt_butterfl
 the list it was applied to) count as the recurrence's carried terms when each is used at most once and
 bound by a distinct recursive result, so `append lo hi` in `ntt_rec` is `S(n) = 2S(n/2) + O(1) = Θ(n)`.
 Only then does the butterfly applied to `self ev`/`self od` fold, and the whole NTT chain certifies
-`O(n log n)`. A `mod` by a literal is bounded whatever its dividend (`w·w mod P`). Because a
+`O(n log n)`. A `mod` by a literal is bounded whatever its dividend (`w·w mod P`). A
+**polylogarithmic** callee (class `O(1)` or `O(log^k n)`) needs less (2026-11-01): an argument
+whose value is bounded by a POLYNOMIAL in the input suffices, since `log^k(p(n)) = O(log^k n)` —
+products of inputs, `x div y` (bounded by `x` whatever the divisor), `x mod y` (bounded by the
+divisor only: Euclidean `−1 mod 5 = 4`), and the components of a callee whose RESULT is
+polynomial in its arguments, re-derived from that callee's body (non-recursive, every result
+leaf polynomial; `gi_mul`'s pair, `rat_normalize`'s quotients by `gcd`). So `normalize(a·d + c·b,
+b·d)` is `O(log n)`; a callee of polynomial class still requires size-bounded arguments. Because a
 declared `O(f)` is an *upper-bound* claim, the check compares the inferred sound bound `O(g)` to it: `g ≤ f`
 → **SOUND** (or **VERIFIED** when `g` is provably tighter, so the declaration could be strengthened); `g > f`
 or a **higher-order / opaque** body (`map`/`filter`/`fold`, applying a parameter or `fn_ref`) → **UNVERIFIABLE**;
