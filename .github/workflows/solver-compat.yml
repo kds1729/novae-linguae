@@ -1,0 +1,49 @@
+name: solver-compat
+
+# The validator's prover tests against more than one z3. The release workflow pins z3 4.16.0;
+# this one also runs the latest 5.x release and whatever Homebrew pours on macOS, because the
+# prover's certificates are solver-shape-sensitive and a moving z3 broke eleven of them once
+# (Homebrew's 5.3.2, 2026-10-30; fixed 2026-11-01 — the Euclidean lemma by its sign cases, the
+# induction step's one-step unfoldings). A red leg here is a solver-compatibility finding, not a
+# release blocker: the release workflow's pinned leg decides that.
+on:
+  push:
+    branches: [main]
+    paths: ["tooling/validator/**", ".github/workflows/solver-compat.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            z3: "4.16.0"
+            zip: z3-4.16.0-x64-glibc-2.39
+          - os: ubuntu-24.04
+            z3: "5.3.3"
+            zip: z3-5.3.3-x64-glibc-2.39
+          - os: macos-15
+            z3: homebrew
+            zip: ""
+    runs-on: ${{ matrix.os }}
+    name: test (${{ matrix.os }}, z3 ${{ matrix.z3 }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: z3 ${{ matrix.z3 }} (release build)
+        if: matrix.zip != ''
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq unzip
+          curl -fsSL -o z3.zip https://github.com/Z3Prover/z3/releases/download/z3-${{ matrix.z3 }}/${{ matrix.zip }}.zip
+          unzip -q z3.zip && sudo cp ${{ matrix.zip }}/bin/z3 /usr/local/bin/z3 && z3 --version
+      - name: z3 (Homebrew, whatever it pours today)
+        if: matrix.z3 == 'homebrew'
+        run: brew install z3 && z3 --version
+      - name: test
+        working-directory: tooling/validator
+        run: cargo test --release --locked
