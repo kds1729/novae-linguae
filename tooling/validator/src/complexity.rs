@@ -320,6 +320,64 @@ pub trait LinkedCallees {
     /// (`ntt_butterfly`): the parameter positions each component is NO LONGER than (plus a constant) —
     /// re-derived from the callee's body (`component_preserve`). `None` otherwise.
     fn components_preserved_by(&self, target: &str) -> Option<Vec<usize>>;
+    /// Is the callee's RESULT (every component of it) bounded by a polynomial in its arguments'
+    /// values — re-derived from its body ([`result_poly_bounded`]): non-recursive arithmetic, `div`
+    /// by anything, `mod` by a bounded divisor, other such callees. Enough for a polylogarithmic
+    /// callee applied to it (2026-11-01). Default: nothing is known.
+    fn result_poly_bounded(&self, _target: &str) -> bool {
+        false
+    }
+}
+
+/// Does `body`'s result — every component, through `let` and `case` — have a value bounded by a
+/// polynomial in its parameters' values? Each result leaf must be [`poly_bounded_in`] its scope; a
+/// recursive result is not (nothing bounds `self(…)`'s magnitude by structure).
+pub fn result_poly_bounded(body: &J, callee: Option<CalleeComplexity<'_>>) -> bool {
+    let (Some(params), Some(inner)) = (lambda_params(body), body.get("body")) else { return false };
+    let bound: BTreeSet<String> = params.iter().cloned().collect();
+    fn leaves(node: &J, bound: &BTreeSet<String>, callee: Option<CalleeComplexity<'_>>) -> bool {
+        match node.get("kind").and_then(|k| k.as_str()) {
+            Some("let") => {
+                let (Some(v), Some(b)) = (node.get("value"), node.get("body")) else { return false };
+                let mut inner = bound.clone();
+                if let Some(n) = node.get("name").and_then(|n| n.as_str()) {
+                    bind_poly(&mut inner, n, poly_bounded_in(v, bound, callee, false), size_bounded_in(v, bound, callee, false));
+                }
+                leaves(b, &inner, callee)
+            }
+            Some("case") => {
+                let Some(s) = node.get("scrutinee") else { return false };
+                let (sp, ss) = (poly_bounded_in(s, bound, callee, false), size_bounded_in(s, bound, callee, false));
+                node.get("arms").and_then(|a| a.as_array()).is_some_and(|arms| {
+                    arms.iter().all(|arm| {
+                        let mut inner = bound.clone();
+                        if let Some(pat) = arm.get("pattern") {
+                            let mut names = Vec::new();
+                            collect_binds(pat, &mut names);
+                            for n in names {
+                                bind_poly(&mut inner, &n, sp, ss);
+                            }
+                        }
+                        arm.get("body").is_some_and(|b| leaves(b, &inner, callee))
+                    })
+                })
+            }
+            _ => poly_bounded_in(node, bound, callee, false),
+        }
+    }
+    leaves(inner, &bound, callee)
+}
+
+/// Record a bound name in a scope set: size-bounded as itself, polynomially bounded only as `~name`
+/// (which [`size_bounded_in`] never matches), else neither (shadowing an outer binding).
+fn bind_poly(set: &mut BTreeSet<String>, name: &str, poly: bool, size: bool) {
+    set.remove(name);
+    set.remove(&format!("~{name}"));
+    if size {
+        set.insert(name.to_string());
+    } else if poly {
+        set.insert(format!("~{name}"));
+    }
 }
 
 /// Does `body` return a tuple of lists each at most as long as (a constant plus) EVERY list parameter
@@ -602,6 +660,42 @@ fn size_bounded_in(arg: &J, bound: &BTreeSet<String>, callee: Option<CalleeCompl
     }
 }
 
+/// Is `arg`'s value bounded by a POLYNOMIAL in the input size — anything [`size_bounded_in`] admits,
+/// and products (`mul`) and the size-bounded ops over such terms? Enough for a callee whose class is
+/// polylogarithmic (`deg = 0`, no exponential): `log^k(p(n)) = O(log^k n)` for any polynomial `p`, so
+/// `normalize(a·d + c·b, b·d)`, `O(log m)` in its arguments' magnitude, is `O(log n)` in ours
+/// (2026-11-01, the rational tier: seven folds UNVERIFIABLE for exactly this product). A callee of
+/// polynomial class still requires a size-bounded argument (`O(m)` of `m = n²` is `O(n²)`).
+fn poly_bounded_in(arg: &J, bound: &BTreeSet<String>, callee: Option<CalleeComplexity<'_>>, self_linear: bool) -> bool {
+    if size_bounded_in(arg, bound, callee, self_linear) {
+        return true;
+    }
+    let poly = |a: &J| poly_bounded_in(a, bound, callee, self_linear);
+    match arg.get("kind").and_then(|k| k.as_str()) {
+        // A name bound to a polynomially bounded value (`~name`, see `bind_poly`).
+        Some("var") => return arg.get("name").and_then(|n| n.as_str()).is_some_and(|n| bound.contains(&format!("~{n}"))),
+        Some("tuple") => return arg.get("elems").and_then(|e| e.as_array()).is_some_and(|es| es.iter().all(poly)),
+        _ => {}
+    }
+    if self_call_args(arg).is_some() {
+        return false;
+    }
+    // A callee whose result is itself polynomial in its arguments (`result_poly_bounded`).
+    if let Some((target, cargs)) = crate::terminate::fn_ref_spine(arg) {
+        return callee.is_some_and(|c| c.result_poly_bounded(&target)) && cargs.iter().all(poly);
+    }
+    match app_spine(arg) {
+        // |x div y| ≤ |x| for every integer y ≠ 0, whatever the divisor (a gcd, a callee's result).
+        Some((op, args)) if op == "div" && args.len() == 2 => poly(&args[0]),
+        // |x mod y| < |y|: bounded by the divisor alone (NOT by x — Euclidean −1 mod 5 = 4).
+        Some((op, args)) if op == "mod" && args.len() == 2 => poly(&args[1]),
+        Some((op, args)) if op == "mul" || SIZE_BOUNDED_OPS.contains(&op.as_str()) => {
+            args.iter().all(|a| poly_bounded_in(a, bound, callee, self_linear))
+        }
+        _ => false,
+    }
+}
+
 /// The first opaque (higher-order / unrecognized-application) reason in `node`, if any. A `self`-call,
 /// a recognized first-order builtin application, and — over a linked view — a `fn_ref` callee with an
 /// inferred class applied to size-bounded arguments are fine; anything else applied is opaque.
@@ -612,8 +706,11 @@ fn find_opaque_in(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeS
         // still descend into the call's arguments below
     } else if let Some((target, cargs)) = crate::terminate::fn_ref_spine(node) {
         match callee.and_then(|c| c.class_of(&target)) {
-            Some(_) => {
-                if let Some(a) = cargs.iter().find(|a| !size_bounded(a, bound, callee)) {
+            Some(class) => {
+                // A polylogarithmic callee tolerates polynomially bounded arguments (`poly_bounded_in`).
+                let polylog = class.deg == 0 && !class.exp;
+                let ok = |a: &J| if polylog { poly_bounded_in(a, bound, callee, self_linear) } else { size_bounded(a, bound, callee) };
+                if let Some(a) = cargs.iter().find(|a| !ok(a)) {
                     return Some(format!(
                         "applies `{target}` to an argument whose size is not bounded by the input ({}) — its class cannot be re-expressed in n",
                         a.get("kind").and_then(|k| k.as_str()).unwrap_or("?")
@@ -647,11 +744,7 @@ fn find_opaque_in(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeS
         }
         let mut inner = bound.clone();
         if let (Some(n), Some(v)) = (node.get("name").and_then(|n| n.as_str()), node.get("value")) {
-            if size_bounded(v, bound, callee) {
-                inner.insert(n.to_string());
-            } else {
-                inner.remove(n);
-            }
+            bind_poly(&mut inner, n, poly_bounded_in(v, bound, callee, self_linear), size_bounded(v, bound, callee));
         }
         return node.get("body").and_then(|b| find_opaque(b, callee, &inner));
     }
@@ -663,17 +756,16 @@ fn find_opaque_in(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeS
                 return Some(why);
             }
             let scrut_bounded = size_bounded(s, bound, callee);
+            // Destructuring a POLYNOMIALLY bounded value (a callee whose result is polynomial in its
+            // arguments, `gi_mul`'s pair) yields polynomially bounded parts (`~name`).
+            let scrut_poly = poly_bounded_in(s, bound, callee, self_linear);
             for arm in node.get("arms").and_then(|a| a.as_array()).cloned().unwrap_or_default() {
                 let mut inner = bound.clone();
                 if let Some(pat) = arm.get("pattern") {
                     let mut names = Vec::new();
                     collect_binds(pat, &mut names);
                     for n in names {
-                        if scrut_bounded {
-                            inner.insert(n);
-                        } else {
-                            inner.remove(&n);
-                        }
+                        bind_poly(&mut inner, &n, scrut_poly, scrut_bounded);
                     }
                 }
                 if let Some(why) = arm.get("body").and_then(|b| find_opaque(b, callee, &inner)) {
@@ -1367,6 +1459,66 @@ mod tests {
         let one = json!({ "kind": "tuple", "elems": [app("cons", vec![hd, v("nil")]), v("nil")] });
         let empty = json!({ "kind": "tuple", "elems": [v("nil"), v("nil")] });
         lambda(&["xs"], case2(app("null", vec![v("xs")]), empty, case2(app("null", vec![app("tail", vec![v("xs")])]), one, step)))
+    }
+
+    /// Every callee has `class`; `poly_result` answers `result_poly_bounded`.
+    struct Magnitude {
+        class: Class,
+        poly_result: bool,
+    }
+    impl LinkedCallees for Magnitude {
+        fn class_of(&self, _: &str) -> Option<Class> {
+            Some(self.class)
+        }
+        fn result_bounded_by(&self, _: &str) -> Option<Vec<usize>> {
+            None
+        }
+        fn components_shrink_by(&self, _: &str) -> Option<u32> {
+            None
+        }
+        fn components_preserved_by(&self, _: &str) -> Option<Vec<usize>> {
+            None
+        }
+        fn result_poly_bounded(&self, _: &str) -> bool {
+            self.poly_result
+        }
+    }
+
+    #[test]
+    fn a_polylog_callee_folds_over_products_and_polynomial_callee_results_a_linear_one_does_not() {
+        let fref = |s: &str| json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", s.repeat(32)) } });
+        let call = |s: &str, args: Vec<J>| json!({ "kind": "app", "fn": fref(s), "args": args });
+        // normalize(a·d, b·d): a product of two inputs as the argument.
+        let product = lambda(&["a", "b", "d"], call("ab", vec![app("mul", vec![v("a"), v("d")]), app("mul", vec![v("b"), v("d")])]));
+        let log = Magnitude { class: Class::LOG, poly_result: false };
+        assert_eq!(analyze_complexity_linked(&product, Some(&log)), ComplexityOutcome::Bound(Class::LOG));
+        // O(m) of m = a·d is O(n²) in ours: still refused for a polynomial callee.
+        let linear = Magnitude { class: Class::poly(1), poly_result: true };
+        assert!(matches!(analyze_complexity_linked(&product, Some(&linear)), ComplexityOutcome::Opaque(_)));
+        // case G(a, b) of (p, q) => F(p, q): G's components are polynomial only if G's result is.
+        let comp = lambda(&["a", "b"], json!({ "kind": "case", "scrutinee": call("cd", vec![v("a"), v("b")]), "arms": [{
+            "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "p" }, { "kind": "bind", "name": "q" }] },
+            "body": call("ab", vec![v("p"), v("q")]) }] }));
+        let poly = Magnitude { class: Class::LOG, poly_result: true };
+        assert_eq!(analyze_complexity_linked(&comp, Some(&poly)), ComplexityOutcome::Bound(Class::LOG));
+        assert!(matches!(analyze_complexity_linked(&comp, Some(&log)), ComplexityOutcome::Opaque(_)));
+    }
+
+    #[test]
+    fn a_result_is_polynomial_through_div_by_anything_and_mod_by_a_bounded_divisor_only() {
+        let none = Magnitude { class: Class::LOG, poly_result: false };
+        let fref = json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", "ab".repeat(32)) } });
+        let opaque = json!({ "kind": "app", "fn": fref, "args": [v("x"), v("y")] });
+        // (x·y div g(x, y), x mod y): the quotient is bounded by its dividend whatever the divisor.
+        let ok = lambda(&["x", "y"], json!({ "kind": "tuple", "elems": [
+            app("div", vec![app("mul", vec![v("x"), v("y")]), opaque.clone()]), app("mod", vec![v("x"), v("y")])] }));
+        assert!(result_poly_bounded(&ok, Some(&none)));
+        // x mod g(x, y) is bounded only by the (unknown) divisor — not by x (Euclidean −1 mod 5 = 4).
+        let bad = lambda(&["x", "y"], app("mod", vec![v("x"), opaque]));
+        assert!(!result_poly_bounded(&bad, Some(&none)));
+        // A recursive result is never polynomial by structure.
+        let rec = lambda(&["x"], self_call(vec![app("sub", vec![v("x"), lit_i(1)])]));
+        assert!(!result_poly_bounded(&rec, Some(&none)));
     }
 
     struct Shrinks;

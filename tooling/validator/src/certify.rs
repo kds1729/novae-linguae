@@ -806,6 +806,16 @@ impl crate::complexity::LinkedCallees for LinkedView<'_> {
     fn components_preserved_by(&self, target: &str) -> Option<Vec<usize>> {
         self.preserve(target)
     }
+    fn result_poly_bounded(&self, target: &str) -> bool {
+        // Re-derived from the callee's body over this same view; a cycle is "not known".
+        let key = format!("poly:{target}");
+        if !self.in_progress.borrow_mut().insert(key.clone()) {
+            return false;
+        }
+        let out = self.callee(target).is_some_and(|(_, body)| crate::complexity::result_poly_bounded(body, Some(self)));
+        self.in_progress.borrow_mut().remove(&key);
+        out
+    }
 }
 
 impl crate::terminate::LinkedTermination for LinkedView<'_> {
