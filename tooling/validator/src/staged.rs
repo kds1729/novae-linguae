@@ -172,6 +172,43 @@ fn abstract_divmod(s: &S) -> S {
     }
 }
 
+/// Is the term an arithmetic composite (`+`, `-` or `*` at its head) — a compound factor?
+fn arith_composite(s: &S) -> bool {
+    matches!(s, S::List(items) if items.len() >= 3 && matches!(&items[0], S::Atom(h) if h == "+" || h == "-" || h == "*"))
+}
+
+/// QUOTIENT ABSTRACTION (2026-11-01): a fact `A = B·C` (either orientation) whose factor `C` (else
+/// `B`) is an arithmetic composite — Euclid's lemma's quotient `u·(p·s div q) + v·s` — with that
+/// factor a FRESH constant `wq_k`, declared in `decls`. Sound: the fact still holds with the
+/// constant set to the factor, so the abstracted set is weaker and its unsat is the original's.
+/// Measured on uniqueness as a law on `rat_normalize`: `q = s·K ∧ s = q·K′ ∧ p·s = r·q ∧ q, s ≥ 1
+/// ⇒ p = r` is unknown at 120 s with `K`, `K′` the degree-3 quotients and unsat at once with them
+/// opaque (the `q = s` step needs only `K·K′ = 1`).
+fn abstract_quotient(s: &S, k: &mut usize, decls: &mut String) -> S {
+    let S::List(items) = s else { return s.clone() };
+    if items.len() != 3 || !matches!(&items[0], S::Atom(h) if h == "=") {
+        return s.clone();
+    }
+    let fresh = |k: &mut usize, decls: &mut String| {
+        *k += 1;
+        decls.push_str(&format!("(declare-const wq_{k} Int)\n"));
+        S::Atom(format!("wq_{k}"))
+    };
+    for side in [2usize, 1] {
+        let S::List(prod) = &items[side] else { continue };
+        if prod.len() != 3 || !matches!(&prod[0], S::Atom(h) if h == "*") {
+            continue;
+        }
+        let pos = if arith_composite(&prod[2]) { 2 } else if arith_composite(&prod[1]) { 1 } else { continue };
+        let mut p = prod.clone();
+        p[pos] = fresh(k, decls);
+        let mut out = items.clone();
+        out[side] = S::List(p);
+        return S::List(out);
+    }
+    s.clone()
+}
+
 fn is_literal(s: &S) -> bool {
     match s {
         S::Atom(a) => !a.is_empty() && a.chars().all(|c| c.is_ascii_digit()),
@@ -535,13 +572,19 @@ pub fn retry_staged(smt: &str, solver: &str) -> Option<Staged> {
         // two products (the cross law's `p·s = r·q`) — the shape measured to close in 20 ms; then
         // every conclusion; then every fact.
         let linear: Vec<&S> = in_force.iter().filter(|f| !nonlinear(f) || branch.contains(f)).collect();
-        let tier = |extra: &[&S]| -> String {
+        // `quotients`: the second pass, with compound quotient factors opaque (`abstract_quotient`).
+        let tier_with = |extra: &[&S], quotients: bool| -> String {
             let mut block = String::new();
+            let mut decls = String::new();
+            let mut k = 0usize;
             for f in linear.iter().chain(extra.iter()) {
-                block.push_str(&format!("(assert {})\n", render(&abstract_divmod(f))));
+                let f = abstract_divmod(f);
+                let f = if quotients { abstract_quotient(&f, &mut k, &mut decls) } else { f };
+                block.push_str(&format!("(assert {})\n", render(&f)));
             }
-            format!("{header}\n{udecl}{block}(check-sat)\n")
+            format!("{header}\n{udecl}{decls}{block}(check-sat)\n")
         };
+        let tier = |extra: &[&S]| tier_with(extra, false);
         // The conclusions drawn LAST are the deepest consequences (the witness equations and the
         // cross equality come after the posts and the callee facts they rest on): the tiers grow
         // from them — every linear conclusion plus the last 4, 8, 16 nonlinear ones, then every
@@ -582,6 +625,22 @@ pub fn retry_staged(smt: &str, solver: &str) -> Option<Staged> {
                 }
             }
         }
+        // The second pass: the same tiers with compound quotients opaque — only when the first
+        // closed none (a weaker query; the first pass's finals stay the ones written when they close).
+        if !ok {
+            for extra in &tiers {
+                let q = tier_with(extra, true);
+                if q == tier(extra) {
+                    continue;
+                }
+                let (k, r) = check(&q, solver, FINAL_SECS);
+                ran = r;
+                if k {
+                    ok = true;
+                    break;
+                }
+            }
+        }
         if !ok {
             if let Some(f) = &first_ran {
                 debug_note("final0.smt2", f);
@@ -603,6 +662,24 @@ pub fn retry_staged(smt: &str, solver: &str) -> Option<Staged> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_compound_quotient_becomes_a_fresh_constant_and_the_mutual_division_final_closes() {
+        let (mut k, mut decls) = (0usize, String::new());
+        let f = parse_all("(= q (* s (+ (* u w) (* v q))))").unwrap().remove(0);
+        assert_eq!(render(&abstract_quotient(&f, &mut k, &mut decls)), "(= q (* s wq_1))");
+        let f2 = parse_all("(= (* (+ a b) s) q)").unwrap().remove(0);
+        assert_eq!(render(&abstract_quotient(&f2, &mut k, &mut decls)), "(= (* wq_2 s) q)");
+        // A product of atoms, or no product, is left alone.
+        let f3 = parse_all("(= (* p s) (* r q))").unwrap().remove(0);
+        assert_eq!(render(&abstract_quotient(&f3, &mut k, &mut decls)), "(= (* p s) (* r q))");
+        assert_eq!(decls, "(declare-const wq_1 Int)\n(declare-const wq_2 Int)\n");
+        // The measured shape: unsat with the quotients opaque (q = s follows from K·K′ = 1).
+        let smt = "(declare-const p Int)(declare-const q Int)(declare-const r Int)(declare-const s Int)\
+                   (declare-const wq_1 Int)(declare-const wq_2 Int)(assert (>= q 1))(assert (>= s 1))\
+                   (assert (= (* p s) (* r q)))(assert (not (= p r)))(assert (= q (* s wq_1)))(assert (= s (* q wq_2)))(check-sat)";
+        assert!(matches!(run_smt_secs(smt, "z3", 10), Ok(SatAnswer::Unsat)));
+    }
 
     #[test]
     fn an_equivalence_splits_into_its_two_directions() {
