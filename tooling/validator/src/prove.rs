@@ -183,6 +183,52 @@ fn datatype(i: u16) -> Option<Datatype> {
     DATATYPES.with(|r| r.borrow().get(i as usize).cloned())
 }
 
+/// A sort as a cache can keep it: a datatype by its STRUCTURE rather than its per-process registry
+/// index (`Sort::Data(i)` means nothing to another process). The derived-contract cache stores
+/// these and re-registers them on load (`register_datatype` dedupes), so a tuple- or sum-sorted
+/// contract — `rat_normalize`'s, `ext_gcd`'s — is derived once per machine, not once per process
+/// (measured: every validator process of a module round re-derived them, minutes each).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PortableSort {
+    Int,
+    Bool,
+    Str,
+    Lst,
+    Tuple(Vec<PortableSort>),
+    Sum(Vec<(String, Option<PortableSort>)>),
+}
+
+impl Sort {
+    /// This sort with its datatypes written out structurally; `None` for a registry index this
+    /// process does not hold (never for a sort the process produced).
+    pub fn to_portable(self) -> Option<PortableSort> {
+        Some(match self {
+            Sort::Int => PortableSort::Int,
+            Sort::Bool => PortableSort::Bool,
+            Sort::Str => PortableSort::Str,
+            Sort::Lst => PortableSort::Lst,
+            Sort::Data(i) => match datatype(i)? {
+                Datatype::Tuple(elems) => PortableSort::Tuple(elems.into_iter().map(Sort::to_portable).collect::<Option<_>>()?),
+                Datatype::Sum(variants) => PortableSort::Sum(
+                    variants.into_iter().map(|(t, p)| Some((t, match p { Some(s) => Some(s.to_portable()?), None => None }))).collect::<Option<_>>()?,
+                ),
+            },
+        })
+    }
+
+    /// The structural sort registered in THIS process (inner datatypes first, as `sort_of_type` does).
+    pub fn from_portable(p: &PortableSort) -> Sort {
+        match p {
+            PortableSort::Int => Sort::Int,
+            PortableSort::Bool => Sort::Bool,
+            PortableSort::Str => Sort::Str,
+            PortableSort::Lst => Sort::Lst,
+            PortableSort::Tuple(elems) => register_datatype(Datatype::Tuple(elems.iter().map(Sort::from_portable).collect())),
+            PortableSort::Sum(variants) => register_datatype(Datatype::Sum(variants.iter().map(|(t, p)| (t.clone(), p.as_ref().map(Sort::from_portable))).collect())),
+        }
+    }
+}
+
 /// The SMT sort of a TYPE expression: builtins to the base sorts, tuples and sums to registered
 /// datatypes (nested types register inner-first). `None` for anything else (lists, maps, type
 /// variables, functions) — out of the fragment.

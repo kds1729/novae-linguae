@@ -112,8 +112,10 @@ pub fn certify_record(record: &J, body: &J, records: &HashMap<String, J>, solver
 /// one law, 64 s re-derived `gcd`'s four laws — associativity's whole failing ladder included —
 /// and every record that applies `gcd` paid it again in its own process. Off by default so a test
 /// run or a fresh audit never reads yesterday's proofs; the module builder turns it on. A contract
-/// whose sorts name a per-process datatype (`Sort::Data`) is never cached — its indices are not
-/// portable.
+/// whose sorts name a datatype is stored with the datatypes written out STRUCTURALLY
+/// (`PortableContract`, `prove::PortableSort`) and re-registered on load — until 2026-10-31 such a
+/// contract was never cached (its registry indices are per process), and every validator process
+/// of a module round re-derived `rat_normalize`'s and `ext_gcd`'s, minutes each.
 pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
     let v = std::env::var("NL_DERIVED_CACHE").ok()?;
     match v.trim() {
@@ -133,26 +135,64 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 /// The derivation's own version: bumped when the RULES that derive a contract change within one
 /// validator version (a cached contract is this machine's earlier derivation under those rules —
 /// a new rule that proves more must not be served the old result). 2 = the self-contract rung as
-/// the derivation's last phase (2026-10-31).
-const DERIVATION_VERSION: u32 = 2;
+/// the derivation's last phase (2026-10-31); 3 = the portable format with structural sorts
+/// (`PortableContract`, same day).
+const DERIVATION_VERSION: u32 = 3;
 
 fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
     dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))
 }
 
-/// The cached contract for `target`, if this validator version derived one here before.
+/// A derived contract as the cache keeps it: the sorts STRUCTURAL (`prove::PortableSort`), so a
+/// tuple- or sum-sorted contract is portable between processes (its datatype registry indices are
+/// not); everything else as in `CalleeContract`.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PortableContract {
+    symbol: String,
+    params: Vec<String>,
+    param_sorts: Vec<crate::prove::PortableSort>,
+    ret: crate::prove::PortableSort,
+    pres: Vec<J>,
+    posts: Vec<J>,
+    laws: Vec<J>,
+    nat_positions: std::collections::BTreeSet<usize>,
+}
+
+/// The cached contract for `target`, if this validator version derived one here before — its
+/// datatypes re-registered in this process.
 pub fn load_derived(dir: &std::path::Path, target: &str) -> Option<crate::CalleeContract> {
     let text = std::fs::read_to_string(derived_cache_path(dir, target)).ok()?;
-    serde_json::from_str(&text).ok()
+    let p: PortableContract = serde_json::from_str(&text).ok()?;
+    Some(crate::CalleeContract {
+        symbol: p.symbol,
+        params: p.params,
+        param_sorts: p.param_sorts.iter().map(crate::Sort::from_portable).collect(),
+        ret: crate::Sort::from_portable(&p.ret),
+        pres: p.pres,
+        posts: p.posts,
+        laws: p.laws,
+        nat_positions: p.nat_positions,
+    })
 }
 
 /// Keep a derived contract for the next process (best effort: an unwritable cache is no cache).
 pub fn store_derived(dir: &std::path::Path, target: &str, c: &crate::CalleeContract) {
-    let portable = !c.param_sorts.iter().chain(std::iter::once(&c.ret)).any(|s| matches!(s, crate::Sort::Data(_)));
-    if !portable || std::fs::create_dir_all(dir).is_err() {
+    if std::fs::create_dir_all(dir).is_err() {
         return;
     }
-    let Ok(text) = serde_json::to_string(c) else { return };
+    let Some(param_sorts) = c.param_sorts.iter().map(|s| s.to_portable()).collect::<Option<Vec<_>>>() else { return };
+    let Some(ret) = c.ret.to_portable() else { return };
+    let p = PortableContract {
+        symbol: c.symbol.clone(),
+        params: c.params.clone(),
+        param_sorts,
+        ret,
+        pres: c.pres.clone(),
+        posts: c.posts.clone(),
+        laws: c.laws.clone(),
+        nat_positions: c.nat_positions.clone(),
+    };
+    let Ok(text) = serde_json::to_string(&p) else { return };
     let path = derived_cache_path(dir, target);
     let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
     if std::fs::write(&tmp, text).is_ok() && std::fs::rename(&tmp, &path).is_err() {
@@ -401,8 +441,7 @@ impl<'a> LinkedView<'a> {
             crate::set_callee_contracts(prev);
             crate::prove::set_callee_refusals(prev_refusals);
             let posts = sound_posts(&reports, &declared_posts);
-            // `NL_DERIVED_DEBUG=1`: what each derivation yielded, on stderr (tuple-sorted contracts are
-            // never cached, so this is the one place to read them).
+            // `NL_DERIVED_DEBUG=1`: what each derivation yielded, on stderr.
             if std::env::var("NL_DERIVED_DEBUG").is_ok_and(|v| v == "1") {
                 let names: Vec<String> = rec.get("properties").and_then(|p| p.as_array()).into_iter().flatten()
                     .filter_map(|p| Some((p.get("name")?.as_str()?.to_string(), p.get("expr")?)))
