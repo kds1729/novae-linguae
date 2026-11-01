@@ -47,6 +47,21 @@ pub const LEMMA_SMT: &str = "(set-logic ALL)\n\
 (assert (not (= m 0)))\n(assert (= x (+ (* q m) r)))\n(assert (>= r 0))\n(assert (< r (abs m)))\n\
 (assert (not (and (= (div x m) q) (= (mod x m) r))))\n(check-sat)\n";
 
+/// The same lemma split on the divisor's sign — the two cases together are `m ≠ 0`, so both unsat
+/// is exactly the lemma. z3 5.x (5.3.2, 5.3.3) does not decide the one-query form (unknown at
+/// 10 s; z3 4.13/4.16: 0.01 s) and decides each half in under 0.1 s (measured 2026-11-01).
+pub const LEMMA_SMT_POS: &str = "(set-logic ALL)\n\
+;; Euclidean division is unique, positive divisor: m > 0 ∧ x = q·m + r ∧ 0 ≤ r < m ⇒ x div m = q ∧ x mod m = r\n\
+(declare-const x Int)\n(declare-const m Int)\n(declare-const q Int)\n(declare-const r Int)\n\
+(assert (> m 0))\n(assert (= x (+ (* q m) r)))\n(assert (>= r 0))\n(assert (< r m))\n\
+(assert (not (and (= (div x m) q) (= (mod x m) r))))\n(check-sat)\n";
+/// The negative-divisor half of [`LEMMA_SMT_POS`].
+pub const LEMMA_SMT_NEG: &str = "(set-logic ALL)\n\
+;; Euclidean division is unique, negative divisor: m < 0 ∧ x = q·m + r ∧ 0 ≤ r < -m ⇒ x div m = q ∧ x mod m = r\n\
+(declare-const x Int)\n(declare-const m Int)\n(declare-const q Int)\n(declare-const r Int)\n\
+(assert (< m 0))\n(assert (= x (+ (* q m) r)))\n(assert (>= r 0))\n(assert (< r (- m)))\n\
+(assert (not (and (= (div x m) q) (= (mod x m) r))))\n(check-sat)\n";
+
 const LEMMA_NAME: &str = "euclid_unique";
 const MAX_INSTANCES: usize = 96;
 const MAX_TERMS: usize = 64;
@@ -63,7 +78,9 @@ pub fn lemma_discharged(solver: &str) -> bool {
     if let Some(v) = DISCHARGED.with(|d| d.borrow().get(solver).copied()) {
         return v;
     }
-    let ok = matches!(run_smt_secs(LEMMA_SMT, solver, 5), Ok(SatAnswer::Unsat));
+    let unsat = |smt: &str| matches!(run_smt_secs(smt, solver, 5), Ok(SatAnswer::Unsat));
+    // The one-query form, else its two sign cases (z3 5.x decides only the split).
+    let ok = unsat(LEMMA_SMT) || (unsat(LEMMA_SMT_POS) && unsat(LEMMA_SMT_NEG));
     DISCHARGED.with(|d| d.borrow_mut().insert(solver.to_string(), ok));
     ok
 }

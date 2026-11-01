@@ -1923,9 +1923,13 @@ fn cmd_prove(
         let write_euclid = |write_cert: &dyn Fn(&str, &str) -> Result<()>, c: &nl_validator::Certificate| -> Result<()> {
             if c.euclid {
                 write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
+                write_cert(".lemma-euclid-pos", nl_validator::euclid::LEMMA_SMT_POS)?;
+                write_cert(".lemma-euclid-neg", nl_validator::euclid::LEMMA_SMT_NEG)?;
             }
             if c.smt.contains(";; the divisibility rung") {
                 write_cert(".lemma-euclid", nl_validator::euclid::LEMMA_SMT)?;
+                write_cert(".lemma-euclid-pos", nl_validator::euclid::LEMMA_SMT_POS)?;
+                write_cert(".lemma-euclid-neg", nl_validator::euclid::LEMMA_SMT_NEG)?;
                 write_cert(".lemma-div-trans", nl_validator::euclid::DIV_TRANS_SMT)?;
                 write_cert(".lemma-div-antisym", nl_validator::euclid::DIV_ANTISYM_SMT)?;
                 write_cert(".lemma-div-scale", nl_validator::euclid::DIV_SCALE_SMT)?;

@@ -300,6 +300,56 @@ impl Ground {
     }
 }
 
+/// ONE-STEP UNFOLDINGS (2026-11-01, z3 5.x): for every `define-fun-rec` in `defs` applied in
+/// `goal` with `term` as one of its arguments, the definition unfolded once at that application —
+/// `(assert (= (F … term …) BODY[params := args]))`, one line each, distinct applications only.
+/// Each is an instance of the function's own definition, so asserting it is sound. Measured: the
+/// structural step of `filter ∘ reverse = reverse ∘ filter` is unsat in 0.01 s on z3 4.13 and
+/// unknown at 30 s on z3 5.3.2/5.3.3, and unsat in 0.02 s on both 5.x with these two lines — 5.x
+/// no longer unfolds `reverse (cons h t)` and `filter (cons h t)` on its own there.
+pub fn unfoldings_at(defs: &str, goal: &str, term: &str) -> String {
+    let (Some(forms), Some(goal), Some(term)) = (parse(&tokenize(defs)), parse(&tokenize(goal)), parse(&tokenize(term))) else {
+        return String::new();
+    };
+    let (Some(goal), Some(term)) = (goal.into_iter().next(), term.into_iter().next()) else { return String::new() };
+    // name → (parameter names, body)
+    let mut recs: BTreeMap<String, (Vec<String>, S)> = BTreeMap::new();
+    for f in &forms {
+        let S::L(xs) = f else { continue };
+        if xs.len() == 5 && matches!(&xs[0], S::A(h) if h == "define-fun-rec") {
+            let (S::A(name), S::L(ps)) = (&xs[1], &xs[2]) else { continue };
+            let params: Option<Vec<String>> = ps.iter().map(|p| match p { S::L(pv) => match pv.first() { Some(S::A(n)) => Some(n.clone()), _ => None }, _ => None }).collect();
+            if let Some(params) = params {
+                recs.insert(name.clone(), (params, xs[4].clone()));
+            }
+        }
+    }
+    fn subst(e: &S, m: &BTreeMap<String, S>) -> S {
+        match e {
+            S::A(a) => m.get(a).cloned().unwrap_or_else(|| e.clone()),
+            S::L(xs) => S::L(xs.iter().map(|x| subst(x, m)).collect()),
+        }
+    }
+    fn walk(e: &S, term: &S, recs: &BTreeMap<String, (Vec<String>, S)>, out: &mut Vec<String>) {
+        let S::L(xs) = e else { return };
+        if let Some(S::A(h)) = xs.first() {
+            if let Some((params, body)) = recs.get(h) {
+                if params.len() + 1 == xs.len() && xs[1..].iter().any(|a| a == term) {
+                    let m: BTreeMap<String, S> = params.iter().cloned().zip(xs[1..].iter().cloned()).collect();
+                    let line = format!("(assert (= {} {}))", show(e), show(&subst(body, &m)));
+                    if !out.contains(&line) {
+                        out.push(line);
+                    }
+                }
+            }
+        }
+        xs.iter().for_each(|x| walk(x, term, recs, out));
+    }
+    let mut out = Vec::new();
+    walk(&goal, &term, &recs, &mut out);
+    out.iter().map(|l| format!("{l}\n")).collect()
+}
+
 const PLAIN_SORTS: [&str; 2] = ["Int", "Bool"];
 
 /// The certificate's script as pure `QF_NIA`, or `None` when the rewrite does not apply (nothing
@@ -424,6 +474,18 @@ pub fn ackermannize(smt: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_recursive_definitions_unfold_once_at_the_constructor_term() {
+        let defs = "(define-fun-rec append ((xs Lst) (ys Lst)) Lst (ite ((_ is nil) xs) ys (cons (hd xs) (append (tl xs) ys))))\n\
+                    (define-fun-rec reverse ((xs Lst)) Lst (ite ((_ is nil) xs) nil (append (reverse (tl xs)) (cons (hd xs) nil))))\n";
+        let goal = "(= (reverse (cons h t)) (append (reverse t) (reverse (cons h t))))";
+        let u = unfoldings_at(defs, goal, "(cons h t)");
+        // One line per DISTINCT application with the term as an argument; `append (reverse t) …` has
+        // no such argument and is left alone.
+        assert_eq!(u, "(assert (= (reverse (cons h t)) (ite ((_ is nil) (cons h t)) nil (append (reverse (tl (cons h t))) (cons (hd (cons h t)) nil)))))\n");
+        assert_eq!(unfoldings_at(defs, "(= (append t t) t)", "(cons h t)"), "");
+    }
 
     fn solver() -> Option<&'static str> {
         ["z3", "cvc5"].into_iter().find(|s| std::process::Command::new(s).arg("--version").output().map(|o| o.status.success()).unwrap_or(false))

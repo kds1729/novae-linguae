@@ -1588,8 +1588,13 @@ fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<I
         let mut env = BTreeMap::new();
         env.insert(induction_var.clone(), format!("(cons {hv} {tv})"));
         let goal = lower(pred, &env)?;
+        // The recursive functions unfolded once at the step's constructor term — instances of their
+        // own definitions (sound); z3 5.x stopped doing this unfolding itself on some steps
+        // (`ground::unfoldings_at`, measured on filter/reverse commutation).
+        let unfold = crate::ground::unfoldings_at(&prelude, &goal, &format!("(cons {hv} {tv})"));
+        let unfold = if unfold.is_empty() { unfold } else { format!("; the definitions unfolded once at the constructor term\n{unfold}") };
         format!(
-            "{prelude}{free}{axioms}(declare-const {hv} Int)\n(declare-const {tv} Lst)\n; step case: assume IH for {tv}, prove for (cons {hv} {tv})\n{qih}(assert {ih})\n(assert (not {goal}))\n(check-sat)\n"
+            "{prelude}{free}{axioms}(declare-const {hv} Int)\n(declare-const {tv} Lst)\n; step case: assume IH for {tv}, prove for (cons {hv} {tv})\n{qih}(assert {ih})\n{unfold}(assert (not {goal}))\n(check-sat)\n"
         )
     };
 
