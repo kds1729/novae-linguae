@@ -137,7 +137,10 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 /// a new rule that proves more must not be served the old result). 2 = the self-contract rung as
 /// the derivation's last phase (2026-10-31); 3 = the portable format with structural sorts
 /// (`PortableContract`, same day).
-const DERIVATION_VERSION: u32 = 4;
+// 5 (2026-11-01): the staged rung's quotient abstraction changes what a derivation proves — a
+// version-4 entry for the same content address held `unique` open (measured: rational round 8's
+// first start read it, so rat_add's contract lacked the law).
+const DERIVATION_VERSION: u32 = 5;
 
 fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
     dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))
