@@ -860,6 +860,18 @@ UNSAT there is UNSAT of the certificate; anything else ends the rung with the ca
 Measured on `rat_eq_normalize_holds`'s certificate (saved, 63 KB, 60-odd conditionals): both
 branches close, 96 conclusions, 59 s; the steps script re-checks (253 of 253 unsat).
 
+*Quotient abstraction and inheritance (2026-11-01, the rational tier's round 8).* When no tier of
+the final closes, the tiers run once more with every compound factor of a product equation — a
+fact `A = B·C` whose `C` (else `B`) is a sum or product, such as Euclid's lemma's quotient
+`u·(p·s div q) + v·s` — replaced by a fresh constant. The abstracted set is weaker, so its UNSAT
+is the certificate's. Measured on uniqueness as a law on `rat_normalize`: the final holding
+`q = s·K`, `s = q·K′` and `p·s = r·q` is unknown at 120 s with the degree-3 quotients and unsat at
+once with them opaque; the law closes with 106 conclusions over 2 branches. The rung runs for the
+record under proof AND in a contract derivation's self-contract phase (phase 4, depth 1 only), so
+a law only the staged rung proves is a contract law for callers: `rat_add`'s congruence and the
+module's associativity close plainly from the inherited law. Each derived record pays it once
+per process and the derived-contract cache keeps the result.
+
 **The stepwise checker (2026-10-18, the ninth follow-up).** The rung after the one-query
 Euclidean rung, in every ladder (`euclid::retry_stepwise`), for a goal whose residues the two
 sides reach only through the certificate's equations — the fast-exponentiation step. Measured

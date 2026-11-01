@@ -28,19 +28,22 @@
    "value_preserved: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "idempotent: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "cross: UNVERIFIABLE  |  generative: HELD (400 cases)",
-   "cross_abs: UNVERIFIABLE  |  generative: HELD (400 cases)"
+   "cross_abs: UNVERIFIABLE  |  generative: HELD (400 cases)",
+   "unique: CONSISTENT  |  generative: HELD (400 cases)"
   ],
   "properties_wide": [
    "value_preserved: CONSISTENT  |  generative: HELD (200 cases)",
    "idempotent: CONSISTENT  |  generative: HELD (200 cases)",
    "cross: UNVERIFIABLE  |  generative: HELD (200 cases)",
-   "cross_abs: UNVERIFIABLE  |  generative: HELD (200 cases)"
+   "cross_abs: UNVERIFIABLE  |  generative: HELD (200 cases)",
+   "unique: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "value_preserved: PROVED       holds for all inputs (unsat negation)",
    "idempotent: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
    "cross: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)",
-   "cross_abs: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)"
+   "cross_abs: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)",
+   "unique: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat) [STAGED: 106 conclusion(s) drawn by refuting the other disjuncts of contract-law instances one at a time, over 2 branch(es) of the negated goal; the final queries over uninterpreted div/mod]"
   ]
  },
  {
@@ -160,16 +163,19 @@
    "refinement:post[0]": "",
    "refinement:post[1]": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies `fn_9db6b1a9d38b125f37bd2a79a54a2bbe281e139971c74ec3addd67fce32b00a9` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "declared `O(log n)`, not established: applies `fn_e5feabda9127ca576877e5ce343c837d8eb895a85efe7b7682829e702052cd31` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
-   "commutative: CONSISTENT  |  generative: HELD (400 cases)"
+   "commutative: CONSISTENT  |  generative: HELD (400 cases)",
+   "congruent: UNVERIFIABLE  |  generative: HELD (400 cases)"
   ],
   "properties_wide": [
-   "commutative: CONSISTENT  |  generative: HELD (200 cases)"
+   "commutative: CONSISTENT  |  generative: HELD (200 cases)",
+   "congruent: UNVERIFIABLE  |  generative: HELD (195 cases; 5 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at a = 117, b = 102899675179839, c = -21558315844784, d = 675280544553, w = 2, x =\u2026)"
   ],
   "prove": [
-   "commutative: PROVED       holds for all inputs (unsat negation)"
+   "commutative: PROVED       holds for all inputs (unsat negation)",
+   "congruent: PROVED       holds for all inputs (unsat negation)"
   ]
  },
  {
@@ -193,7 +199,7 @@
    "refinement:post[0]": "",
    "refinement:post[1]": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies `fn_9db6b1a9d38b125f37bd2a79a54a2bbe281e139971c74ec3addd67fce32b00a9` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "declared `O(log n)`, not established: applies `fn_e5feabda9127ca576877e5ce343c837d8eb895a85efe7b7682829e702052cd31` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
    "self_difference_is_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -226,7 +232,7 @@
    "refinement:post[0]": "",
    "refinement:post[1]": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies `fn_9db6b1a9d38b125f37bd2a79a54a2bbe281e139971c74ec3addd67fce32b00a9` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "declared `O(log n)`, not established: applies `fn_e5feabda9127ca576877e5ce343c837d8eb895a85efe7b7682829e702052cd31` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
    "commutative: CONSISTENT  |  generative: HELD (400 cases)",
@@ -362,7 +368,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_935cfc0f2655dbd2cebe46c6fc631058f79ac6fb8abf937d732c69741d9f6210` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_8cea5388fd7072e7f3553198eae2f6cac491d45107825f8874accbace493f358` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
    "add_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -393,7 +399,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_978b114f481aa99a4a3511ab723e241990e64f01da54aa580cdb1bf56077f43c` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_d5ef9c21f4e10d512b6fc1c0e9ae04d7b6cd5d1b3d7e3e5857662c5834e1e6cf` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
    "mul_one: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -433,7 +439,7 @@
    "equality_is_normal_form_equality: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "equality_is_normal_form_equality: PROVED       holds for all inputs (unsat negation) [STAGED: 100 conclusion(s) drawn by refuting the other disjuncts of contract-law instances one at a time, over 2 branch(es) of the negated goal; the final queries over uninterpreted div/mod]"
+   "equality_is_normal_form_equality: PROVED       holds for all inputs (unsat negation)"
   ]
  },
  {
@@ -455,7 +461,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_935cfc0f2655dbd2cebe46c6fc631058f79ac6fb8abf937d732c69741d9f6210` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
+   "complexity": "declared `O(log n)`, not established: applies the fn_ref `fn_8cea5388fd7072e7f3553198eae2f6cac491d45107825f8874accbace493f358` (its cost is unresolved here \u2014 pass --records to fold the callee's class)"
   },
   "properties_generative": [
    "associative: CONSISTENT  |  generative: HELD (400 cases)"
@@ -464,7 +470,7 @@
    "associative: CONSISTENT  |  generative: HELD (194 cases; 6 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at a = 1154, b = \"389114219404723736\", c = \"-503311226190474878\", d = \"22477513098\u2026)"
   ],
   "prove": [
-   "associative: UNKNOWN      solver could not decide"
+   "associative: PROVED       holds for all inputs (unsat negation)"
   ]
  }
 ]

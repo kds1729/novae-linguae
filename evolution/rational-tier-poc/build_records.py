@@ -214,7 +214,15 @@ def main():
                  ("cross", "forall n d m e. d == 0 || e == 0 || n * e != m * d || fst(self(n, d)) * snd(self(m, e)) == fst(self(m, e)) * snd(self(n, d))"),
                  # Round 7: the same in absolute values — the form Euclid's lemma's premise
                  # `(|p|·s) mod q = 0` reads directly (gcd takes nats, so the lemma is about |p|).
-                 ("cross_abs", "forall n d m e. d == 0 || e == 0 || n * e != m * d || abs(fst(self(n, d))) * snd(self(m, e)) == abs(fst(self(m, e))) * snd(self(n, d))")],
+                 ("cross_abs", "forall n d m e. d == 0 || e == 0 || n * e != m * d || abs(fst(self(n, d))) * snd(self(m, e)) == abs(fst(self(m, e))) * snd(self(n, d))"),
+                 # Round 8: UNIQUENESS as a law on rat_normalize itself — equal values have EQUAL
+                 # normal forms. The staged rung proves it from cross_abs, the lowest-terms post and
+                 # ext_gcd's witness instances; the derivation's self-contract phase now runs that
+                 # rung, so the law is in the contract every caller receives (rat_add's congruence).
+                 # Stated componentwise over positive denominators — the shape the staged rung
+                 # splits into two branches (a pair equality stays one opaque branch) and the only
+                 # domain rat_add's application reaches (b·d ≥ 1).
+                 ("unique", "forall n d m e. d < 1 || e < 1 || n * e != m * d || fst(self(n, d)) == fst(self(m, e)) && snd(self(n, d)) == snd(self(m, e))")],
           hints=["normalize_fraction", "lowest_terms"], complexity="O(log n)")
     gauntlet("rat_normalize", prove)
 
@@ -256,7 +264,11 @@ def main():
                        # The value: result = (a·d + c·b) / (b·d), as cross-multiplication (normalize's law
                        # at the body's application — composition by contract across the module boundary).
                        ("post", "fst(result) * (b * d) == (a * d + c * b) * snd(result)")],
-          props=[("commutative", "forall a b c d. self(a, b, c, d) == self(c, d, a, b)")],
+          props=[("commutative", "forall a b c d. self(a, b, c, d) == self(c, d, a, b)"),
+                 # Round 8: CONGRUENCE — sums of equal value are the same pair. One instance of
+                 # normalize's `unique` law at the body's application; the associativity checker
+                 # then needs two value posts and one instance of this law.
+                 ("congruent", "forall a b c d w x y z. b < 1 || d < 1 || x < 1 || z < 1 || (a * d + c * b) * (x * z) != (w * z + y * x) * (b * d) || fst(self(a, b, c, d)) == fst(self(w, x, y, z)) && snd(self(a, b, c, d)) == snd(self(w, x, y, z))")],
           hints=["add_fractions"], complexity="O(log n)")
     gauntlet("rat_add", prove)
 
