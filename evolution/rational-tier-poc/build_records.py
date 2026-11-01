@@ -173,6 +173,14 @@ def main():
     shutil.copy(INTEGER_TIER / "body-gcd.json", OUT / "body-gcd.json")
     ADDR["gcd"] = gcd_rec["hash"]
     print(f"gcd (integer tier)     {ADDR['gcd'][:24]}…  {len(gcd_rec['properties'])} laws")
+    # Round 7: the integer tier's ext_gcd too — nothing here applies it, but its posts name gcd by
+    # address (`fst(result) == gcd(a, b)`, round 16), which makes it a WITNESS the prover applies at
+    # the goal's gcd terms: the Bézout identity and Euclid's lemma for uniqueness of lowest terms.
+    ext_rec = json.loads((INTEGER_TIER / "ext_gcd.v0.2.json").read_text())
+    shutil.copy(INTEGER_TIER / "ext_gcd.v0.2.json", OUT / "ext_gcd.v0.2.json")
+    shutil.copy(INTEGER_TIER / "body-ext_gcd.json", OUT / "body-ext_gcd.json")
+    ADDR["ext_gcd"] = ext_rec["hash"]
+    print(f"ext_gcd (integer tier) {ADDR['ext_gcd'][:24]}…  {len(ext_rec['properties'])} laws")
 
     # 1. rat_normalize — the one place the sign and the gcd are handled: denominator positive,
     # both components divided by gcd(|n|, |d|); zero is (0, 1). Non-recursive (a recursion on the
@@ -203,7 +211,10 @@ def main():
           # both in lowest terms) is Euclid's lemma — measured to need a STAGED query, see README.
           props=[("value_preserved", "forall n d. d == 0 || fst(self(n, d)) * d == n * snd(self(n, d))"),
                  ("idempotent", "forall n d. d == 0 || self(fst(self(n, d)), snd(self(n, d))) == self(n, d)"),
-                 ("cross", "forall n d m e. d == 0 || e == 0 || n * e != m * d || fst(self(n, d)) * snd(self(m, e)) == fst(self(m, e)) * snd(self(n, d))")],
+                 ("cross", "forall n d m e. d == 0 || e == 0 || n * e != m * d || fst(self(n, d)) * snd(self(m, e)) == fst(self(m, e)) * snd(self(n, d))"),
+                 # Round 7: the same in absolute values — the form Euclid's lemma's premise
+                 # `(|p|·s) mod q = 0` reads directly (gcd takes nats, so the lemma is about |p|).
+                 ("cross_abs", "forall n d m e. d == 0 || e == 0 || n * e != m * d || abs(fst(self(n, d))) * snd(self(m, e)) == abs(fst(self(m, e))) * snd(self(n, d))")],
           hints=["normalize_fraction", "lowest_terms"], complexity="O(log n)")
     gauntlet("rat_normalize", prove)
 

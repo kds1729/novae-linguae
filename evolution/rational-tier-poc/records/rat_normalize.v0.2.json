@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_bfb15ec6396d9bebd8f57ee71ff44f496e964a430bbbf5cf6a0a7ea0d03a7d3e",
+ "body_hash": "expr_7087714625106a8cabdcf23bd65da9a756c172a542714f1992a401876e600396",
  "derived_from": null,
  "examples": [
   {
@@ -153,7 +153,7 @@
    }
   }
  ],
- "hash": "fn_5b5c272a5b805c3d472991b916f6a2c9e90bb2ef9d1b32f527183874d3e308c9",
+ "hash": "fn_9db6b1a9d38b125f37bd2a79a54a2bbe281e139971c74ec3addd67fce32b00a9",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -546,6 +546,208 @@
     ]
    },
    "name": "cross"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "d"
+            },
+            {
+             "kind": "lit",
+             "value": 0
+            }
+           ],
+           "kind": "app",
+           "op": "eq"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "e"
+            },
+            {
+             "kind": "lit",
+             "value": 0
+            }
+           ],
+           "kind": "app",
+           "op": "eq"
+          }
+         ],
+         "kind": "app",
+         "op": "or"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "n"
+            },
+            {
+             "kind": "var",
+             "name": "e"
+            }
+           ],
+           "kind": "app",
+           "op": "mul"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "m"
+            },
+            {
+             "kind": "var",
+             "name": "d"
+            }
+           ],
+           "kind": "app",
+           "op": "mul"
+          }
+         ],
+         "kind": "app",
+         "op": "neq"
+        }
+       ],
+       "kind": "app",
+       "op": "or"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "n"
+                },
+                {
+                 "kind": "var",
+                 "name": "d"
+                }
+               ],
+               "kind": "app",
+               "op": "self"
+              }
+             ],
+             "kind": "app",
+             "op": "fst"
+            }
+           ],
+           "kind": "app",
+           "op": "abs"
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "m"
+              },
+              {
+               "kind": "var",
+               "name": "e"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            }
+           ],
+           "kind": "app",
+           "op": "snd"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "m"
+                },
+                {
+                 "kind": "var",
+                 "name": "e"
+                }
+               ],
+               "kind": "app",
+               "op": "self"
+              }
+             ],
+             "kind": "app",
+             "op": "fst"
+            }
+           ],
+           "kind": "app",
+           "op": "abs"
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "n"
+              },
+              {
+               "kind": "var",
+               "name": "d"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            }
+           ],
+           "kind": "app",
+           "op": "snd"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n",
+     "d",
+     "m",
+     "e"
+    ]
+   },
+   "name": "cross_abs"
   }
  ],
  "schema_version": "0.2.0",
@@ -696,7 +898,7 @@
         }
        ],
        "kind": "app",
-       "op": "fn_7875d6be2650b66990fd3851ac8181787c70b7dc6d445fbe1ff2cc1c440a3c2c"
+       "op": "fn_29c0f131454ed433bfc54ffbdae2f0afc0448a41d9833351e6824ec0b787d8f6"
       },
       {
        "kind": "lit",

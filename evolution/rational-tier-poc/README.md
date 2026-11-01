@@ -2,15 +2,20 @@
 
 - **Status:** published (2026-10-30). <!-- exploring | published | absorbed | superseded -->
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-10-30, last updated 2026-10-31 (round 6 — the cross law; uniqueness measured)
+- **Dates:** first published 2026-10-30, last updated 2026-10-31 (round 7 — uniqueness of lowest terms PROVED by the staged rung)
 - **Scope:** `tooling/validator` (the prover's contract composition, the divisibility rung, the
   generative checker), `evolution/integer-tier-poc` (its `gcd` record, applied by address),
   `spec/evaluation.md`.
 - **Provenance:** rounds 1–5 on upstream commit `e16a8f0` (nl-validator 0.1.5 in-tree; the `v0.1.5`
   tag sits two fixes earlier, on `fe7e16b`); round 6 on `e7c307d` (nl-validator 0.1.7 in-tree, after
-  the measured-descent rung — no validator change for this round, the records changed); the
-  integer tier's `gcd` at `fn_7875d6be2650b6699…` (its
-  eleventh-follow-up record, with the greatest-divisor law); z3 4.13.3 (Debian/Ubuntu package);
+  the measured-descent rung — no validator change for this round, the records changed); round 7
+  on `d566569` (nl-validator 0.1.7 in-tree after the witness rung and the staged rung `9be3a64`,
+  the depth-0 restriction `4590d8d` and the tuple-sorted derived cache `d566569`); the integer
+  tier's `gcd` at `fn_7875d6be2650b6699…` for rounds 1–6 (its eleventh-follow-up record, with the
+  greatest-divisor law) and, from round 7, the integer tier's round-16 `gcd` at
+  `fn_29c0f131454ed433b…` (six laws, among them Euclid's step by unfolding) with its `ext_gcd` at
+  `fn_254d8d14adb94bc38…` (the Bézout post, the link post `fst(result) = gcd(a, b)`, and Euclid's
+  lemma with the quotient named); z3 4.13.3 (Debian/Ubuntu package);
   python 3.14 for the builder, whose reference values are Python's exact `fractions.Fraction`; one
   laptop (Ubuntu 26.04).
 - **Resolution:** —
@@ -20,24 +25,28 @@
 Fourteen pure records — `rat_normalize` (sign to the numerator, both components divided by the
 integer tier's `gcd`), negation, reciprocal, add/sub/mul, equality and order by
 cross-multiplication, floor, and five checker records for the algebra — were authored in surface
-syntax over `(int, int)` pairs and put through the gauntlet, six times, with the validator
-changing between rounds. **Round 6: 14/14 run and certify; every declared contract is SOUND (12
+syntax over `(int, int)` pairs and put through the gauntlet, seven times, with the validator
+changing between rounds. **Round 7: 14/14 run and certify; every declared contract is SOUND (12
 posts), among them the module's headline fact as a post on `rat_normalize` — the result is in
 lowest terms, `gcd(|p|, q) = 1`, stated by applying `gcd` by content address inside the predicate
 and proved through `gcd`'s greatest-divisor law from the other module — and the value-preserving
 identities `fst(result)·(b·d) = (a·d + c·b)·snd(result)` on the arithmetic records, each derived
 from `rat_normalize`'s own proved law at the body's application. Cross-module composition of
 contracts, the thing this module exists to test, works, and it now carries a contract that itself
-applies a callee.** Laws: **19 PROVED / 2 UNKNOWN / 0 UNSUPPORTED** of 21 (round 5: 18 / 2 / 0 of
-20; round 2: 14 / 6 / 0); all 21 held generatively on the bounded domain with nothing skipped, and
-all 21 held under the wide sampler, where one law reports six of 200 cases skipped at the
-evaluator's 128-bit limit. The two UNKNOWNs are one fact: **uniqueness of lowest terms** (Euclid's
-lemma), which is what "equal values have equal normal forms" and `(x + y) + z = x + (y + z)` reduce
-to once the value posts are in place. Round 6 (2026-10-31) proved its first half as the law
-`cross` on `rat_normalize` — `n·e = m·d ⇒ p·s = r·q` for the two normal forms, from the record's
-own certified contract — gave `rat_eq` its decision as a post, and hand-measured the second half
-(Euclid's lemma) step by step: each step closes in under a second alone and no one-shot query
-closes at all, which fixes the shape of the rung still missing (a staged query; "What is argued").
+applies a callee.** Laws: **21 PROVED / 1 UNKNOWN / 0 UNSUPPORTED** of 22 (round 6: 19 / 2 / 0 of
+21; round 5: 18 / 2 / 0 of 20; round 2: 14 / 6 / 0); all 22 held generatively on the bounded
+domain with nothing skipped, and all 22 held under the wide sampler, where one law reports six of
+200 cases skipped at the evaluator's 128-bit limit. **Round 7 (2026-10-31) proved uniqueness of
+lowest terms in the tool**: the checker law `equality_is_normal_form_equality` — equal as values
+⇔ equal normal forms — is PROVED by the prover's new STAGED rung, exactly the shape round 6's
+hand-measurement said it needed: 100 conclusions drawn by refuting the other disjuncts of
+contract-law instances one at a time over the two branches of the negated goal, then a final query
+over uninterpreted `div`/`mod` with the witness terms abstracted. The contract-law instances come
+from the integer tier's `ext_gcd` — applied by nothing in this module, reached as a WITNESS callee
+because its post names `gcd` by address — and from `rat_normalize`'s own laws `cross` (round 6)
+and the new `cross_abs` (the same in absolute values, the form Euclid's lemma's premise reads).
+The one law still UNKNOWN is additive associativity, which composes three normalizations; its
+missing piece is now uniqueness *as a law on `rat_normalize`* that callers inherit ("Still open").
 
 Getting from round 2 to round 5 cost **one prover rung and three validator defects**, all
 in-tree. The rung (dffa6e2, ed76c0a): the divisibility rung reaches a *callee's* laws, with
@@ -56,21 +65,24 @@ UNVERIFIABLE for every record that passes a product to a callee (7 of 14).
 
 | input | pinned at |
 |---|---|
-| `nl-validator` | 0.1.5 in-tree, commit `e16a8f0`; the laws proved with z3 4.13.3 |
-| the integer tier's `gcd` | `fn_7875d6be2650b6699…` — copied record and body into `records/` so `--records` resolves the cross-module `fn_ref`; the address is the same, so publishing it again is idempotent |
+| `nl-validator` | rounds 1–5: 0.1.5 in-tree, commit `e16a8f0`; round 6: `e7c307d`; round 7: `d566569` (0.1.7 in-tree + the witness and staged rungs); the laws proved with z3 4.13.3 |
+| the integer tier's `gcd` | rounds 1–6: `fn_7875d6be2650b6699…`; round 7: the round-16 `gcd` `fn_29c0f131454ed433b…` — copied record and body into `records/` so `--records` resolves the cross-module `fn_ref`; the address is the same, so publishing it again is idempotent |
+| the integer tier's `ext_gcd` | round 7: `fn_254d8d14adb94bc38…`, copied likewise — no record here applies it; it is in the view as a WITNESS (its post `fst(result) = gcd(a, b)` names `gcd` by address, so the prover instantiates its Bézout post and Euclid's lemma at this module's `gcd` applications) |
 | reference values | `fractions.Fraction` (CPython 3.14): every worked example is recomputable |
 | the builder | `build_records.py` here — re-mints deterministically; rerun after any validator change |
 
 ## What was measured
 
-Builder round 6 (`records/REPORT.{json,md}`; the log in the author's sandbox), 98.3 min, z3 4.13.3
-(round 5 took 55.7 min, round 2 30.6 min; each round's additions — the lowest-terms post and the
-rung's 30 s budget, then the `cross` law's self-contract derivation and the two checkers' longer
-ladders over a richer contract set — are where the time goes):
+Builder round 7 (`records/REPORT.{json,md}`; the log in the author's sandbox), 26.8 min, z3 4.13.3
+(round 6 took 98.3 min, round 5 55.7 min, round 2 30.6 min; each round's additions — the
+lowest-terms post and the rung's 30 s budget, then the `cross` law's self-contract derivation and
+the two checkers' longer ladders over a richer contract set — are where the time went; round 7 is
+faster than round 6 despite two more rungs because the derived-contract cache now keeps the
+tuple-sorted contracts, which every process of a round had been re-deriving):
 
 | record | signature | contracts | laws (prove) | generative |
 |---|---|---|---|---|
-| `rat_normalize` | `int int → (int, int)`, pre `d ≠ 0` | `snd ≥ 1`; `n = 0 ⇒ result = (0, 1)`; **`gcd(|fst|, snd) = 1`** — all SOUND | `value_preserved` **PROVED**; `idempotent` **PROVED** [Euclid] (round 2: UNKNOWN); `cross` **PROVED** from self's certified contract (round 6: `n·e = m·d ⇒ p·s = r·q`, the first half of uniqueness; its static example check is UNVERIFIABLE — a two-application law over four variables has no worked-example pair to read it off) | EXHAUSTIVE 81 / 81; HELD 400 |
+| `rat_normalize` | `int int → (int, int)`, pre `d ≠ 0` | `snd ≥ 1`; `n = 0 ⇒ result = (0, 1)`; **`gcd(|fst|, snd) = 1`** — all SOUND | `value_preserved` **PROVED**; `idempotent` **PROVED** [Euclid] (round 2: UNKNOWN); `cross` **PROVED** from self's certified contract (round 6: `n·e = m·d ⇒ p·s = r·q`, the first half of uniqueness; its static example check is UNVERIFIABLE — a two-application law over four variables has no worked-example pair to read it off); `cross_abs` **PROVED** likewise (round 7: `|p|·s = |r|·q`, the form Euclid's lemma's premise `(|p|·s) mod q = 0` reads, since `gcd` takes nats) | EXHAUSTIVE 81 / 81; HELD 400 / 400 |
 | `rat_coprime_holds` | checker | — | `lowest_terms` **PROVED** (round 1: UNSUPPORTED; round 2: UNKNOWN) | EXHAUSTIVE 81 |
 | `rat_neg` | | `snd = d` SOUND | involution ×2 **PROVED** | EXHAUSTIVE 81 ×2 |
 | `rat_inv` | pre `n ≠ 0` | `fst·n = d·snd` SOUND (round 4: UNVERIFIABLE) | `denominator_positive` **PROVED** (round 4: UNSUPPORTED) | EXHAUSTIVE 81 |
@@ -81,13 +93,14 @@ ladders over a richer contract set — are where the time goes):
 | `rat_lt` | pre `b, d ≥ 1` | — | `irreflexive`, `asymmetric` **PROVED** | EXHAUSTIVE 81, HELD 400 |
 | `rat_floor` | pre `d ≥ 1` | — | `lower_bound`, `upper_bound` **PROVED** | EXHAUSTIVE 81 ×2 |
 | `rat_add_zero_holds`, `rat_mul_one_holds` | checkers | — | `add_zero`, `mul_one` **PROVED** by unfolding the callees' definitions (round 2: UNKNOWN) | EXHAUSTIVE 81, 81 |
-| `rat_eq_normalize_holds`, `rat_add_assoc_holds` | checkers | — | UNKNOWN ×2 — uniqueness of lowest terms (round 6: the first half is now `cross`; the rest is Euclid's lemma, measured to need a staged query — below) | HELD 400, 400 |
+| `rat_eq_normalize_holds` | checker | — | `equality_is_normal_form_equality` **PROVED** [STAGED: 100 conclusions over 2 branches of the negated goal; the finals over uninterpreted `div`/`mod`] (rounds 2–6: UNKNOWN — uniqueness of lowest terms, Euclid's lemma) | HELD 400 |
+| `rat_add_assoc_holds` | checker | — | `associative` UNKNOWN — three normalizations composed; needs uniqueness as a law callers inherit (below) | HELD 400 |
 
 Totals: 14/14 run PASS, 14/14 certified, termination SOUND 14/14, complexity SOUND 7 /
 UNVERIFIABLE 7 (every record passing a product to a callee: add/sub/mul and the checkers over
-them, plus `rat_coprime_holds`), contracts 12 SOUND / 0, laws 19 PROVED / 2 UNKNOWN / 0
-UNSUPPORTED, 21/21 held (bounded; no skipped cases anywhere — every law is guarded, `d == 0 ||`,
-`b < 1 ||`, and the guards decide) and 21/21 held (`--wide`, 200 cases sampled across magnitudes;
+them, plus `rat_coprime_holds`), contracts 12 SOUND / 0, laws 21 PROVED / 1 UNKNOWN / 0
+UNSUPPORTED, 22/22 held (bounded; no skipped cases anywhere — every law is guarded, `d == 0 ||`,
+`b < 1 ||`, and the guards decide) and 22/22 held (`--wide`, 200 cases sampled across magnitudes;
 `associative` reports 194 held and 6 skipped — three-fraction sums at numerators near 10¹⁷
 overflow the evaluator's 128-bit integers, and the skipped-case report says so rather than
 counting them as held).
@@ -101,6 +114,16 @@ Round 6 (98.3 min, log `rational-build-round6.log`, nl-validator at `e7c307d`, n
 change): the `cross` law PROVED from `rat_normalize`'s own certified contract (`value_preserved`
 at both applications, the cancellation by the solver), `rat_eq`'s decision post SOUND — the table
 above; the two checkers stay UNKNOWN, now for the measured reason recorded under "What is argued".
+Round 7 (26.8 min, log `rational-build-round7.log`, nl-validator at `d566569` — the witness rung,
+the staged rung, the retry restricted to the record under proof, the derived cache keeping
+tuple-sorted contracts; the integer tier's round-16 `gcd` and `ext_gcd` copied in): the
+`cross_abs` law authored on `rat_normalize` and PROVED from self's contract, and
+`equality_is_normal_form_equality` **PROVED** by the staged rung — uniqueness of lowest terms, in
+the tool. The round's first two starts were killed (every contract derivation ran the new retry,
+then every process re-derived the tuple-sorted contracts) and its third froze the author's laptop
+hard — the run that finished ran inside a memory-capped cgroup (9 GiB, swap off) and peaked at
+817 MB; the freeze did not reproduce and its cause is unconfirmed (the user's kernel log was not
+readable from the build account).
 
 **The lowest-terms proof, by hand and now by the prover.** Let `g = gcd(|n|, |d|)`, `p = n div g`,
 `q = d div g`, `e = gcd(|p|, q)`. Then `e | p` and `e | q`, so `e·g | n` and `e·g | d` (scaling),
@@ -127,10 +150,10 @@ records; which of the intervening validator changes flipped them was not isolate
   must then carry *that* callee's contract into every record that applies the first. Three places
   in the validator had assumed contracts were callee-free; each is now a test.
 - **A contract pins values, not functions — and the value posts are the right contract.** The two
-  checkers still UNKNOWN compose records whose *values* are certified equal; two pairs with the
-  same value are equal only if both are in lowest terms (now a contract) and lowest terms are
-  unique (not yet). That is the honest shape of the gap: not "the prover is weak on composition"
-  but "one number-theoretic fact is missing, and two laws wait on it".
+  checkers UNKNOWN through round 6 compose records whose *values* are certified equal; two pairs
+  with the same value are equal only if both are in lowest terms (a contract since round 4) and
+  lowest terms are unique (round 7). That was the honest shape of the gap: not "the prover is weak
+  on composition" but "one number-theoretic fact is missing, and two laws wait on it".
 - **The next rung is Euclid's lemma, and the integer tier already holds its key.** Uniqueness: if
   `p/q = r/s` with both in lowest terms and `q, s ≥ 1`, then `p·s = r·q`, so `q | p·s`, so `q | s`
   by Euclid's lemma (`gcd(p, q) = 1 ∧ q | p·s ⇒ q | s`); symmetrically `s | q`; so `q = s` and
@@ -164,12 +187,36 @@ records; which of the intervening validator changes flipped them was not isolate
   `gcd`'s own definition and no law states — a one-line unfolding law on `gcd`, whose re-minting
   cascades to every record that applies it). Round 6 took what the measurements already support:
   the first half of uniqueness as a certified law.
+- **Uniqueness PROVED in the tool, by the rung the measurement described (round 7, 2026-10-31).**
+  The validator gained all three pieces (`9be3a64`, `4590d8d`, `d566569`): the WITNESS rung — a
+  view record whose post says `fst(result) = G(params)` is applied at `G`'s applications, so
+  `ext_gcd`, applied by nothing here, brings its Bézout post and its Euclid's-lemma law to every
+  `gcd` term of the goal (the integer tier's round 16 gave `ext_gcd` the link post, SOUND, via
+  `gcd`'s unfolding law `euclid_step`); the STAGED rung — the negated goal split into branches,
+  each contract-law instance's conditional conclusion established by refuting its other disjuncts
+  one at a time under tiers of facts, the conclusions re-stated as facts with the `div` and Bézout
+  witness terms abstracted, every query grounded, the finals grown from the most recent
+  conclusions; and the derivation's self-contract phase, so a law the CLI proved on
+  `rat_normalize` (`cross`, `cross_abs`) is in every caller's contract. On this module's real
+  records the checker's law closes with 100 conclusions over 2 branches. Two costs were measured
+  on the way and fixed before the round finished: the retry ran inside every contract derivation
+  (minutes per UNKNOWN law per process — now depth 0 only, and a law only staging proves is not a
+  contract law for callers), and the tuple-sorted contracts were never cached (727 s cold / 0.1 s
+  warm on `rat_inv` once they were).
+- **Associativity is the same fact one level up.** `(x + y) + z = x + (y + z)` compares two
+  normalizations of values the value posts certify equal; the checker record applies
+  `rat_normalize` through `rat_add`, so the staged rung's witness instances sit two applications
+  away and the query stays UNKNOWN. What callers lack is uniqueness *as a law on `rat_normalize`*
+  (`n·e = m·d ⇒ self(n, d) = self(m, e)`), which the self-contract phase would then hand to
+  `rat_add` and on to the checker — the next rung, recorded, not built.
 - **Complexity through products is a fold limit, not a defect.** The class fold reads a callee's
   cost only for size-bounded arguments; `normalize(a·d + c·b, b·d)` is `O(log(a·d + c·b))`, which
   is `O(log n)` in the inputs' magnitude but not in the fold's vocabulary. Stated, not changed.
 - **The gauntlet is the point.** Five rounds of one module found three defects in a prover with
   640-odd tests, each in a place no unit test had reached because no record had yet applied a
-  callee inside a contract. The module's records never changed after round 3; the validator did.
+  callee inside a contract; rounds 6 and 7 forced two prover rungs that the hand-measurement had
+  specified before they were built. The module's records changed only to add laws after round 3;
+  the validator did the moving.
 
 ## What worked well
 
@@ -186,25 +233,25 @@ records; which of the intervening validator changes flipped them was not isolate
 
 ## Still open
 
-- **Uniqueness of lowest terms** (`equality_is_normal_form_equality`, `associative`): the first
-  half is now the certified law `cross` (round 6); the second half — `p·s = r·q` with both pairs in
-  lowest terms ⇒ `p = r ∧ q = s` — is Euclid's lemma, and the measurements above fix the shape of
-  the rung it needs: a STAGED query over contract-law instances (premises discharged apart,
-  witnesses abstracted), a witness-callee lookup bringing `ext_gcd` in at `gcd`'s applications,
-  and the link post `fst(ext_gcd(a, b)) = gcd(a, b)` (which needs `gcd`'s unfolding law
-  `gcd(a, b) = gcd(b, a mod b)`). Measured need: two laws; every step of the hand proof closes in
-  under a second in isolation, none of the one-shot forms closes in 60 s.
+- **Additive associativity** (`associative`, the last UNKNOWN): author uniqueness as a law on
+  `rat_normalize` itself (`n·e = m·d ⇒ self(n, d) = self(m, e)` — the staged rung proves it there
+  as it did on the checker) so the self-contract phase carries it into `rat_add`'s contract and
+  the checker's query becomes two value-post instances plus that law. Not built; the checker's
+  own law stays as the external re-check.
+- **Uniqueness of lowest terms** — CLOSED in round 7 (`equality_is_normal_form_equality` PROVED
+  by the staged rung over `ext_gcd`'s witness instances). Kept here as the record of what it took:
+  the staged query, the witness-callee lookup, and `ext_gcd`'s link post via `gcd`'s unfolding law.
 - **Complexity through product arguments**: seven UNVERIFIABLE folds; a magnitude-based size
   measure for `log` classes would decide them. Driver-gated.
 - Which validator change flipped `add_zero`/`mul_one` from UNKNOWN to PROVED was not isolated.
-- A Gaussian-integer or Gaussian-rational tier over these pairs is the natural next module: the
-  same pair machinery, with `norm = a² + b²` where the integer tier's facts enter.
+- A Gaussian-integer tier over these pairs was the natural next module and now exists
+  (`evolution/gaussian-tier-poc`, 2026-10-30); a Gaussian-rational tier over both remains open.
 
 ## Reproducing
 
 ```
 cargo build --release --manifest-path tooling/validator/Cargo.toml
-python3 evolution/rational-tier-poc/build_records.py            # mint + gauntlet (needs z3)
+python3 evolution/rational-tier-poc/build_records.py            # mint + gauntlet (needs z3; ~27 min, ≤1 GB)
 python3 tooling/commons-node/publish_records.py evolution/rational-tier-poc/records --sign <seed>
 ```
 
