@@ -2236,8 +2236,9 @@ fn prove_property_in_domain_inner(
     // the conclusions drawn carried into a final query over opaque div/mod. Uniqueness of lowest
     // terms: every step the solver decides alone, the one-shot query it never does (measured). The
     // one-shot form of this certificate is not even tried: it is the staged form that closes.
-    // Not inside a contract derivation (`DERIVATION_DEPTH`): the record under proof only.
-    if last.uses_callees && DERIVATION_DEPTH.with(|d| d.get()) == 0 {
+    // Not inside a contract derivation (`DERIVATION_DEPTH`): the record under proof only — or a
+    // derived record's own law in the derivation's self-contract phase (`staged_retry_allowed`).
+    if last.uses_callees && staged_retry_allowed() {
         if let Ok(cert4) = with_witness_callees(|| with_divisibility_callees(|| without_contract_quantifiers(|| build_certificate_in_domain(prop_expr, body, self_nat_positions)))) {
             if let Some(st) = crate::staged::retry_staged(&cert4.smt, solver) {
                 let mut cert = cert4;
@@ -2729,9 +2730,15 @@ thread_local! {
     /// linked view). The witness + staged retry runs only at depth 0 — for the record under proof:
     /// inside a derivation it is paid again by every process that derives the same tuple-sorted
     /// contract (never cached), on laws that stay UNKNOWN (measured: three records of fourteen in
-    /// 80 minutes, round 7 of the rational tier). A law only the staged rung proves is therefore
-    /// not a contract law for callers — stated here, a cost chosen over a six-hour round.
+    /// 80 minutes, round 7 of the rational tier). The one exception is the derivation's
+    /// SELF-CONTRACT phase (`in_self_contract_phase`, 2026-11-01): a law there is decided once per
+    /// derived record (its dependencies are derived before it, so the depth is 1), over the
+    /// record's own proved facts, and it is how a law the staged rung proves — uniqueness of
+    /// lowest terms on `rat_normalize` — reaches the contract every caller receives.
     static DERIVATION_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Set while the derivation's phase 4 (the self-contract rung) runs: the witness + staged
+    /// retry is allowed there at depth 1.
+    static SELF_CONTRACT_PHASE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Run `f` as a contract derivation (the witness + staged retry off inside it).
@@ -2740,6 +2747,22 @@ pub fn in_derivation<T>(f: impl FnOnce() -> T) -> T {
     let out = f();
     DERIVATION_DEPTH.with(|d| d.set(d.get() - 1));
     out
+}
+
+/// Run `f` as the derivation's self-contract phase: the witness + staged retry is back on for the
+/// derived record's own laws (depth 1 only — never for a derivation nested inside another).
+pub fn in_self_contract_phase<T>(f: impl FnOnce() -> T) -> T {
+    let prev = SELF_CONTRACT_PHASE.with(|p| p.replace(true));
+    let out = f();
+    SELF_CONTRACT_PHASE.with(|p| p.set(prev));
+    out
+}
+
+/// Whether the witness + staged retry may run: for the record under proof, or for a derived
+/// record's own law in the self-contract phase of a top-level derivation.
+fn staged_retry_allowed() -> bool {
+    let depth = DERIVATION_DEPTH.with(|d| d.get());
+    depth == 0 || (depth == 1 && SELF_CONTRACT_PHASE.with(|p| p.get()))
 }
 
 /// The candidate terms a law's free variable ranges over: the applications' terms and, when
@@ -3694,6 +3717,18 @@ mod tests {
     }
     fn op(o: &str, args: Vec<J>) -> J {
         json!({ "kind": "app", "op": o, "args": args })
+    }
+
+    #[test]
+    fn the_staged_retry_runs_for_the_record_under_proof_and_a_top_level_self_contract_phase_only() {
+        assert!(staged_retry_allowed());
+        in_derivation(|| {
+            assert!(!staged_retry_allowed(), "phases 1-3 of a derivation: off");
+            in_self_contract_phase(|| assert!(staged_retry_allowed(), "phase 4 of a top-level derivation: on"));
+            assert!(!staged_retry_allowed(), "restored after phase 4");
+            in_derivation(|| in_self_contract_phase(|| assert!(!staged_retry_allowed(), "a nested derivation: off")));
+        });
+        assert!(staged_retry_allowed());
     }
 
     #[test]

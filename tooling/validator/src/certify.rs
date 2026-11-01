@@ -137,7 +137,7 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 /// a new rule that proves more must not be served the old result). 2 = the self-contract rung as
 /// the derivation's last phase (2026-10-31); 3 = the portable format with structural sorts
 /// (`PortableContract`, same day).
-const DERIVATION_VERSION: u32 = 3;
+const DERIVATION_VERSION: u32 = 4;
 
 fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
     dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))
@@ -743,7 +743,10 @@ fn derive_self_facts_inner(
                 c.symbol = "self_contract".to_string();
                 c.posts = posts.clone();
                 c.laws = proved.clone();
-                if matches!(crate::prove::prove_from_self_contract(law, "fn_self_contract", c, nat_positions, solver).0, crate::ProofOutcome::Proved) {
+                // The staged rung is allowed here (`prove::in_self_contract_phase`): a law it
+                // proves on the derived record — uniqueness on `rat_normalize` — is a contract law.
+                let outcome = crate::prove::in_self_contract_phase(|| crate::prove::prove_from_self_contract(law, "fn_self_contract", c, nat_positions, solver).0);
+                if matches!(outcome, crate::ProofOutcome::Proved) {
                     proved.push(law.clone());
                 }
             }
