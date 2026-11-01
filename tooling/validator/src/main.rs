@@ -380,6 +380,18 @@ enum Commands {
         #[arg(long)]
         records: Option<PathBuf>,
     },
+    /// Run the STAGED rung alone on a saved instances-only certificate (an `.smt2` file a `prove --smt-out`
+    /// or the `NL_EUCLID_DEBUG_DIR` notes wrote): the disjunct eliminations, then the final queries. Prints
+    /// the verdict and writes `<file>.staged-final.smt2` / `<file>.staged-steps.smt2` beside it when it
+    /// closes. A development aid for the rung — the ladder in `prove` reaches it on its own.
+    #[command(hide = true)]
+    StageCertificate {
+        /// Path to the certificate script.
+        certificate: PathBuf,
+        /// SMT solver binary.
+        #[arg(long, default_value = "z3")]
+        solver: String,
+    },
     /// Verify a record's declared `signature.complexity` (an `O(…)` upper bound) by **structural** cost
     /// analysis (no solver): it infers a sound upper-bound class from the body — non-recursive first-order
     /// bodies are `O(1)`/`O(n)`, and a structural recursion is solved as a recurrence `T(n) = a·T(n−k) + w`
@@ -1065,6 +1077,7 @@ fn real_main() -> ExitCode {
             (cmd_check_plan(&plan, records.as_deref(), node.as_deref(), &probe, &grants, &secrets), false)
         }
         Commands::CheckTermination { record, body, records } => (cmd_check_termination(&record, &body, records.as_ref()), false),
+        Commands::StageCertificate { certificate, solver } => (cmd_stage_certificate(&certificate, &solver), false),
         Commands::CheckComplexity { record, body, records } => (cmd_check_complexity(&record, &body, records.as_ref()), false),
         Commands::Certify { record, body, records, solver, json, sign, timestamp } => {
             (cmd_certify(&record, &body, records.as_ref(), &solver, json, sign.as_deref(), timestamp.as_deref()), false)
@@ -1529,6 +1542,21 @@ fn linked_maps(records: Option<&PathBuf>) -> Result<Option<(std::collections::Ha
     }
 }
 
+fn cmd_stage_certificate(certificate: &PathBuf, solver: &str) -> Result<()> {
+    let smt = std::fs::read_to_string(certificate).map_err(|e| anyhow::anyhow!("reading {}: {e}", certificate.display()))?;
+    let t = std::time::Instant::now();
+    match nl_validator::staged::retry_staged(&smt, solver) {
+        Some(st) => {
+            let base = certificate.display().to_string();
+            std::fs::write(format!("{base}.staged-final.smt2"), &st.final_smt)?;
+            std::fs::write(format!("{base}.staged-steps.smt2"), &st.steps_smt)?;
+            println!("STAGED       closed: {} branch(es), {} conclusion(s) derived, {:.1} s — final and steps written beside the certificate", st.branches, st.derived, t.elapsed().as_secs_f64());
+        }
+        None => println!("NOT CLOSED   the staged rung did not close this certificate ({:.1} s; set NL_EUCLID_DEBUG_DIR for its notes)", t.elapsed().as_secs_f64()),
+    }
+    Ok(())
+}
+
 fn cmd_check_termination(record: &PathBuf, body: &PathBuf, records: Option<&PathBuf>) -> Result<()> {
     use nl_validator::TerminationOutcome;
     let record = nl_validator::read_json(record)?;
@@ -1810,6 +1838,10 @@ fn cmd_respond(
 /// The label note for a certificate that closed through the Euclidean rung (`euclid`).
 fn euclid_note(cert: Option<&nl_validator::Certificate>) -> String {
     match cert {
+        Some(c) if c.staged.is_some() => {
+            let (b, d) = c.staged.unwrap();
+            format!(" [STAGED: {d} conclusion(s) drawn by refuting the other disjuncts of contract-law instances one at a time, over {b} branch(es) of the negated goal; the final queries over uninterpreted div/mod]")
+        }
         Some(c) if c.stepwise.is_some() => {
             let (v, t) = c.stepwise.unwrap();
             format!(" [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: {v} of {t} premises verified separately, the final query over uninterpreted mod/div]")

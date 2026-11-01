@@ -130,8 +130,14 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
     }
 }
 
+/// The derivation's own version: bumped when the RULES that derive a contract change within one
+/// validator version (a cached contract is this machine's earlier derivation under those rules —
+/// a new rule that proves more must not be served the old result). 2 = the self-contract rung as
+/// the derivation's last phase (2026-10-31).
+const DERIVATION_VERSION: u32 = 2;
+
 fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
-    dir.join(format!("{target}.v{}.json", env!("CARGO_PKG_VERSION")))
+    dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))
 }
 
 /// The cached contract for `target`, if this validator version derived one here before.
@@ -395,6 +401,15 @@ impl<'a> LinkedView<'a> {
             crate::set_callee_contracts(prev);
             crate::prove::set_callee_refusals(prev_refusals);
             let posts = sound_posts(&reports, &declared_posts);
+            // `NL_DERIVED_DEBUG=1`: what each derivation yielded, on stderr (tuple-sorted contracts are
+            // never cached, so this is the one place to read them).
+            if std::env::var("NL_DERIVED_DEBUG").is_ok_and(|v| v == "1") {
+                let names: Vec<String> = rec.get("properties").and_then(|p| p.as_array()).into_iter().flatten()
+                    .filter_map(|p| Some((p.get("name")?.as_str()?.to_string(), p.get("expr")?)))
+                    .map(|(n, e)| format!("{n}={}", if laws.contains(e) { "PROVED" } else { "open" }))
+                    .collect();
+                eprintln!("[derived] {} {}: posts {} of {} sound; laws [{}]", rec.get("name_hints").and_then(|h| h.get(0)).and_then(|n| n.as_str()).unwrap_or("?"), &target[..14], posts.len(), declared_posts.len(), names.join(", "));
+            }
             Some(crate::CalleeContract {
                 symbol: format!("callee_{}", &target[3..target.len().min(15)]),
                 params,
@@ -454,17 +469,52 @@ impl<'a> LinkedView<'a> {
         // applications are followed as well; each record's contract is derived once (memoized).
         let mut out = std::collections::BTreeMap::new();
         let mut queue: Vec<String> = targets.into_iter().collect();
-        while let Some(t) = queue.pop() {
-            if out.contains_key(&t) {
-                continue;
+        let mut witnesses_scanned = false;
+        loop {
+            while let Some(t) = queue.pop() {
+                if out.contains_key(&t) {
+                    continue;
+                }
+                let Some(c) = self.contract(&t) else { continue };
+                for pred in c.pres.iter().chain(c.posts.iter()).chain(c.laws.iter()) {
+                    let mut more = std::collections::BTreeSet::new();
+                    predicate_fn_targets(pred, &mut more);
+                    queue.extend(more.into_iter().filter(|m| !out.contains_key(m)));
+                }
+                out.insert(t, c);
             }
-            let Some(c) = self.contract(&t) else { continue };
-            for pred in c.pres.iter().chain(c.posts.iter()).chain(c.laws.iter()) {
-                let mut more = std::collections::BTreeSet::new();
-                predicate_fn_targets(pred, &mut more);
-                queue.extend(more.into_iter().filter(|m| !out.contains_key(m)));
+            // WITNESSES (2026-10-31): a record in the view whose POST applies, by address, a callee
+            // already in the set COMPUTES that callee with more — `ext_gcd`'s `fst(result) = gcd(a, b)`
+            // beside its Bézout identity — and a proof about `gcd` terms may need those facts although
+            // nothing applies `ext_gcd` (the prover's witness callees, `prove::witness_callees`, apply
+            // it at `gcd`'s applications). One scan of the view's records' refinements; the witnesses'
+            // own contract callees then close as usual.
+            if witnesses_scanned {
+                break;
             }
-            out.insert(t, c);
+            witnesses_scanned = true;
+            let mut found: Vec<String> = Vec::new();
+            for (h, rec) in self.records.iter() {
+                if out.contains_key(h) {
+                    continue;
+                }
+                let mut named = std::collections::BTreeSet::new();
+                for r in rec.pointer("/signature/refinements").and_then(|r| r.as_array()).into_iter().flatten() {
+                    if r.get("kind").and_then(|k| k.as_str()) == Some("post") {
+                        if let Some(e) = r.get("expr") {
+                            predicate_fn_targets(e, &mut named);
+                        }
+                    }
+                }
+                if named.iter().any(|n| out.contains_key(n)) {
+                    found.push(h.clone());
+                }
+            }
+            found.sort();
+            if found.is_empty() {
+                break;
+            }
+            queue.extend(found);
         }
         out
     }
@@ -624,6 +674,29 @@ pub fn derive_self_facts(
         }
     }
     crate::prove::set_self_facts(prev);
+    // Phase 4 (2026-10-31): the SELF-CONTRACT rung — a law outside every induction principle that
+    // follows from the facts proved above, with `self` uninterpreted under them (`rat_normalize`'s
+    // `cross` from `value_preserved` at two applications; `ext_gcd`'s Euclid lemma from the Bézout
+    // identity and the link). The CLI's `prove` had this rung and the derivation did not, so a law
+    // the builder reported PROVED was missing from the contract every caller received (measured:
+    // the rational tier's uniqueness checker saw neither law). Each law proved here is a fact for
+    // the laws after it, as in phase 3; never the law under proof itself.
+    if let Some(s) = shape.as_ref() {
+        if !posts.is_empty() || !proved.is_empty() {
+            for law in laws {
+                if proved.contains(law) {
+                    continue;
+                }
+                let mut c = s.clone();
+                c.symbol = "self_contract".to_string();
+                c.posts = posts.clone();
+                c.laws = proved.clone();
+                if matches!(crate::prove::prove_from_self_contract(law, "fn_self_contract", c, nat_positions, solver).0, crate::ProofOutcome::Proved) {
+                    proved.push(law.clone());
+                }
+            }
+        }
+    }
     (reports, proved)
 }
 

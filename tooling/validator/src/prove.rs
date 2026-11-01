@@ -394,6 +394,10 @@ pub struct Certificate {
     /// `(check-sat)` unsat), and `stepwise` = (premises verified, instances generated).
     pub steps: Option<String>,
     pub stepwise: Option<(usize, usize)>,
+    /// The STAGED rung closed it (`staged::retry_staged`): `smt` is then the final queries (one block
+    /// per branch of the negated goal, each unsat), `steps` the disjunct refutations, and `staged` =
+    /// (branches, conclusions derived).
+    pub staged: Option<(usize, usize)>,
 }
 
 /// The Euclidean rung over a certificate that stayed UNKNOWN: one query with the lemma's
@@ -815,9 +819,13 @@ fn take_callees_used() -> BTreeSet<String> {
 /// contract INSTANCES at the obligation's applications (emitted after them — they mention the
 /// constants), and whether any callee was used.
 fn callee_preamble() -> Result<(String, String, bool)> {
-    let used = take_callees_used();
-    let apps = take_callee_apps();
+    let mut used = take_callees_used();
+    let mut apps = take_callee_apps();
     let any = !used.is_empty();
+    let retry = DIVISIBILITY_CALLEES.with(|d| d.get());
+    // The witness rung's additions (see `WITNESS_CALLEES`): rounds, witness callees, transitive
+    // instances, pairs, Int-argument candidates — a further retry, never the divisibility one.
+    let witness = WITNESS_CALLEES.with(|w| w.get());
     // Declarations FIRST, for every callee the obligation applies — and, after the axioms are
     // lowered, for every callee a CONTRACT applies that the obligation did not (a post such as
     // `gcd(|fst(result)|, snd(result)) = 1` on `rat_normalize` names `gcd`; emitted after
@@ -826,155 +834,344 @@ fn callee_preamble() -> Result<(String, String, bool)> {
     let declare = |c: &CalleeContract| format!("(declare-fun {} ({}) {})\n", c.symbol, c.param_sorts.iter().map(|s| s.smt()).collect::<Vec<_>>().join(" "), c.ret.smt());
     let mut decls = String::new();
     let mut declared: BTreeSet<String> = BTreeSet::new();
-    for target in &used {
-        if let Some(c) = callee_contract(target) {
-            decls.push_str(&declare(&c));
-            declared.insert(target.clone());
-        }
-    }
     let mut out = String::new();
     let mut inst = String::new();
-    for target in used {
-        let Some(c) = callee_contract(&target) else { continue };
-        // The applications of this callee the obligation makes: each contract fact is also stated at
-        // them explicitly (below), so the solver need not instantiate a quantifier to use it.
-        let at: Vec<Vec<String>> = apps.get(&target).cloned().unwrap_or_default().into_iter().filter(|a| a.len() == c.params.len()).collect();
-        if c.posts.is_empty() {
-            continue;
+    // Instances are stated once (the rounds below revisit a callee with more applications).
+    let mut seen_inst: BTreeSet<String> = BTreeSet::new();
+    let mut push_inst = |inst: &mut String, text: String| {
+        if seen_inst.insert(text.clone()) {
+            inst.push_str(&text);
         }
-        let mut env: BTreeMap<String, Sort> = c.params.iter().cloned().zip(c.param_sorts.iter().copied()).collect();
-        let app = serde_json::json!({ "kind": "app", "op": target, "args": c.params.iter().map(|p| serde_json::json!({ "kind": "var", "name": p })).collect::<Vec<_>>() });
-        let subst: BTreeMap<String, J> = [("result".to_string(), app)].into_iter().collect();
-        let mut ante: Vec<String> = Vec::new();
-        for (i, p) in c.params.iter().enumerate() {
-            if c.nat_positions.contains(&i) {
-                ante.push(format!("(>= {p} 0)"));
+    };
+    let mut axioms_done: BTreeSet<String> = BTreeSet::new();
+    // ROUNDS (the retry only goes past the first): an instance stated at an application may itself
+    // APPLY a callee — `rat_normalize`'s post `gcd(|fst(result)|, snd(result)) = 1` at `(a, b)`
+    // applies `gcd` at `(|p|, q)` — and that application deserves ITS contract's instances too
+    // (transitive instances); and a used callee may have a WITNESS in the contract set
+    // (`witness_callees`: `ext_gcd`'s post names `gcd`, so `ext_gcd` is applied wherever `gcd`
+    // is). Each adds applications for the next round; three rounds bound it.
+    for round in 0..3 {
+        if witness {
+            witness_callees(&mut used, &mut apps);
+        }
+        let targets: Vec<String> = used.iter().cloned().collect();
+        let mut new_apps: BTreeMap<String, Vec<Vec<String>>> = BTreeMap::new();
+        for target in &targets {
+            let Some(c) = callee_contract(target) else { continue };
+            if declared.insert(target.clone()) {
+                decls.push_str(&declare(&c));
             }
-        }
-        for pre in &c.pres {
-            ante.push(lower(pre, &mut env.clone(), None)?);
-        }
-        let binders = c.params.iter().zip(&c.param_sorts).map(|(p, s)| format!("({p} {})", s.smt())).collect::<Vec<_>>().join(" ");
-        for post in &c.posts {
-            let body = lower(&crate::equiv::subst_many(post, &subst), &mut env, None)?;
-            let ante_smt = match ante.len() {
-                0 => "true".to_string(),
-                1 => ante[0].clone(),
-                _ => format!("(and {})", ante.join(" ")),
-            };
-            if c.params.is_empty() {
-                out.push_str(&format!("(assert (=> {ante_smt} {body}))\n"));
-            } else {
-                if CONTRACT_QUANTIFIERS.with(|q| q.get()) {
-                    out.push_str(&format!(";; certified contract of {target}\n(assert (forall ({binders}) (=> {ante_smt} {body})))\n"));
-                }
-                for args in &at {
-                    inst.push_str(&format!("(assert {})\n", let_params(&c.params, args, &format!("(=> {ante_smt} {body})"))));
+            // The applications of this callee the obligation makes: each contract fact is also stated at
+            // them explicitly (below), so the solver need not instantiate a quantifier to use it.
+            let at: Vec<Vec<String>> = apps.get(target).cloned().unwrap_or_default().into_iter().filter(|a| a.len() == c.params.len()).collect();
+            if c.posts.is_empty() {
+                continue;
+            }
+            let first = axioms_done.insert(target.clone());
+            let mut env: BTreeMap<String, Sort> = c.params.iter().cloned().zip(c.param_sorts.iter().copied()).collect();
+            let app = serde_json::json!({ "kind": "app", "op": target, "args": c.params.iter().map(|p| serde_json::json!({ "kind": "var", "name": p })).collect::<Vec<_>>() });
+            let subst: BTreeMap<String, J> = [("result".to_string(), app)].into_iter().collect();
+            let mut ante: Vec<String> = Vec::new();
+            for (i, p) in c.params.iter().enumerate() {
+                if c.nat_positions.contains(&i) {
+                    ante.push(format!("(>= {p} 0)"));
                 }
             }
-        }
-        // Proved laws: `forall vars. P` with `self` read as the callee, guarded to the callee's nat
-        // domain on the variables it feeds there (a law proved by numeric induction assumed it).
-        for law in &c.laws {
-            let law = uncurry(law);
-            let Some(vars_arr) = law.get("vars").and_then(|v| v.as_array()) else { continue };
-            let vars: Vec<String> = vars_arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
-            let Some(pred) = law.get("body") else { continue };
-            let pred = law_about(pred, &target);
-            let Ok(var_sorts) = infer_var_sorts(&pred, &vars, Some(&c.param_sorts)) else { continue };
-            let mut lenv: BTreeMap<String, Sort> = var_sorts.clone();
-            let Ok(body) = lower(&pred, &mut lenv, None) else { continue };
-            let mut guards: Vec<String> = Vec::new();
-            for call in collect_self_applications_of(&pred, &target) {
-                for (i, a) in call.iter().enumerate() {
-                    if c.nat_positions.contains(&i) {
-                        if let Some(v) = var_name(a) {
-                            if vars.iter().any(|x| x == v) {
-                                let g = format!("(>= {v} 0)");
-                                if !guards.contains(&g) {
-                                    guards.push(g);
+            for pre in &c.pres {
+                ante.push(lower(pre, &mut env.clone(), None)?);
+            }
+            let binders = c.params.iter().zip(&c.param_sorts).map(|(p, s)| format!("({p} {})", s.smt())).collect::<Vec<_>>().join(" ");
+            for post in &c.posts {
+                // The post lowered in the callee's parameter scope, its own callee applications
+                // recorded (in that scope) for the transitive instances below.
+                let prev_en = CALLEE_APPS_ENABLED.with(|e| e.replace(true));
+                let lowered = lower(&crate::equiv::subst_many(post, &subst), &mut env, None);
+                CALLEE_APPS_ENABLED.with(|e| e.set(prev_en));
+                let inner = take_callee_apps();
+                let body = lowered?;
+                let ante_smt = match ante.len() {
+                    0 => "true".to_string(),
+                    1 => ante[0].clone(),
+                    _ => format!("(and {})", ante.join(" ")),
+                };
+                if c.params.is_empty() {
+                    if first {
+                        out.push_str(&format!("(assert (=> {ante_smt} {body}))\n"));
+                    }
+                } else {
+                    if first && CONTRACT_QUANTIFIERS.with(|q| q.get()) {
+                        out.push_str(&format!(";; certified contract of {target}\n(assert (forall ({binders}) (=> {ante_smt} {body})))\n"));
+                    }
+                    for args in &at {
+                        push_inst(&mut inst, format!("(assert {})\n", let_params(&c.params, args, &format!("(=> {ante_smt} {body})"))));
+                        if witness {
+                            // Transitive instances: the applications inside this post, at this
+                            // instance, are applications in goal scope — of OTHER callees (the
+                            // post's `result` is this callee's own application at its parameters,
+                            // which the instance already is).
+                            for (t2, a2) in &inner {
+                                if t2 == target {
+                                    continue;
+                                }
+                                for a in a2 {
+                                    let mapped: Vec<String> = a.iter().map(|s| substitute_params(&c.params, args, s)).collect();
+                                    let known = apps.get(t2).is_some_and(|v| v.contains(&mapped)) || new_apps.get(t2).is_some_and(|v| v.contains(&mapped));
+                                    if !known && new_apps.values().map(|v| v.len()).sum::<usize>() < MAX_TRANSITIVE_APPS {
+                                        new_apps.entry(t2.clone()).or_default().push(mapped);
+                                        used.insert(t2.clone());
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            let lbinders = vars.iter().map(|v| format!("({v} {})", var_sorts[v].smt())).collect::<Vec<_>>().join(" ");
-            let guarded = match guards.len() {
-                0 => body,
-                1 => format!("(=> {} {body})", guards[0]),
-                _ => format!("(=> (and {}) {body})", guards.join(" ")),
-            };
-            if CONTRACT_QUANTIFIERS.with(|q| q.get()) {
-                out.push_str(&format!(";; certified law of {target}\n(assert (forall ({lbinders}) {guarded}))\n"));
-            }
-            // The law's instance at each application the obligation makes, when one of the law's
-            // own applications of the callee fixes every law variable (distinct variables covering
-            // them): the variables take the obligation's argument terms, positionally.
-            let fixing = collect_self_applications_of(&pred, &target).into_iter().find(|call| {
-                let names: Vec<&str> = call.iter().filter_map(|a| var_name(a)).collect();
-                names.len() == call.len()
-                    && names.iter().collect::<BTreeSet<_>>().len() == names.len()
-                    && vars.iter().all(|v| names.contains(&v.as_str()))
-            });
-            if let Some(call) = fixing {
-                let names: Vec<String> = call.iter().filter_map(|a| var_name(a).map(String::from)).collect();
-                for args in &at {
-                    inst.push_str(&format!("(assert {})\n", let_params(&names, args, &guarded)));
-                }
-            } else if DIVISIBILITY_CALLEES.with(|d| d.get()) {
-                // The callee-side divisibility rung: a law one of whose variables no application
-                // fixes (`d` in gcd's greatest-divisor law, `a` in associativity) ranges over the
-                // obligation's applications of this callee and their pairwise PRODUCTS — the witness
-                // `e·g` that lowest terms after normalization needs (measured by hand first: with it,
-                // unsat; without, sat). EVERY such law, not only the ones that speak of `mod`:
-                // restricting to divisibility laws lost the proof (measured — z3's path uses the
-                // commutativity/associativity instances at those terms too), so the rung's query
-                // has its own budget instead (`DIVISIBILITY_BUDGET_SECS`).
-                let calls = collect_self_applications_of(&pred, &target);
-                let partial = calls.iter().find_map(|call| {
-                    let names: Vec<&str> = call.iter().filter_map(|a| var_name(a)).collect();
-                    if names.len() != call.len() || names.iter().collect::<BTreeSet<_>>().len() != names.len() {
-                        return None;
+            // Proved laws: `forall vars. P` with `self` read as the callee, guarded to the callee's nat
+            // domain on the variables it feeds there (a law proved by numeric induction assumed it).
+            for law in &c.laws {
+                let law = uncurry(law);
+                let Some(vars_arr) = law.get("vars").and_then(|v| v.as_array()) else { continue };
+                let vars: Vec<String> = vars_arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+                let Some(pred) = law.get("body") else { continue };
+                let pred = law_about(pred, target);
+                let Ok(var_sorts) = infer_var_sorts(&pred, &vars, Some(&c.param_sorts)) else { continue };
+                let mut lenv: BTreeMap<String, Sort> = var_sorts.clone();
+                let Ok(body) = lower(&pred, &mut lenv, None) else { continue };
+                let mut guards: Vec<String> = Vec::new();
+                let calls = collect_self_applications_of(&pred, target);
+                for call in &calls {
+                    for (i, a) in call.iter().enumerate() {
+                        if c.nat_positions.contains(&i) {
+                            if let Some(v) = var_name(a) {
+                                if vars.iter().any(|x| x == v) {
+                                    let g = format!("(>= {v} 0)");
+                                    if !guards.contains(&g) {
+                                        guards.push(g);
+                                    }
+                                }
+                            }
+                        }
                     }
-                    let free: Vec<&String> = vars.iter().filter(|v| !names.contains(&v.as_str())).collect();
-                    (free.len() == 1 && var_sorts.get(free[0].as_str()) == Some(&Sort::Int))
-                        .then(|| (names.into_iter().map(String::from).collect::<Vec<_>>(), free[0].clone()))
-                });
-                if let Some((mut names, free)) = partial {
-                    names.push(free.clone());
-                    for t in free_var_candidates(&c.symbol, &at, true) {
-                        for args in &at {
-                            let mut with = args.clone();
-                            with.push(t.clone());
-                            inst.push_str(&format!(";; certified law of {target} at ({} {}) with {free} = {t}\n(assert {})\n", c.symbol, args.join(" "), let_params(&names, &with, &guarded)));
+                }
+                let lbinders = vars.iter().map(|v| format!("({v} {})", var_sorts[v].smt())).collect::<Vec<_>>().join(" ");
+                let guarded = match guards.len() {
+                    0 => body,
+                    1 => format!("(=> {} {body})", guards[0]),
+                    _ => format!("(=> (and {}) {body})", guards.join(" ")),
+                };
+                if first && CONTRACT_QUANTIFIERS.with(|q| q.get()) {
+                    out.push_str(&format!(";; certified law of {target}\n(assert (forall ({lbinders}) {guarded}))\n"));
+                }
+                // The law's instance at each application the obligation makes, when one of the law's
+                // own applications of the callee fixes every law variable (distinct variables covering
+                // them): the variables take the obligation's argument terms, positionally.
+                let distinct_names = |call: &Vec<J>| -> Option<Vec<String>> {
+                    let names: Vec<&str> = call.iter().filter_map(|a| var_name(a)).collect();
+                    (names.len() == call.len() && names.iter().collect::<BTreeSet<_>>().len() == names.len()).then(|| names.into_iter().map(String::from).collect())
+                };
+                let fixing = calls.iter().find(|call| distinct_names(call).is_some_and(|names| vars.iter().all(|v| names.contains(v))));
+                if let Some(call) = fixing {
+                    let names: Vec<String> = call.iter().filter_map(|a| var_name(a).map(String::from)).collect();
+                    for args in &at {
+                        push_inst(&mut inst, format!("(assert {})\n", let_params(&names, args, &guarded)));
+                    }
+                } else if retry {
+                    // The callee-side divisibility rung: a law one of whose variables no application
+                    // fixes (`d` in gcd's greatest-divisor law, `a` in associativity) ranges over the
+                    // obligation's applications of this callee and their pairwise PRODUCTS — the witness
+                    // `e·g` that lowest terms after normalization needs (measured by hand first: with it,
+                    // unsat; without, sat). EVERY such law, not only the ones that speak of `mod`:
+                    // restricting to divisibility laws lost the proof (measured — z3's path uses the
+                    // commutativity/associativity instances at those terms too), so the rung's query
+                    // has its own budget instead (`DIVISIBILITY_BUDGET_SECS`).
+                    let partial = calls.iter().find_map(|call| {
+                        let names = distinct_names(call)?;
+                        let free: Vec<&String> = vars.iter().filter(|v| !names.contains(v)).collect();
+                        (free.len() == 1 && var_sorts.get(free[0].as_str()) == Some(&Sort::Int)).then(|| (names, free[0].clone()))
+                    });
+                    if let Some((mut names, free)) = partial {
+                        names.push(free.clone());
+                        let candidates = if witness { free_var_candidates_for(&c, &at) } else { free_var_candidates(&c.symbol, &at, true) };
+                        for t in candidates {
+                            for args in &at {
+                                let mut with = args.clone();
+                                with.push(t.clone());
+                                push_inst(&mut inst, format!(";; certified law of {target} at ({} {}) with {free} = {t}\n(assert {})\n", c.symbol, args.join(" "), let_params(&names, &with, &guarded)));
+                            }
+                        }
+                    }
+                    // A law TWO applications fix jointly (`rat_normalize`'s `cross`: `self(n, d)` and
+                    // `self(m, e)`, every variable in one of them): instantiated over ordered PAIRS of
+                    // the obligation's applications — the two normal forms the goal compares (the
+                    // witness rung).
+                    let pair = if !witness { None } else { calls.iter().enumerate().find_map(|(i, c1)| {
+                        let n1 = distinct_names(c1)?;
+                        calls.iter().skip(i + 1).find_map(|c2| {
+                            let n2 = distinct_names(c2)?;
+                            let all: BTreeSet<&String> = n1.iter().chain(n2.iter()).collect();
+                            (all.len() == n1.len() + n2.len() && vars.iter().all(|v| all.contains(v))).then(|| (n1.clone(), n2))
+                        })
+                    }) };
+                    if let Some((n1, n2)) = pair {
+                        let names: Vec<String> = n1.iter().chain(n2.iter()).cloned().collect();
+                        let mut count = 0usize;
+                        for (i, a1) in at.iter().enumerate() {
+                            for (j, a2) in at.iter().enumerate() {
+                                if i == j || count >= MAX_PAIR_INSTANCES {
+                                    continue;
+                                }
+                                let with: Vec<String> = a1.iter().chain(a2.iter()).cloned().collect();
+                                push_inst(&mut inst, format!(";; certified law of {target} at the pair ({} {}) / ({} {})\n(assert {})\n", c.symbol, a1.join(" "), c.symbol, a2.join(" "), let_params(&names, &with, &guarded)));
+                                count += 1;
+                            }
                         }
                     }
                 }
             }
-        }
-        // The divisibility lemma instances at this callee's applications, when its laws include a
-        // divisibility fact and the solver has discharged the lemmas (the rung is a retry).
-        if DIVISIBILITY_CALLEES.with(|d| d.get())
-            && c.laws.iter().any(|l| serde_json::to_string(l).unwrap_or_default().contains("\"mod\""))
-            && DIVISIBILITY_SOLVER.with(|s| s.borrow().as_deref().map(crate::euclid::divisibility_discharged).unwrap_or(false))
-        {
-            inst.push_str(&divisibility_instances(&c.symbol, &at));
-        }
-    }
-    // Lowering the axioms marked callees used again — the ones the obligation applies, and any a
-    // contract applies on its own: those need a declaration too (their axioms are not needed; a
-    // contract's mention of them is a term, not a use under contract).
-    for target in take_callees_used() {
-        if !declared.contains(&target) {
-            if let Some(c) = callee_contract(&target) {
-                decls.push_str(&declare(&c));
-                declared.insert(target);
+            // The divisibility lemma instances at this callee's applications, when its laws include a
+            // divisibility fact and the solver has discharged the lemmas (the rung is a retry).
+            if retry
+                && c.ret == Sort::Int
+                && c.laws.iter().any(|l| serde_json::to_string(l).unwrap_or_default().contains("\"mod\""))
+                && DIVISIBILITY_SOLVER.with(|s| s.borrow().as_deref().map(crate::euclid::divisibility_discharged).unwrap_or(false))
+            {
+                push_inst(&mut inst, divisibility_instances(&c.symbol, &at));
             }
+        }
+        // Lowering the axioms marked callees used again — the ones the obligation applies, and any a
+        // contract applies on its own: those need a declaration too (their axioms are not needed; a
+        // contract's mention of them is a term, not a use under contract).
+        for target in take_callees_used() {
+            if !declared.contains(&target) {
+                if let Some(c) = callee_contract(&target) {
+                    decls.push_str(&declare(&c));
+                    declared.insert(target.clone());
+                }
+            }
+            if witness {
+                used.insert(target);
+            }
+        }
+        if !witness || new_apps.is_empty() || round == 2 {
+            break;
+        }
+        for (t, more) in new_apps {
+            apps.entry(t).or_default().extend(more);
         }
     }
     take_callee_apps();
     Ok((format!("{decls}{out}"), inst, any))
+}
+
+/// The most applications the transitive-instance rounds add (the retry only).
+const MAX_TRANSITIVE_APPS: usize = 24;
+
+/// A term over the callee's parameters read at an instance: the parameters SUBSTITUTED by the
+/// instance's argument terms, simultaneously (a `let` would do, but as an application key it must
+/// match the terms the goal spells — `a`, not `(let ((n a) (d b)) n)`).
+fn substitute_params(params: &[String], args: &[String], term: &str) -> String {
+    let mut t = term.to_string();
+    for (i, p) in params.iter().enumerate() {
+        t = replace_token(&t, p, &format!("\u{1}{i}\u{1}"));
+    }
+    for (i, a) in args.iter().enumerate() {
+        t = t.replace(&format!("\u{1}{i}\u{1}"), a);
+    }
+    t
+}
+/// The most ordered pairs a two-application law is instantiated at (the retry only).
+const MAX_PAIR_INSTANCES: usize = 40;
+
+/// WITNESS CALLEES (the retry only, 2026-10-31): a contract E in the installed set with a post
+/// `fst(result) = G(p…)` or `result = G(p…)` — E COMPUTES G, with more (`ext_gcd` returns the gcd
+/// beside its Bézout coefficients) — is applied at every application of G the certificate has, so
+/// its contract (the Bézout identity, Euclid's lemma) speaks about exactly the gcd terms the goal
+/// mentions. A record that applies nothing of E reaches E's facts this way; the view's contract
+/// closure brings E in (`LinkedView::contracts_closure`, the witness scan). Bounded per G.
+fn witness_callees(used: &mut BTreeSet<String>, apps: &mut BTreeMap<String, Vec<Vec<String>>>) {
+    let contracts: BTreeMap<String, CalleeContract> = CALLEE_CONTRACTS.with(|c| c.borrow().clone());
+    let g_targets: Vec<String> = used.iter().cloned().collect();
+    for g in g_targets {
+        let Some(g_apps) = apps.get(&g).cloned() else { continue };
+        if g_apps.is_empty() {
+            continue;
+        }
+        for (e_target, e) in &contracts {
+            if *e_target == g {
+                continue;
+            }
+            // A post equating the (first component of the) result with an application of G to E's
+            // parameters, each a distinct parameter.
+            let positions: Option<Vec<usize>> = e.posts.iter().find_map(|post| {
+                if post.get("op").and_then(|o| o.as_str()) != Some("eq") {
+                    return None;
+                }
+                let args = post.get("args").and_then(|a| a.as_array())?;
+                if args.len() != 2 {
+                    return None;
+                }
+                let is_result_side = |n: &J| {
+                    var_name(n) == Some("result")
+                        || (n.get("op").and_then(|o| o.as_str()) == Some("fst") && n.get("args").and_then(|a| a.as_array()).is_some_and(|a| a.len() == 1 && var_name(&a[0]) == Some("result")))
+                };
+                let g_side = if is_result_side(&args[0]) { &args[1] } else if is_result_side(&args[1]) { &args[0] } else { return None };
+                if g_side.get("op").and_then(|o| o.as_str()) != Some(g.as_str()) {
+                    return None;
+                }
+                let g_args = g_side.get("args").and_then(|a| a.as_array())?;
+                // E's parameter at each of G's argument positions.
+                let idx: Option<Vec<usize>> = g_args.iter().map(|a| var_name(a).and_then(|n| e.params.iter().position(|p| p == n))).collect();
+                let idx = idx?;
+                if idx.iter().collect::<BTreeSet<_>>().len() != idx.len() || idx.len() != e.params.len() {
+                    return None;
+                }
+                Some(idx)
+            });
+            let Some(idx) = positions else { continue };
+            let mut added = 0usize;
+            for ga in &g_apps {
+                if ga.len() != idx.len() {
+                    continue;
+                }
+                // E's arguments in E's parameter order: parameter k is G's argument at the position
+                // where the post puts parameter k.
+                let mut e_args: Vec<String> = vec![String::new(); e.params.len()];
+                for (pos, k) in idx.iter().enumerate() {
+                    e_args[*k] = ga[pos].clone();
+                }
+                let slot = apps.entry(e_target.clone()).or_default();
+                if !slot.contains(&e_args) && added < MAX_WITNESS_APPS {
+                    slot.push(e_args);
+                    added += 1;
+                    used.insert(e_target.clone());
+                }
+            }
+        }
+    }
+}
+
+/// The most applications a witness callee gains per witnessed callee.
+const MAX_WITNESS_APPS: usize = 8;
+
+/// The candidate terms for a callee law's one free Int variable: the callee's own application
+/// terms and their pairwise products when the callee returns an Int (the divisor `e·g` of the
+/// lowest-terms proof); when it returns a tuple (`ext_gcd`), the Int-sorted ARGUMENTS of its
+/// applications instead — the `s` of Euclid's lemma is a denominator the goal holds, never the
+/// application itself.
+fn free_var_candidates_for(c: &CalleeContract, at: &[Vec<String>]) -> Vec<String> {
+    if c.ret == Sort::Int {
+        return free_var_candidates(&c.symbol, at, true);
+    }
+    let mut terms: Vec<String> = Vec::new();
+    for args in at {
+        for (i, a) in args.iter().enumerate() {
+            if c.param_sorts.get(i) == Some(&Sort::Int) && !terms.contains(a) {
+                terms.push(a.clone());
+            }
+        }
+    }
+    terms.truncate(MAX_FREE_TERMS);
+    terms
 }
 
 /// Sort returned by `op` given the sorts of its operands are well-formed.
@@ -1739,7 +1936,7 @@ pub fn build_certificate_in_domain(prop_expr: &J, body: Option<&J>, self_nat_pos
     out.push_str("(check-sat)\n");
     out.push_str("(get-model)\n");
 
-    Ok(Certificate { smt: with_datatypes(out), quantified, uses_self, uses_callees, euclid: false, steps: None, stepwise: None })
+    Ok(Certificate { smt: with_datatypes(out), quantified, uses_self, uses_callees, euclid: false, steps: None, stepwise: None, staged: None })
 }
 
 pub(crate) fn references_self(node: &J) -> bool {
@@ -1984,6 +2181,23 @@ fn prove_property_in_domain_inner(
                         last = cert3;
                     }
                 }
+            }
+        }
+    }
+    // THE WITNESS RUNG + THE STAGED RUNG (2026-10-31): the instances-only certificate built once more
+    // with the witness callees, transitive instances and pair instances (`WITNESS_CALLEES`), then
+    // STAGED — each conditional instance's disjuncts refuted one at a time under the facts in force,
+    // the conclusions drawn carried into a final query over opaque div/mod. Uniqueness of lowest
+    // terms: every step the solver decides alone, the one-shot query it never does (measured). The
+    // one-shot form of this certificate is not even tried: it is the staged form that closes.
+    if last.uses_callees {
+        if let Ok(cert4) = with_witness_callees(|| with_divisibility_callees(|| without_contract_quantifiers(|| build_certificate_in_domain(prop_expr, body, self_nat_positions)))) {
+            if let Some(st) = crate::staged::retry_staged(&cert4.smt, solver) {
+                let mut cert = cert4;
+                cert.smt = st.final_smt;
+                cert.steps = Some(st.steps_smt);
+                cert.staged = Some((st.branches, st.derived));
+                return (ProofOutcome::Proved, Some(cert));
             }
         }
     }
@@ -2444,6 +2658,25 @@ fn with_divisibility_callees<T>(f: impl FnOnce() -> T) -> T {
     out
 }
 
+thread_local! {
+    /// THE WITNESS RUNG for callees (2026-10-31; a retry after the divisibility one): the
+    /// preamble's rounds — witness callees applied at the applications of the callee they compute
+    /// (`ext_gcd` at `gcd`'s), the applications inside instantiated posts as applications
+    /// (transitive instances), a law two applications fix jointly instantiated over pairs, and a
+    /// tuple-returning callee's free law variable ranging over its Int arguments. Off in every
+    /// earlier rung: measured inside the divisibility retry, the added instances cost
+    /// `rat_normalize`'s lowest-terms post its 30 s budget. The certificate it builds is the one
+    /// the staged rung stages.
+    static WITNESS_CALLEES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn with_witness_callees<T>(f: impl FnOnce() -> T) -> T {
+    let prev = WITNESS_CALLEES.with(|c| c.replace(true));
+    let out = f();
+    WITNESS_CALLEES.with(|c| c.set(prev));
+    out
+}
+
 /// The candidate terms a law's free variable ranges over: the applications' terms and, when
 /// `products` is set, their pairwise products (the divisor `e·g` of the lowest-terms proof).
 fn free_var_candidates(symbol: &str, at: &[Vec<String>], products: bool) -> Vec<String> {
@@ -2527,8 +2760,6 @@ fn divisibility_instances(symbol: &str, at: &[Vec<String>]) -> String {
     out
 }
 
-/// Install (or clear) the function's own certified facts for the measure-induction rung,
-/// returning the previous setting. See `SELF_FACTS`.
 /// Install the body-under-proof's measure from a LINKED termination analysis (see `SELF_MEASURE`);
 /// returns the previous value for restoring.
 pub fn set_self_measure(measure: Option<crate::terminate::Measure>) -> Option<crate::terminate::Measure> {
@@ -2593,6 +2824,8 @@ fn entails_inner(facts: &[J], goal: &J, solver: &str) -> bool {
     matches!(run_smt_secs(&with_datatypes(out), solver, 5), Ok(SatAnswer::Unsat))
 }
 
+/// Install (or clear) the function's own certified facts for the measure-induction rung,
+/// returning the previous setting. See `SELF_FACTS`.
 pub fn set_self_facts(facts: Option<CalleeContract>) -> Option<CalleeContract> {
     SELF_FACTS.with(|s| std::mem::replace(&mut *s.borrow_mut(), facts))
 }
@@ -3043,7 +3276,7 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
     }
     out.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
     let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
-    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees, euclid: false, steps: None, stepwise: None }, m))
+    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees, euclid: false, steps: None, stepwise: None, staged: None }, m))
 }
 
 // --- induction through a callee's definition --------------------------------------------------------
@@ -3276,7 +3509,7 @@ fn build_callee_induction(
     out.push_str(&body_out);
     out.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
     let quantified: Vec<(String, Sort)> = vars.iter().map(|v| (v.clone(), var_sorts[v])).collect();
-    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees: true, euclid: false, steps: None, stepwise: None }, m_label))
+    Ok((Certificate { smt: with_datatypes(out), quantified, uses_self: true, uses_callees: true, euclid: false, steps: None, stepwise: None, staged: None }, m_label))
 }
 
 /// Prove a law about a NON-recursive function by induction through the definitions of the linked

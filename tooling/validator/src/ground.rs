@@ -178,6 +178,13 @@ impl Ground {
                 return self.dt_of(xs.get(2)?);
             }
         }
+        // A projection whose field is itself a datatype (`(dt1_1 (ext_gcd a b))` is a pair).
+        if let Some((dt2, j)) = self.projs.get(h) {
+            let s = self.field_sort_any(dt2, *j)?;
+            if self.is_dt(&s) {
+                return Some(s);
+            }
+        }
         None
     }
 
@@ -191,10 +198,32 @@ impl Ground {
         S::A(n)
     }
 
-    /// `(sel_i e)` reduced: through a constructor, a callee (→ constant), or an `ite`.
+    /// `(sel_i e)` reduced: through a constructor, a callee (→ constant), an `ite`, or another
+    /// projection (a NESTED datatype field: `(dt0_0 (dt1_1 (ext_gcd a b)))`, the Bézout coefficient
+    /// inside the pair inside the triple — one constant per projection path and callee term).
     fn proj(&mut self, dt: &str, i: usize, e: &S) -> Option<S> {
         let S::L(xs) = e else { return None }; // a datatype-valued variable: out of scope
         let h = head(e)?;
+        if let Some((dt2, j)) = self.projs.get(h).cloned() {
+            let inner = xs.get(1)?;
+            let S::L(ixs) = inner else { return None };
+            let ih = head(inner)?.to_string();
+            if let Some((_, ret)) = self.funs.get(&ih).cloned() {
+                if ret != dt2 || self.field_sort_any(&dt2, j).as_deref() != Some(dt) {
+                    return None;
+                }
+                let args: Vec<S> = ixs[1..].iter().map(|a| self.rw(a)).collect::<Option<_>>()?;
+                let sort = self.field_sort(dt, i)?;
+                let key = format!("(proj{i} (proj{j} {ih} {}))", args.iter().map(show).collect::<Vec<_>>().join(" "));
+                return Some(self.constant(key, &sort));
+            }
+            if self.ctors.contains_key(&ih) {
+                // The inner projection of a constructor is its field: project that.
+                let field = self.proj(&dt2, j, inner)?;
+                return self.proj(dt, i, &field);
+            }
+            return None;
+        }
         if let Some((d, sorts)) = self.ctors.get(h).cloned() {
             if d != dt {
                 return None;
@@ -221,9 +250,14 @@ impl Ground {
     }
 
     fn field_sort(&self, dt: &str, i: usize) -> Option<String> {
-        let (_, sorts) = self.ctors.values().find(|(d, _)| d == dt)?;
-        let s = sorts.get(i)?.clone();
+        let s = self.field_sort_any(dt, i)?;
         if s == "Int" || s == "Bool" { Some(s) } else { None }
+    }
+
+    /// The field's sort whatever it is (a nested datatype included).
+    fn field_sort_any(&self, dt: &str, i: usize) -> Option<String> {
+        let (_, sorts) = self.ctors.values().find(|(d, _)| d == dt)?;
+        sorts.get(i).cloned()
     }
 
     fn arity(&self, dt: &str) -> Option<usize> {
@@ -338,9 +372,12 @@ pub fn ackermannize(smt: &str) -> Option<String> {
             _ => return None,
         }
     }
-    // Every datatype field and every uninterpreted result must be plain, or the rung declines.
+    // Every datatype field must be plain or itself a declared datatype (a pair inside a triple —
+    // `ext_gcd`'s Bézout coefficients — reduces through nested projections), and every
+    // uninterpreted result plain or a datatype, or the rung declines.
+    let dts: Vec<String> = g.ctors.values().map(|(d, _)| d.clone()).collect();
     for (_, sorts) in g.ctors.values() {
-        if sorts.iter().any(|s| !PLAIN_SORTS.contains(&s.as_str())) {
+        if sorts.iter().any(|s| !PLAIN_SORTS.contains(&s.as_str()) && !dts.contains(s)) {
             return None;
         }
     }

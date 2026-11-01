@@ -794,7 +794,71 @@ one — a fresh constant per distinct term, asserts with a quantifier dropped, l
 This is Ackermann's reduction WITHOUT the congruence constraints, and that is what makes it a
 proof rung: the rewrite is weaker than the certificate (a model of the original evaluates to a
 model of the rewrite), so its unsat is the certificate's unsat, and a sat is reported as nothing.
-Outside Int/Bool/tuples — strings, lists, sums, tuple-valued constants — the rung declines.
+Outside Int/Bool/tuples — strings, lists, sums, tuple-valued constants — the rung declines. A tuple
+field that is itself a tuple (`ext_gcd`'s Bézout pair inside its triple) reduces through the nested
+projections, one constant per projection path and callee term (2026-10-31).
+
+**The witness rung and the staged rung (2026-10-31, the rational tier's round 7 — uniqueness of
+lowest terms).** Two facts about the proof of `p/q = r/s ∧ both in lowest terms ⇒ (p, q) = (r, s)`
+were measured before anything was built (`~/sandbox/uniq_*.smt2`, the rational tier's README):
+every step closes alone in milliseconds — cancellation to `p·s = r·q`, Euclid's lemma with its
+quotient NAMED, antisymmetry over products, the final cancellation — and no one-shot query closes
+at all, in any form, because the nonlinear hypotheses that justify a conclusion stay in the problem
+after it is drawn and the solver keeps reasoning about them (the explicit witness equations beside
+the Bézout identities: unknown; the two alone: 20 ms). Two rungs follow.
+
+*The witness rung* (`prove.rs`, `WITNESS_CALLEES`, a retry after the divisibility one — measured
+inside it, the added instances cost `rat_normalize`'s lowest-terms post its budget) widens what an
+instances-only certificate states: (1) a WITNESS callee — a contract in the set whose post equates
+its result (or its first component) with an application of a callee `G` the certificate uses,
+`fst(ext_gcd(a, b)) = gcd(a, b)` — is applied at every application of `G`, so its facts (the Bézout
+identity, Euclid's lemma) speak about exactly the gcd terms the goal has; the view's contract
+closure brings such a record in when a post of it names a callee already in the set, although
+nothing applies it; (2) TRANSITIVE instances — the callee applications inside an instantiated post
+(`gcd(|p|, q)` inside `rat_normalize`'s lowest-terms post at `(a, b)`) are applications, with
+instances of their own, over up to three rounds; (3) a law TWO applications fix jointly
+(`rat_normalize`'s `cross`: `self(n, d)` and `self(m, e)`) is instantiated over ordered pairs of
+the certificate's applications; (4) a tuple-returning callee's free law variable ranges over the
+Int ARGUMENTS of its applications (the `s` of Euclid's lemma is a denominator the goal holds, never
+the application itself). The derivation of a callee's contract gained a fourth phase for this: the
+self-contract rung (`prove_from_self_contract`), which the CLI's `prove` had and the derivation did
+not — a law the builder reported PROVED was missing from the contract every caller received
+(measured: the uniqueness checker saw neither `cross` nor Euclid's lemma); the derived-contract
+cache key carries a derivation version so a rule change is never served the old result.
+
+*The staged rung* (`staged.rs`, `retry_staged`, on the witness rung's certificate; `stage-certificate`
+runs it alone on a saved one) is the stepwise checker's discipline generalized from its own
+Euclidean instances to contract-law instances with hypothesis-dependent premises. The negated goal
+is split into branches (an equivalence's two directions, a conjunction's conjuncts, `X = true` as
+X). Per branch: every CONDITIONAL instance — `(=> pre post)`, a law's `(or ¬A ¬B C)`, a lowered law
+flattened from its left-nested `or`s — has its disjuncts refuted one at a time, each a small query
+under the facts in force, over FIVE fact tiers tried in turn: the linear facts and conclusions
+sharing a symbol with the disjunct, with and without the witness equations drawn so far; then
+without the goal's branch literals; with them; everything (measured, each: the `mod` premise of
+Euclid's lemma closes in 0.17 s from the three facts that mention its symbols, is unknown at 30 s
+with four unrelated inequalities beside them, and goes from 0.16 s to 9 s with the negated goal
+literal alone). A disjunct `(not (= (mod T m) 0))` gets the one fact the solver is measured to
+miss — when a fact says `T = Q·m`, the valid formula `m ≠ 0 ∧ T = Q·m ⇒ T mod m = 0` is asserted
+beside it — and, without such a fact, one cheap tier only (a law instance at the wrong candidate).
+When every disjunct but one is refuted the one left joins the facts (a conclusion that is itself a
+disjunction — a law instance behind a refuted nat guard — becomes a conditional in turn); when all
+are, the branch's facts are contradictory. Rounds to a fixpoint: `p·s = r·q` from the cross law in
+one round discharges `(|p|·s) mod q = 0` for Euclid's lemma in the next. A disjunct that could not
+be refuted is retried only once more conclusions exist, and a nonlinear disjunct is not attacked
+while another already stands (an instance's conclusion is what the rung wants to keep, and the
+most expensive thing it can refute). Every query is GROUNDED by the ground rung's rewrite where it
+applies — the final query with the witness quotients as `udiv` applications is unknown at 30 s
+under `ALL` and unsat in 20 ms with them constants. The FINAL query per branch: the branch, the
+linear facts, and the conclusions — grown from the most recent (the deepest consequences are drawn
+last: all linear conclusions plus the last 4, 8, 16 nonlinear ones, then all, then every fact),
+with `div`/`mod` by a non-literal divisor uninterpreted and products kept (`s = q·A ∧ q = s·B ∧ q, s
+≥ 1 ⇒ q = s` is the nonlinear step the final must make). A branch the eliminations found
+contradictory still gets its final run, so the written final stands on its own. Soundness: every
+conclusion is one the solver established (each refutation is a recorded query in the steps script,
+`(reset)`-separated, every `(check-sat)` unsat); the final's facts are consequences or weakenings;
+UNSAT there is UNSAT of the certificate; anything else ends the rung with the caller's UNKNOWN.
+Measured on `rat_eq_normalize_holds`'s certificate (saved, 63 KB, 60-odd conditionals): both
+branches close, 96 conclusions, 59 s; the steps script re-checks (253 of 253 unsat).
 
 **The stepwise checker (2026-10-18, the ninth follow-up).** The rung after the one-query
 Euclidean rung, in every ladder (`euclid::retry_stepwise`), for a goal whose residues the two

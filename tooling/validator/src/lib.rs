@@ -37,6 +37,9 @@ pub use prove::{
 /// of the division-uniqueness lemma (a retry on UNKNOWN in every proof ladder).
 pub mod euclid;
 pub mod ground;
+/// The staged rung: disjunct elimination over contract-law instances, the final query over opaque
+/// witnesses (uniqueness of lowest terms).
+pub mod staged;
 
 pub mod lemmas;
 pub mod explore;

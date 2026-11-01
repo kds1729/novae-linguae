@@ -1164,7 +1164,21 @@ pub enum S {
     List(Vec<S>),
 }
 
-fn parse_all(src: &str) -> Result<Vec<S>, String> {
+/// The asserted forms of a script with `let`s substituted and `define-fun`s unfolded — what the
+/// rungs that read a certificate's facts work on (the staged rung too).
+pub(crate) fn expand_forms(forms: &[S]) -> Vec<S> {
+    let defs = definitions(forms);
+    forms
+        .iter()
+        .filter(|f| matches!(f, S::List(items) if matches!(items.first(), Some(S::Atom(x)) if x == "assert")))
+        .filter_map(|f| match f {
+            S::List(items) if items.len() == 2 => Some(expand(&items[1], &BTreeMap::new(), &defs, 0)),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(crate) fn parse_all(src: &str) -> Result<Vec<S>, String> {
     let chars: Vec<char> = src.chars().collect();
     let mut i = 0;
     let mut out = Vec::new();
