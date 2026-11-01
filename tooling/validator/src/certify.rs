@@ -140,7 +140,8 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 // 5 (2026-11-01): the staged rung's quotient abstraction changes what a derivation proves — a
 // version-4 entry for the same content address held `unique` open (measured: rational round 8's
 // first start read it, so rat_add's contract lacked the law).
-const DERIVATION_VERSION: u32 = 5;
+// 6 (2026-11-01): contracts derived under a cycle refusal were cached partial (`gi_rem`).
+const DERIVATION_VERSION: u32 = 6;
 
 fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
     dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))
@@ -214,6 +215,9 @@ pub struct LinkedView<'a> {
     shrink: std::cell::RefCell<HashMap<String, Option<u32>>>,
     preserve: std::cell::RefCell<HashMap<String, Option<Vec<usize>>>>,
     in_progress: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// How many contract lookups were refused because the target was mid-derivation (a cycle).
+    /// A contract computed while this grew may lack facts and is never memoized or cached.
+    cycle_refusals: std::cell::Cell<usize>,
 }
 
 impl<'a> LinkedView<'a> {
@@ -226,6 +230,7 @@ impl<'a> LinkedView<'a> {
             cx: Default::default(),
             bounds: Default::default(),
             contracts: Default::default(),
+            cycle_refusals: Default::default(),
             shrink: Default::default(),
             preserve: Default::default(),
             in_progress: Default::default(),
@@ -391,8 +396,10 @@ impl<'a> LinkedView<'a> {
         }
         let key = format!("contract:{target}");
         if !self.in_progress.borrow_mut().insert(key.clone()) {
+            self.cycle_refusals.set(self.cycle_refusals.get() + 1);
             return None;
         }
+        let refusals_before = self.cycle_refusals.get();
         // This machine's own earlier derivation of the same record (same content address, same
         // validator), when the operator opted in: see `derived_cache_dir`.
         if self.callee(target).is_some() {
@@ -464,6 +471,13 @@ impl<'a> LinkedView<'a> {
             })
         });
         self.in_progress.borrow_mut().remove(&key);
+        // TAINTED (2026-11-01): a dependency was refused as mid-derivation while this one ran, so
+        // the facts that rest on it may be missing — return it for this use, never memoize or cache
+        // it (measured: `gi_rem`, derived inside `gi_div`'s witness scan, lost its norm post and
+        // that partial contract was kept, so `gi_gcd`'s measured descent read UNVERIFIABLE).
+        if self.cycle_refusals.get() > refusals_before {
+            return out;
+        }
         if let (Some(c), Some(dir)) = (&out, derived_cache_dir()) {
             store_derived(&dir, target, c);
         }
@@ -539,6 +553,19 @@ impl<'a> LinkedView<'a> {
             for (h, rec) in self.records.iter() {
                 if out.contains_key(h) {
                     continue;
+                }
+                // Not a record mid-derivation, nor one that APPLIES such a record: deriving it here
+                // would see that dependency refused and come out short (`gi_rem` inside `gi_div`).
+                let busy = |t: &str| self.in_progress.borrow().contains(&format!("contract:{t}"));
+                if busy(h) {
+                    continue;
+                }
+                if let Some((_, body)) = self.callee(h) {
+                    let mut applies = std::collections::BTreeSet::new();
+                    fn_ref_targets(body, &mut applies);
+                    if applies.iter().any(|t| busy(t)) {
+                        continue;
+                    }
                 }
                 let mut named = std::collections::BTreeSet::new();
                 for r in rec.pointer("/signature/refinements").and_then(|r| r.as_array()).into_iter().flatten() {
@@ -1314,6 +1341,50 @@ mod tests {
         assert!(contracts.contains_key(&ha), "A, applied by the body");
         assert!(contracts.contains_key(&hb), "B, applied only by A's post: {:?}", contracts.keys().collect::<Vec<_>>());
         assert!(!contracts[&ha].posts.is_empty(), "A's post proved (needs B's contract itself)");
+    }
+
+    /// A witness candidate that applies a record still mid-derivation is NOT derived inside that
+    /// derivation (it would see the dependency refused and come out short), and a contract derived
+    /// under a cycle refusal is never memoized. The Gaussian tier's shape: `gi_div`'s witness scan
+    /// derived `gi_rem` (whose post names `gi_norm`) while `gi_div` itself was in progress, `gi_rem`
+    /// lost its norm post, and `gi_gcd`'s measured descent read UNVERIFIABLE (2026-11-01).
+    #[test]
+    fn a_witness_scan_never_derives_and_keeps_a_contract_short_of_a_dependency_in_progress() {
+        let Some(solver) = (["z3", "cvc5"].into_iter().find(|s| std::process::Command::new(s).arg("--version").output().map(|o| o.status.success()).unwrap_or(false))) else { return };
+        let int = json!({ "kind": "builtin", "name": "int" });
+        let mk = |name: &str, body: J, posts: Vec<J>| -> (String, J, J) {
+            let bh = crate::hash_artifact_with_kind(&body, crate::ArtifactKind::BodyExpression).unwrap();
+            let mut rec = json!({
+                "schema_version": "0.2.0", "hash": "fn_".to_string() + &"0".repeat(64), "name_hints": [name],
+                "signature": { "type": { "kind": "fn", "params": [int.clone()], "result": int.clone() },
+                               "refinements": posts.into_iter().map(|p| json!({ "kind": "post", "expr": p })).collect::<Vec<_>>(),
+                               "effects": [], "capabilities": [], "terminates": "always" },
+                "examples": [], "intent_tags": [], "derived_from": J::Null, "supersedes": J::Null, "body_hash": bh });
+            let h = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
+            rec["hash"] = json!(h.clone());
+            (h, rec, body)
+        };
+        let var = |n: &str| json!({ "kind": "var", "name": n });
+        let lam = |b: J| json!({ "kind": "lambda", "params": [{ "name": "x" }], "body": b });
+        let call = |h: &str, a: J| json!({ "kind": "app", "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": h } }, "args": [a] });
+        let ge0 = |e: J| json!({ "kind": "app", "op": "ge", "args": [e, { "kind": "lit", "value": 0 }] });
+        let napp = |h: &str| json!({ "kind": "app", "op": h, "args": [var("result")] });
+        // N = \x -> abs(x), post result >= 0 (the norm).
+        let (hn, rn, bn) = mk("n", lam(json!({ "kind": "app", "fn": var("abs"), "args": [var("x")] })), vec![ge0(var("result"))]);
+        // P = \x -> N(x), posts result >= 0 and N(result) >= 0 (names N: P's closure reaches N).
+        let (hp, rp, bp) = mk("p", lam(call(&hn, var("x"))), vec![ge0(var("result")), ge0(napp(&hn))]);
+        // R = \x -> P(x), the same posts: `result >= 0` holds only through P's contract; its post
+        // naming N makes R a witness candidate while P's contract is being derived.
+        let (hr, rr, br) = mk("r", lam(call(&hp, var("x"))), vec![ge0(var("result")), ge0(napp(&hn))]);
+        let mut records = HashMap::new();
+        let mut bodies = HashMap::new();
+        for (h, r, b) in [(hn.clone(), rn, bn), (hp.clone(), rp, bp), (hr.clone(), rr, br)] {
+            records.insert(h.clone(), r);
+            bodies.insert(h, b);
+        }
+        let view = LinkedView::new(&records, &bodies, solver);
+        assert_eq!(view.contract(&hp).map(|c| c.posts.len()), Some(2), "P: both posts");
+        assert_eq!(view.contract(&hr).map(|c| c.posts.len()), Some(2), "R: both posts, derived with P's contract in hand");
     }
 
     /// The record's OWN pres, posts and laws may apply a callee the body does not (`gi_norm`'s law
