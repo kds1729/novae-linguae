@@ -2190,7 +2190,8 @@ fn prove_property_in_domain_inner(
     // the conclusions drawn carried into a final query over opaque div/mod. Uniqueness of lowest
     // terms: every step the solver decides alone, the one-shot query it never does (measured). The
     // one-shot form of this certificate is not even tried: it is the staged form that closes.
-    if last.uses_callees {
+    // Not inside a contract derivation (`DERIVATION_DEPTH`): the record under proof only.
+    if last.uses_callees && DERIVATION_DEPTH.with(|d| d.get()) == 0 {
         if let Ok(cert4) = with_witness_callees(|| with_divisibility_callees(|| without_contract_quantifiers(|| build_certificate_in_domain(prop_expr, body, self_nat_positions)))) {
             if let Some(st) = crate::staged::retry_staged(&cert4.smt, solver) {
                 let mut cert = cert4;
@@ -2674,6 +2675,24 @@ fn with_witness_callees<T>(f: impl FnOnce() -> T) -> T {
     let prev = WITNESS_CALLEES.with(|c| c.replace(true));
     let out = f();
     WITNESS_CALLEES.with(|c| c.set(prev));
+    out
+}
+
+thread_local! {
+    /// How many contract DERIVATIONS are in progress (`certify::derive_self_facts`, nested through the
+    /// linked view). The witness + staged retry runs only at depth 0 — for the record under proof:
+    /// inside a derivation it is paid again by every process that derives the same tuple-sorted
+    /// contract (never cached), on laws that stay UNKNOWN (measured: three records of fourteen in
+    /// 80 minutes, round 7 of the rational tier). A law only the staged rung proves is therefore
+    /// not a contract law for callers — stated here, a cost chosen over a six-hour round.
+    static DERIVATION_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Run `f` as a contract derivation (the witness + staged retry off inside it).
+pub fn in_derivation<T>(f: impl FnOnce() -> T) -> T {
+    DERIVATION_DEPTH.with(|d| d.set(d.get() + 1));
+    let out = f();
+    DERIVATION_DEPTH.with(|d| d.set(d.get() - 1));
     out
 }
 

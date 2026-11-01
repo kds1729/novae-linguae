@@ -626,6 +626,19 @@ pub fn derive_self_facts(
     nat_positions: &std::collections::BTreeSet<usize>,
     solver: &str,
 ) -> (Vec<crate::RefinementReport>, Vec<J>) {
+    // A derivation: the prover's witness + staged retry stays off inside it (see
+    // `prove::DERIVATION_DEPTH`) — it is the record under proof's rung, not every callee's.
+    crate::prove::in_derivation(|| derive_self_facts_inner(sig_type, refinements, laws, body, nat_positions, solver))
+}
+
+fn derive_self_facts_inner(
+    sig_type: &J,
+    refinements: &[J],
+    laws: &[J],
+    body: &J,
+    nat_positions: &std::collections::BTreeSet<usize>,
+    solver: &str,
+) -> (Vec<crate::RefinementReport>, Vec<J>) {
     let shape = self_shape(sig_type, refinements, body);
     let facts = |posts: Vec<J>, laws: Vec<J>| {
         shape.clone().map(|mut s| {
