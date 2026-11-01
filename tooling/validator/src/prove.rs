@@ -2044,12 +2044,41 @@ pub fn run_smt(script: &str, solver: &str) -> Result<SatAnswer> {
 /// candidate lemma subsets) uses a short budget — a successful list-law proof closes in well under a
 /// second, so a failing subset needn't burn the full default timeout.
 pub fn run_smt_secs(script: &str, solver: &str, secs: u64) -> Result<SatAnswer> {
+    run_smt_inner(script, solver, secs, None)
+}
+
+/// z3 resource units per budgeted second for [`run_smt_rlimit`] — measured 2026-11-01 on this
+/// laptop: a hard nonlinear query spends ~7.5 M/s under z3 4.13 and ~11 M/s under 5.3.3; easy
+/// queries decide in well under 0.1 M.
+pub const RLIMIT_PER_SEC: u64 = 8_000_000;
+/// The wall-clock backstop of an rlimit-bounded query, as a multiple of its budget: the resource
+/// limit is meant to bind first, so a busy machine changes how LONG a query takes, not its answer.
+pub const RLIMIT_BACKSTOP: u64 = 30;
+
+/// [`run_smt_secs`] DETERMINISTICALLY (2026-11-01): the budget is z3's resource limit
+/// (`rlimit = secs · RLIMIT_PER_SEC`), the same answer for the same binary and input however
+/// loaded the machine is, with the wall-clock limits only a backstop `RLIMIT_BACKSTOP`× wider.
+/// Measured why: under two concurrent module builders the staged rung lost `unique` inside
+/// `rat_normalize`'s derivation to wall-clock timeouts, and the derived cache kept the short
+/// contract. A solver other than z3 runs as [`run_smt_secs`] (no resource limit to set).
+pub fn run_smt_rlimit(script: &str, solver: &str, secs: u64) -> Result<SatAnswer> {
+    run_smt_inner(script, solver, secs, Some(secs.max(1) * RLIMIT_PER_SEC))
+}
+
+fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> Result<SatAnswer> {
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
+    let is_z3 = solver == "z3" || solver.ends_with("/z3");
+    let rlimit = rlimit.filter(|_| is_z3);
+    // Under a resource limit the wall clock is only the backstop.
+    let secs = if rlimit.is_some() { secs.max(1) * RLIMIT_BACKSTOP } else { secs };
     let mut cmd = Command::new(solver);
-    if solver == "z3" || solver.ends_with("/z3") {
+    if is_z3 {
+        if let Some(r) = rlimit {
+            cmd.arg(format!("rlimit={r}"));
+        }
         cmd.arg(format!("-t:{}", secs * 1000)); // per-check soft timeout (ms)
         // A memory cap beside the time cap: z3 does not honour its soft timeout while
         // allocating, and one query on this machine reached 13 GB in 30 s (2026-10-29, the

@@ -141,7 +141,9 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 // version-4 entry for the same content address held `unique` open (measured: rational round 8's
 // first start read it, so rat_add's contract lacked the law).
 // 6 (2026-11-01): contracts derived under a cycle refusal were cached partial (`gi_rem`).
-const DERIVATION_VERSION: u32 = 6;
+// 7 (2026-11-01): the staged rung is rlimit-bounded and charge-budgeted — deterministic, so a cached
+// derivation no longer depends on the load it ran under.
+const DERIVATION_VERSION: u32 = 7;
 
 fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
     dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))

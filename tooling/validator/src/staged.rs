@@ -38,7 +38,7 @@
 use std::collections::BTreeSet;
 
 use crate::euclid::{S, parse_all, render, expand_forms};
-use crate::prove::{run_smt_secs, SatAnswer};
+use crate::prove::SatAnswer;
 
 /// A staged proof: the final query (one `(push 1) … (check-sat) (pop 1)` block per branch, every
 /// answer unsat), the stage queries as one re-checkable script, and the counts.
@@ -327,8 +327,26 @@ fn nonlinear(s: &S) -> bool {
 /// Returns whether it was unsat and the script that ran (for the re-checkable record).
 fn check(script: &str, solver: &str, secs: u64) -> (bool, String) {
     let ran = crate::ground::ackermannize(script).unwrap_or_else(|| script.to_string());
-    let ok = matches!(run_smt_secs(&ran, solver, secs), Ok(SatAnswer::Unsat));
+    // DETERMINISTIC (2026-11-01): the query's budget is z3's resource limit, and the rung's own
+    // budget is a CHARGE — a decided query costs `DECIDED_CHARGE_MS`, an undecided one its whole
+    // cap — so neither depends on how loaded the machine is (`prove::run_smt_rlimit`).
+    let answer = crate::prove::run_smt_rlimit(&ran, solver, secs);
+    let decided = matches!(answer, Ok(SatAnswer::Unsat) | Ok(SatAnswer::Sat(_)));
+    CHARGE_MS.with(|c| c.set(c.get() + if decided { DECIDED_CHARGE_MS } else { secs * 1000 }));
+    let ok = matches!(answer, Ok(SatAnswer::Unsat));
     (ok, ran)
+}
+
+/// What a decided staged query costs the rung's budget (an undecided one costs its whole cap).
+const DECIDED_CHARGE_MS: u64 = 50;
+
+thread_local! {
+    /// The staged rung's spent budget in charged milliseconds (see [`check`]); reset per retry.
+    static CHARGE_MS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn charged_ms() -> u64 {
+    CHARGE_MS.with(|c| c.get())
 }
 
 /// Debug aid (`NL_EUCLID_DEBUG_DIR=<dir>`): the rung's input and why it declined, when it did.
@@ -393,7 +411,9 @@ pub fn retry_staged(smt: &str, solver: &str) -> Option<Staged> {
         ds.iter().for_each(|d| symbols(d, &mut fs));
         if fs.iter().any(|x| goal_syms.contains(x)) { 0 } else { 1 }
     });
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(BUDGET_SECS);
+    // The budget is CHARGED, not wall-clock (see `check`): reset for this retry.
+    CHARGE_MS.with(|c| c.set(0));
+    let budget_ms = BUDGET_SECS * 1000;
     let mut steps = String::new();
     steps.push_str(";; the staged rung: each script below (separated by (reset)) refutes one disjunct of a conditional instance under\n;; the facts in force (a relevance slice of the certificate's unconditional facts, the goal's branch, the conclusions\n;; drawn before — grounded to QF_NIA where the ground rung's rewrite applies); every (check-sat) must answer unsat.\n;; A conditional all of whose disjuncts but one are refuted yields the one left as a fact.\n");
     let mut fin = String::new();
@@ -437,13 +457,13 @@ pub fn retry_staged(smt: &str, solver: &str) -> Option<Staged> {
                 if resolved.contains(&ci) {
                     continue;
                 }
-                if std::time::Instant::now() >= deadline {
+                if charged_ms() >= budget_ms {
                     steps.push_str(";; the budget ran out; the remaining conditionals were not attempted\n");
                     break 'rounds;
                 }
                 let mut left: Vec<&S> = Vec::new();
                 let mut refuted = 0usize;
-                let started = std::time::Instant::now();
+                let started = charged_ms();
                 let mut queries = 0usize;
                 for (di, d) in ds.iter().enumerate() {
                     // A disjunct already a fact in force is not refutable; a disjunct whose negation
@@ -530,9 +550,11 @@ pub fn retry_staged(smt: &str, solver: &str) -> Option<Staged> {
                         break; // two disjuncts stand: nothing to conclude from this instance yet
                     }
                 }
-                let ms = started.elapsed().as_millis();
+                // Charged, not measured: the steps script is part of a certificate, which must not
+                // vary with the machine's load.
+                let ms = charged_ms() - started;
                 if ms > 500 {
-                    steps.push_str(&format!(";; timing: conditional {ci} ({} disjuncts) {ms} ms, {queries} queries, {refuted} refuted, {} left — {}\n", ds.len(), left.len(), render(&ds[ds.len() - 1]).chars().take(120).collect::<String>()));
+                    steps.push_str(&format!(";; cost: conditional {ci} ({} disjuncts) {ms} charged ms, {queries} queries, {refuted} refuted, {} left — {}\n", ds.len(), left.len(), render(&ds[ds.len() - 1]).chars().take(120).collect::<String>()));
                 }
                 if refuted == 0 {
                     continue;
@@ -678,7 +700,7 @@ mod tests {
         let smt = "(declare-const p Int)(declare-const q Int)(declare-const r Int)(declare-const s Int)\
                    (declare-const wq_1 Int)(declare-const wq_2 Int)(assert (>= q 1))(assert (>= s 1))\
                    (assert (= (* p s) (* r q)))(assert (not (= p r)))(assert (= q (* s wq_1)))(assert (= s (* q wq_2)))(check-sat)";
-        assert!(matches!(run_smt_secs(smt, "z3", 10), Ok(SatAnswer::Unsat)));
+        assert!(matches!(crate::prove::run_smt_secs(smt, "z3", 10), Ok(SatAnswer::Unsat)));
     }
 
     #[test]
