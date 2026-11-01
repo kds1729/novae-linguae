@@ -398,6 +398,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -406,6 +407,7 @@
    "typecheck": "(int, int, int, int) -> (int, int)",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
+   "refinement:post[1]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(1)` (inferred O(1))"
   },
@@ -461,7 +463,7 @@
    "effects": "SOUND",
    "refinement:refinements": "N/A",
    "termination": "SOUND",
-   "complexity": "UNVERIFIABLE"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -469,7 +471,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(log n)`, not established: a self-call's recursion argument is not a recognized structural/numeric descent"
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
    "right_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",

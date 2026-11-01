@@ -86,17 +86,17 @@ Builder round 3 (`records/REPORT.{json,md}`; the log in the author's sandbox), 1
 | `gi_is_unit` | 2 ints → bool | — | `units_lie_on_an_axis`, `the_four_units` (closed) **PROVED** | EXHAUSTIVE 81; UNGENERATABLE |
 | `gi_round_div` | `n d → int`, pre `d ≥ 1` | `−d ≤ 2(n − q·d) < d` (two posts) SOUND | `exact_on_multiples`, `by_one` **PROVED** | EXHAUSTIVE 81, 9 |
 | `gi_div` | 4 ints → pair, pre `w ≠ 0` | the rounding bounds on both components (four posts, through the `let`-bound norm) SOUND | `by_one` **PROVED** | EXHAUSTIVE 81 |
-| `gi_rem` | 4 ints → pair, pre `w ≠ 0` | **`N(result) < N(w)` SOUND** (rounds 1–2: UNVERIFIABLE) | `by_one_is_zero` **PROVED** | EXHAUSTIVE 81 |
+| `gi_rem` | 4 ints → pair, pre `w ≠ 0` | **`N(result) < N(w)` SOUND** (rounds 1–2: UNVERIFIABLE); **`2·N(result) ≤ N(w)` SOUND** (2026-11-01, the halving) | `by_one_is_zero` **PROVED** | EXHAUSTIVE 81 |
 | `gi_euclid_holds` | checker | — | `remainder_smaller` **PROVED** (rounds 1–2: UNKNOWN) | HELD 400 |
 | `gi_gcd` | 4 ints → pair, recursive; termination **SOUND** on `N(c, d)` by `gi_rem`'s post (rounds 1–3: UNVERIFIABLE) | — | `right_zero` **PROVED** by unfolding (rounds 1–3: UNSUPPORTED, no established measure); `nonzero` **PROVED** by strong induction on `N(c, d)` (round 4) | EXHAUSTIVE 81; HELD 400 |
 
 Totals (round 4): 14/14 run PASS, 14/14 certified, termination SOUND 14 / UNVERIFIABLE 0 (round 3:
-13 / 1, `gi_gcd`), complexity SOUND 13 / UNVERIFIABLE 1 (2026-11-01 rebuild on validator `78ba9fc` — the rebuild's first try also caught a validator regression since `9be3a64`, fixed in `78ba9fc`: a witness scan had derived `gi_rem` short of its norm post while `gi_div` was mid-derivation, and `gi_gcd`'s termination and three laws fell with it; everything else is as in round 4;
+13 / 1, `gi_gcd`), **complexity SOUND 14 / 14** (2026-11-01, later: `gi_rem` gained the HALVING post `2·N(r) ≤ N(w)`, SOUND, and the class fold reads a measured descent that halves a polynomial measure as `T(M) = T(M/2) + O(1)` — `gi_gcd`'s `O(log n)` SOUND); before that, 13 / 1 (2026-11-01 rebuild on validator `78ba9fc` — the rebuild's first try also caught a validator regression since `9be3a64`, fixed in `78ba9fc`: a witness scan had derived `gi_rem` short of its norm post while `gi_div` was mid-derivation, and `gi_gcd`'s termination and three laws fell with it; everything else is as in round 4;
 before it SOUND 8 / UNVERIFIABLE 6 — the records that pass a product or another callee's
 pair to a callee: `gi_div`, `gi_rem`, the three checkers, now SOUND because a polylogarithmic
 callee folds over polynomially bounded arguments and `gi_mul`'s result is re-derived polynomial
-in its arguments; the one left is the recursive `gi_gcd`, whose `O(log n)` is a claim about the
-norm's halving — a measured descent the termination checker reads and the class fold does not yet), contracts 19 SOUND / 0, laws 25 PROVED /
+in its arguments; the one left then was the recursive `gi_gcd`, whose `O(log n)` is a claim about the
+norm's halving), contracts 20 SOUND / 0, laws 25 PROVED /
 0 UNKNOWN / 0 UNSUPPORTED (round 3: 23 / 0 / 1 of 24), 23/23 generatable laws held on the bounded
 domain with no skipped cases (the two closed laws are UNGENERATABLE — "not a forall, no domain to
 sample" — and PROVED; `nonzero` HELD 400). Round 3's wide pass:
@@ -187,9 +187,9 @@ default budget.
   hypothesis; the instances form (at the recursive call, under `N(rem) < N(w)`) is emitted too but
   was not what closed it. A law that needs the instances would measure that path.
 - **Closed laws in the generative checker**: UNGENERATABLE where one evaluation would do. Small.
-- **Complexity through product arguments** — closed 2026-11-01 (five of six; validator `6a14d11`).
-  Left: `gi_gcd`'s `O(log n)` needs the class fold to read the measured descent (the norm at
-  least halves per step) the way the termination checker already does.
+- **Complexity through product arguments** — closed 2026-11-01 (five of six; validator `6a14d11`),
+  and the sixth, `gi_gcd`'s `O(log n)`, the same day: the halving post on `gi_rem` plus the class
+  fold reading a measured descent that halves (validator, see the round notes). 14 / 14 SOUND.
 - A Gaussian-rational tier (pairs of these over the rational tier's normalization) and Gaussian
   primes (`N(z)` prime, or `z` a rational prime `≡ 3 mod 4`) would reuse all of this.
 

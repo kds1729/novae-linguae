@@ -11,6 +11,6 @@
 | `gi_is_unit` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | units_lie_on_an_axis=EXHAUSTIVE; the_four_units=EXHAUSTIVE | units_lie_on_an_axis=PROVED; the_four_units=PROVED |
 | `gi_round_div` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND | SOUND | SOUND | exact_on_multiples=EXHAUSTIVE; by_one=EXHAUSTIVE | exact_on_multiples=PROVED; by_one=PROVED |
 | `gi_div` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / post[2]=SOUND / post[3]=SOUND | SOUND | SOUND | by_one=EXHAUSTIVE | by_one=PROVED |
-| `gi_rem` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | by_one_is_zero=EXHAUSTIVE | by_one_is_zero=PROVED |
+| `gi_rem` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND | SOUND | SOUND | by_one_is_zero=EXHAUSTIVE | by_one_is_zero=PROVED |
 | `gi_euclid_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | remainder_smaller=HELD | remainder_smaller=PROVED |
-| `gi_gcd` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | UNVERIFIABLE | right_zero=EXHAUSTIVE; nonzero=HELD | right_zero=PROVED; nonzero=PROVED |
+| `gi_gcd` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | right_zero=EXHAUSTIVE; nonzero=HELD | right_zero=PROVED; nonzero=PROVED |

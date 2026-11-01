@@ -319,7 +319,11 @@ def main():
           [ex((7, 3, 2, 1), gi(*rem(7, 3, 2, 1))), ex((5, 5, 1, 1), gi(0, 0)), ex((1, 0, 1, 1), gi(*rem(1, 0, 1, 1))),
            ex((-9, 4, 0, 2), gi(*rem(-9, 4, 0, 2))), ex((6, -8, 1, 0), gi(0, 0))],
           refinements=[("pre", "c != 0 || d != 0"),
-                       ("post", "{gi_norm}(fst(result), snd(result)) < {gi_norm}(c, d)")],
+                       ("post", "{gi_norm}(fst(result), snd(result)) < {gi_norm}(c, d)"),
+                       # 2026-11-01: the remainder's norm is at most HALF the divisor's (nearest-
+                       # integer rounding leaves |ε| ≤ 1/2 per component, so N(ε) ≤ 1/2) — the
+                       # halving the complexity fold reads to certify gi_gcd's O(log n).
+                       ("post", "2 * {gi_norm}(fst(result), snd(result)) <= {gi_norm}(c, d)")],
           props=[("by_one_is_zero", "forall a b. fst(self(a, b, 1, 0)) == 0 && snd(self(a, b, 1, 0)) == 0")],
           hints=["gaussian_rem", "euclidean_remainder"], complexity="O(1)")
     gauntlet("gi_rem", prove)

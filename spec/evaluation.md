@@ -279,7 +279,12 @@ products of inputs, `x div y` (bounded by `x` whatever the divisor), `x mod y` (
 divisor only: Euclidean `−1 mod 5 = 4`), and the components of a callee whose RESULT is
 polynomial in its arguments, re-derived from that callee's body (non-recursive, every result
 leaf polynomial; `gi_mul`'s pair, `rat_normalize`'s quotients by `gcd`). So `normalize(a·d + c·b,
-b·d)` is `O(log n)`; a callee of polynomial class still requires size-bounded arguments. Because a
+b·d)` is `O(log n)`; a callee of polynomial class still requires size-bounded arguments. A
+**measured halving descent** folds too: when every self-call descends by the termination checker's
+measured descent (a callee's certified `M(result) < M(params)`) and that callee ALSO certifies
+`2·M(result) ≤ M(params)`, the depth is at most `log₂ M + 1`; with the measure's result
+polynomial in the parameters, the recursion is `T(n) = T(n/2) + work` in the table above —
+`gi_gcd` over `gi_rem`'s two norm posts is `O(log n)`. A strict decrease alone stays refused. Because a
 declared `O(f)` is an *upper-bound* claim, the check compares the inferred sound bound `O(g)` to it: `g ≤ f`
 → **SOUND** (or **VERIFIED** when `g` is provably tighter, so the declaration could be strengthened); `g > f`
 or a **higher-order / opaque** body (`map`/`filter`/`fold`, applying a parameter or `fn_ref`) → **UNVERIFIABLE**;
