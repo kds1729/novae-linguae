@@ -47,8 +47,10 @@ agent most needs are certified, not tested:
 The one UNKNOWN is the text roundtrip (`parse(format(u, k), k) = u`): it holds on every generated
 case, but `to_string`/`str_split` have no SMT theory counterpart — a boundary, stated below.
 
-Getting there cost **four validator changes, one of them a real defect**: a callee whose contract
-is laws alone (no post) was invisible to every caller's proof.
+Getting there cost **four validator changes, one of them a real defect** (a callee whose contract
+is laws alone — no post — was invisible to every caller's proof), and publishing found a fifth:
+**schema validation was exponential in nesting depth**, so the commons gate refused the deepest
+body.
 
 ## What was measured
 
@@ -89,8 +91,19 @@ All numbers from `python3 /home/claude/sandbox/run_module_builder_guarded.py dec
    non-recursive body. The new rung runs only after all of them refused, only for a non-recursive
    body. Test: `lists_are_admitted_in_first_order_only_on_request_and_never_for_a_recursive_body`.
 
-**Cross-module check:** the Gaussian and integer tiers were rebuilt on the changed validator and
-compared with their committed records (see the commit message for the outcome).
+**Cross-module check:** the Gaussian (1 min) and integer (45 min) tiers were rebuilt on the
+changed validator — both byte-identical to their committed records and reports.
+
+**Publishing found a fifth defect, in the spec's schemas.** Arca's gate refused
+`body-parse_amount.json` 422 `schema_invalid`, and locally `nl-validator validate` was killed at
+3 GB on it. Every expression schema dispatched on `kind` through a `oneOf`; a failing branch still
+descended into properties it shares with the matching one (`let` and `lambda` both have `body`),
+and every branch's errors were collected — exponential in nesting depth. Measured with alternating
+`let`/`lambda` nests under a 3 GiB cap: the old body schema aborted at let-depth 8; the rewrite
+(`if`/`then` on `kind`, equivalent because the `kind` consts are disjoint; 12 blocks across seven
+schemas) validates let-depth 24 in 0.07 s under 100 MB. `format_amount`'s body (JSON depth 23)
+had passed — at 2.4 GB. Both nodes were redeployed for gate parity and all 16 records, bodies and
+certifications are on Arca (publish logs `decimal_publish_round4{,b}.log`).
 
 ## What is argued
 
