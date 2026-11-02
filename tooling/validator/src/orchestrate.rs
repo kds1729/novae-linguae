@@ -14,7 +14,7 @@ use serde_json::{json, Value as J};
 use std::path::Path;
 
 use crate::{
-    analyze_termination, build_link_map, build_record_map, certify_record, clear_resolver,
+    analyze_termination, build_link_map, build_record_map, certify_record_linked, clear_resolver,
     did_nova_from_pubkey, eval_body, infer_effects, prove_by_induction_with_exploration, prove_property,
     respond_to_message, set_resolver, sign_message, verify_claim, AttestationGraph, InductionOutcome,
     Policy, ProofOutcome, TerminationOutcome, TrustVerdict, DEFAULT_LEMMA_DEPTH,
@@ -815,7 +815,12 @@ pub fn orchestrate_verified_with_maps(
         let commons_cert = policy.map(|p| p.certification_verdict(&graph, &target, None, timestamp));
         let certified = match (records.get(&target), link.get(&target)) {
             (Some(rec), Some(body)) => {
-                let cert = certify_record(rec, body, &records, solver);
+                // LINKED, like the `certify` command: with the fetched callee bodies a contract that
+                // rests on what a callee DOES (its derived contract), a callee's termination and its
+                // cost class all decide. Unlinked, the loop re-proved none of the decimal text
+                // records' posts that `certify --records` proves (2026-11-02, found by v0.1.12's
+                // CONFIRMED line counting them: "contract 0 of 3 post(s) proved").
+                let cert = certify_record_linked(rec, body, &records, Some(&link), solver);
                 let failed: Vec<&str> = cert.checks.iter().filter(|c| c.hard_fail).map(|c| c.check.as_str()).collect();
                 steps.push(Step {
                     label: "certify".into(),
@@ -1156,6 +1161,29 @@ mod tests {
         assert_eq!(prove.message["property"], json!("unit_rate"), "{}", prove.message);
         assert_eq!(prove.message["proved"], json!(true), "{}", prove.message);
         assert_eq!(prove.message["via"], json!("linked contract derivation"), "{}", prove.message);
+        assert!(run.confirmed);
+    }
+
+    /// The loop's certify step is LINKED, like `certify --records`: `fx_convert_text`'s posts rest on
+    /// what `parse_decimal` and `fx_convert` do, and unlinked all three read UNVERIFIABLE while the
+    /// record still certified (2026-11-02 — the loop vouched for less than it said).
+    #[test]
+    fn the_loops_certify_proves_posts_that_rest_on_callee_bodies() {
+        if std::process::Command::new("z3").arg("--version").output().is_err() {
+            return;
+        }
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evolution/decimal-tier-poc/records");
+        let s = |v: &str| json!({ "kind": "string", "value": v });
+        let run = orchestrate_verified(
+            &dir, "math/decimal/fx-convert-text", vec![s("37.00"), s("1.265"), json!({ "kind": "nat", "value": 2 })],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+            "z3", None, &[], None, true, None, &[],
+        ).unwrap();
+        let cert = run.steps.iter().find(|s| s.label == "certify").expect("a certify step is recorded");
+        let posts: Vec<&J> = cert.message["checks"].as_array().unwrap().iter()
+            .filter(|c| c["check"].as_str().is_some_and(|x| x.starts_with("refinement:post"))).collect();
+        assert_eq!(posts.len(), 3, "{}", cert.message);
+        assert!(posts.iter().all(|c| c["verdict"] == json!("SOUND")), "{}", cert.message);
         assert!(run.confirmed);
     }
 

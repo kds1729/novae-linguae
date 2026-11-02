@@ -750,6 +750,10 @@ enum Commands {
         /// for `{{oauth:NAME}}` placeholders — same doctrine as --secret. Repeatable.
         #[arg(long = "oauth")]
         oauth: Vec<String>,
+        /// With `--verify`: print every step's full detail (candidate scores, merged pairs, every
+        /// certify check) instead of one short line per step, functions named by their name hint.
+        #[arg(long, requires = "verify")]
+        verbose: bool,
     },
     /// Verify a Nova Locutio `assert` by RE-RUNNING its `predicate` claim against the commons:
     /// resolve the claim's content-addressed function(s) from `--records` and evaluate it. The
@@ -1137,7 +1141,7 @@ fn real_main() -> ExitCode {
         Commands::Authorize { policy, capability, grantee, delegations, at } => {
             (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
-        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, expect, grant, grant_certified, secret, oauth } => {
+        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, expect, grant, grant_certified, secret, oauth, verbose } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
             let seed = match (seed, publish) {
                 (Some(s), _) => Ok(s),
@@ -1152,7 +1156,7 @@ fn real_main() -> ExitCode {
                     nl_validator::set_effect_secrets(s);
                     nl_validator::set_effect_oauth(o);
                     if verify {
-                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified, expect.as_ref(), &grant_certified), false)
+                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified, expect.as_ref(), &grant_certified, verbose), false)
                     } else {
                         (cmd_orchestrate(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
                     }
@@ -2871,6 +2875,42 @@ fn read_value_arg(arg: &str) -> Result<serde_json::Value> {
 
 /// The final `assert`'s result in surface syntax (`[3333, 3333, 3334]`) — the line a reader wants,
 /// beside the transcript's value AST.
+/// (SOUND posts, all posts) in a `certify` step's checks — the contract the certifier PROVED, not
+/// merely declared (a certified record may carry an UNVERIFIABLE post: certification fails only on
+/// an actively violated one).
+fn post_tally(certify_step: &serde_json::Value) -> (usize, usize) {
+    let posts: Vec<&serde_json::Value> = certify_step
+        .get("checks")
+        .and_then(|c| c.as_array())
+        .map(|a| a.iter().filter(|c| c.get("check").and_then(|x| x.as_str()).is_some_and(|x| x.starts_with("refinement:post"))).collect())
+        .unwrap_or_default();
+    let sound = posts.iter().filter(|c| c.get("verdict").and_then(|v| v.as_str()) == Some("SOUND")).count();
+    (sound, posts.len())
+}
+
+/// What a CONFIRMED verified run actually vouches for. Stranger 13 read "no property declared to
+/// prove" on a function whose three contract posts were all proved at certify time — the old line
+/// counted laws only.
+fn confirmed_summary(steps: &[nl_validator::Step], certified: Option<bool>, law: Option<&str>) -> String {
+    let mut parts = vec!["trusted".to_string()];
+    match certified {
+        Some(true) => parts.push("certified".into()),
+        Some(false) => parts.push("NOT certified".into()),
+        None => {}
+    }
+    let (sound, total) = steps.iter().rev().find(|s| s.label == "certify").map(|s| post_tally(&s.message)).unwrap_or((0, 0));
+    if total > 0 {
+        parts.push(if sound == total { format!("contract proved ({total} post(s))") } else { format!("contract {sound} of {total} post(s) proved") });
+    }
+    match law {
+        Some(name) => parts.push(format!("law `{name}` proved")),
+        None if total == 0 => parts.push("no contract or law declared".into()),
+        None => {}
+    }
+    parts.push("applied".into());
+    format!("{}, and re-verified", parts.join(", "))
+}
+
 fn final_result_surface(steps: &[nl_validator::Step]) -> Option<String> {
     let m = &steps.iter().rev().find(|s| s.label.rsplit(':').next() == Some("assert"))?.message;
     let v = m.pointer("/body/claim/expr/args/1/value")?;
@@ -2938,6 +2978,7 @@ fn cmd_orchestrate_verified(
     require_certified: bool,
     expect: Option<&String>,
     grant_certified: &[String],
+    verbose: bool,
 ) -> Result<()> {
     if intents.len() != 1 {
         anyhow::bail!("--verify supports exactly one --intent (got {})", intents.len());
@@ -2952,10 +2993,54 @@ fn cmd_orchestrate_verified(
     // expected result's, when stated — shape the discovery page itself.
     let pattern = nl_validator::discovery_type_pattern(&argv, exp.as_ref());
     let (link, recs) = commons_view(records, node, intents, Some(&pattern))?;
+    // Name each candidate by its first name hint for the compact transcript (`name (fn_1234abcd…)`).
+    let names: std::collections::HashMap<String, String> = recs
+        .iter()
+        .filter_map(|(h, r)| Some((h.clone(), r.pointer("/name_hints/0")?.as_str()?.to_string())))
+        .collect();
+    let label = |h: &str| -> String {
+        let short = &h[..h.len().min(11)];
+        match names.get(h) {
+            Some(n) => format!("{n} ({short}…)"),
+            None => format!("{short}…"),
+        }
+    };
     let run = nl_validator::orchestrate_verified_with_maps(link, recs, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp, grant_certified)?;
 
     for step in &run.steps {
         let m = &step.message;
+        if !verbose {
+            // One short line per step (stranger 13 piped the full transcript through `tail`); the
+            // per-candidate scores, merged pairs and every certify check stay behind --verbose.
+            let compact = match step.label.as_str() {
+                "ack" => Some(format!("{} match(es)", m.pointer("/body/result/matches").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0))),
+                "rank" => {
+                    let order: Vec<String> = m.get("scores").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.get("function")?.as_str().map(&label)).collect()).unwrap_or_default();
+                    Some(format!("{} candidate(s), best first: {}", order.len(), order.join(", ")))
+                }
+                "collapse" => {
+                    let dropped: Vec<String> = m.get("collapsed").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.get("dropped")?.as_str().map(&label)).collect()).unwrap_or_default();
+                    Some(format!("merged {} proven-equivalent version(s) into the higher-ranked: {}", dropped.len(), dropped.join(", ")))
+                }
+                "certify" => {
+                    let f = m.get("function").and_then(|v| v.as_str()).map(&label).unwrap_or_default();
+                    let (sound, total) = post_tally(m);
+                    let failed: Vec<&str> = m.get("failed").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+                    Some(format!(
+                        "{f} certified={}{}{}",
+                        m.get("certified").map(|v| v.to_string()).unwrap_or_default(),
+                        if total > 0 { format!(", contract {sound}/{total} post(s) proved") } else { String::new() },
+                        if failed.is_empty() { String::new() } else { format!(", FAILED {}", failed.join(", ")) }
+                    ))
+                }
+                "propose" => Some(format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).map(&label).unwrap_or_default())),
+                _ => None,
+            };
+            if let Some(d) = compact {
+                println!("{:>8}  {d}", step.label);
+                continue;
+            }
+        }
         let detail = match step.label.as_str() {
             "query" => format!("intent {}", m.pointer("/body/pattern/intent_tags").map(|v| v.to_string()).unwrap_or_default()),
             "ack" => format!("matches {}", m.pointer("/body/result/matches").map(|v| v.to_string()).unwrap_or_default()),
@@ -2971,7 +3056,12 @@ fn cmd_orchestrate_verified(
                 m.get("kept").and_then(|k| k.as_array()).map(|a| a.len()).unwrap_or(0),
                 m.get("collapsed").map(|v| v.to_string()).unwrap_or_default()
             ),
-            "certify" => format!("certified={} {}", m.get("certified").map(|v| v.to_string()).unwrap_or_default(), m.get("failed").map(|v| v.to_string()).unwrap_or_default()),
+            "certify" => format!(
+                "certified={} failed={} checks={}",
+                m.get("certified").map(|v| v.to_string()).unwrap_or_default(),
+                m.get("failed").map(|v| v.to_string()).unwrap_or_default(),
+                m.get("checks").map(|v| v.to_string()).unwrap_or_default()
+            ),
             "grants" => format!(
                 "trust gate {} for {} — {}",
                 if m.get("trust_gate_open").and_then(|v| v.as_bool()).unwrap_or(false) { "OPEN (certified-gated grants apply)" } else { "closed (unconditional grants only)" },
@@ -2998,13 +3088,7 @@ fn cmd_orchestrate_verified(
     let trust_ok = run.trusted != Some(false);
     let certify_ok = !require_certified || run.certified == Some(true);
     if run.confirmed && property_ok && trust_ok && certify_ok {
-        let cert_note = match run.certified { Some(true) => ", certified", Some(false) => ", NOT certified", None => "" };
-        // Name the law that was proved (a stranger could not tell WHICH property "its property" was).
-        let prop_note = match &run.property {
-            Some((name, _)) => format!("its property `{name}` proved"),
-            None => "no property declared to prove".to_string(),
-        };
-        println!("CONFIRMED  trusted, {prop_note}{cert_note}, applied, and re-verified");
+        println!("CONFIRMED  {}", confirmed_summary(&run.steps, run.certified, run.property.as_ref().map(|(n, _)| n.as_str())));
         if let Some(r) = final_result_surface(&run.steps) {
             println!("result: {r}");
         }
@@ -3421,8 +3505,29 @@ mod redaction_tests {
 
 #[cfg(test)]
 mod value_arg_tests {
-    use super::read_value_arg;
+    use super::{confirmed_summary, read_value_arg};
     use serde_json::json;
+
+    fn certify_step(verdicts: &[&str]) -> nl_validator::Step {
+        let mut checks = vec![json!({ "check": "typecheck", "verdict": "WELL-TYPED" })];
+        checks.extend(verdicts.iter().enumerate().map(|(i, v)| json!({ "check": format!("refinement:post[{i}]"), "verdict": v })));
+        nl_validator::Step { label: "certify".into(), message: json!({ "certified": true, "checks": checks }) }
+    }
+
+    /// CONFIRMED names what was proved: the certified contract's posts (counted SOUND, not merely
+    /// declared) and the law, if any (2026-11-02: stranger 13 read "no property declared to prove"
+    /// on a function whose three posts had all been proved).
+    #[test]
+    fn confirmed_names_the_proved_contract_and_law() {
+        let all = [certify_step(&["SOUND", "SOUND", "SOUND"])];
+        assert_eq!(confirmed_summary(&all, Some(true), None),
+                   "trusted, certified, contract proved (3 post(s)), applied, and re-verified");
+        let partial = [certify_step(&["SOUND", "UNVERIFIABLE"])];
+        assert_eq!(confirmed_summary(&partial, Some(true), Some("roundtrip")),
+                   "trusted, certified, contract 1 of 2 post(s) proved, law `roundtrip` proved, applied, and re-verified");
+        assert_eq!(confirmed_summary(&[certify_step(&[])], Some(true), None),
+                   "trusted, certified, no contract or law declared, applied, and re-verified");
+    }
 
     /// `--arg`/`--expect` take a file, inline JSON, or a surface literal (2026-11-02: a stranger
     /// agent wrote two files by hand to pass `10000` and `[1, 1, 1]`).

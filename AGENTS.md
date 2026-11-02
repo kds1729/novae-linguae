@@ -83,7 +83,11 @@ them as TEXT to a function that takes text (`round_text_half_even`, `fx_convert_
   apply does not (a fixed default identity signs the transcript). `--arg`/`--expect` take a file,
   inline JSON, or a surface literal — `--arg 10000 --arg '[1, 1, 1]' --arg '"text"'`; a bare
   numeral is a `nat` (accepted where an `int` is expected), `int(-5)` an explicit int. After
-  `CONFIRMED`, a `result:` line prints the answer in that same syntax.
+  `CONFIRMED`, a `result:` line prints the answer in that same syntax (a non-negative int shows
+  as `int(1462)`, a negative one as `-322`). `CONFIRMED` says what was proved: `contract proved
+  (3 post(s))` means the certifier proved every postcondition, and ``law `name` proved`` names a
+  law. The transcript prints one line per step; `--verbose` adds the candidate scores, the merged
+  pairs and every certify check.
 - A record's discovery tag is in its `intent_tags` (adapters derive `parse/<lowercase-hyphenated-
   field>`), its argument order in its `signature`. The adapters print the record's file, not these.
 - Publishing to a public node is permanent: append-only, world-visible, no delete. `--sign` is what
