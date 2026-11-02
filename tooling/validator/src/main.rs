@@ -196,9 +196,10 @@ enum Commands {
     Eval {
         /// Path to the body-expression JSON AST.
         body: PathBuf,
-        /// Argument value (a value-expression JSON file). Repeatable, positional order.
+        /// Argument value, repeatable, positional order: a value-expression JSON file, inline JSON,
+        /// or a surface literal (`10000`, `'[1, 1, 1]'`) — as `orchestrate --arg`.
         #[arg(long = "arg")]
-        args: Vec<PathBuf>,
+        args: Vec<String>,
         /// Grant an effect the body may perform (e.g. `io.console`, `random`, `fs.read`, `fs.write`,
         /// `net.write@api.example.com` — a grant may be scoped: `@host`, `@host/path/prefix`, or
         /// `fs.read@/dir`, matched segment-aligned at the effect boundary).
@@ -3067,7 +3068,7 @@ fn redact_json(v: &mut serde_json::Value, rules: &[(String, String)]) {
 
 fn cmd_eval(
     body: &PathBuf,
-    args: &[PathBuf],
+    args: &[String],
     grants: &[String],
     redactions: &[(String, String)],
     replay: Option<&PathBuf>,
@@ -3075,7 +3076,9 @@ fn cmd_eval(
     records: Option<&PathBuf>,
 ) -> Result<()> {
     let body = nl_validator::read_json(body)?;
-    let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
+    // The same value-argument reader as `orchestrate` (a stranger agent found `eval` still wanted
+    // files after `orchestrate` stopped, 2026-11-02).
+    let argv = args.iter().map(|a| read_value_arg(a)).collect::<Result<Vec<_>>>()?;
     if let Some(dir) = records {
         // Link: a composed body applies commons functions by `fn_ref`; resolve them from the
         // directory so composition evaluates (and traces) like `run --records`.
