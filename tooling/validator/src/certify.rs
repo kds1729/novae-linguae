@@ -144,7 +144,9 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 // 7 (2026-11-01): the staged rung is rlimit-bounded and charge-budgeted — deterministic, so a cached
 // derivation no longer depends on the load it ran under.
 // 8 (2026-11-01): the staged rung at 3 M units/s under the plain `smt` tactic.
-const DERIVATION_VERSION: u32 = 8;
+// 9 (2026-11-02): a callee contract of laws alone reaches its callers (a derivation that applies
+// `list_sum` now proves more), and the refinement checker's first-order rung with lists admitted.
+const DERIVATION_VERSION: u32 = 9;
 
 fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
     dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))
@@ -839,6 +841,9 @@ impl crate::complexity::LinkedCallees for LinkedView<'_> {
     fn measured_halving(&self, body: &J) -> Option<String> {
         let m = crate::terminate::induction_measure_linked(body, &std::collections::BTreeSet::new(), Some(self))?;
         m.by_callee.filter(|b| b.halving).map(|b| b.target)
+    }
+    fn cost_positions(&self, target: &str) -> Option<Vec<usize>> {
+        self.callee(target).and_then(|(_, body)| crate::complexity::cost_positions(body))
     }
     fn result_poly_bounded(&self, target: &str) -> bool {
         // Re-derived from the callee's body over this same view; a cycle is "not known".

@@ -284,10 +284,18 @@ fn decide(goal: &J, body: Option<&J>, solver: &str, nat_positions: &std::collect
                         ProofOutcome::Proved => RefinementOutcome::Sound,
                         ProofOutcome::Unknown => RefinementOutcome::Unverifiable("numeric induction did not close (the step needs a lemma, or the arithmetic is nonlinear)".into()),
                         ProofOutcome::NoSolver => RefinementOutcome::NoSolver,
-                        // The first-order refusal is the informative one (a callee's contract
-                        // missing, an unsupported construct); the list engine's "nothing to induct
-                        // on" hid it (`gi_rem`'s post, 2026-10-30).
-                        _ => RefinementOutcome::Unverifiable(format!("{first_order_why}; induction: {why}")),
+                        // Last: a NON-recursive body's obligation in first order WITH lists — a
+                        // callee's proved list law at the body's application (`allocate`'s length
+                        // post, 2026-11-02). Then the first-order refusal is the informative one (a
+                        // callee's contract missing, an unsupported construct); the list engine's
+                        // "nothing to induct on" hid it (`gi_rem`'s post, 2026-10-30).
+                        _ => match crate::prove::prove_property_with_lists(goal, body, solver).0 {
+                            ProofOutcome::Proved => RefinementOutcome::Sound,
+                            ProofOutcome::Refuted(model) => RefinementOutcome::Violated(model),
+                            ProofOutcome::NoSolver => RefinementOutcome::NoSolver,
+                            ProofOutcome::Unknown => RefinementOutcome::Unverifiable("solver could not decide (first order, lists admitted)".into()),
+                            ProofOutcome::Unsupported(_) => RefinementOutcome::Unverifiable(format!("{first_order_why}; induction: {why}")),
+                        },
                     }
                 }
             }

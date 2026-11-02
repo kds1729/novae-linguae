@@ -334,6 +334,67 @@ pub trait LinkedCallees {
     fn measured_halving(&self, _body: &J) -> Option<String> {
         None
     }
+    /// The callee's parameter positions its COST depends on ([`cost_positions`]), re-derived from
+    /// its body: only arguments there need be size-bounded for its class to fold. Default: unknown
+    /// (every argument must be).
+    fn cost_positions(&self, _target: &str) -> Option<Vec<usize>> {
+        None
+    }
+}
+
+/// The parameter positions `body`'s cost depends on, when that is decidable by structure: a body
+/// whose every operation is a constant-time builtin ([`CONST_OPS`]) or a self-call — no callee, no
+/// linear-time op, no lambda — costs a constant per step times its recursion depth, and the depth
+/// is bounded by the size of the one position its descent measure is taken at (`[]` when it does
+/// not recurse). Measured need (2026-11-02, the decimal tier): `allocate` passes `alloc_from` the
+/// weight total `list_sum(ws)` — unbounded by any input SIZE — at a position the recursion never
+/// descends on; the cost is linear in `ws` alone. `None` = not decidable here.
+pub fn cost_positions(body: &J) -> Option<Vec<usize>> {
+    fn only_const(node: &J) -> bool {
+        match node {
+            J::Array(xs) => xs.iter().all(only_const),
+            J::Object(m) => match m.get("kind").and_then(|k| k.as_str()) {
+                Some("lambda") => false,
+                Some("lit") => m.get("value").and_then(|v| v.get("kind")).and_then(|k| k.as_str()) != Some("fn_ref"),
+                Some("app") => {
+                    if let Some(args) = self_call_args(node) {
+                        return args.iter().all(only_const);
+                    }
+                    if crate::terminate::fn_ref_spine(node).is_some() {
+                        return false;
+                    }
+                    match app_spine(node) {
+                        Some((op, args)) => CONST_OPS.contains(&op.as_str()) && args.iter().all(only_const),
+                        None => false,
+                    }
+                }
+                _ => m.values().all(only_const),
+            },
+            _ => true,
+        }
+    }
+    let inner = body.get("body")?;
+    lambda_params(body)?;
+    if !only_const(inner) {
+        return None;
+    }
+    let mut recursive = false;
+    fn has_self(node: &J, found: &mut bool) {
+        if self_call_args(node).is_some() {
+            *found = true;
+        }
+        match node {
+            J::Array(xs) => xs.iter().for_each(|x| has_self(x, found)),
+            J::Object(m) => m.values().for_each(|x| has_self(x, found)),
+            _ => {}
+        }
+    }
+    has_self(inner, &mut recursive);
+    if !recursive {
+        return Some(vec![]);
+    }
+    let m = crate::terminate::induction_measure(body, &BTreeSet::new())?;
+    m.by_callee.is_none().then(|| vec![m.position])
 }
 
 /// Does `body`'s result — every component, through `let` and `case` — have a value bounded by a
@@ -622,6 +683,9 @@ const SIZE_BOUNDED_OPS: &[&str] = &[
     "add", "sub", "neg", "abs", "min", "max", "mod", "div", "length", "head", "tail", "cons", "append",
     "reverse", "concat", "init", "last", "fst", "snd", "null", "eq", "neq", "lt", "le", "gt", "ge", "and",
     "or", "not", "to_float", "str_concat", "str_length",
+    // Every piece of a split is no longer than the string split (2026-11-02, the decimal tier's
+    // `parse_amount` sizes its scale arithmetic by `str_length` of a piece).
+    "str_split",
 ];
 
 /// Is `arg`'s VALUE bounded by the input size — a parameter (or a `let` name bound to such a value), a
@@ -714,10 +778,18 @@ fn find_opaque_in(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeS
     } else if let Some((target, cargs)) = crate::terminate::fn_ref_spine(node) {
         match callee.and_then(|c| c.class_of(&target)) {
             Some(class) => {
-                // A polylogarithmic callee tolerates polynomially bounded arguments (`poly_bounded_in`).
+                // A polylogarithmic callee tolerates polynomially bounded arguments (`poly_bounded_in`);
+                // a CONSTANT one tolerates any argument — `O(1)` of anything is `O(1)` (2026-11-02, the
+                // decimal tier: `div_half_even(u, pow10(k))`, a divisor exponential in `k`).
                 let polylog = class.deg == 0 && !class.exp;
-                let ok = |a: &J| if polylog { poly_bounded_in(a, bound, callee, self_linear) } else { size_bounded(a, bound, callee) };
-                if let Some(a) = cargs.iter().find(|a| !ok(a)) {
+                let constant = class == Class::CONST;
+                let ok = |a: &J| {
+                    constant || if polylog { poly_bounded_in(a, bound, callee, self_linear) } else { size_bounded(a, bound, callee) }
+                };
+                // Only the positions the callee's cost depends on need be bounded (`cost_positions`).
+                let relevant = callee.and_then(|c| c.cost_positions(&target));
+                let counts = |i: usize| relevant.as_ref().is_none_or(|ps| ps.contains(&i));
+                if let Some((_, a)) = cargs.iter().enumerate().find(|(i, a)| counts(*i) && !ok(a)) {
                     return Some(format!(
                         "applies `{target}` to an argument whose size is not bounded by the input ({}) — its class cannot be re-expressed in n",
                         a.get("kind").and_then(|k| k.as_str()).unwrap_or("?")
@@ -1521,6 +1593,64 @@ mod tests {
         let poly = Magnitude { class: Class::LOG, poly_result: true };
         assert_eq!(analyze_complexity_linked(&comp, Some(&poly)), ComplexityOutcome::Bound(Class::LOG));
         assert!(matches!(analyze_complexity_linked(&comp, Some(&log)), ComplexityOutcome::Opaque(_)));
+    }
+
+    /// Every callee is O(n) in the positions `positions` says.
+    struct Positions(Option<Vec<usize>>);
+    impl LinkedCallees for Positions {
+        fn class_of(&self, _: &str) -> Option<Class> {
+            Some(Class::poly(1))
+        }
+        fn result_bounded_by(&self, _: &str) -> Option<Vec<usize>> {
+            None
+        }
+        fn components_shrink_by(&self, _: &str) -> Option<u32> {
+            None
+        }
+        fn components_preserved_by(&self, _: &str) -> Option<Vec<usize>> {
+            None
+        }
+        fn cost_positions(&self, _: &str) -> Option<Vec<usize>> {
+            self.0.clone()
+        }
+    }
+
+    #[test]
+    fn a_callees_cost_depends_only_on_its_descent_position_when_its_steps_are_constant() {
+        // alloc_from: \t ws c w -> case null ws of true -> nil | false ->
+        //   cons(sub(div(mul(t, add(c, head ws)), w), div(mul(t, c), w)), self(t, tail ws, add(c, head ws), w))
+        let c2 = app("add", vec![v("c"), app("head", vec![v("ws")])]);
+        let part = app("sub", vec![app("div", vec![app("mul", vec![v("t"), c2.clone()]), v("w")]),
+                                   app("div", vec![app("mul", vec![v("t"), v("c")]), v("w")])]);
+        let step = app("cons", vec![part, self_call(vec![v("t"), app("tail", vec![v("ws")]), c2, v("w")])]);
+        let alloc = lambda(&["t", "ws", "c", "w"], case2(app("null", vec![v("ws")]), v("nil"), step.clone()));
+        assert_eq!(cost_positions(&alloc), Some(vec![1]));
+        // A linear-time op in a step (append) is not a constant step: undecided here.
+        let appending = lambda(&["t", "ws", "c", "w"], case2(app("null", vec![v("ws")]), v("nil"),
+            app("append", vec![v("ws"), self_call(vec![v("t"), app("tail", vec![v("ws")]), v("c"), v("w")])])));
+        assert_eq!(cost_positions(&appending), None);
+        // Non-recursive constant arithmetic: no position matters.
+        assert_eq!(cost_positions(&lambda(&["a", "b"], app("mul", vec![v("a"), v("b")]))), Some(vec![]));
+        // The fold: F(t, ws, 0, G(ws)) — G's result is unbounded, but F's cost ignores position 3.
+        let fref = |s: &str| json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", s.repeat(32)) } });
+        let call = |s: &str, args: Vec<J>| json!({ "kind": "app", "fn": fref(s), "args": args });
+        let caller = lambda(&["t", "ws"], call("ab", vec![v("t"), v("ws"), lit_i(0), call("cd", vec![v("ws")])]));
+        assert_eq!(analyze_complexity_linked(&caller, Some(&Positions(Some(vec![1])))), ComplexityOutcome::Bound(Class::poly(1)));
+        assert!(matches!(analyze_complexity_linked(&caller, Some(&Positions(None))), ComplexityOutcome::Opaque(_)));
+        assert!(matches!(analyze_complexity_linked(&caller, Some(&Positions(Some(vec![3])))), ComplexityOutcome::Opaque(_)));
+    }
+
+    #[test]
+    fn a_constant_callee_folds_over_any_argument_a_log_one_does_not() {
+        let fref = |s: &str| json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", s.repeat(32)) } });
+        let call = |s: &str, args: Vec<J>| json!({ "kind": "app", "fn": fref(s), "args": args });
+        // div_half_even(u, G(k)) with G's result unbounded (an exponential `pow10`): O(1) of anything.
+        let body = lambda(&["u", "k"], call("ab", vec![v("u"), call("cd", vec![v("k")])]));
+        let constant = Magnitude { class: Class::CONST, poly_result: false };
+        assert_eq!(analyze_complexity_linked(&body, Some(&constant)), ComplexityOutcome::Bound(Class::CONST));
+        // An O(log m) callee of an unbounded m is not re-expressible in our n.
+        let log = Magnitude { class: Class::LOG, poly_result: false };
+        assert!(matches!(analyze_complexity_linked(&body, Some(&log)), ComplexityOutcome::Opaque(_)));
     }
 
     #[test]

@@ -280,6 +280,12 @@ divisor only: Euclidean `−1 mod 5 = 4`), and the components of a callee whose 
 polynomial in its arguments, re-derived from that callee's body (non-recursive, every result
 leaf polynomial; `gi_mul`'s pair, `rat_normalize`'s quotients by `gcd`). So `normalize(a·d + c·b,
 b·d)` is `O(log n)`; a callee of polynomial class still requires size-bounded arguments. A
+**constant** callee needs nothing of its arguments (2026-11-02, the decimal tier: `div_half_even(u,
+pow10(k))`, a divisor exponential in `k`). And a callee whose every step is a constant-time builtin
+or a self-call — no callee, no linear-time op, no lambda — costs its recursion depth, which its
+descent position alone bounds: only the argument at that position need be size-bounded
+(`cost_positions`; `allocate` passes `alloc_from` the weight total `list_sum(ws)` at a position the
+recursion never descends on). A
 **measured halving descent** folds too: when every self-call descends by the termination checker's
 measured descent (a callee's certified `M(result) < M(params)`) and that callee ALSO certifies
 `2·M(result) ≤ M(params)`, the depth is at most `log₂ M + 1`; with the measure's result

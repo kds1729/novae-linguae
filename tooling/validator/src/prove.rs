@@ -910,7 +910,10 @@ fn callee_preamble() -> Result<(String, String, bool)> {
             // The applications of this callee the obligation makes: each contract fact is also stated at
             // them explicitly (below), so the solver need not instantiate a quantifier to use it.
             let at: Vec<Vec<String>> = apps.get(target).cloned().unwrap_or_default().into_iter().filter(|a| a.len() == c.params.len()).collect();
-            if c.posts.is_empty() {
+            // A contract of laws alone is a contract too (2026-11-02, the decimal tier: `list_sum`
+            // has no post, only its unfolding law `self(cons(x, xs)) = x + self(xs)`, PROVED — and
+            // every caller saw it as a bare uninterpreted function until this read `posts` only).
+            if c.posts.is_empty() && c.laws.is_empty() {
                 continue;
             }
             let first = axioms_done.insert(target.clone());
@@ -2169,6 +2172,21 @@ pub fn run_solver_secs(cert: &Certificate, solver: &str, secs: u64) -> Result<Pr
         SatAnswer::Unknown => ProofOutcome::Unknown,
         SatAnswer::NoSolver => ProofOutcome::NoSolver,
     })
+}
+
+/// [`prove_property`] with LISTS admitted (the `Lst` datatype, `length`/`append`/`reverse` as the
+/// solver's own recursive definitions) — for a NON-recursive body only, and only as a last rung
+/// after every induction backend refused: the first-order prover's list refusal is what routes a
+/// plain list law to the structural backend. Measured need (2026-11-02, the decimal tier):
+/// `allocate`'s `length(result) == length(ws)` — one instance of its callee's PROVED length law
+/// at the body's application, no induction of its own — fell through every rung (the structural
+/// one refuses a callee, the numeric one a non-recursive body).
+pub fn prove_property_with_lists(prop_expr: &J, body: Option<&J>, solver: &str) -> (ProofOutcome, Option<Certificate>) {
+    if body.is_some_and(references_self) {
+        return (ProofOutcome::Unsupported("a recursive body (the induction rungs decide it)".into()), None);
+    }
+    let _lists = admit_lists();
+    prove_property(prop_expr, body, solver)
 }
 
 /// Attempt to prove one property: build the certificate, run the solver. Out-of-fragment properties
@@ -3890,6 +3908,47 @@ mod tests {
         // The instance binds the contract's parameter to the DEFINITION of `p`, not to `p`.
         assert!(smt.contains("(let ((x (callee_cdcd n))) (=> (>= x 0) (>= (callee_cdcd x) 0)))"), "the instance at the definition: {smt}");
         assert!(!smt.contains("(let ((x p))"), "never at the local name: {smt}");
+    }
+
+    /// A callee whose contract is LAWS ALONE (no post) still reaches the caller's certificate: until
+    /// 2026-11-02 the preamble skipped any contract without a post, so `list_sum`'s proved unfolding
+    /// law never reached `alloc_from`'s telescoping proof (the decimal tier).
+    #[test]
+    fn a_callee_contract_of_laws_alone_is_axiomatized() {
+        let Some(solver) = solver() else { return };
+        let target = format!("fn_{}", "ef".repeat(32));
+        let self_at = |a: J| json!({ "kind": "app", "op": "self", "args": [a] });
+        let contract = CalleeContract {
+            symbol: "callee_efef".into(),
+            params: vec!["x".into()],
+            param_sorts: vec![Sort::Int],
+            ret: Sort::Int,
+            pres: vec![],
+            posts: vec![],
+            laws: vec![law(&["x"], op("ge", vec![self_at(v("x")), v("x")]))],
+            nat_positions: BTreeSet::new(),
+        };
+        let call = |a: J| json!({ "kind": "app", "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": target } }, "args": [a] });
+        let goal = law(&["n"], op("ge", vec![op("add", vec![call(v("n")), lit(1)]), v("n")]));
+        let prev = set_callee_contracts([(target.clone(), contract)].into_iter().collect());
+        let (out, _) = prove_property(&goal, None, solver);
+        set_callee_contracts(prev);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+    }
+
+    /// The first-order rung with lists admitted: a list obligation over a NON-recursive body is
+    /// decided by the solver's own `length` definition; the plain first-order prover refuses it
+    /// (that refusal is what routes list laws to the structural backend), and a recursive body is
+    /// left to the induction rungs.
+    #[test]
+    fn lists_are_admitted_in_first_order_only_on_request_and_never_for_a_recursive_body() {
+        let Some(solver) = solver() else { return };
+        let cons = op("cons", vec![lit(1), v("xs")]);
+        let goal = law(&["xs"], op("eq", vec![op("length", vec![cons]), op("add", vec![op("length", vec![v("xs")]), lit(1)])]));
+        assert!(matches!(prove_property(&goal, None, solver).0, ProofOutcome::Unsupported(_)));
+        assert!(matches!(prove_property_with_lists(&goal, None, solver).0, ProofOutcome::Proved));
+        let recursive = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": op("self", vec![v("n")]) });
+        assert!(matches!(prove_property_with_lists(&goal, Some(&recursive), solver).0, ProofOutcome::Unsupported(_)));
     }
 
     #[test]
