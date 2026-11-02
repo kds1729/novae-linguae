@@ -143,7 +143,8 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 // 6 (2026-11-01): contracts derived under a cycle refusal were cached partial (`gi_rem`).
 // 7 (2026-11-01): the staged rung is rlimit-bounded and charge-budgeted — deterministic, so a cached
 // derivation no longer depends on the load it ran under.
-const DERIVATION_VERSION: u32 = 7;
+// 8 (2026-11-01): the staged rung at 3 M units/s under the plain `smt` tactic.
+const DERIVATION_VERSION: u32 = 8;
 
 fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
     dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))

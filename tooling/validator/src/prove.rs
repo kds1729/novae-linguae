@@ -2047,10 +2047,12 @@ pub fn run_smt_secs(script: &str, solver: &str, secs: u64) -> Result<SatAnswer> 
     run_smt_inner(script, solver, secs, None)
 }
 
-/// z3 resource units per budgeted second for [`run_smt_rlimit`] — measured 2026-11-01 on this
-/// laptop: a hard nonlinear query spends ~7.5 M/s under z3 4.13 and ~11 M/s under 5.3.3; easy
-/// queries decide in well under 0.1 M.
-pub const RLIMIT_PER_SEC: u64 = 8_000_000;
+/// z3 resource units per budgeted second for [`run_smt_rlimit`] — calibrated 2026-11-01 on this
+/// laptop to the rate the staged rung's own hard queries spend (~2.2 M/s under z3 4.13; a pure
+/// nonlinear probe runs 7.5 M/s, 11 M/s under 5.3.3), so a budgeted second is about a wall
+/// second here. At 8 M/s the uniqueness proof took 186 s and the suite 4× longer; at 3 M/s,
+/// with the `smt` tactic, the proof closes in 150 s, deterministically.
+pub const RLIMIT_PER_SEC: u64 = 3_000_000;
 /// The wall-clock backstop of an rlimit-bounded query, as a multiple of its budget: the resource
 /// limit is meant to bind first, so a busy machine changes how LONG a query takes, not its answer.
 pub const RLIMIT_BACKSTOP: u64 = 30;
@@ -2078,6 +2080,12 @@ fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> 
     if is_z3 {
         if let Some(r) = rlimit {
             cmd.arg(format!("rlimit={r}"));
+            // The plain `smt` tactic: z3's default QF_NIA strategy wraps sub-tactics in WALL-CLOCK
+            // `try-for` limits, so a resource-limited query still varied with load (measured: 106
+            // vs 102 staged conclusions idle vs under 12 burners); it also spends its budget worse
+            // — a staged premise unknown at 6 M units under the default is unsat at 2.2 M under
+            // `smt` (2026-11-01).
+            cmd.arg("tactic.default_tactic=smt");
         }
         cmd.arg(format!("-t:{}", secs * 1000)); // per-check soft timeout (ms)
         // A memory cap beside the time cap: z3 does not honour its soft timeout while

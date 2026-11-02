@@ -773,6 +773,8 @@ mod tests {
         let st = retry_staged(smt, solver).expect("the staged rung closes uniqueness");
         assert_eq!(st.branches, 2);
         assert!(st.derived >= 3, "derived {}", st.derived);
-        assert!(st.final_smt.contains("(udiv "), "{}", st.final_smt);
+        // The final closes over opaque witnesses: uninterpreted `udiv`, or — under the resource-
+        // limited `smt` tactic (2026-11-01) — the quotient abstraction's `wq_k` constants.
+        assert!(st.final_smt.contains("(udiv ") || st.final_smt.contains("wq_"), "{}", st.final_smt);
     }
 }
