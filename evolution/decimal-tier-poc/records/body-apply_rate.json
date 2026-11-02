@@ -3,7 +3,7 @@
   "args": [
    {
     "kind": "var",
-    "name": "den"
+    "name": "rate_den"
    }
   ],
   "fn": {
@@ -12,14 +12,14 @@
      "args": [
       {
        "kind": "var",
-       "name": "num"
+       "name": "rate_num"
       }
      ],
      "fn": {
       "args": [
        {
         "kind": "var",
-        "name": "a"
+        "name": "amount"
        }
       ],
       "fn": {
@@ -45,13 +45,13 @@
  "kind": "lambda",
  "params": [
   {
-   "name": "a"
+   "name": "amount"
   },
   {
-   "name": "num"
+   "name": "rate_num"
   },
   {
-   "name": "den"
+   "name": "rate_den"
   }
  ]
 }

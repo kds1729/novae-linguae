@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_2d0016d1adf673856fe39f6d1767e4d4e96b4b08426a58279edb7592a175f141",
+ "body_hash": "expr_d1d533ae59ae4a59495cf2df74f8a02d41d23975dd244e4e35c0e0d80bacfb86",
  "derived_from": null,
  "examples": [
   {
@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_9dff4d12bf9045af2e4136a7e83a58db30782708d2a2d38624301af8cad14151",
+ "hash": "fn_1c4f829a05c5a4cd48376818b3fd07a5de91a7ec598f3d5862f63261c1a9eb23",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -120,11 +120,11 @@
              "args": [
               {
                "kind": "var",
-               "name": "a"
+               "name": "amount"
               },
               {
                "kind": "var",
-               "name": "bps"
+               "name": "basis_points"
               }
              ],
              "kind": "app",
@@ -163,6 +163,99 @@
      ],
      "kind": "app",
      "op": "le"
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": 2
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "amount"
+                },
+                {
+                 "kind": "var",
+                 "name": "basis_points"
+                }
+               ],
+               "kind": "app",
+               "op": "mul"
+              },
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "result"
+                },
+                {
+                 "kind": "lit",
+                 "value": 10000
+                }
+               ],
+               "kind": "app",
+               "op": "mul"
+              }
+             ],
+             "kind": "app",
+             "op": "sub"
+            }
+           ],
+           "kind": "app",
+           "op": "abs"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        },
+        {
+         "kind": "lit",
+         "value": 10000
+        }
+       ],
+       "kind": "app",
+       "op": "neq"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "result"
+          },
+          {
+           "kind": "lit",
+           "value": 2
+          }
+         ],
+         "kind": "app",
+         "op": "mod"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
     },
     "kind": "post"
    }

@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_c74efa2c5de323aded9ffb2570ca3973a4b6317b06c1e5241ddcbab8074e5c49",
+ "body_hash": "expr_e8fda3ec1d05e8978ef0ff36f47570bdc030d38e839cd20c58864b727c4cee09",
  "derived_from": null,
  "examples": [
   {
@@ -85,9 +85,37 @@
     "kind": "int",
     "value": 33
    }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 25000
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    },
+    {
+     "kind": "int",
+     "value": 10825
+    },
+    {
+     "kind": "int",
+     "value": 10000
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 27062
+   }
   }
  ],
- "hash": "fn_d8ef8d2cef89cad9fcbf4699b25ee1951decd67c45380e20f842edb17b8a92de",
+ "hash": "fn_5ad8e97cde45982d74ef2a8a3cb8b8f57a40690d253e667aeaf6b42a75664aa0",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -110,7 +138,7 @@
      "args": [
       {
        "kind": "var",
-       "name": "den"
+       "name": "rate_den"
       },
       {
        "kind": "lit",
@@ -141,11 +169,11 @@
                "args": [
                 {
                  "kind": "var",
-                 "name": "a"
+                 "name": "amount"
                 },
                 {
                  "kind": "var",
-                 "name": "num"
+                 "name": "rate_num"
                 }
                ],
                "kind": "app",
@@ -155,7 +183,7 @@
                "args": [
                 {
                  "kind": "var",
-                 "name": "ts"
+                 "name": "to_places"
                 }
                ],
                "kind": "app",
@@ -175,13 +203,13 @@
                "args": [
                 {
                  "kind": "var",
-                 "name": "den"
+                 "name": "rate_den"
                 },
                 {
                  "args": [
                   {
                    "kind": "var",
-                   "name": "fs"
+                   "name": "from_places"
                   }
                  ],
                  "kind": "app",
@@ -211,13 +239,13 @@
        "args": [
         {
          "kind": "var",
-         "name": "den"
+         "name": "rate_den"
         },
         {
          "args": [
           {
            "kind": "var",
-           "name": "fs"
+           "name": "from_places"
           }
          ],
          "kind": "app",
@@ -230,6 +258,147 @@
      ],
      "kind": "app",
      "op": "le"
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": 2
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "amount"
+                  },
+                  {
+                   "kind": "var",
+                   "name": "rate_num"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "mul"
+                },
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "to_places"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+                }
+               ],
+               "kind": "app",
+               "op": "mul"
+              },
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "result"
+                },
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "rate_den"
+                  },
+                  {
+                   "args": [
+                    {
+                     "kind": "var",
+                     "name": "from_places"
+                    }
+                   ],
+                   "kind": "app",
+                   "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "mul"
+                }
+               ],
+               "kind": "app",
+               "op": "mul"
+              }
+             ],
+             "kind": "app",
+             "op": "sub"
+            }
+           ],
+           "kind": "app",
+           "op": "abs"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "rate_den"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "from_places"
+            }
+           ],
+           "kind": "app",
+           "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        }
+       ],
+       "kind": "app",
+       "op": "neq"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "result"
+          },
+          {
+           "kind": "lit",
+           "value": 2
+          }
+         ],
+         "kind": "app",
+         "op": "mod"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
     },
     "kind": "post"
    }

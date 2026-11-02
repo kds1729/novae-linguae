@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_7cf59d22089e121a23e40498143c4492209be181aeb2300884cab103b0f183fa",
+ "body_hash": "expr_b954a06e87962d9425eaf5dfb7dd5a07d32e09899f380a6ff00ee15e570bb539",
  "derived_from": null,
  "examples": [
   {
@@ -163,7 +163,7 @@
    }
   }
  ],
- "hash": "fn_dfb46356e8767487cd9aa946c0f21a9e7c8e1663bed9f56f74a553978ffe35ed",
+ "hash": "fn_4ab62dee1a97030e35249d3d5476f631d165b90f81f090b5669dd04c9755e7f9",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -189,7 +189,7 @@
        "args": [
         {
          "kind": "var",
-         "name": "ws"
+         "name": "weights"
         }
        ],
        "kind": "app",
@@ -222,7 +222,7 @@
        "args": [
         {
          "kind": "var",
-         "name": "ws"
+         "name": "weights"
         }
        ],
        "kind": "app",
@@ -249,7 +249,7 @@
       },
       {
        "kind": "var",
-       "name": "t"
+       "name": "total"
       }
      ],
      "kind": "app",

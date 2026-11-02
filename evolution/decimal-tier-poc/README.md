@@ -2,7 +2,7 @@
 
 - **Status:** published (2026-11-02). <!-- exploring | published | absorbed | superseded -->
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-11-02, last updated 2026-11-02 (round 4)
+- **Dates:** first published 2026-11-02, last updated 2026-11-02 (round 5 — tie posts, named parameters)
 - **Scope:** `tooling/validator` (the complexity fold, the prover's callee preamble, the refinement
   checker's rungs), `spec/evaluation.md`.
 - **Provenance:** upstream commit `40765fb` plus the four validator changes this module forced
@@ -28,7 +28,7 @@ currency conversion with an exact rational rate), `list_sum`, `alloc_from` + `al
 total over weights), and `format_amount` / `parse_amount` / `amount_text_roundtrip` (the text
 boundary, where an agent meets amounts in JSON, CSV and API payloads).
 
-**Round 4: 16/16 run and certify; 17 of 17 contracts SOUND; termination 16/16; complexity 15/16;
+**Round 5: 16/16 run and certify; 21 of 21 contracts SOUND (round 5 added the tie rule to every rounding record); termination 16/16; complexity 15/16;
 laws 22 PROVED / 1 UNKNOWN / 0 UNSUPPORTED of 23, all 23 held generatively (the text roundtrip's
 wide sample mostly skipped — see *Still open*).** The guarantees an
 agent most needs are certified, not tested:
@@ -63,6 +63,7 @@ All numbers from `python3 /home/claude/sandbox/run_module_builder_guarded.py dec
 | 2 | validator change 1; unfolding laws on `list_sum`; text records | `rescale`/`fx_convert` complexity SOUND; `list_sum`'s `cons` law PROVED; telescoping still UNKNOWN; closed laws (`self(0) == 1`) refused "not a `forall`" by the induction backends; `zeros` (a padding loop) honestly O(n²); `parse_amount` 4/9 examples failed (argument order) |
 | 3 | validator changes 2–4; laws restated in guarded `forall` form; derived-cache version 9 | `rescale` roundtrip PROVED; telescoping PROVED; `allocate` both posts SOUND, complexity SOUND; `parse_amount` 1/9 failed — accepted `"1-2"` as −2.00 (a real bug in the record: the sign's position was never checked) |
 | 4 | sign accepted only as the first character | 16/16 run + certified, 17/17 contracts SOUND, laws 22/1/0; 4.3 min, peak 1.6 GB (one z3 query) |
+| 5 | the TIE RULE as a post on `rescale`, `apply_rate`, `percent_bps`, `fx_convert` (`2·|err| ≠ unit ∨ result even`); parameters named for what they are (`amount from_places to_places`, `amount rate_num rate_den`, `total weights`, …); `fx_convert` gains the €250 @ 1.0825 tie example | 16/16 certified, **21/21 contracts SOUND** — each tie post derived from `div_half_even`'s own; laws 22/1/0; 5.8 min. Why: a stranger agent on unseen goals (banker's rounding, FX) could not tell half-even from half-up from these contracts (they bounded only the error) and read the bodies; and could not tell `fs`/`ts` were decimal-place counts |
 
 **The validator changes** (each with a regression test; suite 505 → 509 lib tests, all green):
 

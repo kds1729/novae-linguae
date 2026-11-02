@@ -13,21 +13,21 @@
    "args": [
     {
      "kind": "var",
-     "name": "bps"
+     "name": "basis_points"
     }
    ],
    "fn": {
     "args": [
      {
       "kind": "var",
-      "name": "a"
+      "name": "amount"
      }
     ],
     "fn": {
      "kind": "lit",
      "value": {
       "kind": "fn_ref",
-      "target": "fn_66b0313b84d20d8925cdfc162f4d0ca7472e6c422746e0d85b2aa17917dab46c"
+      "target": "fn_f7ab7d840856bb66e83ef43d93f403a48105bd483eee85fd482b229a5367912e"
      }
     },
     "kind": "app"
@@ -39,10 +39,10 @@
  "kind": "lambda",
  "params": [
   {
-   "name": "a"
+   "name": "amount"
   },
   {
-   "name": "bps"
+   "name": "basis_points"
   }
  ]
 }

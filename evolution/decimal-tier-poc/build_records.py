@@ -273,14 +273,20 @@ def main():
 
     # 3. rescale — minor units at scale `f` to scale `t`: exact upward (×10^(t−f)), banker's-rounded
     # downward (÷10^(f−t)). 12.345 (12345 at 3) → 1234 at 2 (the tie goes to the even 4).
+    # Round 5: parameters named for what they are (the summary's `params` shows the body's names; a
+    # stranger could not tell `f`/`t` were decimal-place counts), and the TIE RULE as a post — the
+    # error bound alone admits half-up too (stranger 10 read the body to find out).
     build("rescale",
-          r"\u f t -> case le f t of { true => mul u ({pow10} (sub t f)); false => {div_half_even} u ({pow10} (sub f t)) }",
+          r"\amount from_places to_places -> case le from_places to_places of { "
+          r"true => mul amount ({pow10} (sub to_places from_places)); "
+          r"false => {div_half_even} amount ({pow10} (sub from_places to_places)) }",
           FN([INT, NAT, NAT], INT),
           [ex([ilit(1234), nlit(2), nlit(4)], ilit(123400)), ex([ilit(12345), nlit(3), nlit(2)], ilit(1234)),
            ex([ilit(12355), nlit(3), nlit(2)], ilit(1236)), ex([ilit(-12345), nlit(3), nlit(2)], ilit(-1234)),
            ex([ilit(199), nlit(2), nlit(0)], ilit(2)), ex([ilit(7), nlit(1), nlit(1)], ilit(7))],
-          refinements=[("post", "f > t || result == u * {pow10}(t - f)"),
-                       ("post", "f <= t || 2 * abs(u - result * {pow10}(f - t)) <= {pow10}(f - t)")],
+          refinements=[("post", "from_places > to_places || result == amount * {pow10}(to_places - from_places)"),
+                       ("post", "from_places <= to_places || 2 * abs(amount - result * {pow10}(from_places - to_places)) <= {pow10}(from_places - to_places)"),
+                       ("post", "from_places <= to_places || 2 * abs(amount - result * {pow10}(from_places - to_places)) != {pow10}(from_places - to_places) || result % 2 == 0")],
           # Up then down is the identity: no information is lost going to MORE decimal places.
           props=[("roundtrip", "forall u f t. f < 0 || t < f || self(self(u, f, t), t, f) == u")],
           hints=["change_scale", "quantize", "round_to_places"], complexity="O(n)")
@@ -288,21 +294,25 @@ def main():
 
     # 4. Rates: amount × num / den, banker's-rounded — tax, discount, interest, currency conversion
     # with an exact rational rate. The contract is the error bound: within half a minor unit.
-    build("apply_rate", r"\a num den -> {div_half_even} (mul a num) den",
+    build("apply_rate", r"\amount rate_num rate_den -> {div_half_even} (mul amount rate_num) rate_den",
           FN([INT, INT, INT], INT),
           [ex(ii(1999, 8, 100), ilit(rdiv(1999 * 8, 100, ROUND_HALF_EVEN))),
            ex(ii(1000, 1, 3), ilit(333)), ex(ii(250, 1, 100), ilit(2)), ex(ii(-1050, 1, 10), ilit(-105))],
-          refinements=[("pre", "den >= 1"), ("post", "2 * abs(a * num - result * den) <= den")],
+          refinements=[("pre", "rate_den >= 1"),
+                       ("post", "2 * abs(amount * rate_num - result * rate_den) <= rate_den"),
+                       # Banker's rounding: a tie goes to the even neighbour.
+                       ("post", "2 * abs(amount * rate_num - result * rate_den) != rate_den || result % 2 == 0")],
           props=[("unit_rate", "forall a d. d < 1 || self(a, d, d) == a"),
                  ("zero_amount", "forall n d. d < 1 || self(0, n, d) == 0")],
           hints=["multiply_by_rate", "tax", "discount", "convert_currency"], complexity="O(1)")
     gauntlet("apply_rate", prove)
 
-    build("percent_bps", r"\a bps -> {apply_rate} a bps 10000",
+    build("percent_bps", r"\amount basis_points -> {apply_rate} amount basis_points 10000",
           FN([INT, INT], INT),
           [ex(ii(10000, 825), ilit(825)), ex(ii(1999, 825), ilit(rdiv(1999 * 825, 10000, ROUND_HALF_EVEN))),
            ex(ii(12345, 5000), ilit(rdiv(12345 * 5000, 10000, ROUND_HALF_EVEN)))],
-          refinements=[("post", "2 * abs(a * bps - result * 10000) <= 10000")],
+          refinements=[("post", "2 * abs(amount * basis_points - result * 10000) <= 10000"),
+                       ("post", "2 * abs(amount * basis_points - result * 10000) != 10000 || result % 2 == 0")],
           props=[("whole", "forall a. self(a, 10000) == a")],
           hints=["percentage", "basis_points"], complexity="O(1)")
     gauntlet("percent_bps", prove)
@@ -310,13 +320,17 @@ def main():
     # Currency conversion between scales: `a` minor units at scale fs, rate num/den (target per
     # source), result in minor units at scale ts — one rounding, at the end.
     build("fx_convert",
-          r"\a fs num den ts -> {div_half_even} (mul (mul a num) ({pow10} ts)) (mul den ({pow10} fs))",
+          r"\amount from_places rate_num rate_den to_places -> {div_half_even} "
+          r"(mul (mul amount rate_num) ({pow10} to_places)) (mul rate_den ({pow10} from_places))",
           FN([INT, NAT, INT, INT, NAT], INT),
           [ex([ilit(10000), nlit(2), ilit(108), ilit(100), nlit(2)], ilit(10800)),
            ex([ilit(100), nlit(2), ilit(15725), ilit(100), nlit(0)], ilit(157)),
-           ex([ilit(1), nlit(0), ilit(1), ilit(3), nlit(2)], ilit(33))],
-          refinements=[("pre", "den >= 1"),
-                       ("post", "2 * abs(a * num * {pow10}(ts) - result * (den * {pow10}(fs))) <= den * {pow10}(fs)")],
+           ex([ilit(1), nlit(0), ilit(1), ilit(3), nlit(2)], ilit(33)),
+           # €250.00 at 1.0825 = 27062.5 cents: the tie goes to the even 27062.
+           ex([ilit(25000), nlit(2), ilit(10825), ilit(10000), nlit(2)], ilit(27062))],
+          refinements=[("pre", "rate_den >= 1"),
+                       ("post", "2 * abs(amount * rate_num * {pow10}(to_places) - result * (rate_den * {pow10}(from_places))) <= rate_den * {pow10}(from_places)"),
+                       ("post", "2 * abs(amount * rate_num * {pow10}(to_places) - result * (rate_den * {pow10}(from_places))) != rate_den * {pow10}(from_places) || result % 2 == 0")],
           hints=["currency_conversion", "exchange"], complexity="O(n)")
     gauntlet("fx_convert", prove)
 
@@ -346,16 +360,16 @@ def main():
           hints=["allocate_cumulative"], complexity="O(n)")
     gauntlet("alloc_from", prove)
 
-    build("allocate", r"\t ws -> {alloc_from} t ws 0 ({list_sum} ws)",
+    build("allocate", r"\total weights -> {alloc_from} total weights 0 ({list_sum} weights)",
           FN([INT, LIST(INT)], LIST(INT)),
           [ex([ilit(100), ilist(1, 1, 1)], ilist(*alloc_ref(100, [1, 1, 1]))),
            ex([ilit(1000), ilist(70, 20, 10)], ilist(*alloc_ref(1000, [70, 20, 10]))),
            ex([ilit(-1001), ilist(1, 1)], ilist(*alloc_ref(-1001, [1, 1]))),
            ex([ilit(5), ilist(3, 0, 7)], ilist(*alloc_ref(5, [3, 0, 7])))],
-          refinements=[("pre", "{list_sum}(ws) >= 1"),
-                       ("post", "length(result) == length(ws)"),
+          refinements=[("pre", "{list_sum}(weights) >= 1"),
+                       ("post", "length(result) == length(weights)"),
                        # NO LOST CENTS: the parts sum to the total, exactly.
-                       ("post", "{list_sum}(result) == t")],
+                       ("post", "{list_sum}(result) == total")],
           hints=["split_proportionally", "allocate_money", "largest_remainder"], complexity="O(n)")
     gauntlet("allocate", prove)
 

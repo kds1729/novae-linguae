@@ -225,6 +225,7 @@
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
    "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -234,6 +235,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
    "refinement:post[1]": "",
+   "refinement:post[2]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(n)` (inferred O(n))"
   },
@@ -257,6 +259,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -265,6 +268,7 @@
    "typecheck": "(int, int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
+   "refinement:post[1]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(1)` (inferred O(1))"
   },
@@ -291,6 +295,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -299,6 +304,7 @@
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
+   "refinement:post[1]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(1)` (inferred O(1))"
   },
@@ -322,6 +328,7 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -330,6 +337,7 @@
    "typecheck": "(int, int, int, int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
+   "refinement:post[1]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(n)` (inferred O(n))"
   }

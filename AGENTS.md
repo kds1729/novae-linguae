@@ -31,7 +31,7 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
 2. Choose by the summary's `contract` (pre/post, surface syntax), `laws`, `params` (argument
    names, in order) and `type_surface`; `refs` names the functions a contract applies by address.
    The contract is what separates candidates with similar names — e.g. `allocate`'s
-   `post: fn_b99a…(result) == t` with `refs` naming `fn_b99a…` as `list_sum` (the parts sum to
+   `post: fn_b99a…(result) == total` with `refs` naming `fn_b99a…` as `list_sum` (the parts sum to
    the total) versus a plain `divide`.
    `certifications` counts signed certificates about the function; whose they are is your
    policy's question (`nl-validator certified`), and `--require-certified` re-certifies locally anyway.

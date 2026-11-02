@@ -5,7 +5,7 @@
     "args": [
      {
       "kind": "var",
-      "name": "ws"
+      "name": "weights"
      }
     ],
     "fn": {
@@ -32,14 +32,14 @@
     "args": [
      {
       "kind": "var",
-      "name": "ws"
+      "name": "weights"
      }
     ],
     "fn": {
      "args": [
       {
        "kind": "var",
-       "name": "t"
+       "name": "total"
       }
      ],
      "fn": {
@@ -60,10 +60,10 @@
  "kind": "lambda",
  "params": [
   {
-   "name": "t"
+   "name": "total"
   },
   {
-   "name": "ws"
+   "name": "weights"
   }
  ]
 }

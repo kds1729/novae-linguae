@@ -7,7 +7,7 @@
       "args": [
        {
         "kind": "var",
-        "name": "fs"
+        "name": "from_places"
        }
       ],
       "fn": {
@@ -24,7 +24,7 @@
      "args": [
       {
        "kind": "var",
-       "name": "den"
+       "name": "rate_den"
       }
      ],
      "fn": {
@@ -44,7 +44,7 @@
        "args": [
         {
          "kind": "var",
-         "name": "ts"
+         "name": "to_places"
         }
        ],
        "fn": {
@@ -63,14 +63,14 @@
         "args": [
          {
           "kind": "var",
-          "name": "num"
+          "name": "rate_num"
          }
         ],
         "fn": {
          "args": [
           {
            "kind": "var",
-           "name": "a"
+           "name": "amount"
           }
          ],
          "fn": {
@@ -105,19 +105,19 @@
  "kind": "lambda",
  "params": [
   {
-   "name": "a"
+   "name": "amount"
   },
   {
-   "name": "fs"
+   "name": "from_places"
   },
   {
-   "name": "num"
+   "name": "rate_num"
   },
   {
-   "name": "den"
+   "name": "rate_den"
   },
   {
-   "name": "ts"
+   "name": "to_places"
   }
  ]
 }
