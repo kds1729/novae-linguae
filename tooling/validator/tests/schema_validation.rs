@@ -170,3 +170,31 @@ fn wrong_typed_field_is_rejected() {
         .insert("name_hints".into(), json!("not-an-array"));
     assert!(check("function-record.schema.json", &v).is_err());
 }
+
+/// Deep nesting validates in linear time (2026-11-02, the decimal tier): the expression schemas
+/// dispatched on `kind` through a `oneOf`, and the failing branches still descended into the
+/// properties they share (`let`/`lambda` both have `body`) while collecting every branch's errors —
+/// exponential in depth. `parse_amount`'s body (JSON depth 40) took 3 GB and was killed, and the
+/// commons node's gate refused it 422. `if`/`then` on `kind` evaluates only the matching branch.
+/// The same depth must still reject a defect at the bottom, and an unknown `kind` at the top.
+#[test]
+fn deep_nesting_validates_and_a_defect_at_the_bottom_is_still_rejected() {
+    fn nest(d: usize, leaf: Value) -> Value {
+        let mut b = leaf;
+        for i in 0..d {
+            b = json!({"kind": "let", "name": format!("x{i}"), "value": {"kind": "var", "name": "y"}, "body": b});
+            if i % 2 == 1 {
+                b = json!({"kind": "lambda", "params": [{"name": format!("p{i}")}], "body": b});
+            }
+        }
+        b
+    }
+    let ok = nest(40, json!({"kind": "var", "name": "x"}));
+    assert!(check("body-expression.schema.json", &ok).is_ok());
+    let bad_leaf = nest(40, json!({"kind": "app", "fn": {"kind": "var", "name": "f"}, "args": "not-a-list"}));
+    assert!(check("body-expression.schema.json", &bad_leaf).is_err());
+    let unknown = json!({"kind": "goto", "label": "x"});
+    assert!(check("body-expression.schema.json", &unknown).is_err());
+    let not_object = json!(42);
+    assert!(check("body-expression.schema.json", &not_object).is_err());
+}

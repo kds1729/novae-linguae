@@ -6,16 +6,19 @@
   "$ref": "#/$defs/type",
   "$defs": {
     "type": {
-      "oneOf": [
-        { "$ref": "#/$defs/var" },
-        { "$ref": "#/$defs/ref" },
-        { "$ref": "#/$defs/builtin" },
-        { "$ref": "#/$defs/forall" },
-        { "$ref": "#/$defs/fn" },
-        { "$ref": "#/$defs/apply" },
-        { "$ref": "#/$defs/tuple" },
-        { "$ref": "#/$defs/record" },
-        { "$ref": "#/$defs/sum" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["var", "ref", "builtin", "forall", "fn", "apply", "tuple", "record", "sum"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "var" } } }, "then": { "$ref": "#/$defs/var" } },
+        { "if": { "properties": { "kind": { "const": "ref" } } }, "then": { "$ref": "#/$defs/ref" } },
+        { "if": { "properties": { "kind": { "const": "builtin" } } }, "then": { "$ref": "#/$defs/builtin" } },
+        { "if": { "properties": { "kind": { "const": "forall" } } }, "then": { "$ref": "#/$defs/forall" } },
+        { "if": { "properties": { "kind": { "const": "fn" } } }, "then": { "$ref": "#/$defs/fn" } },
+        { "if": { "properties": { "kind": { "const": "apply" } } }, "then": { "$ref": "#/$defs/apply" } },
+        { "if": { "properties": { "kind": { "const": "tuple" } } }, "then": { "$ref": "#/$defs/tuple" } },
+        { "if": { "properties": { "kind": { "const": "record" } } }, "then": { "$ref": "#/$defs/record" } },
+        { "if": { "properties": { "kind": { "const": "sum" } } }, "then": { "$ref": "#/$defs/sum" } }
       ],
       "description": "Any type expression. Discriminated by the 'kind' field."
     },

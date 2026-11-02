@@ -6,14 +6,17 @@
   "$ref": "#/$defs/predicate",
   "$defs": {
     "predicate": {
-      "oneOf": [
-        { "$ref": "#/$defs/var" },
-        { "$ref": "#/$defs/lit" },
-        { "$ref": "#/$defs/lit_blob" },
-        { "$ref": "#/$defs/app" },
-        { "$ref": "#/$defs/forall" },
-        { "$ref": "#/$defs/exists" },
-        { "$ref": "#/$defs/case" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["var", "lit", "lit_blob", "app", "forall", "exists", "case"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "var" } } }, "then": { "$ref": "#/$defs/var" } },
+        { "if": { "properties": { "kind": { "const": "lit" } } }, "then": { "$ref": "#/$defs/lit" } },
+        { "if": { "properties": { "kind": { "const": "lit_blob" } } }, "then": { "$ref": "#/$defs/lit_blob" } },
+        { "if": { "properties": { "kind": { "const": "app" } } }, "then": { "$ref": "#/$defs/app" } },
+        { "if": { "properties": { "kind": { "const": "forall" } } }, "then": { "$ref": "#/$defs/forall" } },
+        { "if": { "properties": { "kind": { "const": "exists" } } }, "then": { "$ref": "#/$defs/exists" } },
+        { "if": { "properties": { "kind": { "const": "case" } } }, "then": { "$ref": "#/$defs/case" } }
       ],
       "description": "Any predicate expression. Discriminated by the 'kind' field."
     },
@@ -147,12 +150,15 @@
       "description": "The sum eliminator in a predicate — the body-expression `case` (spec/body-expression.schema.json), same shape, same pattern kinds — so a refinement or law can speak about a `Maybe`- or tuple-valued result the way the body that produced it does. Evaluated by the generative checker through the interpreter's pattern matcher and lowered by the prover as a tester-guarded `ite` over the datatype."
     },
     "pattern": {
-      "oneOf": [
-        { "$ref": "#/$defs/pat_wildcard" },
-        { "$ref": "#/$defs/pat_bind" },
-        { "$ref": "#/$defs/pat_variant" },
-        { "$ref": "#/$defs/pat_lit" },
-        { "$ref": "#/$defs/pat_tuple" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["wildcard", "bind", "variant", "lit", "tuple"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "wildcard" } } }, "then": { "$ref": "#/$defs/pat_wildcard" } },
+        { "if": { "properties": { "kind": { "const": "bind" } } }, "then": { "$ref": "#/$defs/pat_bind" } },
+        { "if": { "properties": { "kind": { "const": "variant" } } }, "then": { "$ref": "#/$defs/pat_variant" } },
+        { "if": { "properties": { "kind": { "const": "lit" } } }, "then": { "$ref": "#/$defs/pat_lit" } },
+        { "if": { "properties": { "kind": { "const": "tuple" } } }, "then": { "$ref": "#/$defs/pat_tuple" } }
       ],
       "description": "A pattern in a `case` arm (the body-expression pattern kinds). Discriminated by `kind`."
     },

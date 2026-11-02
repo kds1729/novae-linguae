@@ -6,16 +6,19 @@
   "$ref": "#/$defs/body",
   "$defs": {
     "body": {
-      "oneOf": [
-        { "$ref": "#/$defs/var" },
-        { "$ref": "#/$defs/lit" },
-        { "$ref": "#/$defs/app" },
-        { "$ref": "#/$defs/let" },
-        { "$ref": "#/$defs/lambda" },
-        { "$ref": "#/$defs/case" },
-        { "$ref": "#/$defs/field" },
-        { "$ref": "#/$defs/variant_expr" },
-        { "$ref": "#/$defs/tuple_expr" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["var", "lit", "app", "let", "lambda", "case", "field", "variant", "tuple"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "var" } } }, "then": { "$ref": "#/$defs/var" } },
+        { "if": { "properties": { "kind": { "const": "lit" } } }, "then": { "$ref": "#/$defs/lit" } },
+        { "if": { "properties": { "kind": { "const": "app" } } }, "then": { "$ref": "#/$defs/app" } },
+        { "if": { "properties": { "kind": { "const": "let" } } }, "then": { "$ref": "#/$defs/let" } },
+        { "if": { "properties": { "kind": { "const": "lambda" } } }, "then": { "$ref": "#/$defs/lambda" } },
+        { "if": { "properties": { "kind": { "const": "case" } } }, "then": { "$ref": "#/$defs/case" } },
+        { "if": { "properties": { "kind": { "const": "field" } } }, "then": { "$ref": "#/$defs/field" } },
+        { "if": { "properties": { "kind": { "const": "variant" } } }, "then": { "$ref": "#/$defs/variant_expr" } },
+        { "if": { "properties": { "kind": { "const": "tuple" } } }, "then": { "$ref": "#/$defs/tuple_expr" } }
       ],
       "description": "Any body expression. Discriminated by `kind`."
     },
@@ -192,12 +195,15 @@
     },
 
     "pattern": {
-      "oneOf": [
-        { "$ref": "#/$defs/pat_wildcard" },
-        { "$ref": "#/$defs/pat_bind" },
-        { "$ref": "#/$defs/pat_variant" },
-        { "$ref": "#/$defs/pat_lit" },
-        { "$ref": "#/$defs/pat_tuple" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["wildcard", "bind", "variant", "lit", "tuple"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "wildcard" } } }, "then": { "$ref": "#/$defs/pat_wildcard" } },
+        { "if": { "properties": { "kind": { "const": "bind" } } }, "then": { "$ref": "#/$defs/pat_bind" } },
+        { "if": { "properties": { "kind": { "const": "variant" } } }, "then": { "$ref": "#/$defs/pat_variant" } },
+        { "if": { "properties": { "kind": { "const": "lit" } } }, "then": { "$ref": "#/$defs/pat_lit" } },
+        { "if": { "properties": { "kind": { "const": "tuple" } } }, "then": { "$ref": "#/$defs/pat_tuple" } }
       ],
       "description": "A pattern in a `case` arm. Discriminated by `kind`."
     },

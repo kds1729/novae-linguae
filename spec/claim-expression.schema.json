@@ -6,13 +6,16 @@
   "$ref": "#/$defs/claim",
   "$defs": {
     "claim": {
-      "oneOf": [
-        { "$ref": "#/$defs/predicate" },
-        { "$ref": "#/$defs/observed" },
-        { "$ref": "#/$defs/satisfies" },
-        { "$ref": "#/$defs/verified" },
-        { "$ref": "#/$defs/attestation" },
-        { "$ref": "#/$defs/equivalent" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["predicate", "observed", "satisfies", "verified", "attestation", "equivalent"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "predicate" } } }, "then": { "$ref": "#/$defs/predicate" } },
+        { "if": { "properties": { "kind": { "const": "observed" } } }, "then": { "$ref": "#/$defs/observed" } },
+        { "if": { "properties": { "kind": { "const": "satisfies" } } }, "then": { "$ref": "#/$defs/satisfies" } },
+        { "if": { "properties": { "kind": { "const": "verified" } } }, "then": { "$ref": "#/$defs/verified" } },
+        { "if": { "properties": { "kind": { "const": "attestation" } } }, "then": { "$ref": "#/$defs/attestation" } },
+        { "if": { "properties": { "kind": { "const": "equivalent" } } }, "then": { "$ref": "#/$defs/equivalent" } }
       ]
     },
     "predicate": {

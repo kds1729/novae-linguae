@@ -6,20 +6,23 @@
   "$ref": "#/$defs/value",
   "$defs": {
     "value": {
-      "oneOf": [
-        { "$ref": "#/$defs/bool" },
-        { "$ref": "#/$defs/int" },
-        { "$ref": "#/$defs/nat" },
-        { "$ref": "#/$defs/float" },
-        { "$ref": "#/$defs/string" },
-        { "$ref": "#/$defs/bytes" },
-        { "$ref": "#/$defs/unit" },
-        { "$ref": "#/$defs/list" },
-        { "$ref": "#/$defs/tuple" },
-        { "$ref": "#/$defs/record" },
-        { "$ref": "#/$defs/variant" },
-        { "$ref": "#/$defs/fn_ref" },
-        { "$ref": "#/$defs/map" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["bool", "int", "nat", "float", "string", "bytes", "unit", "list", "tuple", "record", "variant", "fn_ref", "map"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "bool" } } }, "then": { "$ref": "#/$defs/bool" } },
+        { "if": { "properties": { "kind": { "const": "int" } } }, "then": { "$ref": "#/$defs/int" } },
+        { "if": { "properties": { "kind": { "const": "nat" } } }, "then": { "$ref": "#/$defs/nat" } },
+        { "if": { "properties": { "kind": { "const": "float" } } }, "then": { "$ref": "#/$defs/float" } },
+        { "if": { "properties": { "kind": { "const": "string" } } }, "then": { "$ref": "#/$defs/string" } },
+        { "if": { "properties": { "kind": { "const": "bytes" } } }, "then": { "$ref": "#/$defs/bytes" } },
+        { "if": { "properties": { "kind": { "const": "unit" } } }, "then": { "$ref": "#/$defs/unit" } },
+        { "if": { "properties": { "kind": { "const": "list" } } }, "then": { "$ref": "#/$defs/list" } },
+        { "if": { "properties": { "kind": { "const": "tuple" } } }, "then": { "$ref": "#/$defs/tuple" } },
+        { "if": { "properties": { "kind": { "const": "record" } } }, "then": { "$ref": "#/$defs/record" } },
+        { "if": { "properties": { "kind": { "const": "variant" } } }, "then": { "$ref": "#/$defs/variant" } },
+        { "if": { "properties": { "kind": { "const": "fn_ref" } } }, "then": { "$ref": "#/$defs/fn_ref" } },
+        { "if": { "properties": { "kind": { "const": "map" } } }, "then": { "$ref": "#/$defs/map" } }
       ],
       "description": "Any Nova Lingua value. Discriminated by the 'kind' field."
     },

@@ -6,10 +6,13 @@
   "$ref": "#/$defs/commitment",
   "$defs": {
     "commitment": {
-      "oneOf": [
-        { "$ref": "#/$defs/apply" },
-        { "$ref": "#/$defs/provide" },
-        { "$ref": "#/$defs/refrain" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["apply", "provide", "refrain"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "apply" } } }, "then": { "$ref": "#/$defs/apply" } },
+        { "if": { "properties": { "kind": { "const": "provide" } } }, "then": { "$ref": "#/$defs/provide" } },
+        { "if": { "properties": { "kind": { "const": "refrain" } } }, "then": { "$ref": "#/$defs/refrain" } }
       ]
     },
     "apply": {

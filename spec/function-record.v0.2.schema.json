@@ -290,16 +290,19 @@
     },
 
     "te_type": {
-      "oneOf": [
-        { "$ref": "#/$defs/te_var" },
-        { "$ref": "#/$defs/te_ref" },
-        { "$ref": "#/$defs/te_builtin" },
-        { "$ref": "#/$defs/te_forall" },
-        { "$ref": "#/$defs/te_fn" },
-        { "$ref": "#/$defs/te_apply" },
-        { "$ref": "#/$defs/te_tuple" },
-        { "$ref": "#/$defs/te_record" },
-        { "$ref": "#/$defs/te_sum" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["var", "ref", "builtin", "forall", "fn", "apply", "tuple", "record", "sum"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "var" } } }, "then": { "$ref": "#/$defs/te_var" } },
+        { "if": { "properties": { "kind": { "const": "ref" } } }, "then": { "$ref": "#/$defs/te_ref" } },
+        { "if": { "properties": { "kind": { "const": "builtin" } } }, "then": { "$ref": "#/$defs/te_builtin" } },
+        { "if": { "properties": { "kind": { "const": "forall" } } }, "then": { "$ref": "#/$defs/te_forall" } },
+        { "if": { "properties": { "kind": { "const": "fn" } } }, "then": { "$ref": "#/$defs/te_fn" } },
+        { "if": { "properties": { "kind": { "const": "apply" } } }, "then": { "$ref": "#/$defs/te_apply" } },
+        { "if": { "properties": { "kind": { "const": "tuple" } } }, "then": { "$ref": "#/$defs/te_tuple" } },
+        { "if": { "properties": { "kind": { "const": "record" } } }, "then": { "$ref": "#/$defs/te_record" } },
+        { "if": { "properties": { "kind": { "const": "sum" } } }, "then": { "$ref": "#/$defs/te_sum" } }
       ]
     },
     "te_var": {
@@ -430,14 +433,17 @@
     },
 
     "pe_predicate": {
-      "oneOf": [
-        { "$ref": "#/$defs/pe_var" },
-        { "$ref": "#/$defs/pe_lit" },
-        { "$ref": "#/$defs/pe_lit_blob" },
-        { "$ref": "#/$defs/pe_app" },
-        { "$ref": "#/$defs/pe_forall" },
-        { "$ref": "#/$defs/pe_exists" },
-        { "$ref": "#/$defs/pe_case" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["var", "lit", "lit_blob", "app", "forall", "exists", "case"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "var" } } }, "then": { "$ref": "#/$defs/pe_var" } },
+        { "if": { "properties": { "kind": { "const": "lit" } } }, "then": { "$ref": "#/$defs/pe_lit" } },
+        { "if": { "properties": { "kind": { "const": "lit_blob" } } }, "then": { "$ref": "#/$defs/pe_lit_blob" } },
+        { "if": { "properties": { "kind": { "const": "app" } } }, "then": { "$ref": "#/$defs/pe_app" } },
+        { "if": { "properties": { "kind": { "const": "forall" } } }, "then": { "$ref": "#/$defs/pe_forall" } },
+        { "if": { "properties": { "kind": { "const": "exists" } } }, "then": { "$ref": "#/$defs/pe_exists" } },
+        { "if": { "properties": { "kind": { "const": "case" } } }, "then": { "$ref": "#/$defs/pe_case" } }
       ]
     },
     "pe_var": {
@@ -537,12 +543,15 @@
       "description": "The sum eliminator in a predicate — the body-expression `case` (spec/body-expression.schema.json), same shape, same pattern kinds — so a refinement or law can speak about a `Maybe`- or tuple-valued result the way the body that produced it does. Evaluated by the generative checker through the interpreter's pattern matcher and lowered by the prover as a tester-guarded `ite` over the datatype."
     },
     "pe_pattern": {
-      "oneOf": [
-        { "$ref": "#/$defs/pe_pat_wildcard" },
-        { "$ref": "#/$defs/pe_pat_bind" },
-        { "$ref": "#/$defs/pe_pat_variant" },
-        { "$ref": "#/$defs/pe_pat_lit" },
-        { "$ref": "#/$defs/pe_pat_tuple" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["wildcard", "bind", "variant", "lit", "tuple"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "wildcard" } } }, "then": { "$ref": "#/$defs/pe_pat_wildcard" } },
+        { "if": { "properties": { "kind": { "const": "bind" } } }, "then": { "$ref": "#/$defs/pe_pat_bind" } },
+        { "if": { "properties": { "kind": { "const": "variant" } } }, "then": { "$ref": "#/$defs/pe_pat_variant" } },
+        { "if": { "properties": { "kind": { "const": "lit" } } }, "then": { "$ref": "#/$defs/pe_pat_lit" } },
+        { "if": { "properties": { "kind": { "const": "tuple" } } }, "then": { "$ref": "#/$defs/pe_pat_tuple" } }
       ],
       "description": "A pattern in a `case` arm (the body-expression pattern kinds). Discriminated by `kind`."
     },
@@ -596,20 +605,23 @@
     },
 
     "ve_value": {
-      "oneOf": [
-        { "$ref": "#/$defs/ve_bool" },
-        { "$ref": "#/$defs/ve_int" },
-        { "$ref": "#/$defs/ve_nat" },
-        { "$ref": "#/$defs/ve_float" },
-        { "$ref": "#/$defs/ve_string" },
-        { "$ref": "#/$defs/ve_bytes" },
-        { "$ref": "#/$defs/ve_unit" },
-        { "$ref": "#/$defs/ve_list" },
-        { "$ref": "#/$defs/ve_tuple" },
-        { "$ref": "#/$defs/ve_record" },
-        { "$ref": "#/$defs/ve_variant" },
-        { "$ref": "#/$defs/ve_fn_ref" },
-        { "$ref": "#/$defs/ve_map" }
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["bool", "int", "nat", "float", "string", "bytes", "unit", "list", "tuple", "record", "variant", "fn_ref", "map"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "bool" } } }, "then": { "$ref": "#/$defs/ve_bool" } },
+        { "if": { "properties": { "kind": { "const": "int" } } }, "then": { "$ref": "#/$defs/ve_int" } },
+        { "if": { "properties": { "kind": { "const": "nat" } } }, "then": { "$ref": "#/$defs/ve_nat" } },
+        { "if": { "properties": { "kind": { "const": "float" } } }, "then": { "$ref": "#/$defs/ve_float" } },
+        { "if": { "properties": { "kind": { "const": "string" } } }, "then": { "$ref": "#/$defs/ve_string" } },
+        { "if": { "properties": { "kind": { "const": "bytes" } } }, "then": { "$ref": "#/$defs/ve_bytes" } },
+        { "if": { "properties": { "kind": { "const": "unit" } } }, "then": { "$ref": "#/$defs/ve_unit" } },
+        { "if": { "properties": { "kind": { "const": "list" } } }, "then": { "$ref": "#/$defs/ve_list" } },
+        { "if": { "properties": { "kind": { "const": "tuple" } } }, "then": { "$ref": "#/$defs/ve_tuple" } },
+        { "if": { "properties": { "kind": { "const": "record" } } }, "then": { "$ref": "#/$defs/ve_record" } },
+        { "if": { "properties": { "kind": { "const": "variant" } } }, "then": { "$ref": "#/$defs/ve_variant" } },
+        { "if": { "properties": { "kind": { "const": "fn_ref" } } }, "then": { "$ref": "#/$defs/ve_fn_ref" } },
+        { "if": { "properties": { "kind": { "const": "map" } } }, "then": { "$ref": "#/$defs/ve_map" } }
       ]
     },
     "ve_bool": {
