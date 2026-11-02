@@ -860,10 +860,23 @@ pub fn orchestrate_verified_with_maps(
             ps.iter().find(|p| p.pointer("/expr/kind").and_then(|k| k.as_str()) == Some("forall")).map(|p| {
                 let name = p.get("name").and_then(|n| n.as_str()).unwrap_or("<unnamed>").to_string();
                 let expr = p.get("expr").unwrap();
-                let proved = prove_law(expr, link.get(&target), solver);
+                // Unlinked first (cheap); else the law as the LINKED derivation proves it — the
+                // function's contract derived under its callees' certified contracts, the same
+                // derivation the module builder's `prove --records` and every caller rely on. Until
+                // 2026-11-02 only the unlinked attempt ran: a law resting on a callee's contract
+                // (`rescale`'s roundtrip on `div_half_even`'s exactness, `apply_rate`'s unit rate)
+                // saw the callee as a bare symbol and the loop reported NOT-PROVEN (stranger 10).
+                let (proved, via) = if prove_law(expr, link.get(&target), solver) {
+                    (true, "unlinked")
+                } else {
+                    let linked = crate::LinkedView::new(&records, &link, solver)
+                        .contract(&target)
+                        .is_some_and(|c| c.laws.contains(expr));
+                    (linked, "linked contract derivation")
+                };
                 steps.push(Step {
                     label: "prove".into(),
-                    message: json!({ "function": target, "property": name, "proved": proved }),
+                    message: json!({ "function": target, "property": name, "proved": proved, "via": via }),
                 });
                 (name, proved)
             })
@@ -1109,6 +1122,29 @@ mod tests {
         let gate = run.steps.iter().find(|s| s.label == "grants").expect("a grants step is recorded");
         assert_eq!(gate.message["trust_gate_open"], json!(true), "{}", gate.message);
         assert!(run.confirmed, "the certified target runs under the gated grant and re-verifies");
+    }
+
+    /// The loop's prove step proves a law that rests on a CALLEE's contract (2026-11-02, stranger
+    /// 10): `apply_rate`'s `unit_rate` (`self(a, d, d) == a`) holds by `div_half_even`'s exactness
+    /// law, which the unlinked attempt cannot see (the callee is a bare symbol there). The decimal
+    /// tier's committed records are the commons view.
+    #[test]
+    fn the_loop_proves_a_law_that_rests_on_a_callees_contract() {
+        if std::process::Command::new("z3").arg("--version").output().is_err() {
+            return;
+        }
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evolution/decimal-tier-poc/records");
+        let n = |v: i64| json!({ "kind": "int", "value": v });
+        let run = orchestrate_verified(
+            &dir, "math/decimal/apply-rate", vec![n(25000), n(10825), n(10000)],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+            "z3", None, &[], None, true, None, &[],
+        ).unwrap();
+        let prove = run.steps.iter().find(|s| s.label == "prove").expect("a prove step is recorded");
+        assert_eq!(prove.message["property"], json!("unit_rate"), "{}", prove.message);
+        assert_eq!(prove.message["proved"], json!(true), "{}", prove.message);
+        assert_eq!(prove.message["via"], json!("linked contract derivation"), "{}", prove.message);
+        assert!(run.confirmed);
     }
 
     #[test]

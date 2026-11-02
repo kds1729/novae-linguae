@@ -2998,7 +2998,12 @@ fn cmd_orchestrate_verified(
     let certify_ok = !require_certified || run.certified == Some(true);
     if run.confirmed && property_ok && trust_ok && certify_ok {
         let cert_note = match run.certified { Some(true) => ", certified", Some(false) => ", NOT certified", None => "" };
-        println!("CONFIRMED  trusted, its property proved{cert_note}, applied, and re-verified");
+        // Name the law that was proved (a stranger could not tell WHICH property "its property" was).
+        let prop_note = match &run.property {
+            Some((name, _)) => format!("its property `{name}` proved"),
+            None => "no property declared to prove".to_string(),
+        };
+        println!("CONFIRMED  trusted, {prop_note}{cert_note}, applied, and re-verified");
         if let Some(r) = final_result_surface(&run.steps) {
             println!("result: {r}");
         }
@@ -3011,7 +3016,15 @@ fn cmd_orchestrate_verified(
     } else if require_certified && run.certified != Some(true) {
         Err(anyhow::anyhow!("ABORTED    the discovered function is not certified (--require-certified)"))
     } else if !property_ok {
-        Err(anyhow::anyhow!("NOT-PROVEN the discovered function's own property did not prove"))
+        // The application still ran and re-verified; show its value, marked as not vouched for —
+        // a suppressed value read as a failed run (stranger 10, 2026-11-02).
+        if run.confirmed {
+            if let Some(r) = final_result_surface(&run.steps) {
+                println!("result (applied and re-run, but its law is NOT proved): {r}");
+            }
+        }
+        let name = run.property.as_ref().map(|(n, _)| n.as_str()).unwrap_or("?");
+        Err(anyhow::anyhow!("NOT-PROVEN the discovered function's own property `{name}` did not prove"))
     } else {
         Err(anyhow::anyhow!("orchestration did not confirm (rejected, or the claim failed to re-run)"))
     }
