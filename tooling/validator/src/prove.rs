@@ -332,7 +332,27 @@ fn sum_sort_with_tag(tag: &str, payload: Option<Sort>) -> Result<Sort> {
     match hits.as_slice() {
         [i] => Ok(Sort::Data(*i)),
         [] => bail!("variant `{tag}` belongs to no declared sum type in scope (declare the function's type, or the callee's)"),
-        _ => bail!("variant `{tag}` is ambiguous between several declared sum types"),
+        // Several sums carry the tag (a body returning `Maybe int` whose callee returns `Maybe (int,
+        // int)`): a construction inside the function's own body takes its DECLARED result sort when
+        // that is one of them (`RESULT_SUM_HINT`, set by `lower_self`). A wrong pick elsewhere is an
+        // ill-sorted certificate the solver refuses — never a proof (2026-11-02, the decimal tier's
+        // text wrappers read "ambiguous" for their bare `None`).
+        many => match declared_result_datatype() {
+            Some(h) if many.contains(&h) => Ok(Sort::Data(h)),
+            _ => bail!("variant `{tag}` is ambiguous between several declared sum types"),
+        },
+    }
+}
+
+/// The function's DECLARED result sort (`SELF_TYPE`, installed by every path that proves about a
+/// record — `prove`, the refinement checker, a derivation), when it is a datatype: the sort an
+/// ambiguous bare variant construction in its body takes (see `sum_sort_with_tag`).
+fn declared_result_datatype() -> Option<u16> {
+    let ty = SELF_TYPE.with(|t| t.borrow().clone())?;
+    let fn_ty = if ty.get("kind").and_then(|k| k.as_str()) == Some("forall") { ty.get("body")?.clone() } else { ty };
+    match fn_ty.get("result").and_then(sort_of_type)? {
+        Sort::Data(i) => Some(i),
+        _ => None,
     }
 }
 
@@ -718,9 +738,13 @@ fn replace_token(s: &str, name: &str, def: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         let at = i + pat.len() <= bytes.len() && bytes[i..i + pat.len()] == pat[..];
-        let before_ok = i == 0 || !is_ident(bytes[i - 1]);
-        let after_ok = i + pat.len() == bytes.len() || !is_ident(bytes[i + pat.len()]);
-        if at && before_ok && after_ok {
+        // The boundaries are read only on a match: past the last possible match position,
+        // `bytes[i + pat.len()]` is out of bounds (a panic, reached 2026-11-02 once a nested
+        // `case` on two `Maybe`s lowered far enough to substitute near the end of a term).
+        let bounded = at
+            && (i == 0 || !is_ident(bytes[i - 1]))
+            && (i + pat.len() == bytes.len() || !is_ident(bytes[i + pat.len()]));
+        if bounded {
             out.push_str(def);
             i += pat.len();
         } else {
@@ -3908,6 +3932,16 @@ mod tests {
         // The instance binds the contract's parameter to the DEFINITION of `p`, not to `p`.
         assert!(smt.contains("(let ((x (callee_cdcd n))) (=> (>= x 0) (>= (callee_cdcd x) 0)))"), "the instance at the definition: {smt}");
         assert!(!smt.contains("(let ((x p))"), "never at the local name: {smt}");
+    }
+
+    /// `replace_token` near the end of a term: a name that cannot fit in what is left must not read
+    /// past the end (it panicked once a nested `case` on two `Maybe`s lowered that far, 2026-11-02).
+    #[test]
+    fn replace_token_never_reads_past_the_end() {
+        assert_eq!(replace_token("ab", "abc", "X"), "ab");
+        assert_eq!(replace_token("(f x)", "x", "y"), "(f y)");
+        assert_eq!(replace_token("(f xx)", "x", "y"), "(f xx)");
+        assert_eq!(replace_token("x", "x", "y"), "y");
     }
 
     /// A callee whose contract is LAWS ALONE (no post) still reaches the caller's certificate: until

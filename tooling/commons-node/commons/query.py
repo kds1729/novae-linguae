@@ -246,6 +246,11 @@ def record_summary(record):
                 params = [p.get("name") for p in body.get("params") or [] if isinstance(p, dict)]
                 if params and all(isinstance(p, str) for p in params):
                     out["params"] = params
+        # The author's one line per parameter (`param_docs`, function-record v0.2): what each
+        # argument means and its unit — testimony, beside the names.
+        docs = (record.raw or {}).get("param_docs")
+        if isinstance(docs, list) and docs:
+            out["param_docs"] = docs
     return out
 
 

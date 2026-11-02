@@ -24,6 +24,11 @@
       "uniqueItems": true,
       "default": []
     },
+    "param_docs": {
+      "description": "Optional: one plain-words line per parameter, in order — what the argument means and its unit (`\"decimal places of amount (2 = cents)\"`). Like `name_hints`, the author's testimony for a reader choosing among candidates, not a checked claim; `certify` checks only that there is one per parameter. Added 2026-11-02: a stranger agent could not tell `from_places` was the scale of the amount without decoding the contract.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 160 }
+    },
     "signature": { "$ref": "#/$defs/signature" },
     "examples": {
       "type": "array",

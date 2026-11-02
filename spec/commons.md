@@ -329,7 +329,8 @@ fields that decide BETWEEN similar candidates (2026-11-02), in canonical surface
 ingest by the validator's `unparse-*`: `type_surface`, `contract` (each refinement as
 `"<kind>: <predicate>"`), `laws` (each property as `"<name>: <predicate>"`), `refs` (the first
 name hint of each function the contract and laws apply by address), `params` (the body's
-parameter names, in order, when the node holds the body) and `certifications` (how many signed
+parameter names, in order, when the node holds the body), `param_docs` (the record's own one line
+per parameter — meaning and unit, the author's testimony; function-record v0.2) and `certifications` (how many signed
 certification records about it the node holds — testimony to check under the reader's policy,
 never a verdict). Measured need: a stranger agent choosing a money-splitting function saw names and
 a JSON type blob; `allocate`'s `post: list_sum(result) == t` — what separates it from a plain

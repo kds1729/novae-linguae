@@ -568,7 +568,8 @@ class CommonsProtocolTests(TestCase):
         Record.objects.create(hash=body, kind="body", schema_version="0.1.0",
                               raw={"kind": "lambda", "params": [{"name": "t"}, {"name": "ws"}],
                                    "body": {"kind": "var", "name": "ws"}})
-        Record.objects.create(hash=fn, kind="function-record", schema_version="0.2.0", raw={},
+        Record.objects.create(hash=fn, kind="function-record", schema_version="0.2.0",
+                              raw={"param_docs": ["the amount to split", "one weight per part"]},
                               name_hints=["allocate"], intent_tags=["money"], body_hash=body,
                               surface={"contract": [f"post: {callee}(result) == t"], "addresses": [callee]})
         Record.objects.create(hash=other, kind="function-record", schema_version="0.2.0", raw={},
@@ -582,6 +583,7 @@ class CommonsProtocolTests(TestCase):
         self.assertEqual(summ["refs"], {callee: "list_sum"})
         self.assertEqual(summ["certifications"], 1)
         self.assertEqual(summ["params"], ["t", "ws"])
+        self.assertEqual(summ["param_docs"], ["the amount to split", "one weight per part"])
         # The relevance boost reads the certification records: until 2026-11-02 it read the function
         # row's own `certified` column, which ingest never sets, so it never fired in production.
         ranked = self.client.post("/v0/query?rank=relevance",

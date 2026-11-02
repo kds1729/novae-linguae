@@ -29,7 +29,8 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    Scores are close together (a 0.01 margin is normal); treat the top 3–5 as a shortlist, not the
    top 1 as the answer.
 2. Choose by the summary's `contract` (pre/post, surface syntax), `laws`, `params` (argument
-   names, in order) and `type_surface`; `refs` names the functions a contract applies by address.
+   names, in order), `param_docs` (what each argument means, and its unit — the author's words)
+   and `type_surface`; `refs` names the functions a contract applies by address.
    The contract is what separates candidates with similar names — e.g. `allocate`'s
    `post: fn_b99a…(result) == total` with `refs` naming `fn_b99a…` as `list_sum` (the parts sum to
    the total) versus a plain `divide`.
@@ -39,6 +40,11 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    `nl-validator orchestrate --node <node> --verify --require-certified --intent
    math/decimal/allocate --arg 10000 --arg '[1, 1, 1]'` → `CONFIRMED …` then
    `result: [int(3333), int(3333), int(3334)]`.
+
+Decimal numbers from a user ("7.125", "1.0825") are not floats here — money must be exact. Pass
+them as TEXT to a function that takes text (`round_text_half_even`, `fx_convert_text`,
+`parse_decimal` in the decimal tier — `--arg '"7.125"'`), and its contract tells you which numeric
+function it applies; or scale them yourself to integers (7.125 at 3 places is 7125).
 
 ## What things are
 

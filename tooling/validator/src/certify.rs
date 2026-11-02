@@ -146,7 +146,9 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 // 8 (2026-11-01): the staged rung at 3 M units/s under the plain `smt` tactic.
 // 9 (2026-11-02): a callee contract of laws alone reaches its callers (a derivation that applies
 // `list_sum` now proves more), and the refinement checker's first-order rung with lists admitted.
-const DERIVATION_VERSION: u32 = 9;
+// 10 (2026-11-02): an ambiguous bare variant takes the declared result sort (a body over a callee of
+// another `Maybe` lowers where it refused), and a `replace_token` panic past a term's end is fixed.
+const DERIVATION_VERSION: u32 = 10;
 
 fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
     dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))
@@ -1080,6 +1082,23 @@ pub fn certify_record_linked(
         )),
     }
 
+    // Parameter docs (optional, testimony): the one structural fact a schema cannot state — one
+    // line per parameter of the declared type. A record with no `param_docs` gets no row.
+    if let Some(docs) = record.get("param_docs").and_then(|d| d.as_array()) {
+        let ty = record.pointer("/signature/type");
+        let fn_ty = ty.and_then(|t| if t.get("kind").and_then(|k| k.as_str()) == Some("forall") { t.get("body") } else { Some(t) });
+        let arity = fn_ty.and_then(|t| t.get("params")).and_then(|p| p.as_array()).map(|p| p.len());
+        match arity {
+            Some(n) if n == docs.len() => {
+                checks.push(CertCheck::new("param_docs", "SOUND", format!("{n} parameter(s), {n} line(s)"), false))
+            }
+            Some(n) => checks.push(CertCheck::new(
+                "param_docs", "MISMATCH", format!("{} line(s) for {n} parameter(s)", docs.len()), true,
+            )),
+            None => checks.push(CertCheck::new("param_docs", "UNVERIFIABLE", "the declared type is not a function type", false)),
+        }
+    }
+
     // 1. Type.
     match typecheck_record(record, body) {
         // `typecheck_record` returns a "WELL-TYPED  <type>" line; keep just the type as the detail.
@@ -1322,6 +1341,37 @@ mod tests {
 
     fn schema_check(cert: &Certification) -> &CertCheck {
         cert.checks.iter().find(|c| c.check == "schema").expect("a schema check row")
+    }
+
+    /// `param_docs` (2026-11-02): schema-valid, one line per parameter, and a count mismatch is a
+    /// hard failure; a record without them gets no row.
+    #[test]
+    fn param_docs_are_one_line_per_parameter() {
+        let rehash = |mut rec: J| {
+            rec["hash"] = json!("fn_".to_string() + &"0".repeat(64));
+            let h = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
+            rec["hash"] = json!(h);
+            rec
+        };
+        let (rec, body) = record_named("double");
+        let plain = certify_record(&rec, &body, &HashMap::new(), "z3");
+        assert!(plain.checks.iter().all(|c| c.check != "param_docs"));
+
+        let mut one = rec.clone();
+        one["param_docs"] = json!(["the number to double"]);
+        let one = rehash(one);
+        let cert = certify_record(&one, &body, &HashMap::new(), "z3");
+        assert_eq!(schema_check(&cert).verdict, "VALID", "{:?}", schema_check(&cert));
+        let row = cert.checks.iter().find(|c| c.check == "param_docs").expect("a param_docs row");
+        assert_eq!(row.verdict, "SOUND");
+
+        let mut two = rec.clone();
+        two["param_docs"] = json!(["the number", "a second line for a parameter that does not exist"]);
+        let two = rehash(two);
+        let cert = certify_record(&two, &body, &HashMap::new(), "z3");
+        let row = cert.checks.iter().find(|c| c.check == "param_docs").expect("a param_docs row");
+        assert_eq!(row.verdict, "MISMATCH");
+        assert!(!cert.certified, "a count mismatch revokes certification");
     }
 
     /// A caller's contract set is the CLOSURE under the contracts: `C` applies `A`, whose post
