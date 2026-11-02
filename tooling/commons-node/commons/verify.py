@@ -202,12 +202,86 @@ def _verify_bare_trace(raw):
     return "trace", "0.1.0", address
 
 
+def _unparse(command, ast):
+    """The validator's canonical surface rendering of one AST (`unparse-type` / `unparse-predicate`),
+    or None if it cannot render it — rendering is a convenience for readers, never an admission check."""
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(ast, f)
+        path = f.name
+    try:
+        r = _run(command, path)
+        if r.returncode != 0:
+            return None
+        return (r.stdout or "").strip() or None
+    except VerifyError:
+        return None
+    finally:
+        os.unlink(path)
+
+
+def _fn_addresses(node, out):
+    """Every content address a predicate applies (`{"kind": "app", "op": "fn_…"}`), in order."""
+    if isinstance(node, dict):
+        op = node.get("op")
+        if node.get("kind") == "app" and isinstance(op, str) and op.startswith("fn_") and op not in out:
+            out.append(op)
+        for v in node.values():
+            _fn_addresses(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _fn_addresses(v, out)
+    return out
+
+
+def surface(raw, kind):
+    """The decision fields of a function record in canonical surface syntax (2026-11-02): the type,
+    the contract (every refinement, labelled by its kind) and the laws (labelled by name), plus the
+    content addresses they apply. Measured need: an agent choosing among a search shortlist saw only
+    names and a JSON type blob — `allocate`'s `post: fn_…(result) == t` (the parts sum to the total),
+    which is what separates it from a plain `divide`, was not in the summary at all. A string
+    (v0.1) expression is kept as written; an AST the validator cannot render is skipped."""
+    if kind != "function-record":
+        return {}
+    sig = raw.get("signature") or {}
+    out = {}
+    t = sig.get("type")
+    if isinstance(t, str):
+        out["type"] = t
+    elif t is not None:
+        rendered = _unparse("unparse-type", t)
+        if rendered:
+            out["type"] = rendered
+    addresses = []
+    contract = []
+    for r in sig.get("refinements") or []:
+        e = r.get("expr") if isinstance(r, dict) else None
+        text = e if isinstance(e, str) else (_unparse("unparse-predicate", e) if e is not None else None)
+        if text:
+            contract.append(f"{r.get('kind', 'refinement')}: {text}")
+            _fn_addresses(e, addresses)
+    laws = []
+    for p in raw.get("properties") or []:
+        e = p.get("expr") if isinstance(p, dict) else None
+        text = e if isinstance(e, str) else (_unparse("unparse-predicate", e) if e is not None else None)
+        if text:
+            laws.append(f"{p.get('name', 'law')}: {text}")
+            _fn_addresses(e, addresses)
+    if contract:
+        out["contract"] = contract
+    if laws:
+        out["laws"] = laws
+    if addresses:
+        out["addresses"] = addresses
+    return out
+
+
 def extract(raw, kind):
     """Pull the queryable columns out of a verified record (function records carry the signature;
     certifications and eval attestations carry the `subject` they attest to)."""
     signature = raw.get("signature", {}) if kind == "function-record" else {}
     type_value = signature.get("type")
     return {
+        "surface": surface(raw, kind),
         "effects": signature.get("effects", []) or [],
         "capabilities": signature.get("capabilities", []) or [],
         "intent_tags": raw.get("intent_tags", []) or [],

@@ -21,6 +21,23 @@ posts bodies, traces and records in dependency order; then `nl-validator orchest
 <node> --verify --require-certified --intent <your record's intent tag> …` discovers, certifies,
 applies and publishes in one shot, and anyone can `verify-claim --node <node> msg_…` the result.
 
+## Finding a function for a goal (you have a task, not a tag)
+
+1. `POST https://nl.1105software.com/v0/search?include=summary` with `{"query": "<the goal in
+   plain words>", "k": 10}`. **Always pass `?include=summary`**: without it each hit is a bare
+   `{hash, score}` and you will fetch every record to tell them apart (a stranger did: 20 fetches).
+   Scores are close together (a 0.01 margin is normal); treat the top 3–5 as a shortlist, not the
+   top 1 as the answer.
+2. Choose by the summary's `contract` (pre/post, surface syntax), `laws`, `params` (argument
+   names, in order) and `type_surface`; `refs` names the functions a contract applies by address.
+   The contract is what separates candidates with similar names — e.g. `allocate`'s
+   `post: fn_b99a…(result) == t` with `refs` naming `fn_b99a…` as `list_sum` (the parts sum to
+   the total) versus a plain `divide`.
+   `certifications` counts signed certificates about the function; whose they are is your
+   policy's question (`nl-validator certified`), and `--require-certified` re-certifies locally anyway.
+3. Apply it with the verified loop using a tag from its `intent_tags` (or its address):
+   `nl-validator orchestrate --node <node> --verify --require-certified --intent <tag> --arg …`.
+
 ## What things are
 
 | you see | it is |

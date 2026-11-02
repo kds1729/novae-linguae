@@ -324,7 +324,17 @@ scale. `?include=summary` returns a **compact projection** instead: the decision
 `effects`, `capabilities`, `intent_tags`, `terminates`, `complexity`, `certified`, `name_hints`,
 `body_hash` — so a client ranks and prunes a whole candidate set in one round-trip, then resolves only
 the finalists. The summary is derived from record fields (not heuristic), and each item carries its
-`hash`, so a client still resolves + verifies before use.
+`hash`, so a client still resolves + verifies before use. For a function record it also carries the
+fields that decide BETWEEN similar candidates (2026-11-02), in canonical surface syntax rendered on
+ingest by the validator's `unparse-*`: `type_surface`, `contract` (each refinement as
+`"<kind>: <predicate>"`), `laws` (each property as `"<name>: <predicate>"`), `refs` (the first
+name hint of each function the contract and laws apply by address), `params` (the body's
+parameter names, in order, when the node holds the body) and `certifications` (how many signed
+certification records about it the node holds — testimony to check under the reader's policy,
+never a verdict). Measured need: a stranger agent choosing a money-splitting function saw names and
+a JSON type blob; `allocate`'s `post: list_sum(result) == t` — what separates it from a plain
+`divide` — was not in the summary, so it fetched all 20 search hits. `certified` is the verdict
+column of CERTIFICATION records only; a function's own certification is `certifications`.
 
 ```json
 { "results": [ { "hash": "fn_3a9b…", "kind": "function-record",
@@ -384,7 +394,8 @@ Returns ranked addresses with scores:
 ```
 
 `?include=summary` folds the same compact projection as `query` into each ranked hit (the `score` is
-preserved), so a client ranks *and* judges candidates in a single round-trip. A body `"token_budget": N`
+preserved), so a client ranks *and* judges candidates in a single round-trip — an agent searching by a
+goal should always ask for it. `limit` is accepted as a synonym of `k`. A body `"token_budget": N`
 caps those summaries by estimated token cost exactly as on `query` — the highest-similarity hits that fit
 the budget are kept, and the same `budget` report is returned (there is no `cursor`: `search` is a ranked
 view, not a paged feed).

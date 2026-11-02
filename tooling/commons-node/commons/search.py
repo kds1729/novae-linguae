@@ -28,8 +28,10 @@ class SearchError(Exception):
 
 
 def _k(body):
+    # `limit` is accepted as `k`: a stranger agent (2026-11-02) wrote `limit` — the /v0/query word —
+    # and it was silently ignored, returning the default 20.
     try:
-        return max(1, min(int(body.get("k", _DEFAULT_K)), _MAX_K))
+        return max(1, min(int(body.get("k", body.get("limit", _DEFAULT_K))), _MAX_K))
     except (TypeError, ValueError):
         return _DEFAULT_K
 

@@ -543,6 +543,52 @@ class CommonsProtocolTests(TestCase):
         for heavy in ("examples", "properties", "signature", "refinements", "raw"):
             self.assertNotIn(heavy, summ)
 
+    def test_summary_carries_type_contract_and_laws_in_surface_syntax(self):
+        # The fields that decide between shortlisted candidates, rendered on ingest by the validator
+        # (2026-11-02): before, a v0.2 summary carried names and a JSON type blob, no contract at all.
+        rec = _load("map.v0.2.json")
+        self.assertEqual(self._publish(rec).status_code, 201)
+        resp = self.client.post("/v0/query?include=summary",
+                                data=json.dumps({"name_hint_prefix": "map"}),
+                                content_type="application/json")
+        summ = next(s for s in resp.json()["results"] if s["hash"] == rec["hash"])
+        self.assertIn("->", summ["type_surface"])
+        self.assertNotIn("{", summ["type_surface"])                       # not the AST
+        self.assertEqual(len(summ["contract"]), 1)
+        self.assertTrue(summ["contract"][0].startswith("post: "), summ["contract"])
+        self.assertIn("length", summ["contract"][0])
+        self.assertEqual([law.split(":", 1)[0] for law in summ["laws"]],
+                         [p["name"] for p in rec["properties"]])
+
+    def test_summary_names_the_contracts_callees_and_counts_certifications(self):
+        callee, fn, other = "fn_" + "a" * 64, "fn_" + "b" * 64, "fn_" + "c" * 64
+        Record.objects.create(hash=callee, kind="function-record", schema_version="0.2.0", raw={},
+                              name_hints=["list_sum"])
+        body = "expr_" + "e" * 64
+        Record.objects.create(hash=body, kind="body", schema_version="0.1.0",
+                              raw={"kind": "lambda", "params": [{"name": "t"}, {"name": "ws"}],
+                                   "body": {"kind": "var", "name": "ws"}})
+        Record.objects.create(hash=fn, kind="function-record", schema_version="0.2.0", raw={},
+                              name_hints=["allocate"], intent_tags=["money"], body_hash=body,
+                              surface={"contract": [f"post: {callee}(result) == t"], "addresses": [callee]})
+        Record.objects.create(hash=other, kind="function-record", schema_version="0.2.0", raw={},
+                              name_hints=["divide"], intent_tags=["money"])
+        Record.objects.create(hash="cert_" + "d" * 64, kind="certification", schema_version="0.2.0",
+                              raw={}, subject=fn, certified=True)
+        resp = self.client.post("/v0/query?include=summary",
+                                data=json.dumps({"name_hint_prefix": "allocate"}),
+                                content_type="application/json")
+        summ = next(s for s in resp.json()["results"] if s["hash"] == fn)
+        self.assertEqual(summ["refs"], {callee: "list_sum"})
+        self.assertEqual(summ["certifications"], 1)
+        self.assertEqual(summ["params"], ["t", "ws"])
+        # The relevance boost reads the certification records: until 2026-11-02 it read the function
+        # row's own `certified` column, which ingest never sets, so it never fired in production.
+        ranked = self.client.post("/v0/query?rank=relevance",
+                                  data=json.dumps({"intent_tags": {"any": ["money"]}}),
+                                  content_type="application/json").json()["results"]
+        self.assertLess(ranked.index(fn), ranked.index(other))
+
     def test_query_rank_by_intent_fit(self):
         # Both records satisfy the filter; the one carrying MORE of the requested intent tags ranks first.
         one, two = "fn_" + "1" * 64, "fn_" + "2" * 64
@@ -825,6 +871,12 @@ class SearchTests(TestCase):
         self.assertIn("score", top)                       # similarity kept
         self.assertIn("transform", top["intent_tags"])    # projection folded in
         self.assertNotIn("signature", top)                # not the full record
+
+    def test_limit_is_a_synonym_of_k(self):
+        # A stranger wrote `limit` (the /v0/query word); it was silently ignored (default 20).
+        resp = self._search({"query": "map a function over each element", "limit": 1})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.json()["results"]), 1)
 
     def test_malformed_filter_is_400(self):
         # The typed filter follows the same contract as /v0/query: a bare list is a clean 400.

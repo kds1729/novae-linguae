@@ -219,7 +219,41 @@ def record_summary(record):
         out["certified"] = record.certified
     if record.body_hash:
         out["body_hash"] = record.body_hash
+    # The decision fields in surface syntax (`verify.surface`), and the names of the functions the
+    # contract applies — so `fn_…(result) == t` reads as `list_sum` without fetching it.
+    s = record.surface or {}
+    if s.get("type"):
+        out["type_surface"] = s["type"]
+    if s.get("contract"):
+        out["contract"] = s["contract"]
+    if s.get("laws"):
+        out["laws"] = s["laws"]
+    if s.get("addresses"):
+        names = dict(Record.objects.filter(hash__in=s["addresses"]).values_list("hash", "name_hints"))
+        refs = {a: names[a][0] for a in s["addresses"] if names.get(a)}
+        if refs:
+            out["refs"] = refs
+    if record.kind == "function-record":
+        n = certification_count(record.hash)
+        if n:
+            out["certifications"] = n
+        # The parameter NAMES — the type says `(int, List int)`, the contract says `t` and `ws`; a
+        # stranger agent had to infer "weights" from the examples. Read from the stored body (a
+        # lambda), when this node holds it inline.
+        if record.body_hash:
+            body = Record.objects.filter(hash=record.body_hash).values_list("raw", flat=True).first()
+            if isinstance(body, dict) and body.get("kind") == "lambda":
+                params = [p.get("name") for p in body.get("params") or [] if isinstance(p, dict)]
+                if params and all(isinstance(p, str) for p in params):
+                    out["params"] = params
     return out
+
+
+def certification_count(address):
+    """How many stored certification records state that `address` is certified. The node does not
+    JUDGE them (a certificate is only as good as its certifier — `nl-validator certified` decides that
+    under the reader's own policy); the count tells an agent there is something to check."""
+    return Record.objects.filter(kind="certification", subject=address, certified=True).count()
 
 
 def equivalence_find():
@@ -290,7 +324,10 @@ def _relevance(record, flt):
             if hint.startswith(prefix):
                 score += 1.0 / (i + 1)
                 break
-    if record.certified:
+    # A function row's own `certified` column is never set (it is the verdict column of CERTIFICATION
+    # rows), so until 2026-11-02 this boost read it and never fired in production; certification is
+    # the existence of a positive certification record about the function.
+    if record.certified or (record.kind == "function-record" and certification_count(record.hash)):
         score += 0.5
     return score
 

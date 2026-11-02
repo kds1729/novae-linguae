@@ -33,6 +33,11 @@ class Record(models.Model):
     complexity = models.CharField(max_length=64, null=True, blank=True)
     type_str = models.TextField(null=True, blank=True)
     body_hash = models.CharField(max_length=128, null=True, blank=True)
+    # The decision fields in canonical SURFACE syntax (function records; computed on ingest by the
+    # validator's `unparse-*`): {"type": str, "contract": ["pre: …", "post: …"], "laws": ["name: …"],
+    # "addresses": [fn_… the contract and laws apply]} — what an agent choosing among a shortlist
+    # reads (`record_summary`). Empty when not a function record or when rendering failed.
+    surface = models.JSONField(default=dict)
 
     # Body storage tiering (spec/commons.md open question 4): a bare body larger than the record cap
     # keeps only this POINTER in the metadata index — its canonical JSON bytes live in the blob store
