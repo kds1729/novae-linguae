@@ -179,7 +179,7 @@
    }
   }
  ],
- "hash": "fn_08a9245d1e548a781a04278b6d9e166505b7b8c4ce52a12f73316af9efda8b98",
+ "hash": "fn_e0c5edeb870a59c15c8a711fa90ea48533b3f3f00886c80fe4eb89b30886f098",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -190,6 +190,10 @@
   "round_half_even",
   "bankers_rounding",
   "round_half_to_even"
+ ],
+ "param_docs": [
+  "the dividend (an integer amount, e.g. minor units)",
+  "the divisor, at least 1"
  ],
  "properties": [
   {

@@ -1,0 +1,199 @@
+{
+ "body_hash": "expr_95f5c6b349d4742165a651bfe55f73b53d24c1e107a73637cd858604c127fae4",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "1.0825"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 10825
+      },
+      {
+       "kind": "int",
+       "value": 4
+      }
+     ],
+     "kind": "tuple"
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "-12.05"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "elems": [
+      {
+       "kind": "int",
+       "value": -1205
+      },
+      {
+       "kind": "int",
+       "value": 2
+      }
+     ],
+     "kind": "tuple"
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "7"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 7
+      },
+      {
+       "kind": "int",
+       "value": 0
+      }
+     ],
+     "kind": "tuple"
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "0.5"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 5
+      },
+      {
+       "kind": "int",
+       "value": 1
+      }
+     ],
+     "kind": "tuple"
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "1.2.3"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "abc"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "1-2"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  }
+ ],
+ "hash": "fn_d1a9d5e3f9aea3871ae1e874b064657e3a40a9a3a7f25e472c3689e809086bab",
+ "intent_tags": [
+  "arithmetic/decimal",
+  "math/decimal",
+  "math/decimal/parse-decimal"
+ ],
+ "name_hints": [
+  "parse_decimal",
+  "decimal_from_text",
+  "scaled_integer_of_decimal"
+ ],
+ "param_docs": [
+  "decimal text such as \"1.0825\" or \"-12.05\" (no exponent, no separators)"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "kind": "sum",
+    "variants": [
+     {
+      "tag": "Just",
+      "type": {
+       "elems": [
+        {
+         "kind": "builtin",
+         "name": "int"
+        },
+        {
+         "kind": "builtin",
+         "name": "int"
+        }
+       ],
+       "kind": "tuple"
+      }
+     },
+     {
+      "tag": "None"
+     }
+    ]
+   }
+  }
+ },
+ "supersedes": null
+}

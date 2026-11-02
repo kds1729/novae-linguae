@@ -6,6 +6,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -14,6 +15,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -40,6 +42,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -48,6 +51,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -74,6 +78,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -84,6 +89,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -109,6 +115,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -118,6 +125,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -145,6 +153,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -154,6 +163,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -184,6 +194,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -192,6 +203,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "1 parameter(s), 1 line(s)",
    "typecheck": "(int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -221,6 +233,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -231,6 +244,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "3 parameter(s), 3 line(s)",
    "typecheck": "(int, int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -256,6 +270,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -265,6 +280,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "3 parameter(s), 3 line(s)",
    "typecheck": "(int, int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -292,6 +308,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -301,6 +318,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -325,6 +343,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -334,6 +353,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "5 parameter(s), 5 line(s)",
    "typecheck": "(int, int, int, int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -349,6 +369,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -357,6 +378,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "1 parameter(s), 1 line(s)",
    "typecheck": "(List(int)) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
@@ -386,6 +408,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -394,6 +417,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "4 parameter(s), 4 line(s)",
    "typecheck": "(int, List(int), int, int) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
@@ -420,6 +444,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -429,6 +454,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, List(int)) -> List(int)",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -444,6 +470,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -452,6 +479,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> string",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
@@ -466,6 +494,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -474,6 +503,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(string, int) -> Sum",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
@@ -488,6 +518,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -496,11 +527,12 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
    "termination": "provably always-terminates",
-   "complexity": "declared `O(n)`, not established: applies `fn_55889f2e51033a566e2ba4ff4f3fd147e37aee3e6133a801ab269a4c3a7d069a` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
+   "complexity": "declared `O(n)`, not established: applies `fn_2fbcec66c8c667a59cc134391a8b5b5fbf4002d0598284786d3b40c46aa352f8` to an argument whose size is not bounded by the input (app) \u2014 its class cannot be re-expressed in n"
   },
   "properties_generative": [
    "format_then_parse: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
@@ -511,5 +543,77 @@
   "prove": [
    "format_then_parse: UNKNOWN      solver could not decide"
   ]
+ },
+ {
+  "name": "parse_decimal",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "param_docs": "SOUND",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:refinements": "N/A",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "param_docs": "1 parameter(s), 1 line(s)",
+   "typecheck": "(string) -> Sum",
+   "effects": "effects [] \u2286 declared",
+   "refinement:refinements": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  }
+ },
+ {
+  "name": "round_text_half_even",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "param_docs": "SOUND",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
+   "typecheck": "(string, int) -> Sum",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n)`, not established: applies `fn_3f36725e1d31777878ea180152588db01496be96b2743c6413f6f894f94c2117` to an argument whose size is not bounded by the input (var) \u2014 its class cannot be re-expressed in n"
+  }
+ },
+ {
+  "name": "fx_convert_text",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "param_docs": "SOUND",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "UNVERIFIABLE"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "param_docs": "3 parameter(s), 3 line(s)",
+   "typecheck": "(string, string, int) -> Sum",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "termination": "provably always-terminates",
+   "complexity": "declared `O(n)`, not established: applies `fn_9bafc87c13c67329658ebac778bb5ec28295ec0b024706e13c38a6a0f626efb1` to an argument whose size is not bounded by the input (var) \u2014 its class cannot be re-expressed in n"
+  }
  }
 ]

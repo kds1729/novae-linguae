@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_71fde4d0bf761348eea97b0dc522214a4e8a95236b7e695a85f6bdeca911002a",
+ "body_hash": "expr_1ac3512877d43800e649d939ff5e70e00904ca1fe2cf781a61f3ae0a33fc3c95",
  "derived_from": null,
  "examples": [
   {
@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_c1b9ac3da44e1f2c8fb25fcfeeffcf963ad3d0bfaca2197a7363f5a5896bea9d",
+ "hash": "fn_1f1b690f3c2500448a5246a85d9114222e65e06313c447ddd84f8bae038b8921",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -61,6 +61,10 @@
  "name_hints": [
   "amount_text_roundtrip",
   "amount_roundtrip_check"
+ ],
+ "param_docs": [
+  "the amount, as an integer in units of 10^-k",
+  "decimal places"
  ],
  "properties": [
   {

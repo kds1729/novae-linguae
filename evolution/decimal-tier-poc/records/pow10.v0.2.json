@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5",
+ "hash": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -61,6 +61,9 @@
   "pow10",
   "power_of_ten",
   "scale_factor"
+ ],
+ "param_docs": [
+  "the exponent k, a count of decimal places (result is 10^k)"
  ],
  "properties": [
   {

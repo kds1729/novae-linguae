@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_e8fda3ec1d05e8978ef0ff36f47570bdc030d38e839cd20c58864b727c4cee09",
+ "body_hash": "expr_8a3fe29eec2daf80e80380d4e42b82401038ddbd8f0d488b7a2fd8e803c77af6",
  "derived_from": null,
  "examples": [
   {
@@ -115,7 +115,7 @@
    }
   }
  ],
- "hash": "fn_5ad8e97cde45982d74ef2a8a3cb8b8f57a40690d253e667aeaf6b42a75664aa0",
+ "hash": "fn_9bafc87c13c67329658ebac778bb5ec28295ec0b024706e13c38a6a0f626efb1",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -125,6 +125,13 @@
   "fx_convert",
   "currency_conversion",
   "exchange"
+ ],
+ "param_docs": [
+  "the source amount, as an integer in units of 10^-from_places",
+  "decimal places of the source amount (2 = cents)",
+  "the exchange rate's numerator (target per source; 1.0825 is 10825 / 10000)",
+  "the exchange rate's denominator, at least 1",
+  "decimal places wanted in the target amount (2 = cents)"
  ],
  "properties": [],
  "schema_version": "0.2.0",
@@ -187,7 +194,7 @@
                 }
                ],
                "kind": "app",
-               "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+               "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
               }
              ],
              "kind": "app",
@@ -213,7 +220,7 @@
                   }
                  ],
                  "kind": "app",
-                 "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+                 "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
                 }
                ],
                "kind": "app",
@@ -249,7 +256,7 @@
           }
          ],
          "kind": "app",
-         "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+         "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
         }
        ],
        "kind": "app",
@@ -300,7 +307,7 @@
                   }
                  ],
                  "kind": "app",
-                 "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+                 "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
                 }
                ],
                "kind": "app",
@@ -326,7 +333,7 @@
                     }
                    ],
                    "kind": "app",
-                   "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+                   "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
                   }
                  ],
                  "kind": "app",
@@ -362,7 +369,7 @@
             }
            ],
            "kind": "app",
-           "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+           "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
           }
          ],
          "kind": "app",

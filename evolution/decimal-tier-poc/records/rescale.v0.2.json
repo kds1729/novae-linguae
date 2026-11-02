@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_23770f1683994881ff75e81cbf17a2bf45415aca6ced3aaaaaef06e808fd941f",
+ "body_hash": "expr_6d3821c3d91ba4c3074d2f19b5a74b0d1d692634434d5d73a71048d3f2c8fc71",
  "derived_from": null,
  "examples": [
   {
@@ -123,7 +123,7 @@
    }
   }
  ],
- "hash": "fn_6ca59e3914eb472cd0e15ea2236fcb65f00f188d72ffc60d65d776effad2eaa9",
+ "hash": "fn_3f36725e1d31777878ea180152588db01496be96b2743c6413f6f894f94c2117",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -134,6 +134,11 @@
   "change_scale",
   "quantize",
   "round_to_places"
+ ],
+ "param_docs": [
+  "the amount, as an integer in units of 10^-from_places (12.345 at 3 places is 12345)",
+  "decimal places the amount is stored with (2 = cents)",
+  "decimal places wanted in the result; fewer places rounds half to even"
  ],
  "properties": [
   {
@@ -283,7 +288,7 @@
             }
            ],
            "kind": "app",
-           "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+           "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
           }
          ],
          "kind": "app",
@@ -356,7 +361,7 @@
                   }
                  ],
                  "kind": "app",
-                 "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+                 "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
                 }
                ],
                "kind": "app",
@@ -392,7 +397,7 @@
           }
          ],
          "kind": "app",
-         "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+         "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
         }
        ],
        "kind": "app",
@@ -463,7 +468,7 @@
                     }
                    ],
                    "kind": "app",
-                   "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+                   "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
                   }
                  ],
                  "kind": "app",
@@ -499,7 +504,7 @@
             }
            ],
            "kind": "app",
-           "op": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+           "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
           }
          ],
          "kind": "app",

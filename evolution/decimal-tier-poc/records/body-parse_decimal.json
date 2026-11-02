@@ -1,0 +1,199 @@
+{
+ "body": {
+  "body": {
+   "body": {
+    "arms": [
+     {
+      "body": {
+       "kind": "variant",
+       "payload": {
+        "elems": [
+         {
+          "kind": "var",
+          "name": "v"
+         },
+         {
+          "kind": "var",
+          "name": "places"
+         }
+        ],
+        "kind": "tuple"
+       },
+       "tag": "Just"
+      },
+      "pattern": {
+       "kind": "variant",
+       "payload": {
+        "kind": "bind",
+        "name": "v"
+       },
+       "tag": "Just"
+      }
+     },
+     {
+      "body": {
+       "kind": "variant",
+       "tag": "None"
+      },
+      "pattern": {
+       "kind": "variant",
+       "tag": "None"
+      }
+     }
+    ],
+    "kind": "case",
+    "scrutinee": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "places"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "text"
+       }
+      ],
+      "fn": {
+       "kind": "lit",
+       "value": {
+        "kind": "fn_ref",
+        "target": "fn_2fbcec66c8c667a59cc134391a8b5b5fbf4002d0598284786d3b40c46aa352f8"
+       }
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    }
+   },
+   "kind": "let",
+   "name": "places",
+   "value": {
+    "args": [
+     {
+      "args": [
+       {
+        "kind": "lit",
+        "value": {
+         "kind": "nat",
+         "value": 1
+        }
+       }
+      ],
+      "fn": {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "parts"
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "head"
+             },
+             "kind": "app"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "str_length"
+           },
+           "kind": "app"
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "args": [
+             {
+              "kind": "var",
+              "name": "text"
+             }
+            ],
+            "fn": {
+             "kind": "var",
+             "name": "str_length"
+            },
+            "kind": "app"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "sub"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        }
+       ],
+       "fn": {
+        "kind": "var",
+        "name": "sub"
+       },
+       "kind": "app"
+      },
+      "kind": "app"
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "lit",
+       "value": {
+        "kind": "nat",
+        "value": 0
+       }
+      }
+     ],
+     "fn": {
+      "kind": "var",
+      "name": "max"
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   }
+  },
+  "kind": "let",
+  "name": "parts",
+  "value": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "text"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "lit",
+      "value": {
+       "kind": "string",
+       "value": "."
+      }
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "str_split"
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "text"
+  }
+ ]
+}

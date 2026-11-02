@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_1ed85fdc05604cbaa76d858062b6f9ccd3482063db0fb50ee974ea45bec4aa9b",
+ "body_hash": "expr_588d01c79aa107cbcf8753b44b570da119d57f3c2d1a9afad42cef6787a5e795",
  "derived_from": null,
  "examples": [
   {
@@ -195,7 +195,7 @@
    }
   }
  ],
- "hash": "fn_55889f2e51033a566e2ba4ff4f3fd147e37aee3e6133a801ab269a4c3a7d069a",
+ "hash": "fn_2fbcec66c8c667a59cc134391a8b5b5fbf4002d0598284786d3b40c46aa352f8",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -205,6 +205,10 @@
   "parse_amount",
   "parse_decimal_amount",
   "from_decimal_string"
+ ],
+ "param_docs": [
+  "decimal text such as \"-12.05\" (no exponent, no thousands separators)",
+  "decimal places of the integer result; text with more places is refused (None)"
  ],
  "properties": [],
  "schema_version": "0.2.0",

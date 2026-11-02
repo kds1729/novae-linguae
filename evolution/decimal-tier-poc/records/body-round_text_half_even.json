@@ -1,0 +1,99 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "kind": "variant",
+     "payload": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "places"
+       }
+      ],
+      "fn": {
+       "args": [
+        {
+         "kind": "var",
+         "name": "p"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "kind": "var",
+          "name": "v"
+         }
+        ],
+        "fn": {
+         "kind": "lit",
+         "value": {
+          "kind": "fn_ref",
+          "target": "fn_3f36725e1d31777878ea180152588db01496be96b2743c6413f6f894f94c2117"
+         }
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      },
+      "kind": "app"
+     },
+     "tag": "Just"
+    },
+    "pattern": {
+     "kind": "variant",
+     "payload": {
+      "elems": [
+       {
+        "kind": "bind",
+        "name": "v"
+       },
+       {
+        "kind": "bind",
+        "name": "p"
+       }
+      ],
+      "kind": "tuple"
+     },
+     "tag": "Just"
+    }
+   },
+   {
+    "body": {
+     "kind": "variant",
+     "tag": "None"
+    },
+    "pattern": {
+     "kind": "variant",
+     "tag": "None"
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "text"
+    }
+   ],
+   "fn": {
+    "kind": "lit",
+    "value": {
+     "kind": "fn_ref",
+     "target": "fn_d1a9d5e3f9aea3871ae1e874b064657e3a40a9a3a7f25e472c3689e809086bab"
+    }
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "text"
+  },
+  {
+   "name": "places"
+  }
+ ]
+}

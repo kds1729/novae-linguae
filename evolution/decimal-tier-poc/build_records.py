@@ -55,6 +55,8 @@ B = lambda n: {"kind": "builtin", "name": n}  # noqa: E731
 INT, NAT, BOOL = B("int"), B("nat"), B("bool")
 LIST = lambda t: {"kind": "apply", "ctor": B("List"), "args": [t]}  # noqa: E731
 FN = lambda ps, r: {"kind": "fn", "params": ps, "result": r}  # noqa: E731
+TUPLE = lambda *ts: {"kind": "tuple", "elems": list(ts)}  # noqa: E731
+tup = lambda *vs: {"kind": "tuple", "elems": list(vs)}  # noqa: E731
 
 
 def ilit(v):
@@ -83,9 +85,46 @@ def fmt_ref(u, k):
 ADDR = {}      # name -> fn_ address, for `{name}` placeholders in later bodies
 REPORT = []
 
+# Round 6: one plain-words line per parameter (`param_docs`, function-record v0.2) — the meaning and
+# unit a stranger agent had to decode from the contracts (`from_places` = decimal places of the
+# amount). Testimony beside the names; certify checks one line per parameter.
+_DIV = ["the dividend (an integer amount, e.g. minor units)", "the divisor, at least 1"]
+PARAM_DOCS = {
+    "div_floor": _DIV, "div_ceil": _DIV, "div_trunc": _DIV, "div_half_up": _DIV, "div_half_even": _DIV,
+    "pow10": ["the exponent k, a count of decimal places (result is 10^k)"],
+    "rescale": ["the amount, as an integer in units of 10^-from_places (12.345 at 3 places is 12345)",
+                "decimal places the amount is stored with (2 = cents)",
+                "decimal places wanted in the result; fewer places rounds half to even"],
+    "apply_rate": ["the amount, as an integer in minor units",
+                   "the rate's numerator (rate = rate_num / rate_den; 8.25% is 825 / 10000)",
+                   "the rate's denominator, at least 1"],
+    "percent_bps": ["the amount, as an integer in minor units",
+                    "the rate in basis points (1 bp = 0.01%; 8.25% is 825)"],
+    "fx_convert": ["the source amount, as an integer in units of 10^-from_places",
+                   "decimal places of the source amount (2 = cents)",
+                   "the exchange rate's numerator (target per source; 1.0825 is 10825 / 10000)",
+                   "the exchange rate's denominator, at least 1",
+                   "decimal places wanted in the target amount (2 = cents)"],
+    "list_sum": ["the list of integers to add"],
+    "alloc_from": ["the total being split", "the weights still to allocate",
+                   "the weight already allocated before these", "the sum of all weights, at least 1"],
+    "allocate": ["the total to split, as an integer in minor units",
+                 "one non-negative weight per part (equal weights split evenly); their sum at least 1"],
+    "format_amount": ["the amount, as an integer in units of 10^-k", "decimal places to render (2 = cents)"],
+    "parse_amount": ["decimal text such as \"-12.05\" (no exponent, no thousands separators)",
+                     "decimal places of the integer result; text with more places is refused (None)"],
+    "amount_text_roundtrip": ["the amount, as an integer in units of 10^-k", "decimal places"],
+    "parse_decimal": ["decimal text such as \"1.0825\" or \"-12.05\" (no exponent, no separators)"],
+    "round_text_half_even": ["decimal text such as \"7.125\"",
+                             "decimal places wanted in the integer result (2 = cents)"],
+    "fx_convert_text": ["the source amount as decimal text, e.g. \"466.00\"",
+                        "the exchange rate as decimal text, target per source, e.g. \"1.0825\"",
+                        "decimal places wanted in the integer result (2 = cents)"],
+}
+
 
 def build(name, surface, sig, examples, props=(), refinements=(), tags=(), hints=(), complexity=None,
-          terminates="always"):
+          terminates="always", param_docs=None):
     def subst(t):
         for k, v in ADDR.items():
             t = t.replace("{" + k + "}", v)
@@ -114,6 +153,9 @@ def build(name, surface, sig, examples, props=(), refinements=(), tags=(), hints
     }
     if complexity:
         record["signature"]["complexity"] = complexity
+    param_docs = param_docs or PARAM_DOCS.get(name)
+    if param_docs:
+        record["param_docs"] = list(param_docs)
     del record["hash"]
     record["hash"] = hash_artifact(record, "function-record")
     (OUT / f"body-{name}.json").write_text(json.dumps(body, indent=1, sort_keys=True) + "\n")
@@ -420,6 +462,54 @@ def main():
           props=[("format_then_parse", "forall u k. k < 0 || self(u, k) == true")],
           tags=["predicate/check"], hints=["amount_roundtrip_check"], complexity="O(n)")
     gauntlet("amount_text_roundtrip", prove)
+
+    # 7. Round 6 — decimal TEXT in, so an agent passes the user's numbers verbatim ("7.125",
+    # "1.0825") instead of scaling them by hand (stranger 11's friction). Deliberately not a CLI float
+    # literal: 7.125 as an IEEE float is inexact, and the scale is the function's business, stated in
+    # its contract. `parse_decimal` reads the scale off the text; the two appliers are the numeric
+    # records over it, and their contracts SAY so — the tie rule is one `refs` hop away.
+    build("parse_decimal",
+          # places = characters after the point: len(text) − len(integer part) − 1, floored at 0 (no
+          # point → 0). Arithmetic, not a `case`, so the complexity fold can bound it; a second point
+          # makes `parse_amount` refuse the text anyway.
+          r'\text -> let parts = str_split "." text in '
+          r'let places = max 0 (sub (sub (str_length text) (str_length (head parts))) 1) in '
+          r'case {parse_amount} text places of { Just(v) => Just((v, places)); None => None }',
+          FN([STR], MAYBE(TUPLE(INT, INT))),
+          [ex([slit(s)], r) for s, r in
+           [("1.0825", just(tup(ilit(10825), ilit(4)))), ("-12.05", just(tup(ilit(-1205), ilit(2)))),
+            ("7", just(tup(ilit(7), ilit(0)))), ("0.5", just(tup(ilit(5), ilit(1)))),
+            ("1.2.3", NONE), ("abc", NONE), ("1-2", NONE)]],
+          hints=["decimal_from_text", "scaled_integer_of_decimal"], complexity="O(n)")
+    gauntlet("parse_decimal", prove)
+
+    build("round_text_half_even",
+          r"\text places -> case {parse_decimal} text of { Just((v, p)) => Just({rescale} v p places); None => None }",
+          FN([STR, NAT], MAYBE(INT)),
+          [ex([slit(s), nlit(k)], r) for s, k, r in
+           [("7.125", 2, just(ilit(712))), ("7.135", 2, just(ilit(714))), ("12.5", 0, just(ilit(12))),
+            ("-2.5", 0, just(ilit(-2))), ("3", 2, just(ilit(300))), ("x", 2, NONE)]],
+          # The predicate language builds no `Just(…)` value — compare by cases.
+          refinements=[("post", "case {parse_decimal}(text) of { "
+                                "Just(t) => (case result of { Just(r) => r == {rescale}(fst(t), snd(t), places); None => false }); "
+                                "None => (case result of { Just(r) => false; None => true }) }")],
+          hints=["round_decimal_text", "bankers_rounding_text", "round_half_to_even_text"], complexity="O(n)")
+    gauntlet("round_text_half_even", prove)
+
+    build("fx_convert_text",
+          r"\amount_text rate_text to_places -> case {parse_decimal} amount_text of { None => None; Just((a, ap)) => "
+          r"case {parse_decimal} rate_text of { None => None; Just((r, rp)) => Just({fx_convert} a ap r ({pow10} rp) to_places) } }",
+          FN([STR, STR, NAT], MAYBE(INT)),
+          [ex([slit(a), slit(r), nlit(k)], res) for a, r, k, res in
+           [("466.00", "1.0825", 2, just(ilit(50444))), ("250", "1.0825", 2, just(ilit(27062))),
+            ("100.00", "1", 2, just(ilit(10000))), ("x", "1", 2, NONE), ("1", "y", 2, NONE)]],
+          refinements=[("post", "case {parse_decimal}(amount_text) of { "
+                                "None => (case result of { Just(r) => false; None => true }); "
+                                "Just(x) => (case {parse_decimal}(rate_text) of { "
+                                "None => (case result of { Just(r) => false; None => true }); "
+                                "Just(y) => (case result of { Just(r) => r == {fx_convert}(fst(x), snd(x), fst(y), {pow10}(snd(y)), to_places); None => false }) }) }")],
+          hints=["currency_conversion_text", "exchange_decimal_text"], complexity="O(n)")
+    gauntlet("fx_convert_text", prove)
 
     (OUT / "REPORT.json").write_text(json.dumps(REPORT, indent=1) + "\n")
     lines = ["| record | run | certified | typecheck | effects | refinement | termination | complexity | properties (generative) | prove |",

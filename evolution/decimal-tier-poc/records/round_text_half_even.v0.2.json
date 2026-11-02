@@ -1,0 +1,313 @@
+{
+ "body_hash": "expr_2944b38d67cbc99b6b76bd1d82f1217062e2c41cd95a3dbb7007294082b1cf5f",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "7.125"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": 712
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "7.135"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": 714
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "12.5"
+    },
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": 12
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "-2.5"
+    },
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": -2
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "3"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": 300
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "x"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  }
+ ],
+ "hash": "fn_7039f9c72702c75163ae094833c58e90c09021e1bb6dae4c9ac803254167d123",
+ "intent_tags": [
+  "arithmetic/decimal",
+  "math/decimal",
+  "math/decimal/round-text-half-even"
+ ],
+ "name_hints": [
+  "round_text_half_even",
+  "round_decimal_text",
+  "bankers_rounding_text",
+  "round_half_to_even_text"
+ ],
+ "param_docs": [
+  "decimal text such as \"7.125\"",
+  "decimal places wanted in the integer result (2 = cents)"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "arms": [
+      {
+       "body": {
+        "arms": [
+         {
+          "body": {
+           "args": [
+            {
+             "kind": "var",
+             "name": "r"
+            },
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "t"
+                }
+               ],
+               "kind": "app",
+               "op": "fst"
+              },
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "t"
+                }
+               ],
+               "kind": "app",
+               "op": "snd"
+              },
+              {
+               "kind": "var",
+               "name": "places"
+              }
+             ],
+             "kind": "app",
+             "op": "fn_3f36725e1d31777878ea180152588db01496be96b2743c6413f6f894f94c2117"
+            }
+           ],
+           "kind": "app",
+           "op": "eq"
+          },
+          "pattern": {
+           "kind": "variant",
+           "payload": {
+            "kind": "bind",
+            "name": "r"
+           },
+           "tag": "Just"
+          }
+         },
+         {
+          "body": {
+           "kind": "lit",
+           "value": false
+          },
+          "pattern": {
+           "kind": "variant",
+           "tag": "None"
+          }
+         }
+        ],
+        "kind": "case",
+        "scrutinee": {
+         "kind": "var",
+         "name": "result"
+        }
+       },
+       "pattern": {
+        "kind": "variant",
+        "payload": {
+         "kind": "bind",
+         "name": "t"
+        },
+        "tag": "Just"
+       }
+      },
+      {
+       "body": {
+        "arms": [
+         {
+          "body": {
+           "kind": "lit",
+           "value": false
+          },
+          "pattern": {
+           "kind": "variant",
+           "payload": {
+            "kind": "bind",
+            "name": "r"
+           },
+           "tag": "Just"
+          }
+         },
+         {
+          "body": {
+           "kind": "lit",
+           "value": true
+          },
+          "pattern": {
+           "kind": "variant",
+           "tag": "None"
+          }
+         }
+        ],
+        "kind": "case",
+        "scrutinee": {
+         "kind": "var",
+         "name": "result"
+        }
+       },
+       "pattern": {
+        "kind": "variant",
+        "tag": "None"
+       }
+      }
+     ],
+     "kind": "case",
+     "scrutinee": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "text"
+       }
+      ],
+      "kind": "app",
+      "op": "fn_d1a9d5e3f9aea3871ae1e874b064657e3a40a9a3a7f25e472c3689e809086bab"
+     }
+    },
+    "kind": "post"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "sum",
+    "variants": [
+     {
+      "tag": "Just",
+      "type": {
+       "kind": "builtin",
+       "name": "int"
+      }
+     },
+     {
+      "tag": "None"
+     }
+    ]
+   }
+  }
+ },
+ "supersedes": null
+}

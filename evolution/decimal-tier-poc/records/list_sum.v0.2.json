@@ -65,7 +65,7 @@
    }
   }
  ],
- "hash": "fn_b99af2d74e08338c4bfb64b72c35068baf5feebd6e16bd18622bebeac005f901",
+ "hash": "fn_85e2d51e1b54c1c786c2d068acb68c7a5fb17708492c54184f0487acf381b10b",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -74,6 +74,9 @@
  "name_hints": [
   "list_sum",
   "sum"
+ ],
+ "param_docs": [
+  "the list of integers to add"
  ],
  "properties": [
   {

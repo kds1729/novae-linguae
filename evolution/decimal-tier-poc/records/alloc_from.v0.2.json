@@ -95,7 +95,7 @@
    }
   }
  ],
- "hash": "fn_b310a5f0e3631b9b1fff02ff4661d1406a0b93a8d9780fd77f60dc5da326538b",
+ "hash": "fn_612d40f365e68bb2ffb1ded08044eee515b1bac9a22c9c03b0ed312f820abe7c",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -104,6 +104,12 @@
  "name_hints": [
   "alloc_from",
   "allocate_cumulative"
+ ],
+ "param_docs": [
+  "the total being split",
+  "the weights still to allocate",
+  "the weight already allocated before these",
+  "the sum of all weights, at least 1"
  ],
  "properties": [
   {
@@ -208,7 +214,7 @@
           }
          ],
          "kind": "app",
-         "op": "fn_b99af2d74e08338c4bfb64b72c35068baf5feebd6e16bd18622bebeac005f901"
+         "op": "fn_85e2d51e1b54c1c786c2d068acb68c7a5fb17708492c54184f0487acf381b10b"
         },
         {
          "args": [
@@ -234,7 +240,7 @@
                   }
                  ],
                  "kind": "app",
-                 "op": "fn_b99af2d74e08338c4bfb64b72c35068baf5feebd6e16bd18622bebeac005f901"
+                 "op": "fn_85e2d51e1b54c1c786c2d068acb68c7a5fb17708492c54184f0487acf381b10b"
                 }
                ],
                "kind": "app",

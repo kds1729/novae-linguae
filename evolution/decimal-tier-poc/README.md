@@ -28,7 +28,7 @@ currency conversion with an exact rational rate), `list_sum`, `alloc_from` + `al
 total over weights), and `format_amount` / `parse_amount` / `amount_text_roundtrip` (the text
 boundary, where an agent meets amounts in JSON, CSV and API payloads).
 
-**Round 5: 16/16 run and certify; 21 of 21 contracts SOUND (round 5 added the tie rule to every rounding record); termination 16/16; complexity 15/16;
+**Round 6: 19/19 run and certify; 23 of 23 contracts SOUND (round 5 added the tie rule to every rounding record, round 6 decimal-text entry points and parameter docs); termination 16/16; complexity 15/16;
 laws 22 PROVED / 1 UNKNOWN / 0 UNSUPPORTED of 23, all 23 held generatively (the text roundtrip's
 wide sample mostly skipped — see *Still open*).** The guarantees an
 agent most needs are certified, not tested:

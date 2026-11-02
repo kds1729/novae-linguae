@@ -179,7 +179,7 @@
    }
   }
  ],
- "hash": "fn_06535a10e30d37714c989bb269e99a3fa943c052db9fa6a3cceff60268eaf702",
+ "hash": "fn_363ead5af7a79eb52fc228a4890e429a7a80e0ba3c5b086be1a6fdf91e6a5335",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -189,6 +189,10 @@
   "div_ceil",
   "round_ceiling",
   "round_toward_positive_infinity"
+ ],
+ "param_docs": [
+  "the dividend (an integer amount, e.g. minor units)",
+  "the divisor, at least 1"
  ],
  "properties": [
   {
