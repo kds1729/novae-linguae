@@ -1,0 +1,384 @@
+{
+ "body": {
+  "body": {
+   "body": {
+    "body": {
+     "body": {
+      "arms": [
+       {
+        "body": {
+         "args": [
+          {
+           "kind": "var",
+           "name": "ip"
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "kind": "var",
+            "name": "sign"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "str_concat"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        },
+        "pattern": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": true
+         }
+        }
+       },
+       {
+        "body": {
+         "body": {
+          "args": [
+           {
+            "kind": "var",
+            "name": "fs"
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "lit",
+               "value": {
+                "kind": "string",
+                "value": "."
+               }
+              }
+             ],
+             "fn": {
+              "args": [
+               {
+                "args": [
+                 {
+                  "kind": "var",
+                  "name": "ip"
+                 }
+                ],
+                "fn": {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "sign"
+                  }
+                 ],
+                 "fn": {
+                  "kind": "var",
+                  "name": "str_concat"
+                 },
+                 "kind": "app"
+                },
+                "kind": "app"
+               }
+              ],
+              "fn": {
+               "kind": "var",
+               "name": "str_concat"
+              },
+              "kind": "app"
+             },
+             "kind": "app"
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "str_concat"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         },
+         "kind": "let",
+         "name": "fs",
+         "value": {
+          "args": [
+           {
+            "args": [
+             {
+              "args": [
+               {
+                "args": [
+                 {
+                  "args": [
+                   {
+                    "args": [
+                     {
+                      "kind": "var",
+                      "name": "p"
+                     }
+                    ],
+                    "fn": {
+                     "args": [
+                      {
+                       "kind": "var",
+                       "name": "a"
+                      }
+                     ],
+                     "fn": {
+                      "kind": "var",
+                      "name": "mod"
+                     },
+                     "kind": "app"
+                    },
+                    "kind": "app"
+                   }
+                  ],
+                  "fn": {
+                   "args": [
+                    {
+                     "kind": "var",
+                     "name": "p"
+                    }
+                   ],
+                   "fn": {
+                    "kind": "var",
+                    "name": "add"
+                   },
+                   "kind": "app"
+                  },
+                  "kind": "app"
+                 }
+                ],
+                "fn": {
+                 "kind": "var",
+                 "name": "to_string"
+                },
+                "kind": "app"
+               }
+              ],
+              "fn": {
+               "args": [
+                {
+                 "kind": "lit",
+                 "value": {
+                  "kind": "string",
+                  "value": ""
+                 }
+                }
+               ],
+               "fn": {
+                "kind": "var",
+                "name": "str_split"
+               },
+               "kind": "app"
+              },
+              "kind": "app"
+             }
+            ],
+            "fn": {
+             "kind": "var",
+             "name": "tail"
+            },
+            "kind": "app"
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "kind": "lit",
+             "value": {
+              "kind": "string",
+              "value": ""
+             }
+            }
+           ],
+           "fn": {
+            "kind": "var",
+            "name": "str_join"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         }
+        },
+        "pattern": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": false
+         }
+        }
+       }
+      ],
+      "kind": "case",
+      "scrutinee": {
+       "args": [
+        {
+         "kind": "lit",
+         "value": {
+          "kind": "nat",
+          "value": 0
+         }
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "kind": "var",
+          "name": "k"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "eq"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      }
+     },
+     "kind": "let",
+     "name": "sign",
+     "value": {
+      "arms": [
+       {
+        "body": {
+         "kind": "lit",
+         "value": {
+          "kind": "string",
+          "value": "-"
+         }
+        },
+        "pattern": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": true
+         }
+        }
+       },
+       {
+        "body": {
+         "kind": "lit",
+         "value": {
+          "kind": "string",
+          "value": ""
+         }
+        },
+        "pattern": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": false
+         }
+        }
+       }
+      ],
+      "kind": "case",
+      "scrutinee": {
+       "args": [
+        {
+         "kind": "lit",
+         "value": {
+          "kind": "nat",
+          "value": 0
+         }
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "kind": "var",
+          "name": "u"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "lt"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      }
+     }
+    },
+    "kind": "let",
+    "name": "ip",
+    "value": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "p"
+        }
+       ],
+       "fn": {
+        "args": [
+         {
+          "kind": "var",
+          "name": "a"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "div"
+        },
+        "kind": "app"
+       },
+       "kind": "app"
+      }
+     ],
+     "fn": {
+      "kind": "var",
+      "name": "to_string"
+     },
+     "kind": "app"
+    }
+   },
+   "kind": "let",
+   "name": "a",
+   "value": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "u"
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "abs"
+    },
+    "kind": "app"
+   }
+  },
+  "kind": "let",
+  "name": "p",
+  "value": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "k"
+    }
+   ],
+   "fn": {
+    "kind": "lit",
+    "value": {
+     "kind": "fn_ref",
+     "target": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+    }
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "u"
+  },
+  {
+   "name": "k"
+  }
+ ]
+}

@@ -1,0 +1,156 @@
+{
+ "body_hash": "expr_8c94fd52165c56263c4602cf02680b1460f3e010c6a1a624afc39de959184739",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -1205
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "string",
+    "value": "-12.05"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 5
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "string",
+    "value": "0.05"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -5
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "string",
+    "value": "-0.05"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 100
+    },
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "string",
+    "value": "100"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -7
+    },
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "string",
+    "value": "-7"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 123456789
+    },
+    {
+     "kind": "nat",
+     "value": 4
+    }
+   ],
+   "result": {
+    "kind": "string",
+    "value": "12345.6789"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 0
+    },
+    {
+     "kind": "nat",
+     "value": 3
+    }
+   ],
+   "result": {
+    "kind": "string",
+    "value": "0.000"
+   }
+  }
+ ],
+ "hash": "fn_c3afb71f750002b432e40129e53bca14ee6dcb14a5ab17109b8c2082ca415d4f",
+ "intent_tags": [
+  "arithmetic/decimal",
+  "math/decimal",
+  "math/decimal/format-amount"
+ ],
+ "name_hints": [
+  "format_amount",
+  "render_amount",
+  "to_decimal_string"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "string"
+   }
+  }
+ },
+ "supersedes": null
+}

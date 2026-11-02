@@ -1,0 +1,247 @@
+{
+ "body_hash": "expr_1ed85fdc05604cbaa76d858062b6f9ccd3482063db0fb50ee974ea45bec4aa9b",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "-12.05"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": -1205
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "0.05"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": 5
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "12.5"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": 1250
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "7"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "payload": {
+     "kind": "int",
+     "value": 700
+    },
+    "tag": "Just"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "1.234"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "12."
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "abc"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "1-2"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "--5"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "-"
+    },
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "007"
+    },
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "None"
+   }
+  }
+ ],
+ "hash": "fn_55889f2e51033a566e2ba4ff4f3fd147e37aee3e6133a801ab269a4c3a7d069a",
+ "intent_tags": [
+  "arithmetic/decimal",
+  "math/decimal",
+  "math/decimal/parse-amount"
+ ],
+ "name_hints": [
+  "parse_amount",
+  "parse_decimal_amount",
+  "from_decimal_string"
+ ],
+ "properties": [],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "sum",
+    "variants": [
+     {
+      "tag": "Just",
+      "type": {
+       "kind": "builtin",
+       "name": "int"
+      }
+     },
+     {
+      "tag": "None"
+     }
+    ]
+   }
+  }
+ },
+ "supersedes": null
+}

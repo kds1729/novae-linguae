@@ -1,0 +1,372 @@
+{
+ "body_hash": "expr_a22777af20e0af933dba77c1bf0b1cceacf0706ecb107bb18efa4c3fcdcba9e6",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 100
+    },
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 1
+      }
+     ],
+     "kind": "list"
+    },
+    {
+     "kind": "int",
+     "value": 0
+    },
+    {
+     "kind": "int",
+     "value": 3
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 33
+     },
+     {
+      "kind": "int",
+      "value": 33
+     },
+     {
+      "kind": "int",
+      "value": 34
+     }
+    ],
+    "kind": "list"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 1000
+    },
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 2
+      }
+     ],
+     "kind": "list"
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 4
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 250
+     },
+     {
+      "kind": "int",
+      "value": 500
+     }
+    ],
+    "kind": "list"
+   }
+  }
+ ],
+ "hash": "fn_b310a5f0e3631b9b1fff02ff4661d1406a0b93a8d9780fd77f60dc5da326538b",
+ "intent_tags": [
+  "arithmetic/decimal",
+  "math/decimal",
+  "math/decimal/alloc-from"
+ ],
+ "name_hints": [
+  "alloc_from",
+  "allocate_cumulative"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "t"
+          },
+          {
+           "kind": "var",
+           "name": "ws"
+          },
+          {
+           "kind": "var",
+           "name": "c"
+          },
+          {
+           "kind": "var",
+           "name": "w"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        }
+       ],
+       "kind": "app",
+       "op": "length"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "ws"
+        }
+       ],
+       "kind": "app",
+       "op": "length"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "t",
+     "ws",
+     "c",
+     "w"
+    ]
+   },
+   "name": "length"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "w"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "t"
+            },
+            {
+             "kind": "var",
+             "name": "ws"
+            },
+            {
+             "kind": "var",
+             "name": "c"
+            },
+            {
+             "kind": "var",
+             "name": "w"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "fn_b99af2d74e08338c4bfb64b72c35068baf5feebd6e16bd18622bebeac005f901"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "t"
+              },
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "c"
+                },
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "ws"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "fn_b99af2d74e08338c4bfb64b72c35068baf5feebd6e16bd18622bebeac005f901"
+                }
+               ],
+               "kind": "app",
+               "op": "add"
+              }
+             ],
+             "kind": "app",
+             "op": "mul"
+            },
+            {
+             "kind": "var",
+             "name": "w"
+            }
+           ],
+           "kind": "app",
+           "op": "div"
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "t"
+              },
+              {
+               "kind": "var",
+               "name": "c"
+              }
+             ],
+             "kind": "app",
+             "op": "mul"
+            },
+            {
+             "kind": "var",
+             "name": "w"
+            }
+           ],
+           "kind": "app",
+           "op": "div"
+          }
+         ],
+         "kind": "app",
+         "op": "sub"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "t",
+     "ws",
+     "c",
+     "w"
+    ]
+   },
+   "name": "telescopes"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "w"
+      },
+      {
+       "kind": "lit",
+       "value": 1
+      }
+     ],
+     "kind": "app",
+     "op": "ge"
+    },
+    "kind": "pre"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "args": [
+      {
+       "kind": "builtin",
+       "name": "int"
+      }
+     ],
+     "ctor": {
+      "kind": "builtin",
+      "name": "List"
+     },
+     "kind": "apply"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    }
+   ],
+   "result": {
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "int"
+     }
+    ],
+    "ctor": {
+     "kind": "builtin",
+     "name": "List"
+    },
+    "kind": "apply"
+   }
+  }
+ },
+ "supersedes": null
+}

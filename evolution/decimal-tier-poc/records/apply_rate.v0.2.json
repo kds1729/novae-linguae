@@ -1,0 +1,328 @@
+{
+ "body_hash": "expr_46c54a499a8eeced37b0e46e4668759904518a9cb50282f15a13c1c1bc574366",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 1999
+    },
+    {
+     "kind": "int",
+     "value": 8
+    },
+    {
+     "kind": "int",
+     "value": 100
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 160
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 1000
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 3
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 333
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 250
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 100
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 2
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -1050
+    },
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": 10
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": -105
+   }
+  }
+ ],
+ "hash": "fn_66b0313b84d20d8925cdfc162f4d0ca7472e6c422746e0d85b2aa17917dab46c",
+ "intent_tags": [
+  "arithmetic/decimal",
+  "math/decimal",
+  "math/decimal/apply-rate"
+ ],
+ "name_hints": [
+  "apply_rate",
+  "multiply_by_rate",
+  "tax",
+  "discount",
+  "convert_currency"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "d"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "d"
+          },
+          {
+           "kind": "var",
+           "name": "d"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "var",
+         "name": "a"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "d"
+    ]
+   },
+   "name": "unit_rate"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "d"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": 0
+          },
+          {
+           "kind": "var",
+           "name": "n"
+          },
+          {
+           "kind": "var",
+           "name": "d"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n",
+     "d"
+    ]
+   },
+   "name": "zero_amount"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(1)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "den"
+      },
+      {
+       "kind": "lit",
+       "value": 1
+      }
+     ],
+     "kind": "app",
+     "op": "ge"
+    },
+    "kind": "pre"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "lit",
+         "value": 2
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "a"
+              },
+              {
+               "kind": "var",
+               "name": "num"
+              }
+             ],
+             "kind": "app",
+             "op": "mul"
+            },
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "result"
+              },
+              {
+               "kind": "var",
+               "name": "den"
+              }
+             ],
+             "kind": "app",
+             "op": "mul"
+            }
+           ],
+           "kind": "app",
+           "op": "sub"
+          }
+         ],
+         "kind": "app",
+         "op": "abs"
+        }
+       ],
+       "kind": "app",
+       "op": "mul"
+      },
+      {
+       "kind": "var",
+       "name": "den"
+      }
+     ],
+     "kind": "app",
+     "op": "le"
+    },
+    "kind": "post"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "int"
+   }
+  }
+ },
+ "supersedes": null
+}

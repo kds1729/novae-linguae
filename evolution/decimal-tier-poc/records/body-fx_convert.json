@@ -1,0 +1,123 @@
+{
+ "body": {
+  "args": [
+   {
+    "args": [
+     {
+      "args": [
+       {
+        "kind": "var",
+        "name": "fs"
+       }
+      ],
+      "fn": {
+       "kind": "lit",
+       "value": {
+        "kind": "fn_ref",
+        "target": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+       }
+      },
+      "kind": "app"
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "den"
+      }
+     ],
+     "fn": {
+      "kind": "var",
+      "name": "mul"
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   }
+  ],
+  "fn": {
+   "args": [
+    {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "ts"
+        }
+       ],
+       "fn": {
+        "kind": "lit",
+        "value": {
+         "kind": "fn_ref",
+         "target": "fn_e9cb132d5ab0df0fd6512b6c6101d6573968f84c9679b961b658a7a5f7ae52b5"
+        }
+       },
+       "kind": "app"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "args": [
+         {
+          "kind": "var",
+          "name": "num"
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "mul"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "mul"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    }
+   ],
+   "fn": {
+    "kind": "lit",
+    "value": {
+     "kind": "fn_ref",
+     "target": "fn_08a9245d1e548a781a04278b6d9e166505b7b8c4ce52a12f73316af9efda8b98"
+    }
+   },
+   "kind": "app"
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "fs"
+  },
+  {
+   "name": "num"
+  },
+  {
+   "name": "den"
+  },
+  {
+   "name": "ts"
+  }
+ ]
+}

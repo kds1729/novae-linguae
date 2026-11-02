@@ -1,0 +1,100 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "kind": "lit",
+     "value": {
+      "kind": "nat",
+      "value": 0
+     }
+    },
+    "pattern": {
+     "kind": "lit",
+     "value": {
+      "kind": "bool",
+      "value": true
+     }
+    }
+   },
+   {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "xs"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "tail"
+         },
+         "kind": "app"
+        }
+       ],
+       "fn": {
+        "kind": "var",
+        "name": "self"
+       },
+       "kind": "app"
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "args": [
+         {
+          "kind": "var",
+          "name": "xs"
+         }
+        ],
+        "fn": {
+         "kind": "var",
+         "name": "head"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "add"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    },
+    "pattern": {
+     "kind": "lit",
+     "value": {
+      "kind": "bool",
+      "value": false
+     }
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "xs"
+    }
+   ],
+   "fn": {
+    "kind": "var",
+    "name": "null"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "xs"
+  }
+ ]
+}

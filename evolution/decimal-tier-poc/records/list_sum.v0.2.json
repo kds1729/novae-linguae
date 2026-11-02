@@ -1,0 +1,284 @@
+{
+ "body_hash": "expr_0072d66eeb894b81deb1e2e13b9c2419fd7ed09d6b707ef6fa555f547601ae2a",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 2
+      },
+      {
+       "kind": "int",
+       "value": 3
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 6
+   }
+  },
+  {
+   "args": [
+    {
+     "elems": [],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 0
+   }
+  },
+  {
+   "args": [
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": -4
+      },
+      {
+       "kind": "int",
+       "value": 4
+      },
+      {
+       "kind": "int",
+       "value": 5
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "kind": "int",
+    "value": 5
+   }
+  }
+ ],
+ "hash": "fn_b99af2d74e08338c4bfb64b72c35068baf5feebd6e16bd18622bebeac005f901",
+ "intent_tags": [
+  "arithmetic/decimal",
+  "math/decimal",
+  "math/decimal/list-sum"
+ ],
+ "name_hints": [
+  "list_sum",
+  "sum"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "xs"
+          }
+         ],
+         "kind": "app",
+         "op": "length"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "neq"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "xs"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "xs"
+    ]
+   },
+   "name": "empty"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "x"
+          },
+          {
+           "kind": "var",
+           "name": "xs"
+          }
+         ],
+         "kind": "app",
+         "op": "cons"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "x"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "xs"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        }
+       ],
+       "kind": "app",
+       "op": "add"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "x",
+     "xs"
+    ]
+   },
+   "name": "cons"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "xs"
+          },
+          {
+           "kind": "var",
+           "name": "ys"
+          }
+         ],
+         "kind": "app",
+         "op": "append"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "xs"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "ys"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        }
+       ],
+       "kind": "app",
+       "op": "add"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "xs",
+     "ys"
+    ]
+   },
+   "name": "append"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "args": [
+      {
+       "kind": "builtin",
+       "name": "int"
+      }
+     ],
+     "ctor": {
+      "kind": "builtin",
+      "name": "List"
+     },
+     "kind": "apply"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "int"
+   }
+  }
+ },
+ "supersedes": null
+}

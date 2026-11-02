@@ -1,0 +1,69 @@
+{
+ "body": {
+  "args": [
+   {
+    "args": [
+     {
+      "kind": "var",
+      "name": "ws"
+     }
+    ],
+    "fn": {
+     "kind": "lit",
+     "value": {
+      "kind": "fn_ref",
+      "target": "fn_b99af2d74e08338c4bfb64b72c35068baf5feebd6e16bd18622bebeac005f901"
+     }
+    },
+    "kind": "app"
+   }
+  ],
+  "fn": {
+   "args": [
+    {
+     "kind": "lit",
+     "value": {
+      "kind": "nat",
+      "value": 0
+     }
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "ws"
+     }
+    ],
+    "fn": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "t"
+      }
+     ],
+     "fn": {
+      "kind": "lit",
+      "value": {
+       "kind": "fn_ref",
+       "target": "fn_b310a5f0e3631b9b1fff02ff4661d1406a0b93a8d9780fd77f60dc5da326538b"
+      }
+     },
+     "kind": "app"
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "t"
+  },
+  {
+   "name": "ws"
+  }
+ ]
+}

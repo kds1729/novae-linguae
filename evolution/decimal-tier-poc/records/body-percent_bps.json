@@ -1,0 +1,48 @@
+{
+ "body": {
+  "args": [
+   {
+    "kind": "lit",
+    "value": {
+     "kind": "nat",
+     "value": 10000
+    }
+   }
+  ],
+  "fn": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "bps"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "kind": "var",
+      "name": "a"
+     }
+    ],
+    "fn": {
+     "kind": "lit",
+     "value": {
+      "kind": "fn_ref",
+      "target": "fn_66b0313b84d20d8925cdfc162f4d0ca7472e6c422746e0d85b2aa17917dab46c"
+     }
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  },
+  "kind": "app"
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "bps"
+  }
+ ]
+}
