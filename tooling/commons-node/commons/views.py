@@ -300,7 +300,8 @@ def search(request):
         # single round-trip (the discovery-cost lever); the similarity `score` is preserved alongside.
         by_hash = {r.hash: record_summary(r)
                    for r in Record.objects.filter(hash__in=[x["hash"] for x in results])}
-        results = [{**by_hash.get(x["hash"], {"hash": x["hash"]}), "score": x["score"]} for x in results]
+        results = [{**by_hash.get(x["hash"], {"hash": x["hash"]}), **{k: v for k, v in x.items() if k != "hash"}}
+                   for x in results]
         if token_budget is not None:
             # Cap the ranked, projected hits by estimated token cost (measured on the returned object,
             # score included), keeping the highest-similarity ones that fit — the /v0/search counterpart

@@ -401,6 +401,14 @@ caps those summaries by estimated token cost exactly as on `query` — the highe
 the budget are kept, and the same `budget` report is returned (there is no `cursor`: `search` is a ranked
 view, not a paged feed).
 
+**Versions take one slot.** The commons keeps every version of a function (each re-mint is a new
+address), so by default a node SHOULD group function-record hits that share a first name hint, a type
+and intent tags into one result: shown by the strongest version (certified; then more posts + laws;
+then documented parameters; then newest), at the group's best score, with the other hashes in
+`"versions": [...]`. This is presentation, not a claim that the versions behave alike — nothing is
+dropped, every hash stays listed, and `"group_versions": false` returns the flat ranking. A client that
+needs a specific version resolves it by hash.
+
 Unlike `query`, `search` is **heuristic and node-local**: it depends on the node's embedding model
 (reported in `model` and in `/v0/info`). Two nodes MAY rank differently. Semantic search is a
 discovery aid; the content-addressed guarantee applies only after you resolve and verify a result.

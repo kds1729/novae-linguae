@@ -492,7 +492,13 @@ def main():
           # The predicate language builds no `Just(…)` value — compare by cases.
           refinements=[("post", "case {parse_decimal}(text) of { "
                                 "Just(t) => (case result of { Just(r) => r == {rescale}(fst(t), snd(t), places); None => false }); "
-                                "None => (case result of { Just(r) => false; None => true }) }")],
+                                "None => (case result of { Just(r) => false; None => true }) }"),
+                       # Round 7: the rounding rule stated HERE, over the parsed digits — stranger 12
+                       # fetched `rescale` to learn it. Within half a unit; a tie goes to the even.
+                       ("post", "case {parse_decimal}(text) of { None => true; Just(t) => (case result of { None => true; "
+                                "Just(r) => snd(t) <= places || 2 * abs(fst(t) - r * {pow10}(snd(t) - places)) <= {pow10}(snd(t) - places) }) }"),
+                       ("post", "case {parse_decimal}(text) of { None => true; Just(t) => (case result of { None => true; "
+                                "Just(r) => snd(t) <= places || 2 * abs(fst(t) - r * {pow10}(snd(t) - places)) != {pow10}(snd(t) - places) || r % 2 == 0 }) }")],
           hints=["round_decimal_text", "bankers_rounding_text", "round_half_to_even_text"], complexity="O(n)")
     gauntlet("round_text_half_even", prove)
 
@@ -507,7 +513,18 @@ def main():
                                 "None => (case result of { Just(r) => false; None => true }); "
                                 "Just(x) => (case {parse_decimal}(rate_text) of { "
                                 "None => (case result of { Just(r) => false; None => true }); "
-                                "Just(y) => (case result of { Just(r) => r == {fx_convert}(fst(x), snd(x), fst(y), {pow10}(snd(y)), to_places); None => false }) }) }")],
+                                "Just(y) => (case result of { Just(r) => r == {fx_convert}(fst(x), snd(x), fst(y), {pow10}(snd(y)), to_places); None => false }) }) }"),
+                       # Round 7: the rounding rule stated here, over the parsed digits (amount a at ap
+                       # places, rate r at rp places: exact value a·r·10^to / 10^(ap+rp)). Guarded by
+                       # ap, rp >= 0 (always so — `parse_decimal` floors at 0 — but its body takes `head`
+                       # of a list, outside the refinement fragment, so no post of its can say it): the
+                       # guard is what discharges `fx_convert`'s pre `rate_den >= 1` via `pow10`'s post.
+                       ("post", "case {parse_decimal}(amount_text) of { None => true; Just(x) => (case {parse_decimal}(rate_text) of { None => true; "
+                                "Just(y) => (case result of { None => true; Just(r) => snd(x) < 0 || snd(y) < 0 || "
+                                "2 * abs(fst(x) * fst(y) * {pow10}(to_places) - r * ({pow10}(snd(y)) * {pow10}(snd(x)))) <= {pow10}(snd(y)) * {pow10}(snd(x)) }) }) }"),
+                       ("post", "case {parse_decimal}(amount_text) of { None => true; Just(x) => (case {parse_decimal}(rate_text) of { None => true; "
+                                "Just(y) => (case result of { None => true; Just(r) => snd(x) < 0 || snd(y) < 0 || "
+                                "2 * abs(fst(x) * fst(y) * {pow10}(to_places) - r * ({pow10}(snd(y)) * {pow10}(snd(x)))) != {pow10}(snd(y)) * {pow10}(snd(x)) || r % 2 == 0 }) }) }")],
           hints=["currency_conversion_text", "exchange_decimal_text"], complexity="O(n)")
     gauntlet("fx_convert_text", prove)
 

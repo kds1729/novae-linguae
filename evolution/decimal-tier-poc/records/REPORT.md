@@ -17,5 +17,5 @@
 | `parse_amount` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `amount_text_roundtrip` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | UNVERIFIABLE | format_then_parse=EXHAUSTIVE | format_then_parse=UNKNOWN |
 | `parse_decimal` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
-| `round_text_half_even` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | UNVERIFIABLE | — | — |
-| `fx_convert_text` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | UNVERIFIABLE | — | — |
+| `round_text_half_even` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / post[2]=SOUND | SOUND | UNVERIFIABLE | — | — |
+| `fx_convert_text` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / post[2]=SOUND | SOUND | UNVERIFIABLE | — | — |

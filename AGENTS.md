@@ -27,7 +27,8 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    plain words>", "k": 10}`. **Always pass `?include=summary`**: without it each hit is a bare
    `{hash, score}` and you will fetch every record to tell them apart (a stranger did: 20 fetches).
    Scores are close together (a 0.01 margin is normal); treat the top 3–5 as a shortlist, not the
-   top 1 as the answer.
+   top 1 as the answer. Older versions of a function share its slot: they are listed by hash in
+   `versions`, and the hit shown is the version with the strongest contract.
 2. Choose by the summary's `contract` (pre/post, surface syntax), `laws`, `params` (argument
    names, in order), `param_docs` (what each argument means, and its unit — the author's words)
    and `type_surface`; `refs` names the functions a contract applies by address.
@@ -43,8 +44,8 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
 
 Decimal numbers from a user ("7.125", "1.0825") are not floats here — money must be exact. Pass
 them as TEXT to a function that takes text (`round_text_half_even`, `fx_convert_text`,
-`parse_decimal` in the decimal tier — `--arg '"7.125"'`), and its contract tells you which numeric
-function it applies; or scale them yourself to integers (7.125 at 3 places is 7125).
+`parse_decimal` in the decimal tier — `--arg '"7.125"'`); its contract states the rounding rule
+(within half a unit, a tie to the even) and which numeric function it applies; or scale them yourself to integers (7.125 at 3 places is 7125).
 
 ## What things are
 

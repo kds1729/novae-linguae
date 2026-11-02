@@ -579,6 +579,8 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
    "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
@@ -588,6 +590,8 @@
    "typecheck": "(string, int) -> Sum",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "refinement:post[2]": "",
    "termination": "provably always-terminates",
    "complexity": "declared `O(n)`, not established: applies `fn_3f36725e1d31777878ea180152588db01496be96b2743c6413f6f894f94c2117` to an argument whose size is not bounded by the input (var) \u2014 its class cannot be re-expressed in n"
   }
@@ -603,6 +607,8 @@
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
    "termination": "SOUND",
    "complexity": "UNVERIFIABLE"
   },
@@ -612,6 +618,8 @@
    "typecheck": "(string, string, int) -> Sum",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "refinement:post[2]": "",
    "termination": "provably always-terminates",
    "complexity": "declared `O(n)`, not established: applies `fn_9bafc87c13c67329658ebac778bb5ec28295ec0b024706e13c38a6a0f626efb1` to an argument whose size is not bounded by the input (var) \u2014 its class cannot be re-expressed in n"
   }

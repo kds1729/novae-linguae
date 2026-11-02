@@ -8,15 +8,23 @@ applies only after a result is resolved and verified). Two request shapes:
 
 Returns {"results": [{"hash", "score"}, ...], "model": "<id>"} ranked high-to-low. The optional
 typed `filter` means exactly what it does in `POST /v0/query` (shared via query.candidate_records).
+
+Versions are grouped by default: function records sharing a first name hint, a type and intent tags
+take ONE result slot, shown by the strongest (see `_strength`), with the others' hashes in
+`versions`. The commons keeps every version (content addressing), so re-minted records otherwise
+crowd the ranking — a stranger agent (2026-11-02) met `apply_rate` three times, the OLDEST first.
+Grouping is a presentation choice, not a claim of equal behaviour: nothing is hidden (every hash
+stays listed) and `{"group_versions": false}` returns the flat ranking.
 """
 
 from .embedding import get_embedder
 from .models import Record
-from .query import QueryError, validate_filter
+from .query import QueryError, certification_count, validate_filter
 from .vectorindex import get_vector_index
 
 _DEFAULT_K = 20
 _MAX_K = 100
+_GROUP_WINDOW = 4   # rank k × this many hits before grouping, so k groups usually fill
 
 
 class SearchError(Exception):
@@ -65,5 +73,50 @@ def run_search(body):
 
     # Ranking is delegated to the active backend (pgvector ANN on Postgres, Python cosine on SQLite).
     # Only vectors from the same model are comparable, so the model id is passed through.
-    results, truncated = get_vector_index().search(qvec, _k(body), flt, emb.model_id)
-    return results, emb.model_id, truncated
+    k = _k(body)
+    if body.get("group_versions", True) is False:
+        results, truncated = get_vector_index().search(qvec, k, flt, emb.model_id)
+        return results, emb.model_id, truncated
+    results, truncated = get_vector_index().search(qvec, min(k * _GROUP_WINDOW, _MAX_K), flt, emb.model_id)
+    return group_versions(results)[:k], emb.model_id, truncated
+
+
+def _version_key(r):
+    if r.kind != "function-record" or not r.name_hints:
+        return None
+    return (r.name_hints[0], r.type_str or "", tuple(sorted(r.intent_tags or [])))
+
+
+def _strength(r):
+    """Which version speaks for the group: certified first, then the larger contract (posts + laws:
+    a re-mint that ADDED a tie rule promises more — certification checked each one), then the one
+    that documents its parameters, then the newest."""
+    raw = r.raw or {}
+    posts = sum(1 for x in (raw.get("signature") or {}).get("refinements") or []
+                if isinstance(x, dict) and x.get("kind") == "post")
+    laws = len(raw.get("properties") or [])
+    return (certification_count(r.hash) > 0, posts + laws, bool(raw.get("param_docs")), r.created_at, r.hash)
+
+
+def group_versions(results):
+    """Fold ranked hits into one per version group, at the group's best score, keeping rank order."""
+    rows = {r.hash: r for r in Record.objects.filter(hash__in=[x["hash"] for x in results])}
+    groups, order = {}, []
+    for x in results:
+        r = rows.get(x["hash"])
+        key = _version_key(r) if r is not None else None
+        key = key if key is not None else ("", x["hash"])
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(x)
+    out = []
+    for key in order:
+        hits = groups[key]
+        if len(hits) == 1:
+            out.append(hits[0])
+            continue
+        best = max(hits, key=lambda x: _strength(rows[x["hash"]]))
+        out.append({"hash": best["hash"], "score": max(h["score"] for h in hits),
+                    "versions": [h["hash"] for h in hits if h["hash"] != best["hash"]]})
+    return out

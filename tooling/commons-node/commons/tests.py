@@ -880,6 +880,27 @@ class SearchTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.json()["results"]), 1)
 
+    def test_versions_share_one_slot_shown_by_the_stronger(self):
+        # A re-mint (same name, type, tags) that adds a post and documents its parameters speaks for
+        # the group; the older hash stays listed in `versions`, and `group_versions: false` is flat.
+        newer = "fn_" + "d" * 64
+        raw = json.loads(json.dumps(_MAP_REC))
+        raw.setdefault("signature", {}).setdefault("refinements", []).append(
+            {"kind": "post", "expr": {"kind": "lit", "value": True}})
+        raw["param_docs"] = ["the function", "the list"]
+        self._mk(newer, raw)
+        q = {"query": "map a function over each element of a list", "k": 5}
+        hits = self.client.post("/v0/search?include=summary", data=json.dumps(q),
+                                content_type="application/json").json()["results"]
+        top = hits[0]
+        self.assertEqual(top["hash"], newer)
+        self.assertEqual(top["versions"], [self.map_hash])
+        self.assertEqual(top["param_docs"], ["the function", "the list"])   # summary folded in
+        self.assertNotIn(self.map_hash, [h["hash"] for h in hits])
+        flat = [h["hash"] for h in self._search({**q, "group_versions": False}).json()["results"]]
+        self.assertIn(self.map_hash, flat)
+        self.assertIn(newer, flat)
+
     def test_malformed_filter_is_400(self):
         # The typed filter follows the same contract as /v0/query: a bare list is a clean 400.
         resp = self._search({"query": "encode", "filter": {"effects": ["io.console"]}})

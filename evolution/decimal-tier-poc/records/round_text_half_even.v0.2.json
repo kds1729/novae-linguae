@@ -119,7 +119,7 @@
    }
   }
  ],
- "hash": "fn_7039f9c72702c75163ae094833c58e90c09021e1bb6dae4c9ac803254167d123",
+ "hash": "fn_b85c0bb4c6c80c0ea06d8aae9751612f1526db8eb81efdc92d030964adca8c8a",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -261,6 +261,422 @@
        "pattern": {
         "kind": "variant",
         "tag": "None"
+       }
+      }
+     ],
+     "kind": "case",
+     "scrutinee": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "text"
+       }
+      ],
+      "kind": "app",
+      "op": "fn_d1a9d5e3f9aea3871ae1e874b064657e3a40a9a3a7f25e472c3689e809086bab"
+     }
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "arms": [
+      {
+       "body": {
+        "kind": "lit",
+        "value": true
+       },
+       "pattern": {
+        "kind": "variant",
+        "tag": "None"
+       }
+      },
+      {
+       "body": {
+        "arms": [
+         {
+          "body": {
+           "kind": "lit",
+           "value": true
+          },
+          "pattern": {
+           "kind": "variant",
+           "tag": "None"
+          }
+         },
+         {
+          "body": {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "t"
+                }
+               ],
+               "kind": "app",
+               "op": "snd"
+              },
+              {
+               "kind": "var",
+               "name": "places"
+              }
+             ],
+             "kind": "app",
+             "op": "le"
+            },
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "lit",
+                 "value": 2
+                },
+                {
+                 "args": [
+                  {
+                   "args": [
+                    {
+                     "args": [
+                      {
+                       "kind": "var",
+                       "name": "t"
+                      }
+                     ],
+                     "kind": "app",
+                     "op": "fst"
+                    },
+                    {
+                     "args": [
+                      {
+                       "kind": "var",
+                       "name": "r"
+                      },
+                      {
+                       "args": [
+                        {
+                         "args": [
+                          {
+                           "args": [
+                            {
+                             "kind": "var",
+                             "name": "t"
+                            }
+                           ],
+                           "kind": "app",
+                           "op": "snd"
+                          },
+                          {
+                           "kind": "var",
+                           "name": "places"
+                          }
+                         ],
+                         "kind": "app",
+                         "op": "sub"
+                        }
+                       ],
+                       "kind": "app",
+                       "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
+                      }
+                     ],
+                     "kind": "app",
+                     "op": "mul"
+                    }
+                   ],
+                   "kind": "app",
+                   "op": "sub"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "abs"
+                }
+               ],
+               "kind": "app",
+               "op": "mul"
+              },
+              {
+               "args": [
+                {
+                 "args": [
+                  {
+                   "args": [
+                    {
+                     "kind": "var",
+                     "name": "t"
+                    }
+                   ],
+                   "kind": "app",
+                   "op": "snd"
+                  },
+                  {
+                   "kind": "var",
+                   "name": "places"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "sub"
+                }
+               ],
+               "kind": "app",
+               "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
+              }
+             ],
+             "kind": "app",
+             "op": "le"
+            }
+           ],
+           "kind": "app",
+           "op": "or"
+          },
+          "pattern": {
+           "kind": "variant",
+           "payload": {
+            "kind": "bind",
+            "name": "r"
+           },
+           "tag": "Just"
+          }
+         }
+        ],
+        "kind": "case",
+        "scrutinee": {
+         "kind": "var",
+         "name": "result"
+        }
+       },
+       "pattern": {
+        "kind": "variant",
+        "payload": {
+         "kind": "bind",
+         "name": "t"
+        },
+        "tag": "Just"
+       }
+      }
+     ],
+     "kind": "case",
+     "scrutinee": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "text"
+       }
+      ],
+      "kind": "app",
+      "op": "fn_d1a9d5e3f9aea3871ae1e874b064657e3a40a9a3a7f25e472c3689e809086bab"
+     }
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "arms": [
+      {
+       "body": {
+        "kind": "lit",
+        "value": true
+       },
+       "pattern": {
+        "kind": "variant",
+        "tag": "None"
+       }
+      },
+      {
+       "body": {
+        "arms": [
+         {
+          "body": {
+           "kind": "lit",
+           "value": true
+          },
+          "pattern": {
+           "kind": "variant",
+           "tag": "None"
+          }
+         },
+         {
+          "body": {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "t"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "snd"
+                },
+                {
+                 "kind": "var",
+                 "name": "places"
+                }
+               ],
+               "kind": "app",
+               "op": "le"
+              },
+              {
+               "args": [
+                {
+                 "args": [
+                  {
+                   "kind": "lit",
+                   "value": 2
+                  },
+                  {
+                   "args": [
+                    {
+                     "args": [
+                      {
+                       "args": [
+                        {
+                         "kind": "var",
+                         "name": "t"
+                        }
+                       ],
+                       "kind": "app",
+                       "op": "fst"
+                      },
+                      {
+                       "args": [
+                        {
+                         "kind": "var",
+                         "name": "r"
+                        },
+                        {
+                         "args": [
+                          {
+                           "args": [
+                            {
+                             "args": [
+                              {
+                               "kind": "var",
+                               "name": "t"
+                              }
+                             ],
+                             "kind": "app",
+                             "op": "snd"
+                            },
+                            {
+                             "kind": "var",
+                             "name": "places"
+                            }
+                           ],
+                           "kind": "app",
+                           "op": "sub"
+                          }
+                         ],
+                         "kind": "app",
+                         "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
+                        }
+                       ],
+                       "kind": "app",
+                       "op": "mul"
+                      }
+                     ],
+                     "kind": "app",
+                     "op": "sub"
+                    }
+                   ],
+                   "kind": "app",
+                   "op": "abs"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "mul"
+                },
+                {
+                 "args": [
+                  {
+                   "args": [
+                    {
+                     "args": [
+                      {
+                       "kind": "var",
+                       "name": "t"
+                      }
+                     ],
+                     "kind": "app",
+                     "op": "snd"
+                    },
+                    {
+                     "kind": "var",
+                     "name": "places"
+                    }
+                   ],
+                   "kind": "app",
+                   "op": "sub"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
+                }
+               ],
+               "kind": "app",
+               "op": "neq"
+              }
+             ],
+             "kind": "app",
+             "op": "or"
+            },
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "r"
+                },
+                {
+                 "kind": "lit",
+                 "value": 2
+                }
+               ],
+               "kind": "app",
+               "op": "mod"
+              },
+              {
+               "kind": "lit",
+               "value": 0
+              }
+             ],
+             "kind": "app",
+             "op": "eq"
+            }
+           ],
+           "kind": "app",
+           "op": "or"
+          },
+          "pattern": {
+           "kind": "variant",
+           "payload": {
+            "kind": "bind",
+            "name": "r"
+           },
+           "tag": "Just"
+          }
+         }
+        ],
+        "kind": "case",
+        "scrutinee": {
+         "kind": "var",
+         "name": "result"
+        }
+       },
+       "pattern": {
+        "kind": "variant",
+        "payload": {
+         "kind": "bind",
+         "name": "t"
+        },
+        "tag": "Just"
        }
       }
      ],
