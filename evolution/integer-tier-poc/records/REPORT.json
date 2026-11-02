@@ -337,7 +337,7 @@
    "double_exponent: CONSISTENT  |  generative: HELD (76 cases; 124 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
   ],
   "prove": [
-   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 158 of 161 premises verified separately, the final query over uninterpreted mod/div]"
+   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 159 of 161 premises verified separately, the final query over uninterpreted mod/div]"
   ]
  },
  {
