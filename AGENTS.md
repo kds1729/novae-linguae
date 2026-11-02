@@ -35,8 +35,10 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    the total) versus a plain `divide`.
    `certifications` counts signed certificates about the function; whose they are is your
    policy's question (`nl-validator certified`), and `--require-certified` re-certifies locally anyway.
-3. Apply it with the verified loop using a tag from its `intent_tags` (or its address):
-   `nl-validator orchestrate --node <node> --verify --require-certified --intent <tag> --arg …`.
+3. Apply it with the verified loop using a tag from its `intent_tags`:
+   `nl-validator orchestrate --node <node> --verify --require-certified --intent
+   math/decimal/allocate --arg 10000 --arg '[1, 1, 1]'` → `CONFIRMED …` then
+   `result: [int(3333), int(3333), int(3334)]`.
 
 ## What things are
 
@@ -70,8 +72,11 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
 - The adapters find the binary in this order: sibling `cargo build`, then the one `quickstart.sh`
   fetched into `.quickstart/`, then `NL_VALIDATOR`. After the quickstart you need no env var.
   `.quickstart/` (the binary, the records, the loop's files) lives inside the clone and is ignored.
-- `orchestrate --publish` needs `--seed <string>` (the signer of the published assert) and `--arg`
-  takes a FILE holding a value expression, `{"kind":"string","value":"…"}` — not the bare value.
+- `orchestrate --publish` needs `--seed <string>` (the signer of the published assert); a plain
+  apply does not (a fixed default identity signs the transcript). `--arg`/`--expect` take a file,
+  inline JSON, or a surface literal — `--arg 10000 --arg '[1, 1, 1]' --arg '"text"'`; a bare
+  numeral is a `nat` (accepted where an `int` is expected), `int(-5)` an explicit int. After
+  `CONFIRMED`, a `result:` line prints the answer in that same syntax.
 - A record's discovery tag is in its `intent_tags` (adapters derive `parse/<lowercase-hyphenated-
   field>`), its argument order in its `signature`. The adapters print the record's file, not these.
 - Publishing to a public node is permanent: append-only, world-visible, no delete. `--sign` is what

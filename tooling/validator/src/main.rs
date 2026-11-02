@@ -684,12 +684,16 @@ enum Commands {
         /// intent and applies it to the previous stage's result — composing the discovered functions.
         #[arg(long = "intent")]
         intents: Vec<String>,
-        /// Argument value (a value-expression JSON file). Repeatable, positional order.
+        /// Argument value, repeatable, positional order: a value-expression JSON FILE, inline JSON
+        /// (`'{"kind":"int","value":10000}'`), or a surface literal (`10000`, `'[1, 1, 1]'`,
+        /// `'"text"'` — spec/surface-syntax.md §3). An existing file wins.
         #[arg(long = "arg")]
-        args: Vec<PathBuf>,
-        /// Seed for the orchestrator's signing identity (signs query + propose).
+        args: Vec<String>,
+        /// Seed for the orchestrator's signing identity (signs query + propose). Optional for a plain
+        /// apply (a fixed, documented default identity — the transcript stays deterministic);
+        /// REQUIRED with `--publish`, whose claim goes into the commons under that identity.
         #[arg(long)]
-        seed: String,
+        seed: Option<String>,
         /// Seed for the responder's identity (signs the replies).
         #[arg(long, default_value = "novae-linguae-example-responder")]
         responder_seed: String,
@@ -713,13 +717,14 @@ enum Commands {
         /// before applying it, and ABORT if it isn't certified — "assemble only from verified parts".
         #[arg(long)]
         require_certified: bool,
-        /// With `--verify`: the EXPECTED result value (a value-expression JSON file) — goal-aware
+        /// With `--verify`: the EXPECTED result value (a file, inline JSON or a surface literal, as
+        /// `--arg`) — goal-aware
         /// discovery ranking. Candidates whose declared result type cannot produce it are dropped
         /// (the argument-only filter can't split same-argument fits that return different sorts),
         /// and statically pure+terminating candidates are dry-run on the arguments: an exact match
         /// ranks first, a mismatch last. The per-candidate scores land in the `rank` step.
         #[arg(long, requires = "verify")]
-        expect: Option<PathBuf>,
+        expect: Option<String>,
         /// Grant an effect the responder half of this loop will perform (e.g. `net.read`). Repeatable.
         /// Default NONE (pure-only). The orchestrator's own verify step re-runs under the same grants.
         /// Granting `net.read` means this machine fetches URLs chosen by the discovered function's
@@ -1133,9 +1138,16 @@ fn real_main() -> ExitCode {
         }
         Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, expect, grant, grant_certified, secret, oauth } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
-            match parse_secrets(&secret).and_then(|s| Ok((s, parse_oauth(&oauth)?))) {
+            let seed = match (seed, publish) {
+                (Some(s), _) => Ok(s),
+                (None, true) => Err(anyhow::anyhow!(
+                    "--publish needs --seed <string>: the published claim is signed by that identity, permanently"
+                )),
+                (None, false) => Ok(DEFAULT_ORCHESTRATOR_SEED.to_string()),
+            };
+            match seed.and_then(|seed| parse_secrets(&secret).and_then(|s| Ok((seed, s, parse_oauth(&oauth)?)))) {
                 Err(e) => (Err(e), false),
-                Ok((s, o)) => {
+                Ok((seed, s, o)) => {
                     nl_validator::set_effect_secrets(s);
                     nl_validator::set_effect_oauth(o);
                     if verify {
@@ -2834,17 +2846,47 @@ fn assert_result_detail(m: &serde_json::Value) -> String {
     format!("result {shown}")
 }
 
+/// The orchestrator's identity when `--seed` is omitted (a plain apply, nothing published): fixed
+/// and documented, so the transcript stays deterministic (principle 5) and nobody mistakes its
+/// signatures for anyone's in particular. A stranger agent (2026-11-02) had to invent a seed to
+/// apply a function once.
+const DEFAULT_ORCHESTRATOR_SEED: &str = "novae-linguae-default-orchestrator";
+
+/// An `--arg`/`--expect` value: an existing file holding a value expression (JSON), else inline
+/// JSON (starts with `{`), else a surface literal (`10000`, `[1, 1, 1]`, `"text"`). A stranger
+/// agent wrote two argument files by hand to pass `10000` and `[1, 1, 1]` (2026-11-02).
+fn read_value_arg(arg: &str) -> Result<serde_json::Value> {
+    let path = std::path::Path::new(arg);
+    if path.is_file() {
+        return nl_validator::read_json(path);
+    }
+    let trimmed = arg.trim_start();
+    if trimmed.starts_with('{') {
+        return serde_json::from_str(trimmed).map_err(|e| anyhow::anyhow!("--arg {arg:?}: not a file, and not valid JSON: {e}"));
+    }
+    nl_validator::surface::parse_value(arg)
+        .map_err(|e| anyhow::anyhow!("--arg {arg:?}: not a file, not JSON, and not a surface value literal: {e}"))
+}
+
+/// The final `assert`'s result in surface syntax (`[3333, 3333, 3334]`) — the line a reader wants,
+/// beside the transcript's value AST.
+fn final_result_surface(steps: &[nl_validator::Step]) -> Option<String> {
+    let m = &steps.iter().rev().find(|s| s.label.rsplit(':').next() == Some("assert"))?.message;
+    let v = m.pointer("/body/claim/expr/args/1/value")?;
+    Some(nl_validator::surface::unparse_value(v).unwrap_or_else(|_| v.to_string()))
+}
+
 fn cmd_orchestrate(
     records: Option<&PathBuf>,
     node: Option<&str>,
     publish: bool,
     intents: &[String],
-    args: &[PathBuf],
+    args: &[String],
     seed: &str,
     responder_seed: &str,
     timestamp: Option<&str>,
 ) -> Result<()> {
-    let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
+    let argv = args.iter().map(|a| read_value_arg(a)).collect::<Result<Vec<_>>>()?;
     let orch = nl_validator::signing_key_from_seed(seed);
     let resp = nl_validator::signing_key_from_seed(responder_seed);
     let (link, recs) = commons_view(records, node, intents, None)?;
@@ -2867,6 +2909,9 @@ fn cmd_orchestrate(
     }
     if run.confirmed {
         println!("CONFIRMED  discovered the function, applied it, and re-verified the result");
+        if let Some(r) = final_result_surface(&run.steps) {
+            println!("result: {r}");
+        }
         if publish {
             publish_final_assert(node.expect("--publish requires --node"), &run.steps)?;
         }
@@ -2882,7 +2927,7 @@ fn cmd_orchestrate_verified(
     node: Option<&str>,
     publish: bool,
     intents: &[String],
-    args: &[PathBuf],
+    args: &[String],
     seed: &str,
     responder_seed: &str,
     timestamp: Option<&str>,
@@ -2890,18 +2935,18 @@ fn cmd_orchestrate_verified(
     attestations: &[PathBuf],
     solver: &str,
     require_certified: bool,
-    expect: Option<&PathBuf>,
+    expect: Option<&String>,
     grant_certified: &[String],
 ) -> Result<()> {
     if intents.len() != 1 {
         anyhow::bail!("--verify supports exactly one --intent (got {})", intents.len());
     }
-    let argv = args.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
+    let argv = args.iter().map(|a| read_value_arg(a)).collect::<Result<Vec<_>>>()?;
     let orch = nl_validator::signing_key_from_seed(seed);
     let resp = nl_validator::signing_key_from_seed(responder_seed);
     let pol = policy.map(|p| nl_validator::read_json(p).and_then(|j| nl_validator::Policy::from_json(&j))).transpose()?;
     let atts = attestations.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
-    let exp = expect.map(|p| nl_validator::read_json(p)).transpose()?;
+    let exp = expect.map(|a| read_value_arg(a)).transpose()?;
     // Server-side typed narrowing (commons.md `type_pattern`): the arguments' sorts — and the
     // expected result's, when stated — shape the discovery page itself.
     let pattern = nl_validator::discovery_type_pattern(&argv, exp.as_ref());
@@ -2954,6 +2999,9 @@ fn cmd_orchestrate_verified(
     if run.confirmed && property_ok && trust_ok && certify_ok {
         let cert_note = match run.certified { Some(true) => ", certified", Some(false) => ", NOT certified", None => "" };
         println!("CONFIRMED  trusted, its property proved{cert_note}, applied, and re-verified");
+        if let Some(r) = final_result_surface(&run.steps) {
+            println!("result: {r}");
+        }
         if publish {
             publish_final_assert(node.expect("--publish requires --node"), &run.steps)?;
         }
@@ -3352,5 +3400,31 @@ mod redaction_tests {
         // The placeholder may legitimately contain `=`; only the first one splits.
         let r = parse_redactions(&["a=b=c".to_string()]).unwrap();
         assert_eq!(r, vec![("a".to_string(), "b=c".to_string())]);
+    }
+}
+
+#[cfg(test)]
+mod value_arg_tests {
+    use super::read_value_arg;
+    use serde_json::json;
+
+    /// `--arg`/`--expect` take a file, inline JSON, or a surface literal (2026-11-02: a stranger
+    /// agent wrote two files by hand to pass `10000` and `[1, 1, 1]`).
+    #[test]
+    fn a_value_arg_is_a_file_inline_json_or_a_surface_literal() {
+        assert_eq!(read_value_arg("10000").unwrap(), json!({"kind": "nat", "value": 10000}));
+        assert_eq!(read_value_arg("int(-5)").unwrap(), json!({"kind": "int", "value": -5}));
+        assert_eq!(read_value_arg("[1, 2]").unwrap()["elems"].as_array().unwrap().len(), 2);
+        assert_eq!(read_value_arg("\"hi\"").unwrap(), json!({"kind": "string", "value": "hi"}));
+        assert_eq!(read_value_arg(r#"{"kind":"int","value":7}"#).unwrap(), json!({"kind": "int", "value": 7}));
+        let dir = std::env::temp_dir().join(format!("nl-value-arg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("v.json");
+        std::fs::write(&file, r#"{"kind":"bool","value":true}"#).unwrap();
+        assert_eq!(read_value_arg(file.to_str().unwrap()).unwrap(), json!({"kind": "bool", "value": true}));
+        std::fs::remove_dir_all(&dir).unwrap();
+        let err = read_value_arg("ten thousand").unwrap_err().to_string();
+        assert!(err.contains("not a file, not JSON"), "{err}");
+        assert!(read_value_arg("{not json").is_err());
     }
 }
