@@ -514,11 +514,18 @@ struct GoalScore {
     dry: DryRun,
     tags: i64,
     name: i64,
+    /// How much the record PROMISES: its declared posts plus laws. The last tie-break — and,
+    /// because the collapse below keeps a class's best-ranked member, what makes the stronger of two
+    /// proven-equivalent twins the representative (2026-11-02: the decimal tier's round-4 `rescale`
+    /// and its round-5 re-mint with the tie rule are α-equivalent; address order kept the OLD one,
+    /// so the agent saw the weaker contract). A promise is not a proof — the loop certifies and
+    /// proves the chosen one before applying it.
+    contract: i64,
 }
 
 impl GoalScore {
-    fn key(&self) -> (i64, i64, i64) {
-        (self.dry.score(), self.tags, self.name)
+    fn key(&self) -> (i64, i64, i64, i64) {
+        (self.dry.score(), self.tags, self.name, self.contract)
     }
 }
 
@@ -579,7 +586,12 @@ fn goal_score(
             .max()
             .unwrap_or(0)
     });
-    GoalScore { dry, tags, name }
+    let posts = record
+        .pointer("/signature/refinements")
+        .and_then(|r| r.as_array())
+        .map_or(0, |rs| rs.iter().filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("post")).count());
+    let laws = record.get("properties").and_then(|p| p.as_array()).map_or(0, |ps| ps.len());
+    GoalScore { dry, tags, name, contract: (posts + laws) as i64 }
 }
 
 /// Try to prove a `forall` law: first-order SMT, then induction with lemma discovery (mirrors `prove`).
@@ -726,7 +738,7 @@ pub fn orchestrate_verified_with_maps(
 
     // GOAL RANK: order the surviving candidates by fit against the caller's GOAL — dry-run outcome
     // against the expected result (statically pure + terminating bodies only), then intent-tag
-    // specificity, then name-hint affinity. The sort is stable, so the trust order (or, without a
+    // specificity, then name-hint affinity, then contract strength. The sort is stable, so the trust order (or, without a
     // policy, the discovery order) remains the tie-break: trust decides WHETHER a candidate may be
     // used, the goal decides WHICH to try first. The scores go into the transcript — the choice is
     // auditable, not oracular.
@@ -747,7 +759,7 @@ pub fn orchestrate_verified_with_maps(
                 "scores": ordered.iter().map(|m| {
                     let s = &scores[m];
                     json!({ "function": m, "dry_run": s.dry.label(),
-                            "tag_specificity": s.tags, "name_affinity": s.name })
+                            "tag_specificity": s.tags, "name_affinity": s.name, "contract_strength": s.contract })
                 }).collect::<Vec<J>>(),
             }),
         });
@@ -1187,6 +1199,41 @@ mod tests {
         assert!(pair.contains(&double.as_str()) && pair.contains(&twin_addr.as_str()), "{}", collapse.message);
         assert!(run.confirmed, "the surviving representative applies and re-verifies");
         assert_eq!(run.steps.iter().filter(|s| s.label == "propose").count(), 1, "the class is proposed once");
+    }
+
+    /// The class representative is the twin that PROMISES more (2026-11-02): a re-minted record
+    /// with an added law must be the one kept, even when address order alone would keep the old one
+    /// (the decimal tier's round-5 `rescale`, which added the tie rule, lost to its round-4 twin).
+    #[test]
+    fn collapse_keeps_the_twin_with_the_stronger_contract() {
+        let dir = examples();
+        let mut records = crate::build_record_map(&dir).unwrap();
+        let mut link = crate::build_link_map(&dir).unwrap();
+        let double = double_hash();
+        let strong = format!("fn_{}", "f".repeat(64)); // the LARGEST address: never first by address
+        let mut twin = records[&double].clone();
+        twin["hash"] = json!(strong);
+        let mut props = twin["properties"].as_array().cloned().unwrap_or_default();
+        props.push(json!({ "name": "nonneg_on_nat", "expr": crate::surface::parse_predicate("forall n. n < 0 || self(n) >= 0").unwrap() }));
+        twin["properties"] = json!(props);
+        records.insert(strong.clone(), twin);
+        let mut twin_body = link[&double].clone();
+        twin_body["params"] = json!([{ "name": "k", "type": { "kind": "builtin", "name": "nat" } }]);
+        twin_body["body"]["args"] = json!([{ "kind": "var", "name": "k" }, { "kind": "var", "name": "k" }]);
+        link.insert(strong.clone(), twin_body);
+
+        let run = orchestrate_verified_with_maps(
+            link, records, "arithmetic", vec![json!({ "kind": "nat", "value": 21 })],
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+            "z3", None, &[], None, false,
+            Some(json!({ "kind": "int", "value": 42 })), &[],
+        )
+        .unwrap();
+        let collapse = run.steps.iter().find(|s| s.label == "collapse").expect("a collapse step is recorded");
+        let merged = collapse.message["collapsed"].as_array().unwrap();
+        let pair = merged.iter().find(|m| m["dropped"] == json!(double) || m["kept"] == json!(double)).expect("the twins merged");
+        assert_eq!(pair["kept"], json!(strong), "the stronger contract represents the class: {}", collapse.message);
+        assert!(run.confirmed);
     }
 
     #[test]
