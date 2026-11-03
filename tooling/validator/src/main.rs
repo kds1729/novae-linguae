@@ -2750,15 +2750,22 @@ fn cmd_authorize(
 
 /// Materialize the commons view for the loop: from a local directory, or from a live node by
 /// querying each intent for candidate `fn_…` addresses and walking their hash-verified reference
-/// closure ([`nl_validator::commons_client::maps_from_node`]).
+/// closure ([`nl_validator::commons_client::maps_from_node`]). The third value is the node's
+/// match order — publication order (the query pages by the node's row id) — which the loop uses
+/// only to break a tie between candidates it otherwise scores equal; empty for a local directory.
+#[allow(clippy::type_complexity)]
 fn commons_view(
     records: Option<&PathBuf>,
     node: Option<&str>,
     intents: &[String],
     type_pattern: Option<&serde_json::Value>,
-) -> Result<(std::collections::HashMap<String, serde_json::Value>, std::collections::HashMap<String, serde_json::Value>)> {
+) -> Result<(
+    std::collections::HashMap<String, serde_json::Value>,
+    std::collections::HashMap<String, serde_json::Value>,
+    Vec<String>,
+)> {
     match (records, node) {
-        (Some(dir), None) => Ok((nl_validator::build_link_map(dir)?, nl_validator::build_record_map(dir)?)),
+        (Some(dir), None) => Ok((nl_validator::build_link_map(dir)?, nl_validator::build_record_map(dir)?, Vec::new())),
         (None, Some(url)) => {
             let mut seeds: Vec<String> = Vec::new();
             for intent in intents {
@@ -2798,7 +2805,7 @@ fn commons_view(
                 nl_validator::commons_client::maps_from_node_lenient(url, &seeds, seeds.len() * 8 + 64)?;
             eprintln!("node fetch  {} record(s) + {} linked artifact(s), all hash-verified", record_map.len(),
                       link_map.len().saturating_sub(record_map.len()));
-            Ok((link_map, record_map))
+            Ok((link_map, record_map, seeds))
         }
         _ => anyhow::bail!("supply exactly one of --records / --node"),
     }
@@ -2930,7 +2937,7 @@ fn cmd_orchestrate(
     let argv = args.iter().map(|a| read_value_arg(a)).collect::<Result<Vec<_>>>()?;
     let orch = nl_validator::signing_key_from_seed(seed);
     let resp = nl_validator::signing_key_from_seed(responder_seed);
-    let (link, recs) = commons_view(records, node, intents, None)?;
+    let (link, recs, _) = commons_view(records, node, intents, None)?;
     let run = nl_validator::orchestrate_with_maps(link, recs, intents, argv, &orch, &resp, timestamp)?;
     for step in &run.steps {
         let m = &step.message;
@@ -2992,7 +2999,7 @@ fn cmd_orchestrate_verified(
     // Server-side typed narrowing (commons.md `type_pattern`): the arguments' sorts — and the
     // expected result's, when stated — shape the discovery page itself.
     let pattern = nl_validator::discovery_type_pattern(&argv, exp.as_ref());
-    let (link, recs) = commons_view(records, node, intents, Some(&pattern))?;
+    let (link, recs, published) = commons_view(records, node, intents, Some(&pattern))?;
     // Name each candidate by its first name hint for the compact transcript (`name (fn_1234abcd…)`).
     let names: std::collections::HashMap<String, String> = recs
         .iter()
@@ -3005,7 +3012,7 @@ fn cmd_orchestrate_verified(
             None => format!("{short}…"),
         }
     };
-    let run = nl_validator::orchestrate_verified_with_maps(link, recs, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp, grant_certified)?;
+    let run = nl_validator::orchestrate_verified_with_order(link, recs, &published, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp, grant_certified)?;
 
     for step in &run.steps {
         let m = &step.message;

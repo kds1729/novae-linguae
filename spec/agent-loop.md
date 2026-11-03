@@ -188,6 +188,12 @@ The signals, strongest first, all deterministic and local:
   asked) mark a more specific fit; the exact queried tag is shared by every candidate and carries no
   signal.
 - **Name-hint affinity** — token overlap between the queried intent and the record's `name_hints`.
+- **Contract strength** — declared posts plus laws (a promise; the certify gate checks it).
+- **Documented** — whether the record carries `param_docs`.
+- **Publication order** — with `--node`, the later-published of otherwise-equal candidates first
+  (the node pages its query by row id). The store's word, not proof: it only reorders candidates
+  that tie on every signal above, and it picks the representative of a collapsed class — the
+  decimal tier's round-8 `allocate` over its round-4 twin, whose name hint was false.
 
 The per-candidate scores land in the transcript's `rank` step — the ordering is auditable, not
 oracular. Honest scope: ranking chooses what to *try first*; correctness still comes only from the

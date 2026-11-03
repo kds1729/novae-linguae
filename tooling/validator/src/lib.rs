@@ -114,7 +114,7 @@ pub use respond::{
 
 pub mod orchestrate;
 pub use orchestrate::{
-    discovery_type_pattern, orchestrate, orchestrate_verified, orchestrate_verified_with_maps, orchestrate_with_maps,
+    discovery_type_pattern, orchestrate, orchestrate_verified, orchestrate_verified_with_maps, orchestrate_verified_with_order, orchestrate_with_maps,
     Run, Step, VerifiedRun,
 };
 

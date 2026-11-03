@@ -521,11 +521,17 @@ struct GoalScore {
     /// so the agent saw the weaker contract). A promise is not a proof — the loop certifies and
     /// proves the chosen one before applying it.
     contract: i64,
+    /// Whether the record says what its parameters mean (`param_docs`) — the node search's own
+    /// next tie-break after contract strength, so the loop and the search agree on the version shown.
+    documented: i64,
+    /// Position in the node's publication order (later = newer); -1 when unknown (a local
+    /// directory, or a candidate the query page did not list). The last tie-break.
+    recency: i64,
 }
 
 impl GoalScore {
-    fn key(&self) -> (i64, i64, i64, i64) {
-        (self.dry.score(), self.tags, self.name, self.contract)
+    fn key(&self) -> (i64, i64, i64, i64, i64, i64) {
+        (self.dry.score(), self.tags, self.name, self.contract, self.documented, self.recency)
     }
 }
 
@@ -591,7 +597,8 @@ fn goal_score(
         .and_then(|r| r.as_array())
         .map_or(0, |rs| rs.iter().filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("post")).count());
     let laws = record.get("properties").and_then(|p| p.as_array()).map_or(0, |ps| ps.len());
-    GoalScore { dry, tags, name, contract: (posts + laws) as i64 }
+    let documented = record.get("param_docs").and_then(|d| d.as_array()).is_some_and(|d| !d.is_empty()) as i64;
+    GoalScore { dry, tags, name, contract: (posts + laws) as i64, documented, recency: -1 }
 }
 
 /// Try to prove a `forall` law: first-order SMT, then induction with lemma discovery (mirrors `prove`).
@@ -641,6 +648,36 @@ pub fn orchestrate_verified(
 pub fn orchestrate_verified_with_maps(
     link: std::collections::HashMap<String, J>,
     records: std::collections::HashMap<String, J>,
+    intent: &str,
+    args: Vec<J>,
+    orchestrator: &SigningKey,
+    responder: &SigningKey,
+    solver: &str,
+    policy: Option<&Policy>,
+    attestations: &[J],
+    timestamp: Option<&str>,
+    require_certified: bool,
+    expect: Option<J>,
+    certified_grants: &[String],
+) -> Result<VerifiedRun> {
+    orchestrate_verified_with_order(
+        link, records, &[], intent, args, orchestrator, responder, solver, policy, attestations, timestamp,
+        require_certified, expect, certified_grants,
+    )
+}
+
+/// [`orchestrate_verified_with_maps`] with the node's PUBLICATION ORDER of the candidates (oldest
+/// first — a node pages its query by row id). Used only as the goal rank's LAST tie-break: of two
+/// candidates the loop scores equal, the later-published one is tried first and represents a
+/// collapsed class. Measured need (2026-11-03): the decimal tier's four `allocate` versions promise
+/// the same two posts; address order kept round 4's, whose name hint `largest_remainder` was false
+/// and corrected in round 8. The order is the store's word, not proof — it can only reorder
+/// candidates that already tie on every signal the loop checks itself.
+#[allow(clippy::too_many_arguments)]
+pub fn orchestrate_verified_with_order(
+    link: std::collections::HashMap<String, J>,
+    records: std::collections::HashMap<String, J>,
+    published: &[String],
     intent: &str,
     args: Vec<J>,
     orchestrator: &SigningKey,
@@ -747,7 +784,11 @@ pub fn orchestrate_verified_with_maps(
         set_resolver(link.clone());
         let scores: std::collections::HashMap<String, GoalScore> = ordered
             .iter()
-            .map(|m| (m.clone(), goal_score(&records[m], link.get(m), intent, expect.as_ref(), &args, &records)))
+            .map(|m| {
+                let mut s = goal_score(&records[m], link.get(m), intent, expect.as_ref(), &args, &records);
+                s.recency = published.iter().position(|p| p == m).map_or(-1, |i| i as i64);
+                (m.clone(), s)
+            })
             .collect();
         clear_resolver();
         ordered.sort_by(|a, b| scores[b].key().cmp(&scores[a].key()));
@@ -759,7 +800,8 @@ pub fn orchestrate_verified_with_maps(
                 "scores": ordered.iter().map(|m| {
                     let s = &scores[m];
                     json!({ "function": m, "dry_run": s.dry.label(),
-                            "tag_specificity": s.tags, "name_affinity": s.name, "contract_strength": s.contract })
+                            "tag_specificity": s.tags, "name_affinity": s.name, "contract_strength": s.contract,
+                            "param_docs": s.documented == 1, "publication_order": s.recency })
                 }).collect::<Vec<J>>(),
             }),
         });
@@ -1262,6 +1304,46 @@ mod tests {
         let pair = merged.iter().find(|m| m["dropped"] == json!(double) || m["kept"] == json!(double)).expect("the twins merged");
         assert_eq!(pair["kept"], json!(strong), "the stronger contract represents the class: {}", collapse.message);
         assert!(run.confirmed);
+    }
+
+    #[test]
+    fn of_twins_promising_the_same_the_later_published_represents_the_class() {
+        // The decimal tier's four `allocate` versions promise the same two posts; address order kept
+        // round 4's, whose name hint was false (2026-11-03). Publication order now breaks the tie.
+        let dir = examples();
+        let records = crate::build_record_map(&dir).unwrap();
+        let link = crate::build_link_map(&dir).unwrap();
+        let double = double_hash();
+        let twin = format!("fn_{}", "0".repeat(64)); // the SMALLEST address: first by address
+        let mut with_twin = (records.clone(), link.clone());
+        let mut rec = records[&double].clone();
+        rec["hash"] = json!(twin);
+        with_twin.0.insert(twin.clone(), rec);
+        let mut body = link[&double].clone();
+        body["params"] = json!([{ "name": "k", "type": { "kind": "builtin", "name": "nat" } }]);
+        body["body"]["args"] = json!([{ "kind": "var", "name": "k" }, { "kind": "var", "name": "k" }]);
+        with_twin.1.insert(twin.clone(), body);
+
+        let kept = |published: &[String]| {
+            let run = orchestrate_verified_with_order(
+                with_twin.1.clone(), with_twin.0.clone(), published, "arithmetic",
+                vec![json!({ "kind": "nat", "value": 21 })],
+                &signing_key_from_seed("orch"), &signing_key_from_seed("resp"),
+                "z3", None, &[], None, false, Some(json!({ "kind": "int", "value": 42 })), &[],
+            )
+            .unwrap();
+            assert!(run.confirmed);
+            let collapse = run.steps.iter().find(|s| s.label == "collapse").expect("a collapse step is recorded");
+            collapse.message["collapsed"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["dropped"] == json!(twin) || m["dropped"] == json!(double))
+                .expect("the twins merged")["kept"]
+                .clone()
+        };
+        assert_eq!(kept(&[twin.clone(), double.clone()]), json!(double), "published later, kept");
+        assert_eq!(kept(&[double.clone(), twin.clone()]), json!(twin), "and the other way round");
     }
 
     #[test]
