@@ -511,6 +511,49 @@ class CommonsProtocolTests(TestCase):
                                 content_type="application/json")
         self.assertIn(rec["hash"], resp.json()["results"])
 
+    def _filler_then(self, name_hint, tag):
+        # Five unrelated rows, then the one the query is after — past a scan cap of 3.
+        for i in range(5):
+            Record.objects.create(hash=f"msg_{i:064d}", kind="message", schema_version="0.1.0", raw={})
+        target = "fn_" + "f" * 64
+        Record.objects.create(hash=target, kind="function-record", schema_version="0.2.0", raw={},
+                              name_hints=[name_hint], intent_tags=[tag])
+        return target
+
+    def test_name_hint_prefix_finds_records_past_the_scan_cap(self):
+        # Arca, 2026-11-02: `{"name_hint_prefix": "rescale"}` → `[]`, `complete: false` — the prefix
+        # was checked only over the first `_DB_SCAN_CAP` rows by id; it now narrows in the database.
+        target = self._filler_then("rescale_half_even", "money")
+        with mock.patch.object(query, "_DB_SCAN_CAP", 3):
+            body = self.client.post("/v0/query", data=json.dumps({"name_hint_prefix": "rescale"}),
+                                    content_type="application/json").json()
+            ranked = self.client.post("/v0/query?rank=relevance",
+                                      data=json.dumps({"name_hint_prefix": "rescale"}),
+                                      content_type="application/json").json()
+            literal = self.client.post("/v0/query", data=json.dumps({"name_hint_prefix": "rescale%"}),
+                                       content_type="application/json").json()
+        self.assertEqual(body["results"], [target])
+        self.assertTrue(body["complete"])
+        self.assertEqual(ranked["results"], [target])
+        self.assertEqual(literal["results"], [])  # `%` is a literal character, not a wildcard
+
+    def test_a_truncated_scan_that_matched_nothing_still_advances_the_cursor(self):
+        # Before: an empty page handed back the caller's own cursor, so paging never got past the rows.
+        target = self._filler_then("allocate", "money-split")
+        flt = {"intent_tags": {"any": ["money-split"]}}
+        results, cursor, pages = [], None, 0
+        with mock.patch.object(query, "_DB_SCAN_CAP", 3):
+            while pages < 5:
+                pages += 1
+                body = self.client.post("/v0/query", data=json.dumps({**flt, "cursor": cursor}),
+                                        content_type="application/json").json()
+                results += body["results"]
+                if body["complete"]:
+                    break
+                self.assertNotEqual(body["cursor"], cursor)
+                cursor = body["cursor"]
+        self.assertEqual(results, [target])
+
     def test_query_non_matching_filter_excludes(self):
         rec = _load("map.json")
         self._publish(rec)

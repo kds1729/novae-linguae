@@ -175,7 +175,27 @@ def _scalar_qs(flt):
         for field in ("effects", "capabilities", "intent_tags"):
             if flt.get(field):
                 qs = _pushdown_array(qs, field, flt[field])
+    if isinstance(flt.get("name_hint_prefix"), str) and flt["name_hint_prefix"]:
+        qs = _pushdown_name_prefix(qs, flt["name_hint_prefix"])
     return qs
+
+
+def _pushdown_name_prefix(qs, prefix):
+    """Narrow `qs` to rows with some name hint starting with `prefix`, in the database (both vendors).
+
+    Without it the prefix was checked only in the Python pass over the first `_DB_SCAN_CAP` rows by id,
+    so on a node holding more rows than that a prefix matching only later records found nothing
+    (Arca, 2026-11-02: `{"name_hint_prefix": "rescale"}` → `[]`, `complete: false`). SQLite's LIKE folds
+    ASCII case, so there it only over-approximates; `_array_ok` still has the final say."""
+    pattern = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    table = Record._meta.db_table
+    if connection.vendor == "postgresql":
+        clause = (f"EXISTS (SELECT 1 FROM jsonb_array_elements_text({table}.name_hints) AS n "
+                  f"WHERE n LIKE %s ESCAPE '\\')")
+    else:
+        clause = (f"EXISTS (SELECT 1 FROM json_each({table}.name_hints) AS n "
+                  f"WHERE n.value LIKE %s ESCAPE '\\')")
+    return qs.extra(where=[clause], params=[pattern])
 
 
 def candidate_records(flt, cap=_DB_SCAN_CAP):
@@ -424,7 +444,13 @@ def run_query(flt, rank=False, budget=False, collapse=False):
         page, report = _pack_budget(page, len(matched), token_budget)
 
     hashes = [r.hash for r in page]
-    next_cursor = str(page[-1].id) if page else cursor
+    # A page cut short by `limit`/budget resumes after its last row; otherwise every scanned row has been
+    # judged, so resume after the last SCANNED one — else a truncated scan that matched nothing hands
+    # back the caller's own cursor and paging never advances.
+    if len(page) < len(matched):
+        next_cursor = str(page[-1].id) if page else cursor
+    else:
+        next_cursor = str(scanned[-1].id) if scanned else cursor
     # "complete" iff this scan reached the end of the corpus (not truncated by the scan cap) and
     # we returned every matched row (so there is nothing obvious left — a budget-trimmed page is not).
     complete = len(scanned) < _DB_SCAN_CAP and len(page) == len(matched)
