@@ -11,6 +11,7 @@ Pagination is by the `id` sequence cursor.
 import functools
 import json
 import operator
+import re
 
 from django.db import connection
 from django.db.models import Q
@@ -244,15 +245,16 @@ def record_summary(record):
     s = record.surface or {}
     if s.get("type"):
         out["type_surface"] = s["type"]
-    if s.get("contract"):
-        out["contract"] = s["contract"]
-    if s.get("laws"):
-        out["laws"] = s["laws"]
+    refs = {}
     if s.get("addresses"):
         names = dict(Record.objects.filter(hash__in=s["addresses"]).values_list("hash", "name_hints"))
         refs = {a: names[a][0] for a in s["addresses"] if names.get(a)}
         if refs:
             out["refs"] = refs
+    if s.get("contract"):
+        out["contract"] = [_name_addresses(c, refs) for c in s["contract"]]
+    if s.get("laws"):
+        out["laws"] = [_name_addresses(law, refs) for law in s["laws"]]
     if record.kind == "function-record":
         n = certification_count(record.hash)
         if n:
@@ -272,6 +274,23 @@ def record_summary(record):
         if isinstance(docs, list) and docs:
             out["param_docs"] = docs
     return out
+
+
+def _name_addresses(text, refs):
+    """`text` with each address in `refs` written as its name: `post: list_sum(result) == t` instead of a
+    64-hex `fn_…` (stranger 13: long contract strings it had to decode through `refs`). A name shared
+    by two refs, or already present in the text (a parameter, a local), stays checkable as
+    `name@fn_1234abcd`. `refs` still maps every full address to its name; the stored surface is
+    untouched — names are presentation, resolved at serve time."""
+    counts = {}
+    for name in refs.values():
+        counts[name] = counts.get(name, 0) + 1
+    for addr, name in refs.items():
+        if addr not in text:
+            continue
+        clash = counts[name] > 1 or re.search(rf"(?<![\w@]){re.escape(name)}(?!\w)", text)
+        text = text.replace(addr, f"{name}@{addr[:11]}" if clash else name)
+    return text
 
 
 def certification_count(address):

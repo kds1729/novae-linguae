@@ -328,7 +328,10 @@ the finalists. The summary is derived from record fields (not heuristic), and ea
 fields that decide BETWEEN similar candidates (2026-11-02), in canonical surface syntax rendered on
 ingest by the validator's `unparse-*`: `type_surface`, `contract` (each refinement as
 `"<kind>: <predicate>"`), `laws` (each property as `"<name>: <predicate>"`), `refs` (the first
-name hint of each function the contract and laws apply by address), `params` (the body's
+name hint of each function the contract and laws apply by address; in the served `contract`/`laws`
+strings each such address is written as that name, or `name@fn_<8 hex>` when two refs share it or
+the name already occurs in the predicate — presentation at serve time, the stored surface keeps the
+addresses), `params` (the body's
 parameter names, in order, when the node holds the body), `param_docs` (the record's own one line
 per parameter — meaning and unit, the author's testimony; function-record v0.2) and `certifications` (how many signed
 certification records about it the node holds — testimony to check under the reader's policy,

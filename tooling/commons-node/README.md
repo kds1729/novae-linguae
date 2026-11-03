@@ -330,7 +330,7 @@ signature and bundle hash are the real checks.
 ## Tests
 
 ```bash
-python3 manage.py test commons      # 181 tests (180 on SQLite + 1 Postgres-only, auto-skipped)
+python3 manage.py test commons      # 182 tests (181 on SQLite + 1 Postgres-only, auto-skipped)
 ```
 
 Covers publish/idempotency, resolve, `HEAD` exists, `404` for absent, message

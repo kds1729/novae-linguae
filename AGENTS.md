@@ -31,10 +31,10 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    `versions`, and the hit shown is the version with the strongest contract.
 2. Choose by the summary's `contract` (pre/post, surface syntax), `laws`, `params` (argument
    names, in order), `param_docs` (what each argument means, and its unit — the author's words)
-   and `type_surface`; `refs` names the functions a contract applies by address.
+   and `type_surface`. A function the contract applies is written by name (`name@fn_1234abcd`
+   where a bare name would be ambiguous); `refs` maps each full address to that name.
    The contract is what separates candidates with similar names — e.g. `allocate`'s
-   `post: fn_b99a…(result) == total` with `refs` naming `fn_b99a…` as `list_sum` (the parts sum to
-   the total) versus a plain `divide`.
+   `post: list_sum(result) == total` (the parts sum to the total) versus a plain `divide`.
    `certifications` counts signed certificates about the function; whose they are is your
    policy's question (`nl-validator certified`), and `--require-certified` re-certifies locally anyway.
 3. Apply it with the verified loop using a tag from its `intent_tags`:

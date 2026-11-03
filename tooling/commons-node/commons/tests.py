@@ -624,6 +624,7 @@ class CommonsProtocolTests(TestCase):
                                 content_type="application/json")
         summ = next(s for s in resp.json()["results"] if s["hash"] == fn)
         self.assertEqual(summ["refs"], {callee: "list_sum"})
+        self.assertEqual(summ["contract"], ["post: list_sum(result) == t"])  # named, not 64 hex
         self.assertEqual(summ["certifications"], 1)
         self.assertEqual(summ["params"], ["t", "ws"])
         self.assertEqual(summ["param_docs"], ["the amount to split", "one weight per part"])
@@ -633,6 +634,16 @@ class CommonsProtocolTests(TestCase):
                                   data=json.dumps({"intent_tags": {"any": ["money"]}}),
                                   content_type="application/json").json()["results"]
         self.assertLess(ranked.index(fn), ranked.index(other))
+
+    def test_contract_names_keep_a_short_address_where_a_bare_name_would_be_ambiguous(self):
+        a, b = "fn_" + "1" * 64, "fn_" + "2" * 64
+        self.assertEqual(query._name_addresses(f"post: {a}(result) == {b}(xs)", {a: "f", b: "f"}),
+                         "post: f@fn_11111111(result) == f@fn_22222222(xs)")
+        # the name is already a variable in the text — a bare rename would capture it
+        self.assertEqual(query._name_addresses(f"post: {a}(total) == total", {a: "total"}),
+                         "post: total@fn_11111111(total) == total")
+        self.assertEqual(query._name_addresses(f"law: {a}(x) == {b}(x)", {a: "neg"}),
+                         f"law: neg(x) == {b}(x)")  # an address the node can't name stays as-is
 
     def test_query_rank_by_intent_fit(self):
         # Both records satisfy the filter; the one carrying MORE of the requested intent tags ranks first.
