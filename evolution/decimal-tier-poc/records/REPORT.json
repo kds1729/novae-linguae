@@ -426,15 +426,18 @@
   },
   "properties_generative": [
    "length: CONSISTENT  |  generative: HELD (394 cases; 6 skipped: division by zero at t = 22, ws = {\"elems\":[{\"kind\":\"int\",\"value\":25},{\"kind\":\"int\",\"value\":10},{\"kind\":\"int\",\"value\":-25},{\"kind\":\"int\",\"value\":8},{\"kind\":\"i\u2026)",
-   "telescopes: CONSISTENT  |  generative: HELD (400 cases)"
+   "telescopes: CONSISTENT  |  generative: HELD (400 cases)",
+   "quota: UNVERIFIABLE  |  generative: HELD (400 cases)"
   ],
   "properties_wide": [
    "length: CONSISTENT  |  generative: HELD (195 cases; 5 skipped: division by zero at t = -46093260328757, ws = {\"elems\":[{\"kind\":\"int\",\"value\":20638592152399},{\"kind\":\"int\",\"value\":13795708},{\"kind\":\"int\",\"value\":284176386\u2026)",
-   "telescopes: CONSISTENT  |  generative: HELD (200 cases)"
+   "telescopes: CONSISTENT  |  generative: HELD (200 cases)",
+   "quota: UNVERIFIABLE  |  generative: HELD (200 cases)"
   ],
   "prove": [
-   "length: PROVED       by numeric induction on `ws` (strong induction over the measure; unsat)",
-   "telescopes: PROVED       by numeric induction on `ws` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 4 of 10 premises verified separately, the final query over uninterpreted mod/div]"
+   "length: PROVED       by structural induction on `ws` (base + step both unsat)",
+   "telescopes: PROVED       by numeric induction on `ws` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 4 of 10 premises verified separately, the final query over uninterpreted mod/div]",
+   "quota: PROVED       by structural induction on `xs` (base + step both unsat)"
   ]
  },
  {

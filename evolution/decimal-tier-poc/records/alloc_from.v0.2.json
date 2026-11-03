@@ -95,7 +95,7 @@
    }
   }
  ],
- "hash": "fn_612d40f365e68bb2ffb1ded08044eee515b1bac9a22c9c03b0ed312f820abe7c",
+ "hash": "fn_3f8cf625cb9416a6951e7527a4d54dbf353753f522adcd71a247152f3c09768a",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -303,6 +303,123 @@
     ]
    },
    "name": "telescopes"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "w"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "m"
+                  },
+                  {
+                   "args": [
+                    {
+                     "kind": "var",
+                     "name": "x"
+                    },
+                    {
+                     "kind": "var",
+                     "name": "xs"
+                    }
+                   ],
+                   "kind": "app",
+                   "op": "cons"
+                  },
+                  {
+                   "kind": "var",
+                   "name": "c"
+                  },
+                  {
+                   "kind": "var",
+                   "name": "w"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "self"
+                }
+               ],
+               "kind": "app",
+               "op": "head"
+              },
+              {
+               "kind": "var",
+               "name": "w"
+              }
+             ],
+             "kind": "app",
+             "op": "mul"
+            },
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "m"
+              },
+              {
+               "kind": "var",
+               "name": "x"
+              }
+             ],
+             "kind": "app",
+             "op": "mul"
+            }
+           ],
+           "kind": "app",
+           "op": "sub"
+          }
+         ],
+         "kind": "app",
+         "op": "abs"
+        },
+        {
+         "kind": "var",
+         "name": "w"
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "m",
+     "x",
+     "xs",
+     "c",
+     "w"
+    ]
+   },
+   "name": "quota"
   }
  ],
  "schema_version": "0.2.0",

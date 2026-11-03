@@ -109,7 +109,8 @@ PARAM_DOCS = {
     "alloc_from": ["the total being split", "the weights still to allocate",
                    "the weight already allocated before these", "the sum of all weights, at least 1"],
     "allocate": ["the total to split, as an integer in minor units",
-                 "one non-negative weight per part (equal weights split evenly); their sum at least 1"],
+                 "one non-negative weight per part, their sum at least 1; leftover units fall where "
+                 "the running share crosses a whole unit (10 over six: 1,2,2,1,2,2)"],
     "format_amount": ["the amount, as an integer in units of 10^-k", "decimal places to render (2 = cents)"],
     "parse_amount": ["decimal text such as \"-12.05\" (no exponent, no thousands separators)",
                      "decimal places of the integer result; text with more places is refused (None)"],
@@ -398,7 +399,11 @@ def main():
           refinements=[("pre", "w >= 1")],
           props=[("length", "forall t ws c w. length(self(t, ws, c, w)) == length(ws)"),
                  # The telescoping sum — the invariant the whole allocation rests on.
-                 ("telescopes", "forall t ws c w. w < 1 || {list_sum}(self(t, ws, c, w)) == (t * (c + {list_sum}(ws))) / w - (t * c) / w")],
+                 ("telescopes", "forall t ws c w. w < 1 || {list_sum}(self(t, ws, c, w)) == (t * (c + {list_sum}(ws))) / w - (t * c) / w"),
+                 # THE QUOTA: each part is within one unit of its exact share t·x/w — so the
+                 # rounding never moves a whole unit from one part to another. Every part is the
+                 # head of some call (the one at its running weight c), so this covers them all.
+                 ("quota", "forall m x xs c w. w < 1 || abs(head(self(m, cons(x, xs), c, w)) * w - m * x) < w")],
           hints=["allocate_cumulative"], complexity="O(n)")
     gauntlet("alloc_from", prove)
 
@@ -407,12 +412,16 @@ def main():
           [ex([ilit(100), ilist(1, 1, 1)], ilist(*alloc_ref(100, [1, 1, 1]))),
            ex([ilit(1000), ilist(70, 20, 10)], ilist(*alloc_ref(1000, [70, 20, 10]))),
            ex([ilit(-1001), ilist(1, 1)], ilist(*alloc_ref(-1001, [1, 1]))),
-           ex([ilit(5), ilist(3, 0, 7)], ilist(*alloc_ref(5, [3, 0, 7])))],
+           ex([ilit(5), ilist(3, 0, 7)], ilist(*alloc_ref(5, [3, 0, 7]))),
+           # where the leftover units go: cumulative rounding, not largest remainder
+           ex([ilit(10), ilist(1, 1, 1, 1, 1, 1)], ilist(1, 2, 2, 1, 2, 2))],
           refinements=[("pre", "{list_sum}(weights) >= 1"),
                        ("post", "length(result) == length(weights)"),
                        # NO LOST CENTS: the parts sum to the total, exactly.
                        ("post", "{list_sum}(result) == total")],
-          hints=["split_proportionally", "allocate_money", "largest_remainder"], complexity="O(n)")
+          # NOT "largest_remainder" (rounds 1–7 said so): that is Hamilton's method, a different
+          # placement — 10 over six equal weights is [2,2,2,2,1,1] there, [1,2,2,1,2,2] here.
+          hints=["split_proportionally", "allocate_money", "cumulative_rounding"], complexity="O(n)")
     gauntlet("allocate", prove)
 
     # 6. Text: render minor units as a decimal string and parse one back — the boundary where an

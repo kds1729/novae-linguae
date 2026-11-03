@@ -11,7 +11,7 @@
 | `percent_bps` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND | SOUND | SOUND | whole=EXHAUSTIVE | whole=PROVED |
 | `fx_convert` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND | SOUND | SOUND | — | — |
 | `list_sum` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | empty=EXHAUSTIVE; cons=HELD; append=HELD | empty=PROVED; cons=PROVED; append=PROVED |
-| `alloc_from` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | length=HELD; telescopes=HELD | length=PROVED; telescopes=PROVED |
+| `alloc_from` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | length=HELD; telescopes=HELD; quota=HELD | length=PROVED; telescopes=PROVED; quota=PROVED |
 | `allocate` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND | SOUND | SOUND | — | — |
 | `format_amount` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `parse_amount` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |

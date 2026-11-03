@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_d3f3f0418b7fa4d8075061cdb7f432ea00c094ad7ba0ad665a6256306f8e1d82",
+ "body_hash": "expr_c5c41f67c9a960752cf4394e7d3f0ab1e34277a41db4e8fb5bc63cbf481877fe",
  "derived_from": null,
  "examples": [
   {
@@ -161,9 +161,75 @@
     ],
     "kind": "list"
    }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 10
+    },
+    {
+     "elems": [
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 1
+      },
+      {
+       "kind": "int",
+       "value": 1
+      }
+     ],
+     "kind": "list"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 2
+     },
+     {
+      "kind": "int",
+      "value": 2
+     },
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 2
+     },
+     {
+      "kind": "int",
+      "value": 2
+     }
+    ],
+    "kind": "list"
+   }
   }
  ],
- "hash": "fn_b23dba911210815316b2f38e6c49af61f4a2e50255dd1504d2ac1f6c497d92ee",
+ "hash": "fn_e6d196488c1671351f607a0f2bef3dd2c0144d2842d24643b43d8d6a8609aeb5",
  "intent_tags": [
   "arithmetic/decimal",
   "math/decimal",
@@ -173,11 +239,11 @@
   "allocate",
   "split_proportionally",
   "allocate_money",
-  "largest_remainder"
+  "cumulative_rounding"
  ],
  "param_docs": [
   "the total to split, as an integer in minor units",
-  "one non-negative weight per part (equal weights split evenly); their sum at least 1"
+  "one non-negative weight per part, their sum at least 1; leftover units fall where the running share crosses a whole unit (10 over six: 1,2,2,1,2,2)"
  ],
  "properties": [],
  "schema_version": "0.2.0",
