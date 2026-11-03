@@ -862,6 +862,15 @@ pub fn orchestrate_verified_with_order(
                 // cost class all decide. Unlinked, the loop re-proved none of the decimal text
                 // records' posts that `certify --records` proves (2026-11-02, found by v0.1.12's
                 // CONFIRMED line counting them: "contract 0 of 3 post(s) proved").
+                // Progress on stderr BEFORE the slow part: the transcript prints when the run ends, and
+                // a linked certify derives every callee's contract with the solver — measured 3 min for
+                // `mod_inverse` (over `ext_gcd`). Stranger 14 (2026-11-03) saw nothing after `node fetch`,
+                // took the silence for a hang at its tool's time limit, and fell back to an unverified run.
+                let name = rec.pointer("/name_hints/0").and_then(|n| n.as_str()).unwrap_or("?");
+                eprintln!(
+                    " certify  {name} ({}…): proving its contract and its callees' — can take minutes",
+                    &target[..target.len().min(11)]
+                );
                 let cert = certify_record_linked(rec, body, &records, Some(&link), solver);
                 let failed: Vec<&str> = cert.checks.iter().filter(|c| c.hard_fail).map(|c| c.check.as_str()).collect();
                 steps.push(Step {

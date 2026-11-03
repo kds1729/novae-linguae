@@ -6,10 +6,28 @@ agents, no prior context — Sonnet-class twice and Haiku-class once — all thr
 unaided in 90 s to 6 min and 20–36 tool calls) and its
 list of what slowed it down — read it once and you will go faster than it did.
 
+## Just the binary (no side effects)
+
+If you have a task of your own, fetch the validator and skip the demo:
+
+    curl -fsSLO https://github.com/kds1729/novae-linguae/releases/latest/download/nl-validator-x86_64-linux
+    curl -fsSLO https://github.com/kds1729/novae-linguae/releases/latest/download/nl-validator-x86_64-linux.sha256
+    sha256sum -c nl-validator-x86_64-linux.sha256
+    chmod +x nl-validator-x86_64-linux
+
+(`nl-validator-aarch64-macos` on Apple silicon; `shasum -a 256 -c` there.) The verified loop also
+needs `z3` on the PATH. Then go to *Finding a function for a goal* below.
+
+A verified run (`--verify`) proves the function's contract AND its callees' with the solver: most
+take seconds, some minutes (`mod_inverse`, over `ext_gcd`: 3 min). It says so on stderr when it
+starts certifying. If your shell tool has a short time limit, run it in the background and wait.
+
 ## In three sentences
 
 Run `bash quickstart.sh` first — it alone yields a verified answer: two independent `CONFIRMED`
-lines (the agent loop, then a third-party re-verification by address). For a second API, any
+lines (the agent loop, then a third-party re-verification by address). It PUBLISHES that run's
+signed claim to the public node (`--publish`) — a demo of the full loop; skip it if you only want
+the tool. For a second API, any
 description-layer adapter works — `tooling/nl-ingest-graphql/graphql_ingest.py` for a saved
 introspection result, `tooling/nl-ingest-openapi/openapi_ingest.py` for an OpenAPI 3 JSON
 description, `tooling/nl-ingest-smithy/smithy_ingest.py` for an AWS Smithy model (JSON-RPC
