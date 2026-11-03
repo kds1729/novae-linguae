@@ -148,6 +148,10 @@ pub struct VerifiedRun {
     /// `(property name, proved?)` for the discovered function's first `forall` property (`None` if it
     /// has none, or if the run aborted before the proof step).
     pub property: Option<(String, bool)>,
+    /// `(name, proved?)` for each FURTHER `forall` property, in declaration order. Reported, not
+    /// gating: until v0.1.16 only the first law was tried, and `isqrt`'s proved `floor_bounds`
+    /// (its second law — the "floor" half of the answer) never reached the transcript (stranger 15).
+    pub other_laws: Vec<(String, bool)>,
     /// Whether the applied result's claim re-verified by re-running it.
     pub confirmed: bool,
 }
@@ -727,7 +731,7 @@ pub fn orchestrate_verified_with_order(
         })
         .collect();
     if compatible.is_empty() {
-        return Ok(VerifiedRun { steps, trusted: None, certified: None, property: None, confirmed: false });
+        return Ok(VerifiedRun { steps, trusted: None, certified: None, property: None, other_laws: Vec::new(), confirmed: false });
     }
 
     // The attestation graph over the supplied attestations — including any signed CERTIFICATION records,
@@ -766,7 +770,7 @@ pub fn orchestrate_verified_with_order(
                         message: json!({ "chosen": null, "trusted": false,
                             "reason": "no discovered function is trusted under the policy", "candidates": candidates }),
                     });
-                    return Ok(VerifiedRun { steps, trusted: Some(false), certified: None, property: None, confirmed: false });
+                    return Ok(VerifiedRun { steps, trusted: Some(false), certified: None, property: None, other_laws: Vec::new(), confirmed: false });
                 }
             }
         }
@@ -914,7 +918,7 @@ pub fn orchestrate_verified_with_order(
 
         if require_certified && certified != Some(true) {
             if last {
-                return Ok(VerifiedRun { steps, trusted, certified, property: None, confirmed: false });
+                return Ok(VerifiedRun { steps, trusted, certified, property: None, other_laws: Vec::new(), confirmed: false });
             }
             steps.push(Step {
                 label: "retry".into(),
@@ -923,32 +927,47 @@ pub fn orchestrate_verified_with_order(
             continue;
         }
 
-        // PROVE the discovered function's own declared property — verify the *piece*, not just one result.
-        let property = records.get(&target).and_then(|r| r.get("properties")).and_then(|p| p.as_array()).and_then(|ps| {
-            ps.iter().find(|p| p.pointer("/expr/kind").and_then(|k| k.as_str()) == Some("forall")).map(|p| {
-                let name = p.get("name").and_then(|n| n.as_str()).unwrap_or("<unnamed>").to_string();
-                let expr = p.get("expr").unwrap();
-                // Unlinked first (cheap); else the law as the LINKED derivation proves it — the
-                // function's contract derived under its callees' certified contracts, the same
-                // derivation the module builder's `prove --records` and every caller rely on. Until
-                // 2026-11-02 only the unlinked attempt ran: a law resting on a callee's contract
-                // (`rescale`'s roundtrip on `div_half_even`'s exactness, `apply_rate`'s unit rate)
-                // saw the callee as a bare symbol and the loop reported NOT-PROVEN (stranger 10).
-                let (proved, via) = if prove_law(expr, link.get(&target), solver) {
-                    (true, "unlinked")
-                } else {
-                    let linked = crate::LinkedView::new(&records, &link, solver)
-                        .contract(&target)
-                        .is_some_and(|c| c.laws.contains(expr));
-                    (linked, "linked contract derivation")
-                };
-                steps.push(Step {
-                    label: "prove".into(),
-                    message: json!({ "function": target, "property": name, "proved": proved, "via": via }),
-                });
-                (name, proved)
+        // PROVE the discovered function's own declared properties — verify the *piece*, not just one
+        // result. Every `forall` law is tried; the first gates the run (as it always has), the rest
+        // are reported.
+        let laws: Vec<(String, J)> = records
+            .get(&target)
+            .and_then(|r| r.get("properties"))
+            .and_then(|p| p.as_array())
+            .map(|ps| {
+                ps.iter()
+                    .filter(|p| p.pointer("/expr/kind").and_then(|k| k.as_str()) == Some("forall"))
+                    .map(|p| (p.get("name").and_then(|n| n.as_str()).unwrap_or("<unnamed>").to_string(), p["expr"].clone()))
+                    .collect()
             })
-        });
+            .unwrap_or_default();
+        // The linked derivation runs at most once per candidate, whichever laws need it.
+        let mut linked_laws: Option<Vec<J>> = None;
+        let mut proved_laws: Vec<(String, bool)> = Vec::new();
+        for (name, expr) in &laws {
+            // Unlinked first (cheap); else the law as the LINKED derivation proves it — the
+            // function's contract derived under its callees' certified contracts, the same
+            // derivation the module builder's `prove --records` and every caller rely on. Until
+            // 2026-11-02 only the unlinked attempt ran: a law resting on a callee's contract
+            // (`rescale`'s roundtrip on `div_half_even`'s exactness, `apply_rate`'s unit rate)
+            // saw the callee as a bare symbol and the loop reported NOT-PROVEN (stranger 10).
+            let (proved, via) = if prove_law(expr, link.get(&target), solver) {
+                (true, "unlinked")
+            } else {
+                let derived = linked_laws.get_or_insert_with(|| {
+                    crate::LinkedView::new(&records, &link, solver).contract(&target).map(|c| c.laws).unwrap_or_default()
+                });
+                (derived.contains(expr), "linked contract derivation")
+            };
+            steps.push(Step {
+                label: "prove".into(),
+                message: json!({ "function": target, "property": name, "proved": proved, "via": via }),
+            });
+            proved_laws.push((name.clone(), proved));
+        }
+        let mut proved_laws = proved_laws.into_iter();
+        let property = proved_laws.next();
+        let other_laws: Vec<(String, bool)> = proved_laws.collect();
 
         // APPLY: propose → commit → assert. A signed `reject` (a policy answer — e.g. "effect not
         // granted") advances to the next candidate rather than ending the run.
@@ -964,7 +983,7 @@ pub fn orchestrate_verified_with_order(
         steps.push(Step { label: kind.clone(), message: commit.clone() });
         if kind != "commit" {
             if last {
-                return Ok(VerifiedRun { steps, trusted, certified, property, confirmed: false });
+                return Ok(VerifiedRun { steps, trusted, certified, property, other_laws, confirmed: false });
             }
             steps.push(Step {
                 label: "retry".into(),
@@ -985,7 +1004,7 @@ pub fn orchestrate_verified_with_order(
         // RE-VERIFY the result by re-running the claim (trust nothing — principle 3).
         let confirmed = verify_claim(&assert, link.clone()).unwrap_or(false);
         steps.push(Step { label: "assert".into(), message: assert });
-        return Ok(VerifiedRun { steps, trusted, certified, property, confirmed });
+        return Ok(VerifiedRun { steps, trusted, certified, property, other_laws, confirmed });
     }
     // `compatible` was non-empty, so the loop always returns from its last iteration.
     unreachable!("candidate loop returns on its last attempt")
@@ -1440,6 +1459,8 @@ mod tests {
         assert_eq!(run.trusted, Some(true));
         assert_eq!(run.certified, Some(true), "the chosen function certified (require_certified passed)");
         assert!(run.property.map(|(_, p)| p).unwrap_or(false), "the chosen function's property proved");
+        // Every law is tried, not only the first (stranger 15): `add` declares two.
+        assert_eq!(run.other_laws, vec![("right_identity".to_string(), true)], "the second law is proved and reported");
         assert!(run.confirmed, "add(2,3) = 5 re-verified");
         let chosen = run.steps.iter().find(|s| s.label == "trust").unwrap().message.get("chosen").unwrap().as_str().unwrap().to_string();
         assert_eq!(chosen, add_hash(), "the arity-2 function was selected, not the arity-1 double");

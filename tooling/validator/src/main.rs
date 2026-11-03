@@ -2898,7 +2898,7 @@ fn post_tally(certify_step: &serde_json::Value) -> (usize, usize) {
 /// What a CONFIRMED verified run actually vouches for. Stranger 13 read "no property declared to
 /// prove" on a function whose three contract posts were all proved at certify time — the old line
 /// counted laws only.
-fn confirmed_summary(steps: &[nl_validator::Step], certified: Option<bool>, law: Option<&str>) -> String {
+fn confirmed_summary(steps: &[nl_validator::Step], certified: Option<bool>, law: Option<&str>, others: &[(String, bool)]) -> String {
     let mut parts = vec!["trusted".to_string()];
     match certified {
         Some(true) => parts.push("certified".into()),
@@ -2909,10 +2909,18 @@ fn confirmed_summary(steps: &[nl_validator::Step], certified: Option<bool>, law:
     if total > 0 {
         parts.push(if sound == total { format!("contract proved ({total} post(s))") } else { format!("contract {sound} of {total} post(s) proved") });
     }
-    match law {
-        Some(name) => parts.push(format!("law `{name}` proved")),
-        None if total == 0 => parts.push("no contract or law declared".into()),
-        None => {}
+    // Every law the loop tried: proved ones named together, any it could not prove named apart.
+    let mut proved: Vec<String> = law.map(|n| format!("`{n}`")).into_iter().collect();
+    proved.extend(others.iter().filter(|(_, p)| *p).map(|(n, _)| format!("`{n}`")));
+    let open: Vec<String> = others.iter().filter(|(_, p)| !*p).map(|(n, _)| format!("`{n}`")).collect();
+    match proved.len() {
+        0 if total == 0 && open.is_empty() => parts.push("no contract or law declared".into()),
+        0 => {}
+        1 => parts.push(format!("law {} proved", proved[0])),
+        _ => parts.push(format!("laws {} proved", proved.join(", "))),
+    }
+    if !open.is_empty() {
+        parts.push(format!("{} not proved here", open.join(", ")));
     }
     parts.push("applied".into());
     format!("{}, and re-verified", parts.join(", "))
@@ -3095,7 +3103,7 @@ fn cmd_orchestrate_verified(
     let trust_ok = run.trusted != Some(false);
     let certify_ok = !require_certified || run.certified == Some(true);
     if run.confirmed && property_ok && trust_ok && certify_ok {
-        println!("CONFIRMED  {}", confirmed_summary(&run.steps, run.certified, run.property.as_ref().map(|(n, _)| n.as_str())));
+        println!("CONFIRMED  {}", confirmed_summary(&run.steps, run.certified, run.property.as_ref().map(|(n, _)| n.as_str()), &run.other_laws));
         if let Some(r) = final_result_surface(&run.steps) {
             println!("result: {r}");
         }
@@ -3527,13 +3535,24 @@ mod value_arg_tests {
     #[test]
     fn confirmed_names_the_proved_contract_and_law() {
         let all = [certify_step(&["SOUND", "SOUND", "SOUND"])];
-        assert_eq!(confirmed_summary(&all, Some(true), None),
+        assert_eq!(confirmed_summary(&all, Some(true), None, &[]),
                    "trusted, certified, contract proved (3 post(s)), applied, and re-verified");
         let partial = [certify_step(&["SOUND", "UNVERIFIABLE"])];
-        assert_eq!(confirmed_summary(&partial, Some(true), Some("roundtrip")),
+        assert_eq!(confirmed_summary(&partial, Some(true), Some("roundtrip"), &[]),
                    "trusted, certified, contract 1 of 2 post(s) proved, law `roundtrip` proved, applied, and re-verified");
-        assert_eq!(confirmed_summary(&[certify_step(&[])], Some(true), None),
+        assert_eq!(confirmed_summary(&[certify_step(&[])], Some(true), None, &[]),
                    "trusted, certified, no contract or law declared, applied, and re-verified");
+    }
+
+    /// Every law is named, not just the first (stranger 15: `isqrt`'s proved floor bound was its
+    /// SECOND law, so the transcript never said the answer was the floor).
+    #[test]
+    fn confirmed_names_every_law_and_any_left_open() {
+        let s = [certify_step(&["SOUND", "SOUND"])];
+        let others = [("floor_bounds".to_string(), true), ("associative".to_string(), false)];
+        assert_eq!(confirmed_summary(&s, Some(true), Some("square_root_of_square"), &others),
+                   "trusted, certified, contract proved (2 post(s)), laws `square_root_of_square`, `floor_bounds` proved, \
+                    `associative` not proved here, applied, and re-verified");
     }
 
     /// `--arg`/`--expect` take a file, inline JSON, or a surface literal (2026-11-02: a stranger

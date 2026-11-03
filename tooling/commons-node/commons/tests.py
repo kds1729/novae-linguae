@@ -595,6 +595,7 @@ class CommonsProtocolTests(TestCase):
                                 data=json.dumps({"name_hint_prefix": "map"}),
                                 content_type="application/json")
         summ = next(s for s in resp.json()["results"] if s["hash"] == rec["hash"])
+        self.assertEqual(summ["name"], rec["name_hints"][0])                # stranger 15: a plain `name`
         self.assertIn("->", summ["type_surface"])
         self.assertNotIn("{", summ["type_surface"])                       # not the AST
         self.assertEqual(len(summ["contract"]), 1)

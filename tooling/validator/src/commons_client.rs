@@ -274,6 +274,31 @@ pub fn maps_from_node_lenient(node: &str, seeds: &[String], max_fetches: usize) 
     crawl(node, seeds, true, max_fetches)
 }
 
+/// How many artifacts one closure walk fetches at once — a small node is the other party, so
+/// concurrency stays modest.
+const FETCH_CONCURRENCY: usize = 8;
+
+/// Fetch (and verify) each address, at most `FETCH_CONCURRENCY` at a time; results in input order.
+/// A `blob_<sha256>` pseudo-address is a by-address example value: served by the gate-free blob
+/// store, sha256-verified by fetch_blob, and indexed straight into the link map under the same key
+/// `run_examples` resolves it by.
+fn fetch_all(node: &str, addrs: &[String]) -> Vec<Result<J>> {
+    let fetch_one = |addr: &String| match addr.strip_prefix("blob_") {
+        Some(sha) => fetch_blob(node, sha),
+        None => fetch_artifact(node, addr),
+    };
+    let mut out = Vec::with_capacity(addrs.len());
+    for chunk in addrs.chunks(FETCH_CONCURRENCY) {
+        std::thread::scope(|s| {
+            let handles: Vec<_> = chunk.iter().map(|a| s.spawn(move || fetch_one(a))).collect();
+            for h in handles {
+                out.push(h.join().unwrap_or_else(|_| Err(anyhow!("artifact fetch thread panicked"))));
+            }
+        });
+    }
+    out
+}
+
 fn crawl(node: &str, seeds: &[String], lenient: bool, max_fetches: usize) -> Result<(HashMap<String, J>, HashMap<String, J>)> {
     let mut record_map: HashMap<String, J> = HashMap::new();
     let mut link_map: HashMap<String, J> = HashMap::new();
@@ -283,50 +308,56 @@ fn crawl(node: &str, seeds: &[String], lenient: bool, max_fetches: usize) -> Res
     // record fn_ -> its body_hash, so the body (whenever fetched) is also indexed under the fn_.
     let mut body_of: HashMap<String, String> = HashMap::new();
 
-    while let Some(addr) = queue.pop_front() {
-        if !seen.insert(addr.clone()) {
-            continue;
-        }
-        if !(addr.starts_with("fn_")
-            || addr.starts_with("expr_")
-            || addr.starts_with("trc_")
-            || addr.starts_with("blob_"))
-        {
-            continue; // messages/certs aren't part of the runnable closure (traces and example blobs ARE — checking needs them)
-        }
-        if fetched >= max_fetches {
-            bail!("remote closure exceeded {max_fetches} artifacts — refusing an unbounded crawl");
-        }
-        fetched += 1;
-        // A `blob_<sha256>` pseudo-address is a by-address example value: served by the gate-free
-        // blob store, sha256-verified by fetch_blob, and indexed straight into the link map under
-        // the same key `run_examples` resolves it by.
-        let fetch = if let Some(sha) = addr.strip_prefix("blob_") {
-            fetch_blob(node, sha)
-        } else {
-            fetch_artifact(node, &addr)
-        };
-        let art = match fetch {
-            Ok(a) => a,
-            Err(e) if lenient => {
-                eprintln!("skip {addr}: {e}");
+    // Level by level: every address on the frontier is fetched CONCURRENTLY (each request is its own
+    // connection and TLS handshake — fetched one at a time, a 21-artifact closure cost 7 s of a
+    // 40 s verified run, stranger 15), then processed in frontier order, so the maps and any
+    // lenient skip lines come out exactly as the sequential walk produced them.
+    loop {
+        let mut frontier: Vec<String> = Vec::new();
+        while let Some(addr) = queue.pop_front() {
+            if !seen.insert(addr.clone()) {
                 continue;
             }
-            Err(e) => return Err(e),
-        };
-        let mut refs = Vec::new();
-        referenced_addresses(&art, &mut refs);
-        if addr.starts_with("fn_") {
-            if let Some(bh) = art.get("body_hash").and_then(|b| b.as_str()) {
-                body_of.insert(addr.clone(), bh.to_string());
+            if !(addr.starts_with("fn_")
+                || addr.starts_with("expr_")
+                || addr.starts_with("trc_")
+                || addr.starts_with("blob_"))
+            {
+                continue; // messages/certs aren't part of the runnable closure (traces and example blobs ARE — checking needs them)
             }
-            record_map.insert(addr.clone(), art);
-        } else {
-            link_map.insert(addr.clone(), art);
+            if fetched >= max_fetches {
+                bail!("remote closure exceeded {max_fetches} artifacts — refusing an unbounded crawl");
+            }
+            fetched += 1;
+            frontier.push(addr);
         }
-        for r in refs {
-            if !seen.contains(&r) {
-                queue.push_back(r);
+        if frontier.is_empty() {
+            break;
+        }
+        for (addr, fetch) in frontier.iter().zip(fetch_all(node, &frontier)) {
+            let addr = addr.clone();
+            let art = match fetch {
+                Ok(a) => a,
+                Err(e) if lenient => {
+                    eprintln!("skip {addr}: {e}");
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            let mut refs = Vec::new();
+            referenced_addresses(&art, &mut refs);
+            if addr.starts_with("fn_") {
+                if let Some(bh) = art.get("body_hash").and_then(|b| b.as_str()) {
+                    body_of.insert(addr.clone(), bh.to_string());
+                }
+                record_map.insert(addr.clone(), art);
+            } else {
+                link_map.insert(addr.clone(), art);
+            }
+            for r in refs {
+                if !seen.contains(&r) {
+                    queue.push_back(r);
+                }
             }
         }
     }

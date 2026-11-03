@@ -15,13 +15,17 @@ If you have a task of your own, fetch the validator and skip the demo:
     sha256sum -c nl-validator-x86_64-linux.sha256
     chmod +x nl-validator-x86_64-linux
 
-(`nl-validator-aarch64-macos` on Apple silicon; `shasum -a 256 -c` there.) The verified loop also
-needs `z3` on the PATH. Then go to *Finding a function for a goal* below.
+(`nl-validator-aarch64-macos` on Apple silicon; `shasum -a 256 -c` there.) Keep the file name:
+the `.sha256` file names it, so `-c` fails on a renamed copy. The verified loop also needs **`z3`
+on the PATH** (any 4.13+; `apt install z3`, `brew install z3`). Then go to *Finding a function
+for a goal* below.
 
 A verified run (`--verify`) proves the function's contract AND what it rests on in its callees,
-with the solver: usually well under a minute (`mod_inverse` over `ext_gcd`: ~20 s from v0.1.15;
-3 min before), longer when a contract needs a callee's laws too. It says so on stderr when it
-starts certifying. If your shell tool has a short time limit, run it in the background and wait.
+with the solver: seconds to under a minute (`isqrt` ~2 s, `mod_inverse` ~20 s, `crt2` ~35 s —
+two modular proofs), longer when a contract needs a callee's laws too. It says so on stderr when
+it starts certifying. If your shell tool has a short time limit, run it in the background and
+wait. `NL_DERIVED_CACHE=1` keeps derived callee contracts on disk, so a second run over the same
+callees skips them.
 
 ## In three sentences
 
@@ -48,7 +52,7 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    Scores are close together (a 0.01 margin is normal); treat the top 3–5 as a shortlist, not the
    top 1 as the answer. Older versions of a function share its slot: they are listed by hash in
    `versions`, and the hit shown is the version with the strongest contract.
-2. Choose by the summary's `contract` (pre/post, surface syntax), `laws`, `params` (argument
+2. Choose by the summary's `name`, `contract` (pre/post, surface syntax), `laws`, `params` (argument
    names, in order), `param_docs` (what each argument means, and its unit — the author's words)
    and `type_surface`. A function the contract applies is written by name (`name@fn_1234abcd`
    where a bare name would be ambiguous); `refs` maps each full address to that name.
@@ -104,8 +108,8 @@ them as TEXT to a function that takes text (`round_text_half_even`, `fx_convert_
   numeral is a `nat` (accepted where an `int` is expected), `int(-5)` an explicit int. After
   `CONFIRMED`, a `result:` line prints the answer in that same syntax (a non-negative int shows
   as `int(1462)`, a negative one as `-322`). `CONFIRMED` says what was proved: `contract proved
-  (3 post(s))` means the certifier proved every postcondition, and ``law `name` proved`` names a
-  law. The transcript prints one line per step; `--verbose` adds the candidate scores, the merged
+  (3 post(s))` means the certifier proved every postcondition, and ``laws `a`, `b` proved`` names
+  every law the loop proved (one it could not is named as ``not proved here``). The transcript prints one line per step; `--verbose` adds the candidate scores, the merged
   pairs and every certify check.
 - A record's discovery tag is in its `intent_tags` (adapters derive `parse/<lowercase-hyphenated-
   field>`), its argument order in its `signature`. The adapters print the record's file, not these.

@@ -223,6 +223,9 @@ def record_summary(record):
     are always present."""
     out = {"hash": record.hash, "kind": record.kind}
     if record.name_hints:
+        # `name` = the first hint, the name `refs` and the agent loop's transcript use (stranger 15
+        # looked for a `name` field and read names off the intent tags instead).
+        out["name"] = record.name_hints[0]
         out["name_hints"] = record.name_hints
     if record.type_str:
         out["type"] = record.type_str
