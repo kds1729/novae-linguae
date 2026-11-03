@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_74736373b3d293b19365e19e792010258ca99c32562db9ed199a9e4712ee615f",
+ "hash": "fn_78fe989a13183777030a9b89488ec782afd0ee973da67bbb425d7e5410407d6f",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -60,6 +60,9 @@
  "name_hints": [
   "next_pow2",
   "next_power_of_two"
+ ],
+ "param_docs": [
+  "a non-negative integer (the result is the least power of two at least it, and 1 for 0)"
  ],
  "properties": [
   {

@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_8b10661709736c9839d529a0f4cf0f3eb1a420ddd040340382994b32d13f9978",
+ "body_hash": "expr_20cd2a2553d36deee8273df94a828351b5829b5099137d00a33df04490585186",
  "derived_from": null,
  "examples": [
   {
@@ -227,7 +227,7 @@
    }
   }
  ],
- "hash": "fn_c4166a6c6496f044ce5c2bced1fb310ab00a01864546f4e388b5f0420c765917",
+ "hash": "fn_f2ce00f4e1fd88023936308095194fdd0ad39b92fe7d4238574cb2333b379100",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -238,6 +238,9 @@
   "ntt",
   "number_theoretic_transform",
   "fft_mod_p"
+ ],
+ "param_docs": [
+  "the coefficients mod 998244353, length a power of two dividing 2^23"
  ],
  "properties": [],
  "schema_version": "0.2.0",

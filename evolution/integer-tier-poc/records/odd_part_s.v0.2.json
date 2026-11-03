@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_9cf6c991c7fea12d5ceef95f83d7eb7aa639dfe342ea8152587a92470dc586b7",
+ "hash": "fn_4cc77d690db5971c13f6c0a21d5403c4a01abbb7f796e9510692c3d64910146e",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -61,6 +61,9 @@
   "odd_part_s",
   "two_adic_valuation",
   "trailing_zero_count"
+ ],
+ "param_docs": [
+  "a non-negative integer; the result is how many times 2 divides it"
  ],
  "properties": [],
  "schema_version": "0.2.0",

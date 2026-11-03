@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_09e14d9d33b083b18e2fb0b57f7c50e780d5175a949d0def68f638c04b68ae68",
+ "body_hash": "expr_04952dab086a5e6bb559a63c760f22bbcb85971316d9e1f234a8771c8eaf62cf",
  "derived_from": null,
  "examples": [
   {
@@ -127,7 +127,7 @@
    }
   }
  ],
- "hash": "fn_0ef870995d2e573e589b9cc565f6836594a6cb13bc58657dea13c3c227376bc4",
+ "hash": "fn_6b94daccd715405d346365fb05d6f7f375067c70ddd2bc305051979c08839f56",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -137,6 +137,9 @@
  "name_hints": [
   "ntt_inverse",
   "inverse_number_theoretic_transform"
+ ],
+ "param_docs": [
+  "a transform from `ntt`, length a power of two dividing 2^23"
  ],
  "properties": [],
  "schema_version": "0.2.0",

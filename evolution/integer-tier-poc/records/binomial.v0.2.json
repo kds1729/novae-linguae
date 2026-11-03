@@ -83,7 +83,7 @@
    }
   }
  ],
- "hash": "fn_4141709c823385798a6dd93b111b2a621fd5cfb13d886efbf1dcfe3ec23a2c2f",
+ "hash": "fn_dd4745676afd4826db2866f2e29636116463c3551ed6966de996fd6bc679588c",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -93,6 +93,10 @@
   "binomial",
   "binomial_coefficient",
   "choose"
+ ],
+ "param_docs": [
+  "n, the size of the set",
+  "k, how many to choose (0 when k > n)"
  ],
  "properties": [
   {

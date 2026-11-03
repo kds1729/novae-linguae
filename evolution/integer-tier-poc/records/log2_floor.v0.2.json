@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_b917665637907721091514d4ead89dca3817d9dd6cd5d783cc136a23eeeb2d60",
+ "hash": "fn_c4a75c5d978b0305f6520e7e97a376a67934fb3e78e2776dd018db823c0e4754",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -61,6 +61,9 @@
   "log2_floor",
   "integer_log2",
   "bit_length_minus_one"
+ ],
+ "param_docs": [
+  "a positive integer (below 2 gives 0)"
  ],
  "properties": [
   {

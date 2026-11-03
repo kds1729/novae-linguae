@@ -43,7 +43,7 @@
    }
   }
  ],
- "hash": "fn_c2010a293fd2d76545673347c89d2e44663f4f0e256775e8a5b7eb11a340a733",
+ "hash": "fn_3a9dceeaf16cfb5fdd2fcc05df0aa785e327e4b03b8a6f1159a0d0c0b08e0c89",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -52,6 +52,11 @@
  "name_hints": [
   "mod_mul",
   "modular_multiplication"
+ ],
+ "param_docs": [
+  "the first factor",
+  "the second factor",
+  "the modulus, 1 to 2^63-1"
  ],
  "properties": [
   {

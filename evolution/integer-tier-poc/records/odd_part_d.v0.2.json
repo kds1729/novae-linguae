@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_407a595edab18c0859afd35192caf74b6b4c0eaacea3c060801bab50936bfe35",
+ "hash": "fn_2f0cbb50a39bb81660fe3a4a995dd815726cf1662e8f4ecedd461c01a66dd796",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -61,6 +61,9 @@
   "odd_part_d",
   "odd_part",
   "split_powers_of_two"
+ ],
+ "param_docs": [
+  "a non-negative integer; the result is it with every factor 2 removed"
  ],
  "properties": [
   {

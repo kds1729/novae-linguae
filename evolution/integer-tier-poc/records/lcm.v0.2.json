@@ -67,7 +67,7 @@
    }
   }
  ],
- "hash": "fn_795cde432f4cc60ab37686a219cd128929cfca92dae1989d7778d813b41b8a0c",
+ "hash": "fn_2977302d643b9f25cd89d993f7b7d52cea69c0844ab0a351ec94675a98cfd42b",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -76,6 +76,10 @@
  "name_hints": [
   "lcm",
   "least_common_multiple"
+ ],
+ "param_docs": [
+  "a non-negative integer",
+  "a non-negative integer (lcm with 0 is 0)"
  ],
  "properties": [
   {

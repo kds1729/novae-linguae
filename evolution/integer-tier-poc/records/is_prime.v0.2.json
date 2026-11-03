@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_fa7e24acd5c0da955f62f2c0ff9ba2157081856dd463a7c10c0677c90472da07",
+ "body_hash": "expr_2932b0988dad687cc12cc6f32d2334838c9401f134d6f8a24a8b739e7d4ecc8f",
  "derived_from": null,
  "examples": [
   {
@@ -219,7 +219,7 @@
    }
   }
  ],
- "hash": "fn_f979f37d0f364d2c7bdeabbdccdc8ca99a56b65861b5a6228b5fbcd15ceecde2",
+ "hash": "fn_6480b1f90052bd687c2b1003dcaa64edeb44a059063610c9a67cdcce0de43643",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -230,6 +230,9 @@
   "is_prime",
   "primality",
   "miller_rabin"
+ ],
+ "param_docs": [
+  "the number to test, 0 to 2^63-1 (deterministic Miller-Rabin, twelve bases)"
  ],
  "properties": [],
  "schema_version": "0.2.0",

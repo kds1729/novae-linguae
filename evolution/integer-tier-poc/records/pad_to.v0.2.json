@@ -83,7 +83,7 @@
    }
   }
  ],
- "hash": "fn_cf0cca543c5eb5050ab83f1c515cc0747a60b2fe64ed76243294714941b6ddd9",
+ "hash": "fn_c0d1dc7af47f436653cc423e26cbef80f2a429fdc55aea14a686670cc208242c",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -93,6 +93,10 @@
  "name_hints": [
   "pad_to",
   "pad_or_truncate"
+ ],
+ "param_docs": [
+  "the list to pad with zeros or truncate",
+  "the wanted length"
  ],
  "properties": [
   {

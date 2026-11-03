@@ -77,6 +77,42 @@ NONE = {"kind": "variant", "tag": "None"}
 ADDR = {}      # name -> fn_ address, for `{name}` placeholders in later bodies
 REPORT = []
 
+# Round 17: one plain-words line per parameter (`param_docs`, function-record v0.2) — stranger 15
+# read `crt2`'s argument order from its worked examples alone. `gcd` and `ext_gcd` stay as they are:
+# the rational tier applies them BY ADDRESS, and re-minting them would fork its copies.
+_MOD = "the modulus, at least 1"
+PARAM_DOCS = {
+    "lcm": ["a non-negative integer", "a non-negative integer (lcm with 0 is 0)"],
+    "mod_inverse": ["the number to invert (any integer; only its residue mod m matters)",
+                    "the modulus, at least 2; the result is None unless a and m are coprime"],
+    "mod_add": ["the first addend", "the second addend", _MOD],
+    "mod_mul": ["the first factor", "the second factor", "the modulus, 1 to 2^63-1"],
+    "pow_mod_naive": ["the base (any integer)", "the exponent, non-negative", _MOD],
+    "mod_pow": ["the base (any integer)", "the exponent, non-negative", "the modulus, 1 to 2^63-1"],
+    "is_even": ["any integer"],
+    "isqrt": ["the non-negative integer whose square root is floored"],
+    "is_prime": ["the number to test, 0 to 2^63-1 (deterministic Miller-Rabin, twelve bases)"],
+    "is_prime_trial": ["the number to test (trial division up to its square root)"],
+    "crt2": ["the residue wanted modulo m1", "the first modulus, at least 2",
+             "the residue wanted modulo m2", "the second modulus, at least 2; None unless m1 and m2 are coprime"],
+    "digits": ["the base, at least 2 (below 2 gives the empty list)", "the non-negative number to split"],
+    "from_digits": ["the base", "the digits, least significant first"],
+    "digit_sum": ["the base, at least 2 (below 2 gives 0)", "the non-negative number whose digits are summed"],
+    "binomial": ["n, the size of the set", "k, how many to choose (0 when k > n)"],
+    "binomial_pascal": ["n, the size of the set", "k, how many to choose (0 when k > n)"],
+    "log2_floor": ["a positive integer (below 2 gives 0)"],
+    "next_pow2": ["a non-negative integer (the result is the least power of two at least it, and 1 for 0)"],
+    "odd_part_d": ["a non-negative integer; the result is it with every factor 2 removed"],
+    "odd_part_s": ["a non-negative integer; the result is how many times 2 divides it"],
+    "ntt": ["the coefficients mod 998244353, length a power of two dividing 2^23"],
+    "ntt_inverse": ["a transform from `ntt`, length a power of two dividing 2^23"],
+    "convolution": ["the first polynomial's coefficients, lowest degree first, mod 998244353",
+                    "the second polynomial's coefficients, lowest degree first, mod 998244353"],
+    "pad_to": ["the list to pad with zeros or truncate", "the wanted length"],
+    "scale_mod": ["the list to scale", "the factor; each product is reduced mod 998244353"],
+    "pointwise_mod": ["the first list", "the second list (the result is as long as the shorter)"],
+}
+
 
 def build(name, surface, sig, examples, props=(), refinements=(), tags=(), hints=(), complexity=None,
           terminates="always"):
@@ -110,6 +146,8 @@ def build(name, surface, sig, examples, props=(), refinements=(), tags=(), hints
     }
     if complexity:
         record["signature"]["complexity"] = complexity
+    if name in PARAM_DOCS:
+        record["param_docs"] = list(PARAM_DOCS[name])
     del record["hash"]
     record["hash"] = hash_artifact(record, "function-record")
     (OUT / f"body-{name}.json").write_text(json.dumps(body, indent=1, sort_keys=True) + "\n")
@@ -492,8 +530,12 @@ def main():
           FN([INT, INT, INT, INT], MAYBE(INT)),
           [{"args": [ilit(2), ilit(3), ilit(3), ilit(5)], "result": just(ilit(8))}, {"args": [ilit(1), ilit(4), ilit(3), ilit(6)], "result": NONE},
            {"args": [ilit(0), ilit(7), ilit(6), ilit(11)], "result": just(ilit(28))}],
+          # Round 17: the second post makes the answer THE least non-negative solution (with the
+          # first, and m1·m2 coprime, the solution in [0, m1·m2) is unique) — stranger 15 had to check
+          # minimality by hand.
           refinements=[("pre", "m1 > 1 && m2 > 1"),
-                       ("post", "case result of { Just(x) => x % m1 == a1 % m1 && x % m2 == a2 % m2; None => true }")],
+                       ("post", "case result of { Just(x) => x % m1 == a1 % m1 && x % m2 == a2 % m2; None => true }"),
+                       ("post", "case result of { Just(x) => x >= 0 && x < m1 * m2; None => true }")],
           hints=["chinese_remainder"], complexity="O(log n)")
     gauntlet("crt2", prove)
     # As for inverse_holds: the unguarded law is generative evidence over all ints; the law provable

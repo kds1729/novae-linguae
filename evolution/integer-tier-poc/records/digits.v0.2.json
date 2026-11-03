@@ -110,7 +110,7 @@
    }
   }
  ],
- "hash": "fn_23994af4f046d4d70f794a6e94dd9f74f07e06b9cbce2a20205623db82e1bc2c",
+ "hash": "fn_4fefbfd9511df8ac923eee8ca9f8525ea1e53db1a47d1927fe1dccfc243558e9",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -120,6 +120,10 @@
   "digits",
   "to_digits",
   "digits_little_endian"
+ ],
+ "param_docs": [
+  "the base, at least 2 (below 2 gives the empty list)",
+  "the non-negative number to split"
  ],
  "properties": [],
  "schema_version": "0.2.0",

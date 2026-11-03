@@ -85,7 +85,7 @@
    }
   }
  ],
- "hash": "fn_4c57b69b1cb566fbf428bddbf2fb7a8fa10632460ff29f3a7d397016bb149983",
+ "hash": "fn_44a0a23e5005cf41c70aa2d111042881593c169dcec2c9bce3021f933e164646",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -94,6 +94,10 @@
  "name_hints": [
   "from_digits",
   "from_digits_little_endian"
+ ],
+ "param_docs": [
+  "the base",
+  "the digits, least significant first"
  ],
  "properties": [],
  "schema_version": "0.2.0",

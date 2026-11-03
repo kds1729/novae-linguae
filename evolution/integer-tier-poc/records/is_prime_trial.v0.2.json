@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_bbadd85b6cf5d4179cedce6faf04466cf2001890f7d551ffb1823ef52f83b7de",
+ "body_hash": "expr_8ce913b3d738ece1f91c9c8cdde852df95e9d4c4e787bd946d5eb6741bc476f9",
  "derived_from": null,
  "examples": [
   {
@@ -99,7 +99,7 @@
    }
   }
  ],
- "hash": "fn_1228b196f44c9383b6deedf8270176c55268e7daa05654ed0c10ccef88e4874d",
+ "hash": "fn_7e34d7e9dd6fd79aca9ef7539042d2656df980a2443c2c5806b5abd407671f7b",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -109,6 +109,9 @@
  "name_hints": [
   "is_prime_trial",
   "primality_trial_division"
+ ],
+ "param_docs": [
+  "the number to test (trial division up to its square root)"
  ],
  "properties": [],
  "schema_version": "0.2.0",

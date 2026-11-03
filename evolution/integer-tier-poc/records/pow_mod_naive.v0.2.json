@@ -63,7 +63,7 @@
    }
   }
  ],
- "hash": "fn_17294c8567b399157a80a2ec27662ef1798d30b361e0153cb7550dad9816dc8c",
+ "hash": "fn_c5be1e14f190fbd16d0f549512c1d3d3f06a26c3161d084f70c2cbc1179fc95b",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -72,6 +72,11 @@
  "name_hints": [
   "pow_mod_naive",
   "modular_power_linear"
+ ],
+ "param_docs": [
+  "the base (any integer)",
+  "the exponent, non-negative",
+  "the modulus, at least 1"
  ],
  "properties": [
   {

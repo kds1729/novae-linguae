@@ -75,7 +75,7 @@
    }
   }
  ],
- "hash": "fn_d5f06970b976fe9ee5209949937775f3348b48de28fe2320a62bb4c5c9bfb490",
+ "hash": "fn_bdf9c9bddf8c45b8142c2e7b1a05836739227a970548cbaf0ef460e8c6cf8285",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -84,6 +84,9 @@
  "name_hints": [
   "isqrt",
   "integer_square_root"
+ ],
+ "param_docs": [
+  "the non-negative integer whose square root is floored"
  ],
  "properties": [
   {

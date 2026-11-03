@@ -1226,6 +1226,26 @@ quotients: the solver verifies a witness it is given and does not search for one
 - As after the twelfth: `prime_agree` (documented negative), the unguarded laws over all ints, the
   multiplicative binomial's division, the exponential record's complexity.
 
+## Fourteenth note (2026-11-03): what a stranger agent had to check by hand
+
+Stranger 15 (a fresh agent with only the repository URL, on v0.1.15) answered three unseen goals
+from this module and the decimal one correctly, and listed what it had to verify itself. Round 17
+(46.8 min, log `integer-build-round17.log`, validator at 4176b1c) answers the two that belong here:
+
+| friction | change | verdict |
+|---|---|---|
+| `crt2(4, 9, 6, 11) = Just(94)` — the contract said 94 satisfies both congruences, not that it is the LEAST non-negative solution | second post `case result of { Just(x) => x >= 0 && x < m1 * m2; None => true }` — with the first, and `m1`, `m2` coprime, the solution in `[0, m1·m2)` is unique | **SOUND** (two-pass certify ~33 s, as before the post) |
+| `crt2`'s argument order (`a1, m1, a2, m2`) only from its worked examples | `param_docs` on the module's 26 callable records (not the checker records; not `gcd`/`ext_gcd`, which the rational tier applies by address — re-minting them would fork its copies) | `param_docs` **SOUND** on all 26 |
+
+The third, "`isqrt` proves only `r² ≤ n`, not that `r` is the floor", was not a gap in the record:
+its law `floor_bounds` (`r² ≤ n < (r+1)²`) has been PROVED since the second follow-up. The agent
+loop proved and reported only a function's FIRST law; from v0.1.16 it proves every law and names
+each one (`laws `square_root_of_square`, `floor_bounds` proved`).
+
+Every other verdict is unchanged from round 16 except addresses (the re-minted records and their
+dependents) and `pow_mod_agree`, whose induction now closes without the stepwise fallback.
+Contracts 25/0 (was 24), laws 38/7/0 of 45.
+
 ## Open questions (as they stood before the follow-up)
 
 - **Folding certified callees into termination and complexity.** Eighteen of twenty UNVERIFIABLE

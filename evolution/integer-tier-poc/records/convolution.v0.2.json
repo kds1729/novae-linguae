@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_73ddc3b86868128248282dd51bddf7918089ad9d912c7dbd2d5e25b27672fcdc",
+ "body_hash": "expr_b3c1c23f03257d03028b407a525e9b0579ba9ec5ccd8fa8f2355c03638d21982",
  "derived_from": null,
  "examples": [
   {
@@ -168,7 +168,7 @@
    }
   }
  ],
- "hash": "fn_80238cda79e2f5145e86850db3f366f6c4a136fc3bde401fc96240429522b509",
+ "hash": "fn_a6f99761367eb81e583011718eb4bca86fcbe5988ac30803e61c67c1ca40bf36",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -179,6 +179,10 @@
   "convolution",
   "polynomial_multiplication_mod_p",
   "fft_convolution"
+ ],
+ "param_docs": [
+  "the first polynomial's coefficients, lowest degree first, mod 998244353",
+  "the second polynomial's coefficients, lowest degree first, mod 998244353"
  ],
  "properties": [],
  "schema_version": "0.2.0",

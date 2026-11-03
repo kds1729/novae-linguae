@@ -43,7 +43,7 @@
    }
   }
  ],
- "hash": "fn_f3883b51ac8fa3fb119fe59f6e889736551669d97da0b9e063c496948849d10c",
+ "hash": "fn_bab8ed70a531042b86369c75edf9085a22f0964c9e0af9b25446d2d56356e1de",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -52,6 +52,11 @@
  "name_hints": [
   "mod_add",
   "modular_addition"
+ ],
+ "param_docs": [
+  "the first addend",
+  "the second addend",
+  "the modulus, at least 1"
  ],
  "properties": [
   {

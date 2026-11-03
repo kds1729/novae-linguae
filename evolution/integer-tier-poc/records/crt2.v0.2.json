@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_bcdbdd5ac2ee21c7361e48963e4912adcdec4a68b42ef0fdea69e1bb497f01b7",
+ "body_hash": "expr_e5e848f76cf98fbb23d53a2e2878fddb6c954b71c9331f42b8759c3ba25ff369",
  "derived_from": null,
  "examples": [
   {
@@ -83,7 +83,7 @@
    }
   }
  ],
- "hash": "fn_f98030c897c3485ba82956f158b4075944b67e7daaba3d96e912e1337260878d",
+ "hash": "fn_2523bc056489bfc4fd481f52d4ed5501643229c7e760ccd9cc0c1105314dec0f",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -92,6 +92,12 @@
  "name_hints": [
   "crt2",
   "chinese_remainder"
+ ],
+ "param_docs": [
+  "the residue wanted modulo m1",
+  "the first modulus, at least 2",
+  "the residue wanted modulo m2",
+  "the second modulus, at least 2; None unless m1 and m2 are coprime"
  ],
  "properties": [],
  "schema_version": "0.2.0",
@@ -210,6 +216,82 @@
           ],
           "kind": "app",
           "op": "eq"
+         }
+        ],
+        "kind": "app",
+        "op": "and"
+       },
+       "pattern": {
+        "kind": "variant",
+        "payload": {
+         "kind": "bind",
+         "name": "x"
+        },
+        "tag": "Just"
+       }
+      },
+      {
+       "body": {
+        "kind": "lit",
+        "value": true
+       },
+       "pattern": {
+        "kind": "variant",
+        "tag": "None"
+       }
+      }
+     ],
+     "kind": "case",
+     "scrutinee": {
+      "kind": "var",
+      "name": "result"
+     }
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "arms": [
+      {
+       "body": {
+        "args": [
+         {
+          "args": [
+           {
+            "kind": "var",
+            "name": "x"
+           },
+           {
+            "kind": "lit",
+            "value": 0
+           }
+          ],
+          "kind": "app",
+          "op": "ge"
+         },
+         {
+          "args": [
+           {
+            "kind": "var",
+            "name": "x"
+           },
+           {
+            "args": [
+             {
+              "kind": "var",
+              "name": "m1"
+             },
+             {
+              "kind": "var",
+              "name": "m2"
+             }
+            ],
+            "kind": "app",
+            "op": "mul"
+           }
+          ],
+          "kind": "app",
+          "op": "lt"
          }
         ],
         "kind": "app",

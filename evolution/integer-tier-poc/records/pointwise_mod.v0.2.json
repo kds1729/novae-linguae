@@ -58,7 +58,7 @@
    }
   }
  ],
- "hash": "fn_b5032636ab25e8b6bc83d9d8d3c1d0b28828f68ba54ed7d489b7e2072afe7e6b",
+ "hash": "fn_b7617b29876fdcfc1ace7e4af7cbf461015486131780c23978c5a07963fe5e69",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -68,6 +68,10 @@
  "name_hints": [
   "pointwise_mod",
   "pointwise_product_mod_p"
+ ],
+ "param_docs": [
+  "the first list",
+  "the second list (the result is as long as the shorter)"
  ],
  "properties": [
   {

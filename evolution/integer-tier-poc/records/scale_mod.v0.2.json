@@ -61,7 +61,7 @@
    }
   }
  ],
- "hash": "fn_c7bf02595d4efae5b0f5fdcc346209a5c0c6bf6bb7728b9e11e5dc36f8155401",
+ "hash": "fn_dfd86c0704a68bf33aab7b0f1c8f584c70386f5d7f6e4d7706f9e168d26b72c2",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -71,6 +71,10 @@
  "name_hints": [
   "scale_mod",
   "scale_mod_p"
+ ],
+ "param_docs": [
+  "the list to scale",
+  "the factor; each product is reduced mod 998244353"
  ],
  "properties": [
   {

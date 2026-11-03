@@ -39,7 +39,7 @@
    }
   }
  ],
- "hash": "fn_1fa3bbb43b09451a0053a12a497abc4aa7ff3e863ca22cefb9de849f7d66c63e",
+ "hash": "fn_2739e8a86299b052c311860c444a472e8a159f1ff783bc2eebb0409e56354fa9",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -50,6 +50,9 @@
   "is_even",
   "even",
   "parity"
+ ],
+ "param_docs": [
+  "any integer"
  ],
  "properties": [
   {

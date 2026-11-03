@@ -79,7 +79,7 @@
    }
   }
  ],
- "hash": "fn_041eaf26dfc1c0f2a9d05de8505849c181997f887b0a5797f900745f84dbf2cc",
+ "hash": "fn_b1c76a9fcd276730ff9d8b7534bc8f07f44522fe21fd378d46573c318acdbc86",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -88,6 +88,10 @@
  "name_hints": [
   "mod_inverse",
   "modular_inverse"
+ ],
+ "param_docs": [
+  "the number to invert (any integer; only its residue mod m matters)",
+  "the modulus, at least 2; the result is None unless a and m are coprime"
  ],
  "properties": [],
  "schema_version": "0.2.0",

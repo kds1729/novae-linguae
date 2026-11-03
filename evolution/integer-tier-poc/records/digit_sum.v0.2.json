@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_cdc0896aa90a49bfcc1ef1bf80223249690d7c72fc2f31829bc37a43a6a31822",
+ "hash": "fn_2fc10957c7fb81e604033290d4d93624092e4e757bcfeb4137bd452530df30a9",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -60,6 +60,10 @@
  "name_hints": [
   "digit_sum",
   "sum_of_digits"
+ ],
+ "param_docs": [
+  "the base, at least 2 (below 2 gives 0)",
+  "the non-negative number whose digits are summed"
  ],
  "properties": [
   {
