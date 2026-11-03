@@ -18,8 +18,9 @@ If you have a task of your own, fetch the validator and skip the demo:
 (`nl-validator-aarch64-macos` on Apple silicon; `shasum -a 256 -c` there.) The verified loop also
 needs `z3` on the PATH. Then go to *Finding a function for a goal* below.
 
-A verified run (`--verify`) proves the function's contract AND its callees' with the solver: most
-take seconds, some minutes (`mod_inverse`, over `ext_gcd`: 3 min). It says so on stderr when it
+A verified run (`--verify`) proves the function's contract AND what it rests on in its callees,
+with the solver: usually well under a minute (`mod_inverse` over `ext_gcd`: ~20 s from v0.1.15;
+3 min before), longer when a contract needs a callee's laws too. It says so on stderr when it
 starts certifying. If your shell tool has a short time limit, run it in the background and wait.
 
 ## In three sentences

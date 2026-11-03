@@ -227,6 +227,9 @@ pub struct LinkedView<'a> {
     /// How many contract lookups were refused because the target was mid-derivation (a cycle).
     /// A contract computed while this grew may lack facts and is never memoized or cached.
     cycle_refusals: std::cell::Cell<usize>,
+    /// Whether a callee's contract carries its LAWS (`true`, the full derivation) or its posts
+    /// alone ([`LinkedView::posts_only`] — the cheap first pass of [`certify_record_linked`]).
+    callee_laws: bool,
 }
 
 impl<'a> LinkedView<'a> {
@@ -243,7 +246,17 @@ impl<'a> LinkedView<'a> {
             shrink: Default::default(),
             preserve: Default::default(),
             in_progress: Default::default(),
+            callee_laws: true,
         }
+    }
+
+    /// A view whose callee contracts carry their pres and posts but NOT their laws. Proving every
+    /// law of every callee is most of a linked certify's cost (`mod_inverse`: `gcd`'s six laws and
+    /// `ext_gcd`'s one took 159 of 175 s) and most targets never use them; fewer axioms can only
+    /// lose proofs, never make a false one, so a SOUND verdict over this view is a proof. Never
+    /// written to the derived cache (it is not the full contract); a cached full one is used as is.
+    pub fn posts_only(records: &'a HashMap<String, J>, bodies: &'a HashMap<String, J>, solver: &str) -> Self {
+        LinkedView { callee_laws: false, ..LinkedView::new(records, bodies, solver) }
     }
 
     /// `complexity::component_preserve` of the callee's body (memoized).
@@ -453,7 +466,7 @@ impl<'a> LinkedView<'a> {
             let prev = crate::set_callee_contracts(deps);
             let prev_ty = crate::prove::set_self_type(Some(sig_type.clone()));
             let prev_measure = crate::prove::set_self_measure(self.self_measure(body, &nat_positions));
-            let all_laws: Vec<J> = law_exprs(rec);
+            let all_laws: Vec<J> = if self.callee_laws { law_exprs(rec) } else { Vec::new() };
             let (reports, laws) = derive_self_facts(sig_type, &refinements, &all_laws, body, &nat_positions, &self.solver);
             crate::prove::set_self_measure(prev_measure);
             crate::prove::set_self_type(prev_ty);
@@ -487,7 +500,7 @@ impl<'a> LinkedView<'a> {
         if self.cycle_refusals.get() > refusals_before {
             return out;
         }
-        if let (Some(c), Some(dir)) = (&out, derived_cache_dir()) {
+        if let (Some(c), Some(dir), true) = (&out, derived_cache_dir(), self.callee_laws) {
             store_derived(&dir, target, c);
         }
         self.contracts.borrow_mut().insert(target.to_string(), out.clone());
@@ -1045,6 +1058,14 @@ fn upper_bound_params(post: &J) -> Vec<String> {
 /// [`certify_record`] with an optional LINKED view (`bodies` = [`crate::build_link_map`] of the records
 /// directory): with it, a `fn_ref` callee whose own body provably terminates / has an inferred class
 /// folds into the termination and complexity checks instead of reading as an opaque call.
+///
+/// With a view it runs in two passes. First over [`LinkedView::posts_only`] — callees' pres and posts,
+/// not their laws — and if every check that consults the view (refinements, termination,
+/// complexity, cost) is decided (SOUND / VERIFIED / N/A), that IS the certification: fewer axioms
+/// cannot make a false proof. Anything else — UNVERIFIABLE, or a VIOLATED that may only mean a law
+/// was missing — and the whole certification runs again over the full view, exactly as before, so
+/// the first pass can only make a verdict cheaper or better, never worse. Measured (2026-11-03):
+/// `mod_inverse` 175 s → 16 s; stranger 14 took its verified run's silence for a hang.
 pub fn certify_record_linked(
     record: &J,
     body: &J,
@@ -1052,7 +1073,29 @@ pub fn certify_record_linked(
     bodies: Option<&HashMap<String, J>>,
     solver: &str,
 ) -> Certification {
-    let view = bodies.map(|b| LinkedView::new(records, b, solver));
+    let Some(b) = bodies else {
+        return certify_with_view(record, body, records, None, solver);
+    };
+    let first = certify_with_view(record, body, records, Some(&LinkedView::posts_only(records, b, solver)), solver);
+    let decided = first.checks.iter().filter(|c| uses_the_view(&c.check)).all(|c| matches!(c.verdict, "SOUND" | "VERIFIED" | "N/A"));
+    if decided {
+        return first;
+    }
+    certify_with_view(record, body, records, Some(&LinkedView::new(records, b, solver)), solver)
+}
+
+/// The certification checks whose verdict can depend on callee contracts from the linked view.
+fn uses_the_view(check: &str) -> bool {
+    check.starts_with("refinement:") || check.starts_with("cost.") || matches!(check, "termination" | "complexity")
+}
+
+fn certify_with_view(
+    record: &J,
+    body: &J,
+    records: &HashMap<String, J>,
+    view: Option<&LinkedView<'_>>,
+    solver: &str,
+) -> Certification {
     let sig = record.pointer("/signature");
     let mut checks: Vec<CertCheck> = Vec::new();
 
@@ -1134,12 +1177,12 @@ pub fn certify_record_linked(
     if let Some(sig_type) = record.pointer("/signature/type") {
         let refinements: Vec<J> =
             record.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
-        let prev = view.as_ref().map(|v| crate::set_callee_contracts(v.contracts_for_record(record, body)));
-        let prev_refusals = view.as_ref().map(|v| crate::prove::set_callee_refusals(v.refusals_for(body)));
+        let prev = view.map(|v| crate::set_callee_contracts(v.contracts_for_record(record, body)));
+        let prev_refusals = view.map(|v| crate::prove::set_callee_refusals(v.refusals_for(body)));
         // The same phased derivation the linked view uses for a callee (its own plain-proved laws
         // may enter a post's induction), so this report and a dependent's view of it agree.
         let nat_positions = crate::terminate::nat_param_positions(record);
-        let prev_measure = view.as_ref().map(|v| crate::prove::set_self_measure(v.self_measure(body, &nat_positions)));
+        let prev_measure = view.map(|v| crate::prove::set_self_measure(v.self_measure(body, &nat_positions)));
         let (reports, _) = derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, solver);
         if let Some(p) = prev_measure {
             crate::prove::set_self_measure(p);
@@ -1169,7 +1212,7 @@ pub fn certify_record_linked(
 
     // 4. Termination.
     let declared_term = sig.and_then(|s| s.get("terminates")).and_then(|t| t.as_str()).unwrap_or("unknown");
-    let term_cb: Option<crate::terminate::CalleeTerminates<'_>> = view.as_ref().map(|v| v as crate::terminate::CalleeTerminates<'_>);
+    let term_cb: Option<crate::terminate::CalleeTerminates<'_>> = view.map(|v| v as crate::terminate::CalleeTerminates<'_>);
     match crate::terminate::analyze_termination_linked(body, &crate::terminate::nat_param_positions(record), term_cb) {
         TerminationOutcome::Always if declared_term == "always" => {
             checks.push(CertCheck::new("termination", "SOUND", "provably always-terminates", false))
@@ -1186,7 +1229,7 @@ pub fn certify_record_linked(
     }
 
     // 5. Complexity + structured cost.
-    let cx_cb: Option<crate::complexity::CalleeComplexity<'_>> = view.as_ref().map(|v| v as crate::complexity::CalleeComplexity<'_>);
+    let cx_cb: Option<crate::complexity::CalleeComplexity<'_>> = view.map(|v| v as crate::complexity::CalleeComplexity<'_>);
     let result_ty = record.pointer("/signature/type").and_then(unwrap_result_type);
     let complexity = crate::complexity::analyze_complexity_typed(body, result_ty.as_ref(), cx_cb);
     match sig.and_then(|s| s.get("complexity")).and_then(|c| c.as_str()) {
@@ -1318,6 +1361,31 @@ mod tests {
         let none = LinkedView::new(&records, &bodies, "z3").contract("fn_not_in_view");
         std::env::remove_var("NL_DERIVED_CACHE");
         assert_eq!(none, None);
+    }
+
+    /// The posts-only view (the linked certify's cheap first pass) gives a callee's contract without
+    /// its laws and never caches it; the full view proves and caches them. A cached full contract
+    /// is the derivation either view would make, so the posts-only view may read it.
+    #[test]
+    fn a_posts_only_view_skips_callee_laws_and_never_caches_its_partial_contract() {
+        let Some(solver) = ["z3", "cvc5"].into_iter().find(|s| std::process::Command::new(s).arg("--version").output().is_ok_and(|o| o.status.success())) else { return };
+        let (mut rec, body) = record_named("doubles_with_a_law");
+        rec["properties"] = json!([{ "name": "twice", "expr": crate::surface::parse_predicate("forall n. self(n) == n + n").unwrap() }]);
+        let hash = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
+        rec["hash"] = json!(hash);
+        let records: HashMap<String, J> = [(hash.clone(), rec)].into_iter().collect();
+        let bodies: HashMap<String, J> = [(hash.clone(), body)].into_iter().collect();
+        let dir = fresh_cache_dir("posts-only");
+        std::env::set_var("NL_DERIVED_CACHE", dir.to_str().unwrap());
+        let thin = LinkedView::posts_only(&records, &bodies, solver).contract(&hash).expect("a contract");
+        let cached_after_thin = load_derived(&dir, &hash);
+        let full = LinkedView::new(&records, &bodies, solver).contract(&hash).expect("a contract");
+        let cached_after_full = load_derived(&dir, &hash);
+        std::env::remove_var("NL_DERIVED_CACHE");
+        assert!(thin.laws.is_empty(), "posts only: {:?}", thin.laws);
+        assert_eq!(cached_after_thin, None, "a partial contract is never cached");
+        assert_eq!(full.laws.len(), 1, "the full view proves the law");
+        assert_eq!(cached_after_full, Some(full));
     }
 
     /// A minimal well-formed v0.2 record over `\n -> add(n, n)` with the given primary name.
