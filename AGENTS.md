@@ -21,8 +21,8 @@ on the PATH** (any 4.13+; `apt install z3`, `brew install z3`). Then go to *Find
 for a goal* below.
 
 A verified run (`--verify`) proves the function's contract AND what it rests on in its callees,
-with the solver: seconds to under a minute (`isqrt` ~2 s, `mod_inverse` ~20 s, `crt2` ~35 s —
-two modular proofs), longer when a contract needs a callee's laws too. It says so on stderr when
+with the solver: seconds to under a minute (`isqrt` ~2 s, `mod_inverse` ~20 s, `crt2` ~40 s —
+modular proofs through `mod_inverse`), longer when a contract needs a callee's laws too. It says so on stderr when
 it starts certifying. If your shell tool has a short time limit, run it in the background and
 wait. `NL_DERIVED_CACHE=1` keeps derived callee contracts on disk, so a second run over the same
 callees skips them.
