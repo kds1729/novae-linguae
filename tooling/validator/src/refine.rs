@@ -266,13 +266,18 @@ fn decide(goal: &J, body: Option<&J>, solver: &str, nat_positions: &std::collect
         ProofOutcome::Unsupported(first_order_why) => {
             match prove_by_induction_with_exploration(goal, body, solver, DEFAULT_LEMMA_DEPTH).0 {
                 InductionOutcome::Proved | InductionOutcome::ProvedWithLemmas(_) => RefinementOutcome::Sound,
-                // A satisfiable induction base is a concrete short input on which the body breaks the contract.
-                InductionOutcome::Failed(model) => RefinementOutcome::Violated(model),
                 InductionOutcome::NoSolver => RefinementOutcome::NoSolver,
+                // A structural FAILURE is not a counterexample: `Failed` also means "the step is
+                // satisfiable" (the induction does not close), and even a satisfiable base is over
+                // `Lst` of Int — a `List nat` parameter's elements are unconstrained there. It read
+                // VIOLATED until 2026-11-03, a hard certification failure: `from_digits` (nat, List
+                // nat → nat) was refuted on `result >= 0` once the structural backend could see a
+                // body that descends on its second parameter. So it falls through like Unknown;
+                // VIOLATED comes only from the first-order rungs, whose models are real inputs.
                 // The structural backend inducts on the leading list; a contract whose recursion
                 // measures elsewhere (`pad_to` counts `n` down with the list in play) still has the
                 // measure-induction rung, which now lowers lists.
-                InductionOutcome::Unknown => match crate::prove::prove_by_numeric_induction(goal, body, nat_positions, solver).0 {
+                InductionOutcome::Failed(_) | InductionOutcome::Unknown => match crate::prove::prove_by_numeric_induction(goal, body, nat_positions, solver).0 {
                     ProofOutcome::Proved => RefinementOutcome::Sound,
                     ProofOutcome::NoSolver => RefinementOutcome::NoSolver,
                     _ => RefinementOutcome::Unverifiable("induction did not close".into()),
@@ -410,6 +415,32 @@ mod tests {
             }),
         );
         assert_eq!(nat_outcome(&ty, &body, s), RefinementOutcome::Sound);
+    }
+
+    #[test]
+    fn a_structural_induction_that_does_not_close_is_never_a_violation() {
+        // `from_digits` (integer tier): nat, List nat -> nat. Once the structural backend could see a
+        // body descending on its SECOND parameter (2026-11-03), its `Lst` of Int let a digit go negative
+        // and the step came back satisfiable — which read VIOLATED, failing a true contract's
+        // certification. A non-closing induction is undecided, not refuted.
+        let Some(s) = solver() else { return };
+        let list_nat = json!({ "kind": "apply", "ctor": { "kind": "builtin", "name": "List" }, "args": [nat()] });
+        let ty = fn_ty(vec![nat(), list_nat], nat());
+        let body = lambda(
+            &["b", "ds"],
+            json!({
+                "kind": "case",
+                "scrutinee": app("null", vec![var("ds")]),
+                "arms": [
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": int_lit(0) },
+                    { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body":
+                        app("add", vec![app("head", vec![var("ds")]), app("mul", vec![var("b"),
+                            app("self", vec![var("b"), app("tail", vec![var("ds")])])])]) },
+                ]
+            }),
+        );
+        let out = nat_outcome(&ty, &body, s);
+        assert!(!matches!(out, RefinementOutcome::Violated(_)), "a true contract refuted: {out:?}");
     }
 
     #[test]

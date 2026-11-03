@@ -148,7 +148,9 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 // `list_sum` now proves more), and the refinement checker's first-order rung with lists admitted.
 // 10 (2026-11-02): an ambiguous bare variant takes the declared result sort (a body over a callee of
 // another `Maybe` lowers where it refused), and a `replace_token` panic past a term's end is fixed.
-const DERIVATION_VERSION: u32 = 10;
+// 11 (2026-11-03): structural induction over a body that descends on a later parameter
+// (`induct::trailing_list_descent` — `alloc_from t ws c w`): its laws prove where they were refused.
+const DERIVATION_VERSION: u32 = 11;
 
 fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
     dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))

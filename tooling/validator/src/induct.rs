@@ -181,6 +181,78 @@ fn unwind_self_apply(node: &J) -> Option<(&str, Vec<&J>)> {
     Some((name, inner))
 }
 
+thread_local! {
+    /// The argument position at which `self` takes its list: 0, except while a law is proved over a body
+    /// whose structural descent is on a later parameter (`alloc_from t ws c w` recurses on `tail(ws)`) —
+    /// set for that proof by [`SelfListPos`]. Read by the `self` arms of [`walk_sorts`] and by the
+    /// parameter-sort check in [`lower_rec_def_with_sorts`].
+    static SELF_LIST_POS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Sets [`SELF_LIST_POS`] for a scope and restores it on drop (early `?` returns included).
+struct SelfListPos(usize);
+
+impl SelfListPos {
+    fn set(pos: usize) -> Self {
+        SelfListPos(SELF_LIST_POS.with(|p| p.replace(pos)))
+    }
+}
+
+impl Drop for SelfListPos {
+    fn drop(&mut self) {
+        SELF_LIST_POS.with(|p| p.set(self.0));
+    }
+}
+
+/// The argument lists of every complete recursive call in `node` (`self(…)` and curried `apply(self, …)`).
+fn self_calls<'a>(node: &'a J, out: &mut Vec<Vec<&'a J>>) {
+    let args = if head_op(node).as_deref() == Some("self") {
+        Some(args_of(node))
+    } else {
+        unwind_self_apply(node).filter(|(n, _)| *n == "self").map(|(_, a)| a)
+    };
+    if let Some(args) = args {
+        // Only the arguments: the partial applications inside a curried call are not calls.
+        for a in &args {
+            self_calls(a, out);
+        }
+        out.push(args);
+        return;
+    }
+    match node {
+        J::Object(m) => m.values().for_each(|v| self_calls(v, out)),
+        J::Array(items) => items.iter().for_each(|v| self_calls(v, out)),
+        _ => {}
+    }
+}
+
+/// The position of the parameter a recursive lambda descends on structurally when it is NOT the leading
+/// one: every recursive call passes `tail(p)` of that same parameter there, and the leading parameter is
+/// not so descended. `None` for the ordinary leading-list shape, or when no single position qualifies.
+/// Every call descending at one fixed position is the termination checker's tail-descent criterion —
+/// the same footing the leading position stands on.
+fn trailing_list_descent(body: &J) -> Option<usize> {
+    let params: Vec<&str> = body
+        .get("params")?
+        .as_array()?
+        .iter()
+        .map(|p| p.get("name").and_then(|n| n.as_str()))
+        .collect::<Option<_>>()?;
+    let mut calls = Vec::new();
+    self_calls(body.get("body")?, &mut calls);
+    let descends_at = |i: usize| {
+        calls.iter().all(|args| {
+            args.get(i).is_some_and(|a| {
+                head_op(a).as_deref() == Some("tail") && args_of(a).first().and_then(|x| var_name(x)) == Some(params[i])
+            })
+        })
+    };
+    if calls.is_empty() || params.is_empty() || descends_at(0) {
+        return None;
+    }
+    (1..params.len()).find(|&i| descends_at(i))
+}
+
 fn references_self(node: &J) -> bool {
     if var_name(node) == Some("self") || node.get("op").and_then(|o| o.as_str()) == Some("self") {
         return true;
@@ -284,15 +356,18 @@ fn walk_sorts(node: &J, vars: &[String], sorts: &mut BTreeMap<String, Option<Sor
                     }
                 }
             }
-            // `self` recurses on a list, so its argument is a list. Both call forms: `self(xs)` and the
-            // curried `apply(self, xs)`.
+            // `self` recurses on a list, so its argument at the list position (`SELF_LIST_POS`, usually
+            // the first) is a list. Both call forms: `self(xs)` and the curried `apply(self, xs)`.
             "self" => {
-                if let Some(n) = args.first().and_then(|a| var_name(a)) {
+                let pos = SELF_LIST_POS.with(|p| p.get());
+                if let Some(n) = args.get(pos).and_then(|a| var_name(a)) {
                     assign(n, Sort3::Lst, vars, sorts)?;
                 }
             }
-            "apply" if args.first().and_then(|a| var_name(a)) == Some("self") => {
-                if let Some(n) = args.get(1).and_then(|a| var_name(a)) {
+            "apply" if unwind_self_apply(node).is_some_and(|(n, _)| n == "self") => {
+                let pos = SELF_LIST_POS.with(|p| p.get());
+                let (_, call) = unwind_self_apply(node).expect("checked by the guard");
+                if let Some(n) = call.get(pos).and_then(|a| var_name(a)) {
                     assign(n, Sort3::Lst, vars, sorts)?;
                 }
             }
@@ -877,8 +952,9 @@ fn lower_rec_def_with_sorts(body: &J, smt_name: &str) -> Result<(String, Vec<Sor
     walk_sorts(inner, &pnames, &mut psorts)?;
     let mut sorts = Vec::with_capacity(pnames.len());
     let mut decls = String::new();
+    let list_pos = SELF_LIST_POS.with(|p| p.get());
     for (i, p) in pnames.iter().enumerate() {
-        let s = if i == 0 {
+        let s = if i == list_pos {
             match psorts.get(p).copied().flatten() {
                 None | Some(Sort3::Lst) => Sort3::Lst,
                 Some(other) => bail!(
@@ -1478,6 +1554,13 @@ fn build_obligations(prop_expr: &J, body: Option<&J>, lemmas: &[&J]) -> Result<I
     if prop_expr.get("kind").and_then(|k| k.as_str()) != Some("forall") {
         bail!("not a `forall` — no induction to perform");
     }
+    // A body descending on a later parameter (`alloc_from t ws c w` tails `ws`) takes its list there:
+    // both the law's sort inference and the `define-fun-rec`'s parameter sorts read the position. The
+    // induction itself is on the LAW's first list variable either way, and its hypothesis is the
+    // structural one — the position only fixes which argument of `self` is the list.
+    let _list_pos = SelfListPos::set(
+        body.filter(|_| references_self(prop_expr)).and_then(trailing_list_descent).unwrap_or(0),
+    );
     // A law over a user-defined recursive function: encode the body as a `define-fun-rec self`, and the
     // induction discharges it just like the built-in recursive list ops. Without a body we can't.
     let self_def = if references_self(prop_expr) {
@@ -2838,6 +2921,67 @@ mod tests {
         ]));
         let (o, _) = prove_by_induction(&prop, Some(&recursive_double_all_body()), solver);
         assert_eq!(o, InductionOutcome::Proved, "list-returning self should preserve length, got {o:?}");
+    }
+
+    /// `self = \k xs -> case null(xs) of true -> nil | false -> cons(mul(k, head xs), self(k, tail xs))` —
+    /// the list is the SECOND parameter (the shape of the decimal tier's `alloc_from t ws c w`).
+    fn scale_all_list_second_body(curried: bool) -> J {
+        let rec = app("tail", vec![var("xs")]);
+        let call = if curried {
+            app("apply", vec![app("apply", vec![var("self"), var("k")]), rec])
+        } else {
+            app("self", vec![var("k"), rec])
+        };
+        json!({
+            "kind": "lambda",
+            "params": [{ "name": "k" }, { "name": "xs" }],
+            "body": {
+                "kind": "case",
+                "scrutinee": app("null", vec![var("xs")]),
+                "arms": [
+                    { "pattern": lit_bool(true),  "body": var("nil") },
+                    { "pattern": lit_bool(false), "body": app("cons", vec![
+                        app("mul", vec![var("k"), app("head", vec![var("xs")])]), call]) },
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn a_body_descending_on_a_later_parameter_proves_by_structural_induction() {
+        // Before 2026-11-03 `self`'s FIRST argument was always taken as the list: `k` came out a list
+        // and an int at once ("used at conflicting sorts") and every such law was UNSUPPORTED.
+        assert_eq!(trailing_list_descent(&scale_all_list_second_body(false)), Some(1));
+        assert_eq!(trailing_list_descent(&scale_all_list_second_body(true)), Some(1));
+        assert_eq!(trailing_list_descent(&recursive_length_body()), None, "the leading shape is unchanged");
+        let Some(solver) = solver() else {
+            return;
+        };
+        let self_at = |curried: bool, a: J, b: J| {
+            if curried {
+                app("apply", vec![app("apply", vec![var("self"), a]), b])
+            } else {
+                app("self", vec![a, b])
+            }
+        };
+        for curried in [false, true] {
+            let body = scale_all_list_second_body(curried);
+            let length = forall(&["k", "xs"], app("eq", vec![
+                app("length", vec![self_at(curried, var("k"), var("xs"))]),
+                app("length", vec![var("xs")]),
+            ]));
+            let (o, _) = prove_by_induction(&length, Some(&body), solver);
+            assert_eq!(o, InductionOutcome::Proved, "length (curried={curried}): {o:?}");
+            let head = |rhs: J| forall(&["k", "x", "xs"], app("eq", vec![
+                app("head", vec![self_at(curried, var("k"), app("cons", vec![var("x"), var("xs")]))]),
+                rhs,
+            ]));
+            let (o, _) = prove_by_induction(&head(app("mul", vec![var("k"), var("x")])), Some(&body), solver);
+            assert_eq!(o, InductionOutcome::Proved, "head (curried={curried}): {o:?}");
+            // ...and the position is not a licence: a false law stays unproved.
+            let (o, _) = prove_by_induction(&head(var("x")), Some(&body), solver);
+            assert_ne!(o, InductionOutcome::Proved, "a false head law (curried={curried})");
+        }
     }
 
     /// `self = \xs ys -> case null(xs) of true -> ys | false -> cons(head xs, self(tail xs, ys))` —
