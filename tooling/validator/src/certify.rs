@@ -473,12 +473,29 @@ impl<'a> LinkedView<'a> {
             let prev_ty = crate::prove::set_self_type(Some(sig_type.clone()));
             let prev_measure = crate::prove::set_self_measure(self.self_measure(body, &nat_positions));
             let all_laws: Vec<J> = if self.callee_laws { law_exprs(rec) } else { Vec::new() };
+            let callee_name = rec.pointer("/name_hints/0").and_then(|n| n.as_str()).unwrap_or("?");
+            let started = std::time::Instant::now();
+            if progress() {
+                eprintln!("   callee   {callee_name} ({}…): deriving its contract", &target[..target.len().min(11)]);
+            }
             let (reports, laws) = derive_self_facts(sig_type, &refinements, &all_laws, body, &nat_positions, &self.solver);
             crate::prove::set_self_measure(prev_measure);
             crate::prove::set_self_type(prev_ty);
             crate::set_callee_contracts(prev);
             crate::prove::set_callee_refusals(prev_refusals);
             let posts = sound_posts(&reports, &declared_posts);
+            if progress() {
+                // `posts` counts the type-implied ones (a `nat` result) beside the declared.
+                let laws_part = if self.callee_laws {
+                    format!("laws {} of {} proved", laws.len(), all_laws.len())
+                } else {
+                    "laws not tried (posts-only pass)".to_string()
+                };
+                eprintln!(
+                    "   callee   {callee_name}: {} post(s) sound, {laws_part} ({:.1} s)",
+                    posts.len(), started.elapsed().as_secs_f64()
+                );
+            }
             // `NL_DERIVED_DEBUG=1`: what each derivation yielded, on stderr.
             if std::env::var("NL_DERIVED_DEBUG").is_ok_and(|v| v == "1") {
                 let names: Vec<String> = rec.get("properties").and_then(|p| p.as_array()).into_iter().flatten()
@@ -823,13 +840,48 @@ fn derive_self_facts_inner(
 /// `rat_normalize`'s `idempotent` PROVES after 286 — no query budget separates the two).
 pub fn law_attempt(phase: &str, law: &J, f: impl FnOnce() -> bool) -> bool {
     let before = crate::prove::queries_run();
+    let started = std::time::Instant::now();
     let proved = f();
+    let text = || -> String {
+        let t = crate::surface::unparse_predicate(law).unwrap_or_else(|_| "?".into());
+        t.chars().take(60).collect()
+    };
     if std::env::var("NL_DERIVED_DEBUG").is_ok_and(|v| v == "1") {
-        let text = crate::surface::unparse_predicate(law).unwrap_or_else(|_| "?".into());
-        let text: String = text.chars().take(60).collect();
-        eprintln!("[law] {phase} {} queries, proved={proved}: {text}", crate::prove::queries_run() - before);
+        eprintln!("[law] {phase} {} queries, proved={proved}: {}", crate::prove::queries_run() - before, text());
+    }
+    if progress() {
+        let verdict = if proved { "proved" } else { "open  " };
+        eprintln!("   law      {verdict} {:>6.1} s  {}", started.elapsed().as_secs_f64(), text());
     }
     proved
+}
+
+/// Progress lines on stderr while a verified run certifies (`orchestrate --verify` turns it on): one
+/// per law attempt and one per callee contract derived, each with its time. Stranger 16 and 17
+/// (2026-11-03/04) sat through `binomial`'s and `lcm`'s 3–5 min with one "can take minutes" line
+/// and nothing after it; the work is a sequence of solver attempts of seconds to a minute each.
+static PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_progress(on: bool) {
+    PROGRESS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Progress on until the guard drops.
+pub fn progress_on() -> ProgressGuard {
+    set_progress(true);
+    ProgressGuard
+}
+
+pub struct ProgressGuard;
+
+impl Drop for ProgressGuard {
+    fn drop(&mut self) {
+        set_progress(false);
+    }
+}
+
+pub fn progress() -> bool {
+    PROGRESS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Every `fn_ref` literal target in an AST.
@@ -1113,6 +1165,15 @@ pub fn certify_record_in_view(record: &J, body: &J, records: &HashMap<String, J>
     if decided {
         return first;
     }
+    if progress() {
+        let open: Vec<&str> = first
+            .checks
+            .iter()
+            .filter(|c| uses_the_view(&c.check) && !matches!(c.verdict, "SOUND" | "VERIFIED" | "N/A"))
+            .map(|c| c.check.as_str())
+            .collect();
+        eprintln!("   certify  {} undecided on callee posts alone — again with callee laws (slower)", open.join(", "));
+    }
     certify_with_view(record, body, records, Some(full), solver)
 }
 
@@ -1216,7 +1277,16 @@ fn certify_with_view(
         // may enter a post's induction), so this report and a dependent's view of it agree.
         let nat_positions = crate::terminate::nat_param_positions(record);
         let prev_measure = view.map(|v| crate::prove::set_self_measure(v.self_measure(body, &nat_positions)));
+        let started = std::time::Instant::now();
         let (reports, proved) = derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, solver);
+        if progress() {
+            let sound = reports.iter().filter(|r| matches!(r.outcome, RefinementOutcome::Sound)).count();
+            let pass = if view.is_some_and(|v| !v.callee_laws) { ", over callee posts only" } else { "" };
+            eprintln!(
+                "   contract {sound} of {} refinement(s) sound, {} of {} law(s) proved ({:.1} s{pass})",
+                reports.len(), proved.len(), law_exprs(record).len(), started.elapsed().as_secs_f64()
+            );
+        }
         laws = proved;
         laws_complete = view.is_some_and(|v| v.callee_laws || v.contracts_for_record(record, body).is_empty());
         if let Some(p) = prev_measure {

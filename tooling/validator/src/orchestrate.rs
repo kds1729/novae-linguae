@@ -862,6 +862,9 @@ pub fn orchestrate_verified_with_order(
         // One linked view for the candidate: certify's second pass and the law step below derive
         // the same contracts, memoized here once.
         let view = crate::LinkedView::new(&records, &link, solver);
+        // A stderr line per callee derived and per law attempted, while this candidate's certify
+        // and law steps run (stranger 17: minutes of silence after the one "certify" line).
+        let _progress = crate::certify::progress_on();
         let mut certified_laws: Option<(Vec<J>, bool)> = None;
         let certified = match (records.get(&target), link.get(&target)) {
             (Some(rec), Some(body)) => {

@@ -15,19 +15,25 @@ If you have a task of your own, fetch the validator and skip the demo:
     sha256sum -c nl-validator-x86_64-linux.sha256
     chmod +x nl-validator-x86_64-linux
 
-(`nl-validator-aarch64-macos` on Apple silicon; `shasum -a 256 -c` there.) Run `-c` in the
-directory you downloaded into and keep the file name: the `.sha256` file names the binary by its
-bare file name, so `-c` from elsewhere, or on a renamed copy, checks nothing. The verified loop also needs **`z3`
+(`nl-validator-aarch64-macos` on Apple silicon; `shasum -a 256 -c` there.) The `.sha256` file
+names the binary by its bare file name, so `-c` must run in the directory you downloaded into, on
+the un-renamed file. If your shell cannot `cd` there (one command per call), let `env` do it:
+`env -C <download-dir> sha256sum -c nl-validator-x86_64-linux.sha256` (GNU coreutils) prints
+`nl-validator-x86_64-linux: OK`. The verified loop also needs **`z3`
 on the PATH** (any 4.13+; `apt install z3`, `brew install z3`). Then go to *Finding a function
 for a goal* below.
 
 A verified run (`--verify`) proves the function's contract AND what it rests on in its callees,
 with the solver: seconds to under a minute (`isqrt` ~2 s, `mod_inverse` ~20 s, `crt2` ~40 s —
-modular proofs through `mod_inverse`), longer when a contract needs a callee's laws too. It says so on stderr when
-it starts certifying. If your shell tool has a short time limit, run it in the background and
-wait. A law the solver cannot close is reported as "not proved here" — it does not fail the run
-unless you pass `--require-laws` — but trying it costs time: `binomial` (two laws its own module
-build leaves open) takes ~4.5 min, the rational functions over `gcd` longer. `NL_DERIVED_CACHE=1` keeps derived callee contracts on disk, so a second run over the same
+modular proofs through `mod_inverse`), longer when a contract needs a callee's laws too. On stderr
+it prints ` certify  <name> …` when it starts, then one line per callee contract it derives
+(`callee  gcd: 2 post(s) sound, laws 4 of 5 proved (28.0 s)`) and one per law attempt
+(`law  proved   3.2 s  forall …` / `law  open    61.0 s  forall …`) — a new line every few seconds
+to a minute means it is working, not hung. If your shell tool has a short time limit, run it in
+the background and read its output file. A law the solver cannot close is reported as "not proved
+here" — it does not fail the run unless you pass `--require-laws` — but trying it costs time:
+`binomial` and `lcm` (laws their own module build leaves open) take ~3–5 min each, the rational
+functions over `gcd` longer. `NL_DERIVED_CACHE=1` keeps derived callee contracts on disk, so a second run over the same
 callees skips them.
 
 ## In three sentences
@@ -74,6 +80,10 @@ Decimal numbers from a user ("7.125", "1.0825") are not floats here — money mu
 them as TEXT to a function that takes text (`round_text_half_even`, `fx_convert_text`,
 `parse_decimal` in the decimal tier — `--arg '"7.125"'`); its contract states the rounding rule
 (within half a unit, a tie to the even) and which numeric function it applies; or scale them yourself to integers (7.125 at 3 places is 7125).
+The integer rounding functions (`div_half_even`, `div_half_up`, `div_floor`, `div_ceil`,
+`div_trunc`) round the FRACTION n/d — the dividend first, then the divisor (≥ 1): to round −3.5
+ties-to-even, apply `div_half_even` to `--arg -35 --arg 10` (→ `-4`); `round_text_half_even` on
+`"-3.5"` with 0 places is the same rule on text (→ `Just(-4)`; `None` for text that is not a decimal).
 
 ## What things are
 
