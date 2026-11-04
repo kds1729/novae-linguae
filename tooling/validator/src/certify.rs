@@ -989,7 +989,7 @@ pub fn progress_on() -> ProgressGuard {
             std::thread::sleep(std::time::Duration::from_millis(250));
             let silent = progress_clock().saturating_sub(LAST_PROGRESS_MS.load(Relaxed));
             if !flag.load(Relaxed) && silent >= HEARTBEAT_SECS * 1000 {
-                progress_line!("   working  still proving — {:.0} s so far (not hung)", started.elapsed().as_secs_f64());
+                progress_line!("   working  still working — {:.0} s so far (not hung)", started.elapsed().as_secs_f64());
             }
         }
     });

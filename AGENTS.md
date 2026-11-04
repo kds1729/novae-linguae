@@ -31,7 +31,7 @@ it prints ` certify  <name> …` when it starts, then one line per callee contra
 (`callee  gcd: 2 post(s) sound, laws 4 of 5 proved (28.0 s)`) and one per law attempt
 (`law  proved     3.2 s  forall …` / `law  unproved  20.0 s  forall …` — an unproved law is
 normal and harmless, see below), and after 30 s with no
-other line `working  still proving — 95 s so far (not hung)` — so a stderr line at least every
+other line `working  still working — 95 s so far (not hung)` — so a stderr line at least every
 30 s means it is working. If your shell tool has a short time limit, run it in
 the background and read its output file. A law the solver cannot close is reported as "not proved
 here" — it does not fail the run unless you pass `--require-laws`. Each law ATTEMPT in a verified
@@ -80,7 +80,11 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    The contract is what separates candidates with similar names — e.g. `allocate`'s
    `post: list_sum(result) == total` (the parts sum to the total) versus a plain `divide`.
    Read `complexity` before applying to a large argument: `binomial_pascal` is `O(2^n)` and does
-   not finish on (60, 30); `binomial` is `O(n)`.
+   not finish on (60, 30); `binomial` is `O(n)`. A summary with NO `complexity` and `terminates`
+   other than `always` (the early seed `fib`, naive recursion) promises nothing about running time —
+   treat it as possibly exponential; the loop says so before applying it. A `pre` bounds where a
+   function promises anything at all (`is_prime`: `n <= 9223372036854775807`); the loop refuses
+   arguments that falsify it, naming the pre.
    `certifications` counts signed certificates about the function; whose they are is your
    policy's question (`nl-validator certified`), and `--require-certified` re-certifies locally anyway.
 3. Apply it with the verified loop using a tag from its `intent_tags`:

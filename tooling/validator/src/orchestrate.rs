@@ -1063,6 +1063,25 @@ pub fn orchestrate_verified_with_order(
         let property = proved_laws.next();
         let other_laws: Vec<(String, bool)> = proved_laws.collect();
 
+        // Nothing bounds a run of a function that declares neither termination nor a cost class:
+        // say so BEFORE applying it. Stranger 24 (2026-11-04) applied Arca's seed `fib` (naive
+        // recursion, `terminates: unknown`, no complexity) to 100 and it ran until killed.
+        if let Some(rec) = records.get(&target) {
+            let terminates = rec.pointer("/signature/terminates").and_then(|t| t.as_str()).unwrap_or("unknown");
+            let has_cost = rec.pointer("/signature/complexity").is_some();
+            if terminates != "always" || !has_cost {
+                let name = rec.pointer("/name_hints/0").and_then(|n| n.as_str()).unwrap_or("?");
+                let what = match (terminates != "always", !has_cost) {
+                    (true, true) => format!("declares termination `{terminates}` and no complexity"),
+                    (true, false) => format!("declares termination `{terminates}`"),
+                    _ => "declares no complexity".to_string(),
+                };
+                crate::certify::progress_line!(
+                    "   apply    {name} {what} — nothing bounds this run; it may not finish on large arguments"
+                );
+            }
+        }
+
         // APPLY: propose → commit → assert. A signed `reject` (a policy answer — e.g. "effect not
         // granted") advances to the next candidate rather than ending the run.
         let mut propose = json!({

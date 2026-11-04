@@ -423,6 +423,19 @@ pub fn respond_to_message_with_trust(
             signing_key,
         ))
     };
+    // A `propose`/`apply` whose args falsify a declared pre: refused naming the pre.
+    let pre_gate = || -> Option<Result<J>> {
+        let target = message.pointer("/body/target").and_then(|t| t.as_str())?;
+        let args = message.pointer("/body/args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+        let (code, reason) = precondition_refusal(target, &args, &link_map, &record_map)?;
+        let hash = message.get("hash").and_then(|h| h.as_str())?;
+        let reply_to = message.get("from").and_then(|f| f.as_str())?;
+        Some(sign_envelope(
+            build_envelope("reject", reply_to, hash, timestamp,
+                json!({ "rejects": hash, "code": code, "reason": reason })),
+            signing_key,
+        ))
+    };
     match kind {
         "request" => {
             let action = message.pointer("/body/action").and_then(|a| a.as_str()).unwrap_or_default();
@@ -441,6 +454,7 @@ pub fn respond_to_message_with_trust(
         "query" => query_reply(message, record_map, signing_key, timestamp),
         "propose" => match capability_gate(message, &record_map, policy, signing_key, timestamp)
             .or_else(|| effect_gate("/body/target"))
+            .or_else(|| pre_gate())
         {
             Some(reject) => reject,
             None => propose_reply(message, link_map, signing_key, timestamp),
@@ -540,6 +554,38 @@ fn capability_gate(
 /// 2. **Policy**: every inferred effect must be operator-granted. Shortfall → `refused`, with an
 ///    `effect not granted:` reason naming the missing effects.
 ///
+/// A proposal whose ARGUMENTS falsify one of the target's declared `pre`s is refused naming that
+/// pre — the function promises nothing there. Stranger 24 (2026-11-04) applied `is_prime`
+/// (`pre n <= 2^63 − 1`) to 2^89 − 1 and saw only "errored" (an i128 overflow inside `mod_pow`).
+/// Only a pre that EVALUATES to `false` refuses; one the evaluator cannot decide proceeds.
+fn precondition_refusal(
+    target: &str,
+    args: &[J],
+    link_map: &HashMap<String, J>,
+    record_map: &HashMap<String, J>,
+) -> Option<(&'static str, String)> {
+    let rec = record_map.get(target)?;
+    let params = link_map.get(target)?.get("params")?.as_array()?;
+    if params.len() != args.len() {
+        return None;
+    }
+    let mut bindings = std::collections::BTreeMap::new();
+    for (p, a) in params.iter().zip(args) {
+        bindings.insert(p.get("name")?.as_str()?.to_string(), crate::interp::decode_value(a).ok()?);
+    }
+    let pres = rec.pointer("/signature/refinements")?.as_array()?.iter()
+        .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("pre"))
+        .filter_map(|r| r.get("expr"));
+    set_resolver(link_map.clone());
+    let failed = pres.into_iter().find(|e| {
+        matches!(crate::interp::eval_predicate_env(e, &bindings, &None), Some(crate::interp::Val::Bool(false)))
+    }).cloned();
+    clear_resolver();
+    let pre = failed?;
+    let text = crate::surface::unparse_predicate(&pre).unwrap_or_else(|_| pre.to_string());
+    Some(("precondition_violated", format!("the arguments do not satisfy the function's precondition `{text}` — it promises nothing there")))
+}
+
 /// Returns `Some((code, reason))` to refuse, `None` to proceed. A pure target always proceeds.
 fn effect_refusal(
     target: &str,
@@ -703,10 +749,13 @@ fn propose_reply(
 
     // Only commit to what we can actually fulfil: resolve + test-run the target on the proposed args.
     set_resolver(link_map);
-    let runnable = eval_body(&body_ast, &args).is_ok();
+    let run = eval_body(&body_ast, &args);
     clear_resolver();
-    if !runnable {
-        return reject("constraint_violated", format!("cannot fulfil: running `{target}` on the proposed args errored"));
+    if let Err(e) = run {
+        // Say WHY: stranger 24 (2026-11-04) saw only "errored" for `is_prime` on 2^89 − 1.
+        let why = e.to_string();
+        let why: String = why.chars().take(200).collect();
+        return reject("constraint_violated", format!("cannot fulfil: running `{target}` on the proposed args errored: {why}"));
     }
 
     sign_envelope(
@@ -833,6 +882,23 @@ mod tests {
     use super::*;
     use crate::{build_link_map, build_record_map, signing_key_from_seed, verify_signature};
     use std::path::{Path, PathBuf};
+
+    /// Args that falsify a declared pre are refused naming it; args that satisfy it, or a pre the
+    /// evaluator cannot decide, proceed (stranger 24: `is_prime` on 2^89 − 1 read only "errored").
+    #[test]
+    fn a_proposal_whose_args_falsify_a_pre_is_refused_naming_it() {
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": { "kind": "var", "name": "n" } });
+        let rec = json!({ "signature": { "refinements": [
+            { "kind": "pre", "expr": crate::surface::parse_predicate("n <= 10").unwrap() } ] } });
+        let link: HashMap<String, J> = [("fn_t".to_string(), body)].into_iter().collect();
+        let recs: HashMap<String, J> = [("fn_t".to_string(), rec)].into_iter().collect();
+        let int = |v: i64| json!({ "kind": "int", "value": v });
+        let (code, reason) = precondition_refusal("fn_t", &[int(11)], &link, &recs).expect("refused");
+        assert_eq!(code, "precondition_violated");
+        assert!(reason.contains("n <= 10"), "{reason}");
+        assert!(precondition_refusal("fn_t", &[int(5)], &link, &recs).is_none());
+        assert!(precondition_refusal("fn_t", &[], &link, &recs).is_none(), "an arity mismatch is the run's to report");
+    }
 
     fn examples_dir() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec/examples")
