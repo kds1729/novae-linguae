@@ -1246,6 +1246,19 @@ Every other verdict is unchanged from round 16 except addresses (the re-minted r
 dependents) and `pow_mod_agree`, whose induction now closes without the stepwise fallback.
 Contracts 25/0 (was 24), laws 38/7/0 of 45.
 
+## Fifteenth note (2026-11-03): an exponential function, said so
+
+Stranger 16 (v0.1.16) asked for C(60, 30). Its verified run of `binomial` ended NOT-PROVEN: the
+loop then gated on a function's FIRST law, and `binomial`'s `symmetry` (like its `pascal`) is one
+this module has always left UNKNOWN — the multiplicative body's division hides the factorial
+fact both rest on. From v0.1.17 laws are reported, not gating, and the same run CONFIRMS
+`int(118264581564861424)` naming `choose_zero`, `beyond_n` proved and `symmetry`, `pascal` not
+proved here. It then tried `binomial_pascal`, whose four laws are all PROVED — and waited 14
+minutes: the body is Pascal's rule with two recursive calls, exponential in `n`, and nothing in
+the record or its search summary said so. Round 18 (46.8 min, log `integer-build-round18.log`)
+declares `complexity = "O(2^n)"` on it: **SOUND** (was N/A, no declaration). Every other verdict is
+unchanged from round 17 except addresses (`binomial_pascal` and its dependent `binomial_agree`).
+
 ## Open questions (as they stood before the follow-up)
 
 - **Folding certified callees into termination and complexity.** Eighteen of twenty UNVERIFIABLE

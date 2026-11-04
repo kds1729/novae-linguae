@@ -901,7 +901,7 @@
    "effects": "SOUND",
    "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
-   "complexity": "N/A"
+   "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
@@ -910,7 +910,7 @@
    "effects": "effects [] \u2286 declared",
    "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
-   "complexity": "none declared; inferred O(2^n)"
+   "complexity": "within declared `O(2^n)` (inferred O(2^n))"
   },
   "properties_generative": [
    "pascal: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",

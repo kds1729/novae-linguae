@@ -593,7 +593,8 @@ def main():
     # 11b. The same coefficients by Pascal's rule (twelfth note): C(n+1, k+1) = C(n, k) + C(n, k+1),
     # C(n, 0) = 1, C(0, k > 0) = 0 — no division, so Pascal's identity is the DEFINITION and
     # symmetry is a two-variable induction; the multiplicative record's two open laws, re-posed.
-    # Exponential as written (two recursive calls), so no complexity bound is declared.
+    # Exponential as written (two recursive calls), declared O(2^n) since round 18: stranger 16 applied
+    # it to (60, 30) and waited 14 min, with no complexity in the search summary to warn it.
     build("binomial_pascal", r"\n k -> case gt k 0 of { true => case gt n 0 of { true => add (self (sub n 1) (sub k 1)) (self (sub n 1) k); false => 0 }; false => 1 }",
           FN([NAT, NAT], NAT),
           [{"args": [nlit(5), nlit(2)], "result": nlit(10)}, {"args": [nlit(10), nlit(0)], "result": nlit(1)}, {"args": [nlit(4), nlit(5)], "result": nlit(0)},
@@ -602,7 +603,7 @@ def main():
                  ("symmetry", "forall n k. n < 0 || k < 0 || k > n || self(n, k) == self(n, n - k)"),
                  ("choose_zero", "forall n. self(n, 0) == 1"),
                  ("beyond_n", "forall n k. k <= n || self(n, k) == 0")],
-          hints=["binomial_coefficient_pascal", "choose_additive"])
+          hints=["binomial_coefficient_pascal", "choose_additive"], complexity="O(2^n)")
     gauntlet("binomial_pascal", prove)
 
     # 11c. The two definitions agree — a checker record; the law is the factorial fact the
