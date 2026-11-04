@@ -954,7 +954,7 @@ pub fn orchestrate_verified_with_order(
                 // `mod_inverse` (over `ext_gcd`). Stranger 14 (2026-11-03) saw nothing after `node fetch`,
                 // took the silence for a hang at its tool's time limit, and fell back to an unverified run.
                 let name = rec.pointer("/name_hints/0").and_then(|n| n.as_str()).unwrap_or("?");
-                eprintln!(
+                crate::certify::progress_line!(
                     " certify  {name} ({}…): proving its contract and its callees' — can take minutes",
                     &target[..target.len().min(11)]
                 );

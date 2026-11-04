@@ -70,6 +70,26 @@ rat = lambda n, d: tup(ilit(n), ilit(d))  # noqa: E731
 ADDR = {}      # name -> fn_ address, for `{name}` placeholders in later bodies
 REPORT = []
 
+# Round 10: one plain-words line per parameter (`param_docs`, function-record v0.2) — strangers 19/20
+# inferred the argument order (numerator, denominator, …) from the pre. Testimony beside the names.
+_X = ["numerator of the fraction x (any integer; the sign lives here)",
+      "denominator of x, at least 1 (the fraction is n/d)"]
+_XY = ["numerator of the first fraction x = a/b", "denominator of x, at least 1",
+       "numerator of the second fraction y = c/d", "denominator of y, at least 1"]
+PARAM_DOCS = {
+    "rat_normalize": ["numerator n of the fraction n/d (any integer)",
+                      "denominator d (any nonzero integer; a negative sign moves to the numerator)"],
+    "rat_coprime_holds": ["numerator n of the fraction n/d", "denominator d, nonzero"],
+    "rat_neg": _X,
+    "rat_inv": ["numerator of x = n/d, nonzero (1/x must exist)", "denominator of x, nonzero"],
+    "rat_add": _XY, "rat_sub": _XY, "rat_mul": _XY, "rat_eq": _XY, "rat_lt": _XY,
+    "rat_floor": _X,
+    "rat_add_zero_holds": _X, "rat_mul_one_holds": _X,
+    "rat_eq_normalize_holds": _XY,
+    "rat_add_assoc_holds": ["numerator of x", "denominator of x, at least 1", "numerator of y",
+                            "denominator of y, at least 1", "numerator of z", "denominator of z, at least 1"],
+}
+
 
 def build(name, surface, sig, examples, props=(), refinements=(), tags=(), hints=(), complexity=None,
           terminates="always"):
@@ -103,6 +123,8 @@ def build(name, surface, sig, examples, props=(), refinements=(), tags=(), hints
     }
     if complexity:
         record["signature"]["complexity"] = complexity
+    if name in PARAM_DOCS:
+        record["param_docs"] = list(PARAM_DOCS[name])
     del record["hash"]
     record["hash"] = hash_artifact(record, "function-record")
     (OUT / f"body-{name}.json").write_text(json.dumps(body, indent=1, sort_keys=True) + "\n")
@@ -264,6 +286,10 @@ def main():
                        # The value: result = (a·d + c·b) / (b·d), as cross-multiplication (normalize's law
                        # at the body's application — composition by contract across the module boundary).
                        ("post", "fst(result) * (b * d) == (a * d + c * b) * snd(result)")],
+          # Round 10 gave rat_sub/rat_mul a LOWEST-TERMS post (stranger 20); NOT rat_add: with it,
+          # rat_add_assoc_holds' `associative` went PROVED → UNKNOWN (13 min, measured twice) — four
+          # rat_add applications each carrying a gcd atom drown the query. Lowest terms of a sum is
+          # still rat_normalize's post at the body's application.
           props=[("commutative", "forall a b c d. self(a, b, c, d) == self(c, d, a, b)"),
                  # Round 8: CONGRUENCE — sums of equal value are the same pair. One instance of
                  # normalize's `unique` law at the body's application; the associativity checker
@@ -275,7 +301,8 @@ def main():
     build("rat_sub", r"\a b c d -> {rat_normalize} (sub (mul a d) (mul c b)) (mul b d)", FN([INT, INT, INT, INT], RAT),
           [ex((1, 2, 1, 3), rat(1, 6)), ex((1, 2, 1, 2), rat(0, 1)), ex((-1, 3, 1, 6), rat(-1, 2))],
           refinements=[("pre", "b >= 1 && d >= 1"), ("post", "snd(result) >= 1"),
-                       ("post", "fst(result) * (b * d) == (a * d - c * b) * snd(result)")],
+                       ("post", "fst(result) * (b * d) == (a * d - c * b) * snd(result)"),
+                       ("post", "{gcd}(abs(fst(result)), snd(result)) == 1")],
           # x − x = 0: the numerator a·b − a·b vanishes, and normalize's zero post does the rest.
           props=[("self_difference_is_zero", "forall a b. b < 1 || fst(self(a, b, a, b)) == 0 && snd(self(a, b, a, b)) == 1")],
           hints=["subtract_fractions"], complexity="O(log n)")
@@ -284,7 +311,8 @@ def main():
     build("rat_mul", r"\a b c d -> {rat_normalize} (mul a c) (mul b d)", FN([INT, INT, INT, INT], RAT),
           [ex((1, 2, 2, 3), rat(1, 3)), ex((-3, 4, 4, 3), rat(-1, 1)), ex((0, 5, 7, 2), rat(0, 1))],
           refinements=[("pre", "b >= 1 && d >= 1"), ("post", "snd(result) >= 1"),
-                       ("post", "fst(result) * (b * d) == (a * c) * snd(result)")],
+                       ("post", "fst(result) * (b * d) == (a * c) * snd(result)"),
+                       ("post", "{gcd}(abs(fst(result)), snd(result)) == 1")],
           props=[("commutative", "forall a b c d. self(a, b, c, d) == self(c, d, a, b)"),
                  ("zero_annihilates", "forall b c d. b < 1 || d < 1 || fst(self(0, b, c, d)) == 0")],
           hints=["multiply_fractions"], complexity="O(log n)")
@@ -303,7 +331,9 @@ def main():
 
     build("rat_lt", r"\a b c d -> lt (mul a d) (mul c b)", FN([INT, INT, INT, INT], BOOL),
           [ex((1, 2, 2, 3), blit(True)), ex((2, 3, 1, 2), blit(False)), ex((1, 2, 1, 2), blit(False)), ex((-1, 2, 0, 1), blit(True))],
-          refinements=[("pre", "b >= 1 && d >= 1")],
+          # Round 10: the decision as a POST (as rat_eq's) — stranger 20's verified run vouched
+          # nothing about the boolean. With positive denominators a·d < c·b IS a/b < c/d.
+          refinements=[("pre", "b >= 1 && d >= 1"), ("post", "result == (a * d < c * b)")],
           props=[("irreflexive", "forall a b. self(a, b, a, b) == false"),
                  ("asymmetric", "forall a b c d. b < 1 || d < 1 || self(a, b, c, d) == false || self(c, d, a, b) == false")],
           tags=["predicate/check"], hints=["fraction_less_than"], complexity="O(1)")

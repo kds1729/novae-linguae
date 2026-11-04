@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_79360fe7383d3c3bebc4702d00180ff8d8bf249dfa575489bc250fa83530604e",
+ "body_hash": "expr_9446052f4078decb952dcd9e536a300c025b9dfe940de8ccab80dc1e30833703",
  "derived_from": null,
  "examples": [
   {
@@ -168,7 +168,7 @@
    }
   }
  ],
- "hash": "fn_57ebf7f0fe2203660ef7d617553ac07779789eaf0b34289fc86cd20c663125c1",
+ "hash": "fn_07f429f2bbee9c06ccba13ec85edbc653fa009aedc6b737afc9df3674be29ab8",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -178,6 +178,12 @@
   "gi_gcd",
   "gaussian_gcd",
   "euclid_gaussian"
+ ],
+ "param_docs": [
+  "real part a of z = a + bi",
+  "imaginary part b of z",
+  "real part c of w = c + di",
+  "imaginary part d of w"
  ],
  "properties": [
   {

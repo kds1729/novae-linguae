@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_927270ee6db3c43781adc61256443f1310b4a907a36ed6c58b2b51e92feebe61",
+ "body_hash": "expr_5eb246856e76bec9d927172b5b0afcb61089e291990f9db466ef6334e12d028f",
  "derived_from": null,
  "examples": [
   {
@@ -78,7 +78,7 @@
    }
   }
  ],
- "hash": "fn_420e4a42f17cee60d37f1f4116084387eb2010dc76b6f6da785d403ca96d8af0",
+ "hash": "fn_567ddc04ecf22a9779a2e88c5e18360d243f4cdab796a23cb2b74ea2420179ab",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -87,6 +87,10 @@
  "name_hints": [
   "rat_inv",
   "reciprocal"
+ ],
+ "param_docs": [
+  "numerator of x = n/d, nonzero (1/x must exist)",
+  "denominator of x, nonzero"
  ],
  "properties": [
   {

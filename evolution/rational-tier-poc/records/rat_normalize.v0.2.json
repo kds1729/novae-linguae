@@ -153,7 +153,7 @@
    }
   }
  ],
- "hash": "fn_e5feabda9127ca576877e5ce343c837d8eb895a85efe7b7682829e702052cd31",
+ "hash": "fn_e951a3dc71f18b4395831519dc5311c07ff68209c652f3b7264deb23d15aa35b",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -163,6 +163,10 @@
   "rat_normalize",
   "normalize_fraction",
   "lowest_terms"
+ ],
+ "param_docs": [
+  "numerator n of the fraction n/d (any integer)",
+  "denominator d (any nonzero integer; a negative sign moves to the numerator)"
  ],
  "properties": [
   {

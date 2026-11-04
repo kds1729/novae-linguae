@@ -2,7 +2,7 @@
 
 - **Status:** published (2026-10-30). <!-- exploring | published | absorbed | superseded -->
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-10-30, last updated 2026-11-01 (round 8 — uniqueness as a law on `rat_normalize`, inherited by callers; ADDITIVE ASSOCIATIVITY PROVED; every law PROVED; round 9 — complexity SOUND 14/14)
+- **Dates:** first published 2026-10-30, last updated 2026-11-04 (round 10 — `param_docs`, `rat_lt`'s decision post, lowest terms on `rat_sub`/`rat_mul`); round 8 — uniqueness as a law on `rat_normalize`, inherited by callers; ADDITIVE ASSOCIATIVITY PROVED; every law PROVED; round 9 — complexity SOUND 14/14)
 - **Scope:** `tooling/validator` (the prover's contract composition, the divisibility rung, the
   generative checker), `evolution/integer-tier-poc` (its `gcd` record, applied by address),
   `spec/evaluation.md`.
@@ -123,6 +123,14 @@ Round 6 (98.3 min, log `rational-build-round6.log`, nl-validator at `e7c307d`, n
 change): the `cross` law PROVED from `rat_normalize`'s own certified contract (`value_preserved`
 at both applications, the cancellation by the solver), `rat_eq`'s decision post SOUND — the table
 above; the two checkers stay UNKNOWN, now for the measured reason recorded under "What is argued".
+Round 10 (2026-11-04, 30.7 min, log `rational-tier-poc-r9b.log`, peak 810 MB, nl-validator
+0.1.20; stranger 20's frictions): every record gained `param_docs` (strangers 19/20 inferred the
+argument order from the pre); `rat_lt` gained the decision post `result == (a·d < c·b)` — SOUND (its
+verified run vouched nothing about the boolean); `rat_sub` and `rat_mul` gained the LOWEST-TERMS
+post `gcd(|fst|, snd) = 1` — SOUND, read off `rat_normalize`'s post. NOT `rat_add`: with that post
+`rat_add_assoc_holds`' `associative` went PROVED → UNKNOWN (13 min, measured twice — four `rat_add`
+applications each carrying a gcd atom drown the query), so the first round-10 build (`r9`, 46.6 min)
+was discarded and the post dropped. Laws 24/0/0, complexity 14/14, as in round 9.
 Round 9 (38.1 min, log `rational-build-round9.log`, peak 979 MB, nl-validator at `78ba9fc`): no
 record changed; complexity SOUND 14/14 (rounds 1–8: 7/14) from the validator's polylogarithmic
 fold (`6a14d11`); laws 24/0/0 and every contract as in round 8. A first round-9 start ran beside

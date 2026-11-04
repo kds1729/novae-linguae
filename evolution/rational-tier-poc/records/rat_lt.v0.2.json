@@ -99,7 +99,7 @@
    }
   }
  ],
- "hash": "fn_c062fd4fe8b4dbc3ef8708730d29c8636a8ba1a127a5c07fe80c81d8d028d132",
+ "hash": "fn_3d5de98c3adf5eb82034982a520c788161168de040188e56f81f22779947f0eb",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -109,6 +109,12 @@
  "name_hints": [
   "rat_lt",
   "fraction_less_than"
+ ],
+ "param_docs": [
+  "numerator of the first fraction x = a/b",
+  "denominator of x, at least 1",
+  "numerator of the second fraction y = c/d",
+  "denominator of y, at least 1"
  ],
  "properties": [
   {
@@ -318,6 +324,53 @@
      "op": "and"
     },
     "kind": "pre"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "result"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "d"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "c"
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "post"
    }
   ],
   "terminates": "always",

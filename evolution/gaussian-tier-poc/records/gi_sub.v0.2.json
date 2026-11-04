@@ -102,7 +102,7 @@
    }
   }
  ],
- "hash": "fn_8eb61bf5795655587334edf0458fe435c3267bb555214d07dffdc05c11da811e",
+ "hash": "fn_b576712e27c4f67e3bba6725048c08bea407323e994c09b6d1dd86068ce1cca5",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -111,6 +111,12 @@
  "name_hints": [
   "gi_sub",
   "gaussian_sub"
+ ],
+ "param_docs": [
+  "real part a of z = a + bi",
+  "imaginary part b of z",
+  "real part c of w = c + di",
+  "imaginary part d of w"
  ],
  "properties": [
   {

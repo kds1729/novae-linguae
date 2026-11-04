@@ -28,8 +28,9 @@ with the solver: seconds to under a minute (`isqrt` ~2 s, `mod_inverse` ~20 s, `
 modular proofs through `mod_inverse`), longer when a contract needs a callee's laws too. On stderr
 it prints ` certify  <name> …` when it starts, then one line per callee contract it derives
 (`callee  gcd: 2 post(s) sound, laws 4 of 5 proved (28.0 s)`) and one per law attempt
-(`law  proved   3.2 s  forall …` / `law  open    61.0 s  forall …`) — a new line every few seconds
-to a minute means it is working, not hung. If your shell tool has a short time limit, run it in
+(`law  proved   3.2 s  forall …` / `law  open    61.0 s  forall …`), and after 30 s with no
+other line `working  still proving — 95 s so far (not hung)` — so a stderr line at least every
+30 s means it is working. If your shell tool has a short time limit, run it in
 the background and read its output file. A law the solver cannot close is reported as "not proved
 here" — it does not fail the run unless you pass `--require-laws`. Each law ATTEMPT in a verified
 run is capped at 20 s (`NL_LAW_BUDGET_SECS`; `0` = no cap, every law tried to the end — slower,

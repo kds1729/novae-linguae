@@ -78,7 +78,7 @@
    }
   }
  ],
- "hash": "fn_8185dcf34c5e8fb43c77ff5330d45816fc9503570bb2f2eeac77b2444cff431c",
+ "hash": "fn_560bf2f7dd0e9e710f4273baee16e4c98a281269967d44b3d251a856f09f3046",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -87,6 +87,10 @@
  "name_hints": [
   "gi_neg",
   "gaussian_negate"
+ ],
+ "param_docs": [
+  "real part a of z = a + bi",
+  "imaginary part b of z = a + bi"
  ],
  "properties": [
   {

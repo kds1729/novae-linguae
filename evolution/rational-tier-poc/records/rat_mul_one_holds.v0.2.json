@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_7eaa99c6441dcd129d6a33d26d777e6bece783ab977263f86771a69ccd7ce97d",
+ "body_hash": "expr_cb9a923b1589f52d36ebec2ceafb078ef567a1e8631507156cf17dd22c0d4639",
  "derived_from": null,
  "examples": [
   {
@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_ea3cab85902e02501d7c9220ef7f0fbfb4c56cb8f80ea8ee6aa19388020e2e1b",
+ "hash": "fn_71c4e163422fac300a47c9ffe39b029323ba2642283d48c7e7476a85148b7841",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -61,6 +61,10 @@
  "name_hints": [
   "rat_mul_one_holds",
   "multiplicative_identity_check"
+ ],
+ "param_docs": [
+  "numerator of the fraction x (any integer; the sign lives here)",
+  "denominator of x, at least 1 (the fraction is n/d)"
  ],
  "properties": [
   {

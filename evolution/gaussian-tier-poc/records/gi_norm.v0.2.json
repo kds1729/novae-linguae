@@ -83,7 +83,7 @@
    }
   }
  ],
- "hash": "fn_8328260910b99901bb959bf62ac7d7674aa841df69cc7561161dbac89e2b9931",
+ "hash": "fn_46a821b431541b97b2b40013794a15a98fd4a1cbdea2be5cf36692b84fd3f21a",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -93,6 +93,10 @@
   "gi_norm",
   "gaussian_norm",
   "complex_norm_squared"
+ ],
+ "param_docs": [
+  "real part a of z = a + bi",
+  "imaginary part b of z = a + bi"
  ],
  "properties": [
   {
@@ -263,7 +267,7 @@
             }
            ],
            "kind": "app",
-           "op": "fn_9f4fa4dd3cf72130e042e41498ddce8b7ecc82e8513630f071d5ef9eab6d93ef"
+           "op": "fn_ba53e08a985b89c0c461a5385c3baa540ff5ed9faabfcaf0aa1950822ec4c247"
           }
          ],
          "kind": "app",
@@ -283,7 +287,7 @@
             }
            ],
            "kind": "app",
-           "op": "fn_9f4fa4dd3cf72130e042e41498ddce8b7ecc82e8513630f071d5ef9eab6d93ef"
+           "op": "fn_ba53e08a985b89c0c461a5385c3baa540ff5ed9faabfcaf0aa1950822ec4c247"
           }
          ],
          "kind": "app",

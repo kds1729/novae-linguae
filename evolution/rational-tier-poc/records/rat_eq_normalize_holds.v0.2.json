@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_8339c5d75830c43140b70fd09b0032e30d831c6b492feaec3e2d7cd49e2f3b8a",
+ "body_hash": "expr_83aeeaeba1605e7155b1b7475b05d5f5178e203e8ef854c63f277dd8c97369eb",
  "derived_from": null,
  "examples": [
   {
@@ -75,7 +75,7 @@
    }
   }
  ],
- "hash": "fn_5503d8f2c4914ffa2ddc7e5de8d96366c276b03251d3d1eb88305386370bd7a9",
+ "hash": "fn_87e24a7cb39b2a23232481690da008d05354adfc47c7a72a9b0ae9a9c659516f",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -85,6 +85,12 @@
  "name_hints": [
   "rat_eq_normalize_holds",
   "normal_form_uniqueness_check"
+ ],
+ "param_docs": [
+  "numerator of the first fraction x = a/b",
+  "denominator of x, at least 1",
+  "numerator of the second fraction y = c/d",
+  "denominator of y, at least 1"
  ],
  "properties": [
   {

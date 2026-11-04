@@ -25,6 +25,15 @@ use crate::{
     TerminationOutcome,
 };
 
+/// An `eprintln!` for a progress line that also resets the heartbeat's silence clock ([`progress_on`]).
+macro_rules! progress_line {
+    ($($t:tt)*) => {{
+        eprintln!($($t)*);
+        $crate::certify::mark_progress();
+    }};
+}
+pub(crate) use progress_line;
+
 /// One check's verdict inside a [`Certification`].
 #[derive(Debug, Clone)]
 pub struct CertCheck {
@@ -494,7 +503,7 @@ impl<'a> LinkedView<'a> {
             let callee_name = rec.pointer("/name_hints/0").and_then(|n| n.as_str()).unwrap_or("?");
             let started = std::time::Instant::now();
             if progress() {
-                eprintln!("   callee   {callee_name} ({}…): deriving its contract", &target[..target.len().min(11)]);
+                progress_line!("   callee   {callee_name} ({}…): deriving its contract", &target[..target.len().min(11)]);
             }
             let (reports, laws) = with_law_budget(self.law_budget, || {
                 derive_self_facts(sig_type, &refinements, &all_laws, body, &nat_positions, &self.solver)
@@ -512,7 +521,7 @@ impl<'a> LinkedView<'a> {
                 } else {
                     "laws not tried (posts-only pass)".to_string()
                 };
-                eprintln!(
+                progress_line!(
                     "   callee   {callee_name}: {} post(s) sound, {laws_part} ({:.1} s)",
                     posts.len(), started.elapsed().as_secs_f64()
                 );
@@ -888,7 +897,7 @@ pub fn law_attempt(phase: &str, law: &J, f: impl FnOnce() -> bool) -> bool {
     }
     if progress() {
         let verdict = if proved { "proved" } else { "open  " };
-        eprintln!("   law      {verdict} {:>6.1} s  {}", started.elapsed().as_secs_f64(), text());
+        progress_line!("   law      {verdict} {:>6.1} s  {}", started.elapsed().as_secs_f64(), text());
     }
     proved
 }
@@ -924,17 +933,56 @@ pub fn set_progress(on: bool) {
     PROGRESS.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Progress on until the guard drops.
-pub fn progress_on() -> ProgressGuard {
-    set_progress(true);
-    ProgressGuard
+/// Seconds of silence after which the heartbeat prints. Stranger 20 (2026-11-04): `rat_sub`'s 4–5 min
+/// run had quiet stretches between the per-law lines (posts, the record's own checks) that "look hung".
+const HEARTBEAT_SECS: u64 = 30;
+
+/// Milliseconds since [`progress_clock`]'s start at the last progress line.
+static LAST_PROGRESS_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn progress_clock() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
 }
 
-pub struct ProgressGuard;
+/// Reset the heartbeat's silence clock (every [`progress_line!`] calls it).
+pub fn mark_progress() {
+    LAST_PROGRESS_MS.store(progress_clock(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Progress on until the guard drops, with a heartbeat thread: after [`HEARTBEAT_SECS`] without a
+/// progress line it prints one saying the solver is still working and for how long.
+pub fn progress_on() -> ProgressGuard {
+    set_progress(true);
+    mark_progress();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = stop.clone();
+    let started = std::time::Instant::now();
+    let ticker = std::thread::spawn(move || {
+        use std::sync::atomic::Ordering::Relaxed;
+        while !flag.load(Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let silent = progress_clock().saturating_sub(LAST_PROGRESS_MS.load(Relaxed));
+            if !flag.load(Relaxed) && silent >= HEARTBEAT_SECS * 1000 {
+                progress_line!("   working  still proving — {:.0} s so far (not hung)", started.elapsed().as_secs_f64());
+            }
+        }
+    });
+    ProgressGuard { stop, ticker: Some(ticker) }
+}
+
+pub struct ProgressGuard {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ticker: Option<std::thread::JoinHandle<()>>,
+}
 
 impl Drop for ProgressGuard {
     fn drop(&mut self) {
         set_progress(false);
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(t) = self.ticker.take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -1250,17 +1298,17 @@ fn certify_passes(
     // certification, as for the first pass; else the full view, exactly as before.
     if let Some(budget) = budget.filter(|_| full.is_full()) {
         if progress() {
-            eprintln!("   certify  {} undecided on callee posts alone — again with callee laws, {} s per attempt", open(&first), budget.as_secs());
+            progress_line!("   certify  {} undecided on callee posts alone — again with callee laws, {} s per attempt", open(&first), budget.as_secs());
         }
         let middle = certify_with_view(record, body, records, Some(&LinkedView::budgeted(records, full.bodies, solver, budget)), solver);
         if middle.checks.iter().filter(|c| uses_the_view(&c.check)).all(|c| matches!(c.verdict, "SOUND" | "VERIFIED" | "N/A")) {
             return middle;
         }
         if progress() {
-            eprintln!("   certify  {} still undecided — again with every callee law, no time cap (slowest)", open(&middle));
+            progress_line!("   certify  {} still undecided — again with every callee law, no time cap (slowest)", open(&middle));
         }
     } else if progress() {
-        eprintln!("   certify  {} undecided on callee posts alone — again with callee laws (slower)", open(&first));
+        progress_line!("   certify  {} undecided on callee posts alone — again with callee laws (slower)", open(&first));
     }
     certify_with_view(record, body, records, Some(full), solver)
 }
@@ -1380,7 +1428,7 @@ fn certify_with_view(
                 _ => String::new(),
             };
             let posts = if checked == 0 { "no post to prove".to_string() } else { format!("{sound} of {checked} post(s) sound") };
-            eprintln!(
+            progress_line!(
                 "   contract {posts}, {} of {} law(s) proved ({:.1} s{pass})",
                 proved.len(), law_exprs(record).len(), started.elapsed().as_secs_f64()
             );

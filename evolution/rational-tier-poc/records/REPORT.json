@@ -6,6 +6,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -16,6 +17,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> (int, int)",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -53,6 +55,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -61,6 +64,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
@@ -84,6 +88,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -92,6 +97,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> (int, int)",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -118,6 +124,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -126,6 +133,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> (int, int)",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -149,6 +157,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -158,6 +167,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "4 parameter(s), 4 line(s)",
    "typecheck": "(int, int, int, int) -> (int, int)",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -185,19 +195,23 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
    "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "4 parameter(s), 4 line(s)",
    "typecheck": "(int, int, int, int) -> (int, int)",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
    "refinement:post[1]": "",
+   "refinement:post[2]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
@@ -218,19 +232,23 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
    "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "4 parameter(s), 4 line(s)",
    "typecheck": "(int, int, int, int) -> (int, int)",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
    "refinement:post[1]": "",
+   "refinement:post[2]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
@@ -254,6 +272,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
@@ -262,6 +281,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "4 parameter(s), 4 line(s)",
    "typecheck": "(int, int, int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
@@ -288,17 +308,19 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:refinements": "N/A",
+   "refinement:post[0]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "4 parameter(s), 4 line(s)",
    "typecheck": "(int, int, int, int) -> bool",
    "effects": "effects [] \u2286 declared",
-   "refinement:refinements": "",
+   "refinement:post[0]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(1)` (inferred O(1))"
   },
@@ -322,6 +344,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -330,6 +353,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
@@ -356,6 +380,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -364,6 +389,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
@@ -387,6 +413,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -395,6 +422,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
@@ -418,6 +446,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -426,6 +455,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "4 parameter(s), 4 line(s)",
    "typecheck": "(int, int, int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",
@@ -449,6 +479,7 @@
   "certified": true,
   "checks": {
    "schema": "VALID",
+   "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
    "refinement:refinements": "N/A",
@@ -457,6 +488,7 @@
   },
   "check_details": {
    "schema": "v0.2 function-record schema",
+   "param_docs": "6 parameter(s), 6 line(s)",
    "typecheck": "(int, int, int, int, int, int) -> bool",
    "effects": "effects [] \u2286 declared",
    "refinement:refinements": "",

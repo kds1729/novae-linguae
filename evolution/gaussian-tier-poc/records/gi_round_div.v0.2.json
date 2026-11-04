@@ -131,7 +131,7 @@
    }
   }
  ],
- "hash": "fn_02e79f519f9f680342c4274f8aa47f8ef838700d747cfdf0167c571158a42e78",
+ "hash": "fn_936656028dfec2d5d7e4a3393bad1ed22cb011e6688bbaf0de3c76f671a6c051",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -141,6 +141,10 @@
   "gi_round_div",
   "round_half_up_division",
   "nearest_integer_quotient"
+ ],
+ "param_docs": [
+  "the integer dividend n",
+  "the integer divisor d, at least 1 (result is n/d rounded, ties up)"
  ],
  "properties": [
   {

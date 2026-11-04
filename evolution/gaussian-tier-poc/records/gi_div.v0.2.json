@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_7d0b228f04be7fe78604e98be299d94a7cde4dc1f065de67fd60524494b52365",
+ "body_hash": "expr_6a715ea869477f72177b87eb3da6a668fb98e325a10ed175c5be562db3b1b24f",
  "derived_from": null,
  "examples": [
   {
@@ -168,7 +168,7 @@
    }
   }
  ],
- "hash": "fn_72c94cf8faf2e61bad6a4193fa4b5a6f0df510df4006ceec43aef8df72bea4d7",
+ "hash": "fn_141f45982bf9c589341c2eebae49f361f63b289ec51f3d9b3e9ab2853bd82a33",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -178,6 +178,12 @@
   "gi_div",
   "gaussian_div",
   "nearest_gaussian_quotient"
+ ],
+ "param_docs": [
+  "real part a of z = a + bi",
+  "imaginary part b of z",
+  "real part c of the divisor w = c + di",
+  "imaginary part d of w (w must be nonzero)"
  ],
  "properties": [
   {

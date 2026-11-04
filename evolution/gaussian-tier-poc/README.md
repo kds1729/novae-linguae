@@ -90,6 +90,9 @@ Builder round 3 (`records/REPORT.{json,md}`; the log in the author's sandbox), 1
 | `gi_euclid_holds` | checker | — | `remainder_smaller` **PROVED** (rounds 1–2: UNKNOWN) | HELD 400 |
 | `gi_gcd` | 4 ints → pair, recursive; termination **SOUND** on `N(c, d)` by `gi_rem`'s post (rounds 1–3: UNVERIFIABLE) | — | `right_zero` **PROVED** by unfolding (rounds 1–3: UNSUPPORTED, no established measure); `nonzero` **PROVED** by strong induction on `N(c, d)` (round 4) | EXHAUSTIVE 81; HELD 400 |
 
+Round 5 (2026-11-04, 1.5 min, log `gaussian-tier-poc-r9.log`; strangers 19/20): every record gained
+`param_docs` (a + bi passed as its two parts, the divisor's nonzero requirement); no other change —
+every verdict as below (only `gi_norm`'s address moved, so `gi_gcd`'s induction names a new measure).
 Totals (round 4): 14/14 run PASS, 14/14 certified, termination SOUND 14 / UNVERIFIABLE 0 (round 3:
 13 / 1, `gi_gcd`), **complexity SOUND 14 / 14** (2026-11-01, later: `gi_rem` gained the HALVING post `2·N(r) ≤ N(w)`, SOUND, and the class fold reads a measured descent that halves a polynomial measure as `T(M) = T(M/2) + O(1)` — `gi_gcd`'s `O(log n)` SOUND); before that, 13 / 1 (2026-11-01 rebuild on validator `78ba9fc` — the rebuild's first try also caught a validator regression since `9be3a64`, fixed in `78ba9fc`: a witness scan had derived `gi_rem` short of its norm post while `gi_div` was mid-derivation, and `gi_gcd`'s termination and three laws fell with it; everything else is as in round 4;
 before it SOUND 8 / UNVERIFIABLE 6 — the records that pass a product or another callee's

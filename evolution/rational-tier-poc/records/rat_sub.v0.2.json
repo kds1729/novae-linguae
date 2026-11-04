@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_4289d1035cbdd5ba91b756988ef5354cc9b25c81dba998e0c6b2da5a344ac508",
+ "body_hash": "expr_429c59cf238bcaf4ec0178e1432f16ecfbdceea5774c40470631b67e406890ed",
  "derived_from": null,
  "examples": [
   {
@@ -102,7 +102,7 @@
    }
   }
  ],
- "hash": "fn_9a972c01fd0b6973b2a9f62d28f74f6843e1992f1a10fcc0ed9980ed8be843d6",
+ "hash": "fn_e24a671eb648e5cf2931a8dd686590d312835cc54922e9a4d69b8079b7ae4bc2",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -111,6 +111,12 @@
  "name_hints": [
   "rat_sub",
   "subtract_fractions"
+ ],
+ "param_docs": [
+  "numerator of the first fraction x = a/b",
+  "denominator of x, at least 1",
+  "numerator of the second fraction y = c/d",
+  "denominator of y, at least 1"
  ],
  "properties": [
   {
@@ -374,6 +380,51 @@
        ],
        "kind": "app",
        "op": "mul"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "fst"
+          }
+         ],
+         "kind": "app",
+         "op": "abs"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "result"
+          }
+         ],
+         "kind": "app",
+         "op": "snd"
+        }
+       ],
+       "kind": "app",
+       "op": "fn_29c0f131454ed433bfc54ffbdae2f0afc0448a41d9833351e6824ec0b787d8f6"
+      },
+      {
+       "kind": "lit",
+       "value": 1
       }
      ],
      "kind": "app",

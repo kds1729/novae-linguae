@@ -67,7 +67,7 @@
    }
   }
  ],
- "hash": "fn_170117d2e1f558f9a9a252f0744a64c4db4932c7cc90f509f1b9fb80da66a60c",
+ "hash": "fn_f3006bd28c244286b35b364ab8147f396ebfd3d130bfec77f9d62ac764240752",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -76,6 +76,10 @@
  "name_hints": [
   "rat_floor",
   "floor_of_fraction"
+ ],
+ "param_docs": [
+  "numerator of the fraction x (any integer; the sign lives here)",
+  "denominator of x, at least 1 (the fraction is n/d)"
  ],
  "properties": [
   {

@@ -168,7 +168,7 @@
    }
   }
  ],
- "hash": "fn_df76bb50185880202ef50ee0ed5936a5f9f9098ddcca5aa60a32849f283ff8af",
+ "hash": "fn_7735479890101ab4be4ba71f2ba4f8fc839eddbb8d578e5fa0b0d3f58021602e",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -178,6 +178,12 @@
   "gi_mul",
   "gaussian_mul",
   "complex_integer_mul"
+ ],
+ "param_docs": [
+  "real part a of z = a + bi",
+  "imaginary part b of z",
+  "real part c of w = c + di",
+  "imaginary part d of w"
  ],
  "properties": [
   {

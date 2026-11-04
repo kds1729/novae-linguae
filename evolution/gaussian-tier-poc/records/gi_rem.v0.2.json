@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_2c9122ea103446a8c75001a32d3e20e059db4ee4a305ad1ecbde3c634ad8f417",
+ "body_hash": "expr_79913533c116b27731fe2c15a6bd04b13d443ab91e7f7fc62347088610d84e32",
  "derived_from": null,
  "examples": [
   {
@@ -168,7 +168,7 @@
    }
   }
  ],
- "hash": "fn_e77f637c6ec47c3b6fb032a7e0833914d58b4ace454d86c8aa1c69c29196171b",
+ "hash": "fn_251bcc9dd01822f4ea03138ec4372c78fe9a0f4495befe246495edd0237349aa",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -178,6 +178,12 @@
   "gi_rem",
   "gaussian_rem",
   "euclidean_remainder"
+ ],
+ "param_docs": [
+  "real part a of z = a + bi",
+  "imaginary part b of z",
+  "real part c of the divisor w = c + di",
+  "imaginary part d of w (w must be nonzero)"
  ],
  "properties": [
   {
@@ -343,7 +349,7 @@
         }
        ],
        "kind": "app",
-       "op": "fn_8328260910b99901bb959bf62ac7d7674aa841df69cc7561161dbac89e2b9931"
+       "op": "fn_46a821b431541b97b2b40013794a15a98fd4a1cbdea2be5cf36692b84fd3f21a"
       },
       {
        "args": [
@@ -357,7 +363,7 @@
         }
        ],
        "kind": "app",
-       "op": "fn_8328260910b99901bb959bf62ac7d7674aa841df69cc7561161dbac89e2b9931"
+       "op": "fn_46a821b431541b97b2b40013794a15a98fd4a1cbdea2be5cf36692b84fd3f21a"
       }
      ],
      "kind": "app",
@@ -398,7 +404,7 @@
           }
          ],
          "kind": "app",
-         "op": "fn_8328260910b99901bb959bf62ac7d7674aa841df69cc7561161dbac89e2b9931"
+         "op": "fn_46a821b431541b97b2b40013794a15a98fd4a1cbdea2be5cf36692b84fd3f21a"
         }
        ],
        "kind": "app",
@@ -416,7 +422,7 @@
         }
        ],
        "kind": "app",
-       "op": "fn_8328260910b99901bb959bf62ac7d7674aa841df69cc7561161dbac89e2b9931"
+       "op": "fn_46a821b431541b97b2b40013794a15a98fd4a1cbdea2be5cf36692b84fd3f21a"
       }
      ],
      "kind": "app",

@@ -67,6 +67,19 @@ gi = lambda a, b: tup(ilit(a), ilit(b))  # noqa: E731
 
 ADDR = {}      # name -> fn_ address, for `{name}` placeholders in later bodies and predicates
 REPORT = []
+
+# Round 5: one plain-words line per parameter (`param_docs`, function-record v0.2) — strangers 19/20
+# inferred that a Gaussian integer a + bi is passed as its two parts. Testimony beside the names.
+_Z = ["real part a of z = a + bi", "imaginary part b of z = a + bi"]
+_ZW = ["real part a of z = a + bi", "imaginary part b of z", "real part c of w = c + di", "imaginary part d of w"]
+_ZW0 = _ZW[:2] + ["real part c of the divisor w = c + di", "imaginary part d of w (w must be nonzero)"]
+PARAM_DOCS = {
+    "gi_add": _ZW, "gi_sub": _ZW, "gi_mul": _ZW, "gi_norm_mul_holds": _ZW, "gi_conj_mul_holds": _ZW,
+    "gi_neg": _Z, "gi_conj": _Z, "gi_norm": _Z, "gi_is_unit": _Z,
+    "gi_round_div": ["the integer dividend n", "the integer divisor d, at least 1 (result is n/d rounded, ties up)"],
+    "gi_div": _ZW0, "gi_rem": _ZW0, "gi_euclid_holds": _ZW0,
+    "gi_gcd": _ZW,
+}
 PARSE_ONLY = "--parse-only" in sys.argv
 
 
@@ -100,6 +113,8 @@ def build(name, surface, sig, examples, props=(), refinements=(), tags=(), hints
     }
     if complexity:
         record["signature"]["complexity"] = complexity
+    if name in PARAM_DOCS:
+        record["param_docs"] = list(PARAM_DOCS[name])
     del record["hash"]
     record["hash"] = hash_artifact(record, "function-record")
     (OUT / f"body-{name}.json").write_text(json.dumps(body, indent=1, sort_keys=True) + "\n")

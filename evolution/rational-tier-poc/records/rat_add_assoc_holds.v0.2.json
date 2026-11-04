@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_d31fbd4618741c1059a167547c0329fc0095251d1e9ee3a900ce5f87a074c6d8",
+ "body_hash": "expr_d955f520eebb44419b6841bd3c2afeba384b6ae3b338d973fad3b378f19e2a04",
  "derived_from": null,
  "examples": [
   {
@@ -99,7 +99,7 @@
    }
   }
  ],
- "hash": "fn_8c802e372e4880b687644f8482b75b05ab19ac414186aeb78ea3b0ebe37ebe93",
+ "hash": "fn_38a3ba16f8dee212516d18e3f41e48d0b0c48899ee3b26e7b4e1af183f70d324",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -109,6 +109,14 @@
  "name_hints": [
   "rat_add_assoc_holds",
   "additive_associativity_check"
+ ],
+ "param_docs": [
+  "numerator of x",
+  "denominator of x, at least 1",
+  "numerator of y",
+  "denominator of y, at least 1",
+  "numerator of z",
+  "denominator of z, at least 1"
  ],
  "properties": [
   {

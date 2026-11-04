@@ -78,7 +78,7 @@
    }
   }
  ],
- "hash": "fn_1ea651b8b9bb15006adeb117462f3a559754972870b9facebf2941ef094c072b",
+ "hash": "fn_c787643469d9884b513f543c5256d6e63a4606f8c91c7209c20f1e43dedd11bf",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -87,6 +87,10 @@
  "name_hints": [
   "rat_neg",
   "negate_fraction"
+ ],
+ "param_docs": [
+  "numerator of the fraction x (any integer; the sign lives here)",
+  "denominator of x, at least 1 (the fraction is n/d)"
  ],
  "properties": [
   {

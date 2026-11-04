@@ -75,7 +75,7 @@
    }
   }
  ],
- "hash": "fn_abedd8edbe0464f769e22ea0e72b715ea8063f88a28d9ee7d99eaa92d3ad0e1e",
+ "hash": "fn_7517c5e749a0ebe9e37be3c94732710cc03069cc605cebb8b0d1705f1f06f17a",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -85,6 +85,12 @@
  "name_hints": [
   "rat_eq",
   "fractions_equal"
+ ],
+ "param_docs": [
+  "numerator of the first fraction x = a/b",
+  "denominator of x, at least 1",
+  "numerator of the second fraction y = c/d",
+  "denominator of y, at least 1"
  ],
  "properties": [
   {
