@@ -549,8 +549,12 @@ fn render(node: &Value) -> Result<(String, u8), SurfaceError> {
                         return Ok((format!("{l} {sym} {r}"), lvl));
                     }
                     Fixity::NonAssoc if args.len() == 2 => {
-                        let l = sub(&args[0], lvl + 1)?;
-                        let r = sub(&args[1], lvl + 1)?;
+                        // A comparison under `==`/`!=` is parenthesized although `<` binds tighter:
+                        // `result == a * d < c * b` parses right but reads wrong (stranger-20 round,
+                        // rat_lt's decision post), and in Rust it would not parse at all.
+                        let need = lvl.max(4) + 1;
+                        let l = sub(&args[0], need)?;
+                        let r = sub(&args[1], need)?;
                         return Ok((format!("{l} {sym} {r}"), lvl));
                     }
                     _ => {} // arity mismatch: fall through to call syntax
@@ -784,6 +788,8 @@ mod tests {
             "(a + b) * c",
             "a < b",
             "x != y",
+            "result == (a * d < c * b)",
+            "(a < b) != (c <= d)",
             "f(a, b)",
             "-x",
             "forall xs. length(map(f, xs)) == length(xs)",
