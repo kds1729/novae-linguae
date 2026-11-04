@@ -168,7 +168,7 @@
    }
   }
  ],
- "hash": "fn_141f45982bf9c589341c2eebae49f361f63b289ec51f3d9b3e9ab2853bd82a33",
+ "hash": "fn_283a48ace1df5413fe561f97e0a99dfcd385e8bb665e36f7d9d52a836a780cf1",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -183,7 +183,7 @@
   "real part a of z = a + bi",
   "imaginary part b of z",
   "real part c of the divisor w = c + di",
-  "imaginary part d of w (w must be nonzero)"
+  "imaginary part d of w (w must be nonzero); the quotient is z/w with each component rounded to the nearest integer, exact halves rounded UP (toward +infinity)"
  ],
  "properties": [
   {

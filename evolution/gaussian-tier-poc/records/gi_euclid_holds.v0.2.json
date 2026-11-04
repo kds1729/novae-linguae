@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_b9bcc9c46a996063bc99a49bc419b2d77366158f9b2314671f1c720fe4c08dad",
+ "body_hash": "expr_de31e581b05cc9a653484ef8a1a1f21f54c8f6dd760f2c5087f4fd8de72c8ddf",
  "derived_from": null,
  "examples": [
   {
@@ -99,7 +99,7 @@
    }
   }
  ],
- "hash": "fn_4b9360a10c8cf97aa4cc3c4f9943fbcdbd70f24f84bdc3a5da45e54127af8eb0",
+ "hash": "fn_49abeb8cbf651c917f99e23755bcaa9b1d4f9baac744a7da5400a70786406ffa",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -114,7 +114,7 @@
   "real part a of z = a + bi",
   "imaginary part b of z",
   "real part c of the divisor w = c + di",
-  "imaginary part d of w (w must be nonzero)"
+  "imaginary part d of w (w must be nonzero); the quotient is z/w with each component rounded to the nearest integer, exact halves rounded UP (toward +infinity)"
  ],
  "properties": [
   {

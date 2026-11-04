@@ -37,7 +37,7 @@ class PgVectorIndex:
     backend = "pgvector"
 
     def search(self, qvec, k, flt, model_id):
-        from django.db import connection
+        from django.db import connection, transaction
 
         vec = _vector_literal(qvec)
         where = ["embedding_vec IS NOT NULL", "embedding_model = %s"]
@@ -62,7 +62,13 @@ class PgVectorIndex:
             f"WHERE {' AND '.join(where)} "
             "ORDER BY embedding_vec <=> %s::vector LIMIT %s"
         )
-        with connection.cursor() as cur:
+        with transaction.atomic(), connection.cursor() as cur:
+            if flt:
+                # The HNSW index returns its `ef_search` (40) nearest rows and the WHERE is applied
+                # AFTER — so a filter whose matches are not among them returned NOTHING (stranger 21,
+                # 2026-11-04: `{"kind": "function-record"}` → [] when 40 claim messages ranked first).
+                # The filtered set is already bounded by _SEARCH_SCAN_CAP: rank it exactly.
+                cur.execute("SET LOCAL enable_indexscan = off")
             cur.execute(sql, params)
             rows = cur.fetchall()
         return [{"hash": h, "score": round(float(s), 6)} for h, s in rows], truncated

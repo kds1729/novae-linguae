@@ -72,7 +72,9 @@ REPORT = []
 # inferred that a Gaussian integer a + bi is passed as its two parts. Testimony beside the names.
 _Z = ["real part a of z = a + bi", "imaginary part b of z = a + bi"]
 _ZW = ["real part a of z = a + bi", "imaginary part b of z", "real part c of w = c + di", "imaginary part d of w"]
-_ZW0 = _ZW[:2] + ["real part c of the divisor w = c + di", "imaginary part d of w (w must be nonzero)"]
+_ZW0 = _ZW[:2] + ["real part c of the divisor w = c + di",
+                  "imaginary part d of w (w must be nonzero); the quotient is z/w with each component "
+                  "rounded to the nearest integer, exact halves rounded UP (toward +infinity)"]
 PARAM_DOCS = {
     "gi_add": _ZW, "gi_sub": _ZW, "gi_mul": _ZW, "gi_norm_mul_holds": _ZW, "gi_conj_mul_holds": _ZW,
     "gi_neg": _Z, "gi_conj": _Z, "gi_norm": _Z, "gi_is_unit": _Z,
@@ -338,7 +340,11 @@ def main():
                        # 2026-11-01: the remainder's norm is at most HALF the divisor's (nearest-
                        # integer rounding leaves |ε| ≤ 1/2 per component, so N(ε) ≤ 1/2) — the
                        # halving the complexity fold reads to certify gi_gcd's O(log n).
-                       ("post", "2 * {gi_norm}(fst(result), snd(result)) <= {gi_norm}(c, d)")],
+                       ("post", "2 * {gi_norm}(fst(result), snd(result)) <= {gi_norm}(c, d)"),
+                       # Round 5 (stranger 21: "the posts are only norm bounds — the remainder value
+                       # rests on the body"): the DIVISION IDENTITY z = q·w + r, q = gi_div(z, w).
+                       ("post", "a == fst(result) + (fst({gi_div}(a, b, c, d)) * c - snd({gi_div}(a, b, c, d)) * d)"),
+                       ("post", "b == snd(result) + (fst({gi_div}(a, b, c, d)) * d + snd({gi_div}(a, b, c, d)) * c)")],
           props=[("by_one_is_zero", "forall a b. fst(self(a, b, 1, 0)) == 0 && snd(self(a, b, 1, 0)) == 0")],
           hints=["gaussian_rem", "euclidean_remainder"], complexity="O(1)")
     gauntlet("gi_rem", prove)

@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_9446052f4078decb952dcd9e536a300c025b9dfe940de8ccab80dc1e30833703",
+ "body_hash": "expr_ba85e282b61de99649366dd686171f6209218bf5c2c4474937b97821c4a1e90e",
  "derived_from": null,
  "examples": [
   {
@@ -168,7 +168,7 @@
    }
   }
  ],
- "hash": "fn_07f429f2bbee9c06ccba13ec85edbc653fa009aedc6b737afc9df3674be29ab8",
+ "hash": "fn_a57cefaef3784cebe89c8b978bc6b69c3d935d03b60072919698b5e43de0cb86",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",

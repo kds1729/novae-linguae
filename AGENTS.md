@@ -60,8 +60,10 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
 ## Finding a function for a goal (you have a task, not a tag)
 
 1. `POST https://nl.1105software.com/v0/search?include=summary` with `{"query": "<the goal in
-   plain words>", "k": 10}`. **Always pass `?include=summary`**: without it each hit is a bare
-   `{hash, score}` and you will fetch every record to tell them apart (a stranger did: 20 fetches).
+   plain words>", "k": 10, "filter": {"kind": "function-record"}}`. **Always pass
+   `?include=summary`**: without it each hit is a bare `{hash, score}` and you will fetch every
+   record to tell them apart (a stranger did: 20 fetches). **Pass the `kind` filter**: the commons
+   also holds claim and assertion messages (`msg_…`), and without it they can fill every slot.
    The response is `{"results": [hit, …]}`, best first. A hit has `contract` only if the function
    declares a pre/post and `laws` only if it declares laws — a missing key means none, not an error.
    Scores are close together (a 0.01 margin is normal); treat the top 3–5 as a shortlist, not the

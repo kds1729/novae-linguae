@@ -422,6 +422,8 @@
    "effects": "SOUND",
    "refinement:post[0]": "SOUND",
    "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
+   "refinement:post[3]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -432,6 +434,8 @@
    "effects": "effects [] \u2286 declared",
    "refinement:post[0]": "",
    "refinement:post[1]": "",
+   "refinement:post[2]": "",
+   "refinement:post[3]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(1)` (inferred O(1))"
   },
