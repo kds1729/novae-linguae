@@ -1496,6 +1496,14 @@ mod tests {
         }
     }
 
+    /// `NL_DERIVED_CACHE` is process-wide: the tests that set it hold this, or one's `remove_var`
+    /// lands mid-way through another's derivation and its cache write is skipped (CI, v0.1.20).
+    static CACHE_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn cache_env() -> std::sync::MutexGuard<'static, ()> {
+        CACHE_ENV.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn fresh_cache_dir(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("nl-derived-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -1548,6 +1556,7 @@ mod tests {
     /// stored contract carries a post the record itself never declared, and that is what comes back.
     #[test]
     fn the_linked_view_reads_a_cached_contract_before_deriving() {
+        let _env = cache_env();
         let dir = fresh_cache_dir("view");
         let (rec, body) = record_named("cached_fn");
         let hash = rec["hash"].as_str().unwrap().to_string();
@@ -1581,6 +1590,7 @@ mod tests {
         rec["hash"] = json!(hash);
         let records: HashMap<String, J> = [(hash.clone(), rec)].into_iter().collect();
         let bodies: HashMap<String, J> = [(hash.clone(), body)].into_iter().collect();
+        let _env = cache_env();
         let dir = fresh_cache_dir("posts-only");
         std::env::set_var("NL_DERIVED_CACHE", dir.to_str().unwrap());
         let thin = LinkedView::posts_only(&records, &bodies, solver).contract(&hash).expect("a contract");
