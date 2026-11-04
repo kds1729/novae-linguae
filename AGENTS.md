@@ -24,11 +24,13 @@ on the PATH** (any 4.13+; `apt install z3`, `brew install z3`). Then go to *Find
 for a goal* below.
 
 A verified run (`--verify`) proves the function's contract AND what it rests on in its callees,
-with the solver: seconds to under a minute (`isqrt` ~2 s, `mod_inverse` ~20 s, `crt2` ~40 s —
-modular proofs through `mod_inverse`), longer when a contract needs a callee's laws too. On stderr
+with the solver: seconds to a few minutes (`isqrt` ~2 s, `mod_pow` ~5 s, `mod_inverse` ~20 s,
+`crt2` ~40 s, `round_text_half_even` ~1 min, `ext_gcd` ~2 min), longer when a contract needs a
+callee's laws too. On stderr
 it prints ` certify  <name> …` when it starts, then one line per callee contract it derives
 (`callee  gcd: 2 post(s) sound, laws 4 of 5 proved (28.0 s)`) and one per law attempt
-(`law  proved   3.2 s  forall …` / `law  open    61.0 s  forall …`), and after 30 s with no
+(`law  proved     3.2 s  forall …` / `law  unproved  20.0 s  forall …` — an unproved law is
+normal and harmless, see below), and after 30 s with no
 other line `working  still proving — 95 s so far (not hung)` — so a stderr line at least every
 30 s means it is working. If your shell tool has a short time limit, run it in
 the background and read its output file. A law the solver cannot close is reported as "not proved
@@ -108,6 +110,10 @@ The integer rounding functions (`div_half_even`, `div_half_up`, `div_floor`, `di
 `div_trunc`) round the FRACTION n/d — the dividend first, then the divisor (≥ 1): to round −3.5
 ties-to-even, apply `div_half_even` to `--arg -35 --arg 10` (→ `-4`); `round_text_half_even` on
 `"-3.5"` with 0 places is the same rule on text (→ `Just(-4)`; `None` for text that is not a decimal).
+The decimal tier's MONEY rule is round half to EVEN (banker's rounding): `rescale`, `apply_rate`,
+`percent_bps` and the `*_text` functions all use it; `div_half_up` and friends exist for other rules,
+named by their suffix. Results are MINOR UNITS at the places asked for: `round_text_half_even "0.125" 2`
+→ `Just(12)` means 0.12.
 
 ## What things are
 

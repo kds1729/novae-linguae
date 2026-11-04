@@ -911,13 +911,17 @@ pub fn law_attempt(phase: &str, law: &J, f: impl FnOnce() -> bool) -> bool {
     let proved = crate::prove::with_query_deadline(deadline, f);
     let text = || -> String {
         let t = crate::surface::unparse_predicate(law).unwrap_or_else(|_| "?".into());
-        t.chars().take(60).collect()
+        // A callee address takes 67 of the 60 characters (`ext_gcd`'s laws all read
+        // `forall a b s. b == 0 || fn_29c0f131454ed433bfc54ffbdae2f0afc`): shorten it first.
+        short_addresses(&t).chars().take(60).collect()
     };
     if std::env::var("NL_DERIVED_DEBUG").is_ok_and(|v| v == "1") {
         eprintln!("[law] {phase} {} queries, proved={proved}: {}", crate::prove::queries_run() - before, text());
     }
     if progress() {
-        let verdict = if proved { "proved" } else { "open  " };
+        // "unproved", not "open": stranger 23 (2026-11-04) read a run full of `law open` lines as
+        // alarms; a law the solver gives up on never fails the run (unless `--require-laws`).
+        let verdict = if proved { "proved  " } else { "unproved" };
         progress_line!("   law      {verdict} {:>6.1} s  {}", started.elapsed().as_secs_f64(), text());
     }
     proved
@@ -1009,6 +1013,28 @@ impl Drop for ProgressGuard {
 
 pub fn progress() -> bool {
     PROGRESS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Every `fn_<64 hex>` address in `s` cut to `fn_<8 hex>…` (progress lines only).
+fn short_addresses(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("fn_") {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i + 3..];
+        let hex = tail.bytes().take_while(|b| b.is_ascii_hexdigit()).count();
+        if hex == 64 {
+            out.push_str("fn_");
+            out.push_str(&tail[..8]);
+            out.push('…');
+            rest = &tail[64..];
+        } else {
+            out.push_str("fn_");
+            rest = tail;
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Every `fn_ref` literal target in an AST.
@@ -1711,6 +1737,13 @@ mod tests {
         let view = LinkedView::posts_only(&records, &bodies, "z3");
         let set = view.contracts_closure([ha.clone()].into_iter().collect());
         assert!(!set.contains_key(&hb), "another version of `same_name` was taken as a witness");
+    }
+
+    #[test]
+    fn progress_lines_shorten_callee_addresses() {
+        let h = "29c0f131454ed433bfc54ffbdae2f0afc0448a41d9833351e6824ec0b787d8f6";
+        assert_eq!(short_addresses(&format!("b == 0 || fn_{h}(a, b) == 1")), "b == 0 || fn_29c0f131…(a, b) == 1");
+        assert_eq!(short_addresses("fn_abc(x) && no_fn_here"), "fn_abc(x) && no_fn_here");
     }
 
     /// Nor is another version of the record BEING CERTIFIED, though no contract in the set names

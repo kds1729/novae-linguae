@@ -2949,7 +2949,28 @@ fn vouched_lines(vouched: &[String]) -> String {
 fn final_result_surface(steps: &[nl_validator::Step]) -> Option<String> {
     let m = &steps.iter().rev().find(|s| s.label.rsplit(':').next() == Some("assert"))?.message;
     let v = m.pointer("/body/claim/expr/args/1/value")?;
-    Some(nl_validator::surface::unparse_value(v).unwrap_or_else(|_| v.to_string()))
+    Some(nl_validator::surface::unparse_value(&plain_ints(v)).unwrap_or_else(|_| v.to_string()))
+}
+
+/// The value for DISPLAY: every non-negative `int` relabelled `nat`, so the `result:` line prints
+/// integers plainly. The canonical surface writes `int(2)` (a bare `2` is a nat) but `-9` bare —
+/// stranger 23 (2026-11-04) read `(int(2), (-9, int(47)))` as "mixed forms". Display only: the
+/// asserted message keeps the typed value.
+fn plain_ints(v: &serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::Object(m) => {
+            let nonneg_int = m.get("kind").and_then(|k| k.as_str()) == Some("int")
+                && m.get("value").is_some_and(|x| !x.to_string().trim_matches('"').starts_with('-'));
+            let mut out: serde_json::Map<String, serde_json::Value> =
+                m.iter().map(|(k, x)| (k.clone(), plain_ints(x))).collect();
+            if nonneg_int {
+                out.insert("kind".into(), serde_json::json!("nat"));
+            }
+            serde_json::Value::Object(out)
+        }
+        serde_json::Value::Array(xs) => serde_json::Value::Array(xs.iter().map(plain_ints).collect()),
+        other => other.clone(),
+    }
 }
 
 fn cmd_orchestrate(
