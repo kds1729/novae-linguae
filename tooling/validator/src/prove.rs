@@ -469,6 +469,9 @@ pub struct Certificate {
 /// The Euclidean rung over a certificate that stayed UNKNOWN: one query with the lemma's
 /// instances, then the stepwise checker. Updates the certificate in place; true when it closed.
 fn euclid_ladder(cert: &mut Certificate, solver: &str) -> bool {
+    if past_deadline() {
+        return false;
+    }
     if let Some(augmented) = crate::euclid::retry(&cert.smt, solver) {
         cert.smt = augmented;
         cert.euclid = true;
@@ -2104,12 +2107,50 @@ pub fn queries_run() -> u64 {
     QUERIES_RUN.with(|c| c.get())
 }
 
+thread_local! {
+    /// A wall-clock deadline for every solver query on this thread (`None` = only each query's own
+    /// limit). Past it a query answers `unknown` without spawning — see [`with_query_deadline`].
+    static QUERY_DEADLINE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
+/// Whether this thread's query deadline (see [`with_query_deadline`]) has passed. The retry
+/// ladders check it before building their next query: past the deadline every query answers
+/// `unknown` at once, and each `unknown` sent a ladder down its retries — `rat_normalize`'s
+/// `idempotent` spent 615 queries and 131 s of script building on a 20 s budget (2026-11-04).
+pub fn past_deadline() -> bool {
+    QUERY_DEADLINE.with(|c| c.get()).is_some_and(|d| std::time::Instant::now() >= d)
+}
+
+/// Run `f` with every solver query it spawns cut off at `deadline` (the earlier of it and any
+/// enclosing deadline): an overrun reads as `unknown`, so a cut-off attempt can only fail to
+/// prove, never prove falsely. Used by the budgeted pass of a linked certify (2026-11-04).
+pub fn with_query_deadline<T>(deadline: Option<std::time::Instant>, f: impl FnOnce() -> T) -> T {
+    let prev = QUERY_DEADLINE.with(|c| c.get());
+    let next = match (prev, deadline) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
+    QUERY_DEADLINE.with(|c| c.set(next));
+    let out = f();
+    QUERY_DEADLINE.with(|c| c.set(prev));
+    out
+}
+
 fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> Result<SatAnswer> {
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
     QUERIES_RUN.with(|c| c.set(c.get() + 1));
+    let cutoff = QUERY_DEADLINE.with(|c| c.get());
+    if cutoff.is_some_and(|d| Instant::now() >= d) {
+        if std::env::var("NL_QUERY_TRACE").is_ok_and(|v| v == "1") {
+            let bt = std::backtrace::Backtrace::force_capture().to_string();
+            let frames: Vec<&str> = bt.lines().filter(|l| l.contains("nl_validator::") && !l.contains("run_smt")).take(6).map(|l| l.trim()).collect();
+            eprintln!("[late] {}", frames.join(" < "));
+        }
+        return Ok(SatAnswer::Unknown);
+    }
 
     let is_z3 = solver == "z3" || solver.ends_with("/z3");
     let rlimit = rlimit.filter(|_| is_z3);
@@ -2154,7 +2195,10 @@ fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> 
         .map_err(|e| anyhow!("writing to solver: {e}"))?; // dropping the handle closes stdin (EOF)
 
     // Poll for completion, killing the process if it overruns the timeout backstop.
-    let deadline = Instant::now() + Duration::from_secs(secs + 5);
+    let mut deadline = Instant::now() + Duration::from_secs(secs + 5);
+    if let Some(d) = cutoff {
+        deadline = deadline.min(d);
+    }
     loop {
         match child.try_wait().map_err(|e| anyhow!("waiting on solver: {e}"))? {
             Some(_) => break,
@@ -2277,7 +2321,7 @@ fn prove_property_in_domain_inner(
     // the combination solver with uninterpreted symbols did not (the Gaussian tier's Euclidean
     // property, degree 4: under a second here, undecided in 90 s before). Weaker than the
     // certificate it rewrites, so its unsat is the certificate's.
-    if last.uses_callees {
+    if last.uses_callees && !past_deadline() {
         if let Some(ground) = crate::ground::ackermannize(&last.smt) {
             if matches!(run_smt_secs(&ground, solver, SOLVER_TIMEOUT_SECS), Ok(SatAnswer::Unsat)) {
                 last.smt = ground;
@@ -3776,6 +3820,22 @@ pub fn type_mentions_float(ty: &J) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Past a query deadline a query answers `unknown` without asking the solver — even a trivially
+    /// unsat one — and the deadline is scoped: outside `with_query_deadline` the same query decides.
+    #[test]
+    fn a_spent_query_deadline_answers_unknown_and_is_scoped() {
+        if std::process::Command::new("z3").arg("--version").output().is_err() {
+            return;
+        }
+        let q = "(assert false)\n(check-sat)\n";
+        let past = Some(std::time::Instant::now());
+        let late = with_query_deadline(past, || (past_deadline(), run_smt_secs(q, "z3", 5).unwrap()));
+        assert!(late.0);
+        assert!(matches!(late.1, SatAnswer::Unknown));
+        assert!(!past_deadline());
+        assert!(matches!(run_smt_secs(q, "z3", 5).unwrap(), SatAnswer::Unsat));
+    }
 
     /// count: \n -> case gt(n, 0) of true -> add(1, self(sub(n, 1))) | false -> 0 — a nat recursion.
     fn count_body() -> J {

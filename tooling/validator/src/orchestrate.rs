@@ -1044,8 +1044,12 @@ pub fn orchestrate_verified_with_order(
                 // again would only repeat the same attempts (`binomial`: 270 s, twice).
                 (false, "certify's contract derivation")
             } else {
-                let derived = linked_laws.get_or_insert_with(|| {
-                    view.contract(&target).map(|c| c.laws).unwrap_or_default()
+                // Under the run's per-attempt law budget, like certify's middle pass: laws are
+                // reported, not gating, and an uncapped derivation of `lcm`'s re-derived laws took
+                // 142 s of its 4 min (2026-11-04). `NL_LAW_BUDGET_SECS=0` derives without a cap.
+                let derived = linked_laws.get_or_insert_with(|| match crate::certify::law_budget() {
+                    Some(b) => crate::LinkedView::budgeted(&records, &link, solver, b).contract(&target).map(|c| c.laws).unwrap_or_default(),
+                    None => view.contract(&target).map(|c| c.laws).unwrap_or_default(),
                 });
                 (derived.contains(expr), "linked contract derivation")
             };

@@ -177,6 +177,9 @@ pub struct Stepwise {
 /// the final query congruence plus linear arithmetic, which the solver decides. The instances
 /// come with the certificate's equations substituted into the goal (`instances(_, true)`).
 pub fn retry_stepwise(smt: &str, solver: &str) -> Option<Stepwise> {
+    if crate::prove::past_deadline() {
+        return None;
+    }
     let insts = instances(smt, true)?;
     if !lemma_discharged(solver) || !idem_discharged(solver) {
         return None;
@@ -219,6 +222,11 @@ pub fn retry_stepwise(smt: &str, solver: &str) -> Option<Stepwise> {
     let mut witness_deadline: Option<std::time::Instant> = None;
     let mut skipped = 0usize;
     for i in &insts {
+        // An enclosing law budget ran out (`prove::with_query_deadline`): every remaining query
+        // would answer `unknown` unasked, and building them was most of a budgeted attempt's time.
+        if crate::prove::past_deadline() {
+            return None;
+        }
         let now = std::time::Instant::now();
         if i.witness && witness_deadline.is_none() {
             witness_deadline = Some(now + std::time::Duration::from_secs(WITNESS_BUDGET_SECS));
@@ -488,6 +496,10 @@ fn definitions(forms: &[S]) -> BTreeMap<String, (Vec<String>, S)> {
 }
 
 fn instances_with(smt: &str, with_variants: bool, with_rules: bool) -> Option<Vec<Instance>> {
+    // Past an enclosing law budget no query built from these would be asked (see `retry_stepwise`).
+    if crate::prove::past_deadline() {
+        return None;
+    }
     let forms = parse_all(smt).ok()?;
     let defs = definitions(&forms);
     let asserted: Vec<S> = forms
@@ -526,6 +538,9 @@ fn instances_with(smt: &str, with_variants: bool, with_rules: bool) -> Option<Ve
                 harvest(e, &mut equations, true);
             }
             for base in &bases {
+                if crate::prove::past_deadline() {
+                    return None;
+                }
                 for v in variants(base, &equations) {
                     collect(&v, &mut candidates, &mut decompositions, &mut mod_keys);
                 }
@@ -549,6 +564,9 @@ fn instances_with(smt: &str, with_variants: bool, with_rules: bool) -> Option<Ve
     for (i, (t, m)) in candidates.iter().enumerate() {
         if out.len() >= max {
             break;
+        }
+        if crate::prove::past_deadline() {
+            return None;
         }
         let Some(tp) = to_poly(t) else { continue };
         for inst in instance_chain(t, m, &tp, &BTreeMap::new(), &rules) {

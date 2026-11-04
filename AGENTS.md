@@ -31,10 +31,13 @@ it prints ` certify  <name> …` when it starts, then one line per callee contra
 (`law  proved   3.2 s  forall …` / `law  open    61.0 s  forall …`) — a new line every few seconds
 to a minute means it is working, not hung. If your shell tool has a short time limit, run it in
 the background and read its output file. A law the solver cannot close is reported as "not proved
-here" — it does not fail the run unless you pass `--require-laws` — but trying it costs time:
-`binomial` and `lcm` (laws their own module build leaves open) take ~3–5 min each, the rational
-functions over `gcd` longer. `NL_DERIVED_CACHE=1` keeps derived callee contracts on disk, so a second run over the same
-callees skips them.
+here" — it does not fail the run unless you pass `--require-laws`. Each law ATTEMPT in a verified
+run is capped at 20 s (`NL_LAW_BUDGET_SECS`; `0` = no cap, every law tried to the end — slower,
+may prove more): the certification itself never depends on the cap (a contract the capped pass
+cannot decide is re-proved without it), only which laws are reported proved. Expect ~3–5 min for
+`binomial`/`lcm` and ~4–5 min for a rational function over `rat_normalize` (`rat_add`: 257 s;
+21 min before the cap). `NL_DERIVED_CACHE=1` keeps fully derived callee contracts on disk, so a
+second run over the same callees skips them.
 
 ## In three sentences
 

@@ -410,3 +410,10 @@ the goal over a commons containing a prior `double_then_add` composite (whose bo
   proved law, callees by name), or says `proved: nothing about this result beyond certification
   and an agreeing re-run` when none constrains the value (2026-11-04, stranger 18: a pre-only
   `is_prime` and a fully-specified `div_half_even` read as the same CONFIRMED).
+- **Laws under a time cap; certification without one.** The loop's linked certify runs three
+  passes: callee posts only; callee laws with each law attempt capped (`NL_LAW_BUDGET_SECS`,
+  default 20 s — past the cap every solver query answers `unknown`, so a cut-off can only lose a
+  proof); every callee law uncapped. Each pass is taken only if the one before left a
+  view-dependent check undecided, so the verdict is the uncapped one. The loop's own law
+  attempts run under the same cap: a law "not proved here" may be one the uncapped prover closes
+  (2026-11-04, stranger 19 — one verified `rat_add` 21.5 min → 257 s).

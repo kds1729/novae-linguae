@@ -360,6 +360,9 @@ fn debug_note(what: &str, text: &str) {
 /// The rung as a retry over an instances-only certificate (contracts as instances, no quantified
 /// axioms, the negated goal the LAST assertion). `Some` when every branch closed.
 pub fn retry_staged(smt: &str, solver: &str) -> Option<Staged> {
+    if crate::prove::past_deadline() {
+        return None;
+    }
     let forms = parse_all(smt).ok()?;
     if forms.iter().any(|f| is_form(f, "assert") && render(f).contains("(forall ")) {
         debug_note("declined.txt", "quantified axioms present");
@@ -431,6 +434,11 @@ pub fn retry_staged(smt: &str, solver: &str) -> Option<Staged> {
         let mut failed_at: std::collections::BTreeMap<(usize, usize), usize> = std::collections::BTreeMap::new();
         steps.push_str(&format!(";; branch {} of {}: {}\n", bi + 1, branches.len(), branch.iter().map(render).collect::<Vec<_>>().join(" ∧ ")));
         'rounds: for _ in 0..MAX_ROUNDS {
+            // An enclosing law budget ran out: no further query would be asked (see
+            // `prove::past_deadline`), and each round builds hundreds.
+            if crate::prove::past_deadline() {
+                return None;
+            }
             let mut progress = false;
             // Conditionals a round derives (a law instance behind a refuted domain guard), added
             // for the next round.
@@ -460,6 +468,9 @@ pub fn retry_staged(smt: &str, solver: &str) -> Option<Staged> {
                 if charged_ms() >= budget_ms {
                     steps.push_str(";; the budget ran out; the remaining conditionals were not attempted\n");
                     break 'rounds;
+                }
+                if crate::prove::past_deadline() {
+                    return None;
                 }
                 let mut left: Vec<&S> = Vec::new();
                 let mut refuted = 0usize;

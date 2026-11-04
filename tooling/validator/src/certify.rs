@@ -236,6 +236,8 @@ pub struct LinkedView<'a> {
     /// Whether a callee's contract carries its LAWS (`true`, the full derivation) or its posts
     /// alone ([`LinkedView::posts_only`] — the cheap first pass of [`certify_record_linked`]).
     callee_laws: bool,
+    /// A wall-clock cap on each law attempt in this view's derivations ([`LinkedView::budgeted`]).
+    law_budget: Option<std::time::Duration>,
 }
 
 impl<'a> LinkedView<'a> {
@@ -253,6 +255,7 @@ impl<'a> LinkedView<'a> {
             preserve: Default::default(),
             in_progress: Default::default(),
             callee_laws: true,
+            law_budget: None,
         }
     }
 
@@ -263,6 +266,21 @@ impl<'a> LinkedView<'a> {
     /// written to the derived cache (it is not the full contract); a cached full one is used as is.
     pub fn posts_only(records: &'a HashMap<String, J>, bodies: &'a HashMap<String, J>, solver: &str) -> Self {
         LinkedView { callee_laws: false, ..LinkedView::new(records, bodies, solver) }
+    }
+
+    /// A view whose callee contracts carry the laws each provable within `budget` per attempt
+    /// (a law attempt's solver queries are cut off at the budget and read `unknown`). The middle
+    /// pass of [`certify_record_in_view`]: `rat_add`'s posts need `rat_normalize`'s first law
+    /// (10 s), not its other four (100–270 s each, then the staged rung) — the full view took
+    /// 21.5 min for one verified run (stranger 19, 2026-11-04). Fewer axioms can only lose proofs,
+    /// so a SOUND verdict here is a proof; never cached (its contracts may be partial).
+    pub fn budgeted(records: &'a HashMap<String, J>, bodies: &'a HashMap<String, J>, solver: &str, budget: std::time::Duration) -> Self {
+        LinkedView { law_budget: Some(budget), ..LinkedView::new(records, bodies, solver) }
+    }
+
+    /// Whether this view's derivations try every callee law without a time cap.
+    pub fn is_full(&self) -> bool {
+        self.callee_laws && self.law_budget.is_none()
     }
 
     /// `complexity::component_preserve` of the callee's body (memoized).
@@ -478,7 +496,9 @@ impl<'a> LinkedView<'a> {
             if progress() {
                 eprintln!("   callee   {callee_name} ({}…): deriving its contract", &target[..target.len().min(11)]);
             }
-            let (reports, laws) = derive_self_facts(sig_type, &refinements, &all_laws, body, &nat_positions, &self.solver);
+            let (reports, laws) = with_law_budget(self.law_budget, || {
+                derive_self_facts(sig_type, &refinements, &all_laws, body, &nat_positions, &self.solver)
+            });
             crate::prove::set_self_measure(prev_measure);
             crate::prove::set_self_type(prev_ty);
             crate::set_callee_contracts(prev);
@@ -487,7 +507,8 @@ impl<'a> LinkedView<'a> {
             if progress() {
                 // `posts` counts the type-implied ones (a `nat` result) beside the declared.
                 let laws_part = if self.callee_laws {
-                    format!("laws {} of {} proved", laws.len(), all_laws.len())
+                    let within = self.law_budget.map(|b| format!(" within {} s each", b.as_secs())).unwrap_or_default();
+                    format!("laws {} of {} proved{within}", laws.len(), all_laws.len())
                 } else {
                     "laws not tried (posts-only pass)".to_string()
                 };
@@ -523,7 +544,7 @@ impl<'a> LinkedView<'a> {
         if self.cycle_refusals.get() > refusals_before {
             return out;
         }
-        if let (Some(c), Some(dir), true) = (&out, derived_cache_dir(), self.callee_laws) {
+        if let (Some(c), Some(dir), true) = (&out, derived_cache_dir(), self.is_full()) {
             store_derived(&dir, target, c);
         }
         self.contracts.borrow_mut().insert(target.to_string(), out.clone());
@@ -595,8 +616,23 @@ impl<'a> LinkedView<'a> {
             }
             witnesses_scanned = true;
             let mut found: Vec<String> = Vec::new();
+            // Another VERSION of a function already in the set is no witness: the agent loop's view
+            // holds every candidate's fetched closure, and an older `rat_normalize` (its post applies
+            // `gcd`) was derived in full beside the one `rat_add` applies — ~5 of its 11 min
+            // (stranger 19, 2026-11-04). A module's records hold one version per name, so builds are
+            // unaffected; skipping a witness only withholds axioms, never makes a proof.
+            let name_of = |h: &str| self.records.get(h).and_then(|r| r.pointer("/name_hints/0")).and_then(|n| n.as_str()).map(String::from);
+            // …including the record mid-derivation that asked (its nested closure scans too — the
+            // older `rat_normalize` came in as a witness of `gcd` inside the newer one's derivation).
+            let in_progress: Vec<String> =
+                self.in_progress.borrow().iter().filter_map(|k| k.strip_prefix("contract:").map(String::from)).collect();
+            let in_set: std::collections::BTreeSet<String> =
+                out.keys().cloned().chain(in_progress).filter_map(|h| name_of(&h)).collect();
             for (h, rec) in self.records.iter() {
                 if out.contains_key(h) {
+                    continue;
+                }
+                if name_of(h).is_some_and(|n| in_set.contains(&n)) {
                     continue;
                 }
                 // Not a record mid-derivation, nor one that APPLIES such a record: deriving it here
@@ -841,7 +877,8 @@ fn derive_self_facts_inner(
 pub fn law_attempt(phase: &str, law: &J, f: impl FnOnce() -> bool) -> bool {
     let before = crate::prove::queries_run();
     let started = std::time::Instant::now();
-    let proved = f();
+    let deadline = LAW_BUDGET.with(|b| b.get()).map(|b| started + b);
+    let proved = crate::prove::with_query_deadline(deadline, f);
     let text = || -> String {
         let t = crate::surface::unparse_predicate(law).unwrap_or_else(|_| "?".into());
         t.chars().take(60).collect()
@@ -854,6 +891,27 @@ pub fn law_attempt(phase: &str, law: &J, f: impl FnOnce() -> bool) -> bool {
         eprintln!("   law      {verdict} {:>6.1} s  {}", started.elapsed().as_secs_f64(), text());
     }
     proved
+}
+
+thread_local! {
+    /// The per-attempt cap [`law_attempt`] applies, set by a budgeted view's derivations.
+    static LAW_BUDGET: std::cell::Cell<Option<std::time::Duration>> = const { std::cell::Cell::new(None) };
+}
+
+/// Run `f` with every [`law_attempt`] in it capped at `budget` (`None` leaves any enclosing cap).
+pub fn with_law_budget<T>(budget: Option<std::time::Duration>, f: impl FnOnce() -> T) -> T {
+    let Some(b) = budget else { return f() };
+    let prev = LAW_BUDGET.with(|c| c.replace(Some(b)));
+    let out = f();
+    LAW_BUDGET.with(|c| c.set(prev));
+    out
+}
+
+/// The per-attempt law budget of a verified run: `NL_LAW_BUDGET_SECS` (default 20; `0` = none —
+/// every law tried to the end, as before 2026-11-04).
+pub fn law_budget() -> Option<std::time::Duration> {
+    let secs = std::env::var("NL_LAW_BUDGET_SECS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(20);
+    (secs > 0).then(|| std::time::Duration::from_secs(secs))
 }
 
 /// Progress lines on stderr while a verified run certifies (`orchestrate --verify` turns it on): one
@@ -1153,26 +1211,56 @@ pub fn certify_record_linked(
     let Some(b) = bodies else {
         return certify_with_view(record, body, records, None, solver);
     };
-    certify_record_in_view(record, body, records, &LinkedView::new(records, b, solver), solver)
+    certify_passes(record, body, records, &LinkedView::new(records, b, solver), solver, None)
 }
 
 /// [`certify_record_linked`] with the caller's full view for the second pass, so what that pass
 /// derives (the record's own contract and laws, its callees') is memoized for the caller: the
 /// agent loop proves the same laws next and derived them all a second time (2026-11-03).
+///
+/// The agent loop's entry: between the two passes, a BUDGETED one ([`LinkedView::budgeted`],
+/// `law_budget()`). Only here — `certify` and the module builders keep the two passes, so their
+/// signed certificates stay byte-identical.
 pub fn certify_record_in_view(record: &J, body: &J, records: &HashMap<String, J>, full: &LinkedView<'_>, solver: &str) -> Certification {
+    certify_passes(record, body, records, full, solver, law_budget())
+}
+
+fn certify_passes(
+    record: &J,
+    body: &J,
+    records: &HashMap<String, J>,
+    full: &LinkedView<'_>,
+    solver: &str,
+    budget: Option<std::time::Duration>,
+) -> Certification {
     let first = certify_with_view(record, body, records, Some(&LinkedView::posts_only(records, full.bodies, solver)), solver);
     let decided = first.checks.iter().filter(|c| uses_the_view(&c.check)).all(|c| matches!(c.verdict, "SOUND" | "VERIFIED" | "N/A"));
     if decided {
         return first;
     }
-    if progress() {
-        let open: Vec<&str> = first
-            .checks
+    let open = |c: &Certification| -> String {
+        c.checks
             .iter()
             .filter(|c| uses_the_view(&c.check) && !matches!(c.verdict, "SOUND" | "VERIFIED" | "N/A"))
             .map(|c| c.check.as_str())
-            .collect();
-        eprintln!("   certify  {} undecided on callee posts alone — again with callee laws (slower)", open.join(", "));
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    // The middle pass: callee laws, each attempt capped (`law_budget`). Decided ⇒ that is the
+    // certification, as for the first pass; else the full view, exactly as before.
+    if let Some(budget) = budget.filter(|_| full.is_full()) {
+        if progress() {
+            eprintln!("   certify  {} undecided on callee posts alone — again with callee laws, {} s per attempt", open(&first), budget.as_secs());
+        }
+        let middle = certify_with_view(record, body, records, Some(&LinkedView::budgeted(records, full.bodies, solver, budget)), solver);
+        if middle.checks.iter().filter(|c| uses_the_view(&c.check)).all(|c| matches!(c.verdict, "SOUND" | "VERIFIED" | "N/A")) {
+            return middle;
+        }
+        if progress() {
+            eprintln!("   certify  {} still undecided — again with every callee law, no time cap (slowest)", open(&middle));
+        }
+    } else if progress() {
+        eprintln!("   certify  {} undecided on callee posts alone — again with callee laws (slower)", open(&first));
     }
     certify_with_view(record, body, records, Some(full), solver)
 }
@@ -1278,13 +1366,19 @@ fn certify_with_view(
         let nat_positions = crate::terminate::nat_param_positions(record);
         let prev_measure = view.map(|v| crate::prove::set_self_measure(v.self_measure(body, &nat_positions)));
         let started = std::time::Instant::now();
-        let (reports, proved) = derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, solver);
+        let (reports, proved) = with_law_budget(view.and_then(|v| v.law_budget), || {
+            derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, solver)
+        });
         if progress() {
             let sound = reports.iter().filter(|r| matches!(r.outcome, RefinementOutcome::Sound)).count();
             // The lone NOT-APPLICABLE report of a record with nothing to check (a pre only —
             // `is_prime`) is not an unproved post: stranger 18 read "0 of 1 sound" as one.
             let checked = reports.iter().filter(|r| !matches!(r.outcome, RefinementOutcome::NotApplicable)).count();
-            let pass = if view.is_some_and(|v| !v.callee_laws) { ", over callee posts only" } else { "" };
+            let pass = match view {
+                Some(v) if !v.callee_laws => ", over callee posts only".to_string(),
+                Some(v) if v.law_budget.is_some() => format!(", laws within {} s each", v.law_budget.unwrap().as_secs()),
+                _ => String::new(),
+            };
             let posts = if checked == 0 { "no post to prove".to_string() } else { format!("{sound} of {checked} post(s) sound") };
             eprintln!(
                 "   contract {posts}, {} of {} law(s) proved ({:.1} s{pass})",
@@ -1292,6 +1386,9 @@ fn certify_with_view(
             );
         }
         laws = proved;
+        // Complete = no further attempt in this verified run would add a law: every callee law was
+        // available (a full view; a budgeted one — the loop tries laws under the same budget), or
+        // there is no callee.
         laws_complete = view.is_some_and(|v| v.callee_laws || v.contracts_for_record(record, body).is_empty());
         if let Some(p) = prev_measure {
             crate::prove::set_self_measure(p);
@@ -1495,6 +1592,46 @@ mod tests {
         assert_eq!(cached_after_thin, None, "a partial contract is never cached");
         assert_eq!(full.laws.len(), 1, "the full view proves the law");
         assert_eq!(cached_after_full, Some(full));
+    }
+
+    /// The budgeted view (the agent loop's middle pass) proves a cheap law within its budget, and
+    /// a law attempt whose budget is already spent proves nothing — a cut-off can only lose a
+    /// proof (2026-11-04, stranger 19).
+    #[test]
+    fn a_budgeted_view_proves_within_its_budget_and_a_spent_budget_proves_nothing() {
+        let Some(solver) = ["z3", "cvc5"].into_iter().find(|s| std::process::Command::new(s).arg("--version").output().is_ok_and(|o| o.status.success())) else { return };
+        let (mut rec, body) = record_named("doubles_with_a_cheap_law");
+        rec["properties"] = json!([{ "name": "twice", "expr": crate::surface::parse_predicate("forall n. self(n) == n + n").unwrap() }]);
+        let hash = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
+        rec["hash"] = json!(hash);
+        let records: HashMap<String, J> = [(hash.clone(), rec)].into_iter().collect();
+        let bodies: HashMap<String, J> = [(hash.clone(), body)].into_iter().collect();
+        let view = LinkedView::budgeted(&records, &bodies, solver, std::time::Duration::from_secs(20));
+        assert!(!view.is_full());
+        assert_eq!(view.contract(&hash).expect("a contract").laws.len(), 1, "a cheap law proves within budget");
+        let spent = LinkedView::budgeted(&records, &bodies, solver, std::time::Duration::ZERO);
+        assert!(spent.contract(&hash).expect("a contract").laws.is_empty(), "a spent budget proves nothing");
+    }
+
+    /// Another VERSION of a function in the closure is not a witness (the agent loop's view holds
+    /// every candidate's fetched closure; an older `rat_normalize` was derived beside the newer).
+    #[test]
+    fn the_witness_scan_skips_another_version_of_a_function_in_the_set() {
+        let (a, ab) = record_named("same_name");
+        let (mut b, bb) = record_named("same_name");
+        b["examples"][0]["args"][0]["value"] = json!(3);
+        b["examples"][0]["result"]["value"] = json!(6);
+        b["hash"] = json!(crate::hash_artifact_with_kind(&b, crate::ArtifactKind::FunctionRecord).unwrap());
+        let (ha, hb) = (a["hash"].as_str().unwrap().to_string(), b["hash"].as_str().unwrap().to_string());
+        // `b`'s post applies `a` by address — a witness of `a`, but for its own name.
+        b["signature"]["refinements"] = json!([{ "kind": "post", "expr":
+            { "kind": "app", "op": "eq", "args": [ { "kind": "var", "name": "result" },
+              { "kind": "app", "op": ha.clone(), "args": [ { "kind": "var", "name": "n" } ] } ] } }]);
+        let records: HashMap<String, J> = [(ha.clone(), a), (hb.clone(), b)].into_iter().collect();
+        let bodies: HashMap<String, J> = [(ha.clone(), ab), (hb.clone(), bb)].into_iter().collect();
+        let view = LinkedView::posts_only(&records, &bodies, "z3");
+        let set = view.contracts_closure([ha.clone()].into_iter().collect());
+        assert!(!set.contains_key(&hb), "another version of `same_name` was taken as a witness");
     }
 
     /// A minimal well-formed v0.2 record over `\n -> add(n, n)` with the given primary name.
