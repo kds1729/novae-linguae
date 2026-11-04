@@ -2930,6 +2930,22 @@ fn confirmed_summary(steps: &[nl_validator::Step], certified: Option<bool>, laws
     format!("{}, and re-verified", parts.join(", "))
 }
 
+/// The `proved:` block after `result:` — each fact proved about the result, or the plain statement
+/// that the answer rests only on certification and an agreeing re-run.
+fn vouched_lines(vouched: &[String]) -> String {
+    if vouched.is_empty() {
+        return "proved: nothing about this result beyond certification and an agreeing re-run — no post or law of the \
+                function constrains it (its correctness rests on the body: `unparse-body`)"
+            .to_string();
+    }
+    let mut out = String::from("proved about this result (read them: a bound is not the value):");
+    for v in vouched {
+        out.push_str("\n  ");
+        out.push_str(v);
+    }
+    out
+}
+
 fn final_result_surface(steps: &[nl_validator::Step]) -> Option<String> {
     let m = &steps.iter().rev().find(|s| s.label.rsplit(':').next() == Some("assert"))?.message;
     let v = m.pointer("/body/claim/expr/args/1/value")?;
@@ -3118,6 +3134,9 @@ fn cmd_orchestrate_verified(
         if let Some(r) = final_result_surface(&run.steps) {
             println!("result: {r}");
         }
+        // CONFIRMED is the same word whether a post pins the value or nothing constrains it
+        // (stranger 18: `is_prime`, a pre only); say which facts the answer rests on.
+        println!("{}", vouched_lines(&run.vouched));
         if publish {
             publish_final_assert(node.expect("--publish requires --node"), &run.steps)?;
         }
@@ -3579,6 +3598,16 @@ mod value_arg_tests {
         assert_eq!(confirmed_summary(&[certify_step(&["SOUND"])], Some(true), &laws),
                    "trusted, certified, contract proved (1 post(s)), laws `choose_zero`, `beyond_n` proved, \
                     `symmetry`, `pascal` not proved here, applied, and re-verified");
+    }
+
+    /// After `result:`, the facts the answer rests on — or, plainly, that none constrains it
+    /// (stranger 18: `is_prime`, a pre only, CONFIRMED in the same words as a specified function).
+    #[test]
+    fn the_proved_block_lists_the_facts_or_says_there_are_none() {
+        let none = crate::vouched_lines(&[]);
+        assert!(none.starts_with("proved: nothing about this result beyond certification"), "{none}");
+        let some = crate::vouched_lines(&["post  result >= 0 && result < m".to_string(), "law exact  forall k d. self(k * d, d) == k".to_string()]);
+        assert_eq!(some, "proved about this result (read them: a bound is not the value):\n  post  result >= 0 && result < m\n  law exact  forall k d. self(k * d, d) == k");
     }
 
     /// `--arg`/`--expect` take a file, inline JSON, or a surface literal (2026-11-02: a stranger

@@ -1281,10 +1281,14 @@ fn certify_with_view(
         let (reports, proved) = derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, solver);
         if progress() {
             let sound = reports.iter().filter(|r| matches!(r.outcome, RefinementOutcome::Sound)).count();
+            // The lone NOT-APPLICABLE report of a record with nothing to check (a pre only —
+            // `is_prime`) is not an unproved post: stranger 18 read "0 of 1 sound" as one.
+            let checked = reports.iter().filter(|r| !matches!(r.outcome, RefinementOutcome::NotApplicable)).count();
             let pass = if view.is_some_and(|v| !v.callee_laws) { ", over callee posts only" } else { "" };
+            let posts = if checked == 0 { "no post to prove".to_string() } else { format!("{sound} of {checked} post(s) sound") };
             eprintln!(
-                "   contract {sound} of {} refinement(s) sound, {} of {} law(s) proved ({:.1} s{pass})",
-                reports.len(), proved.len(), law_exprs(record).len(), started.elapsed().as_secs_f64()
+                "   contract {posts}, {} of {} law(s) proved ({:.1} s{pass})",
+                proved.len(), law_exprs(record).len(), started.elapsed().as_secs_f64()
             );
         }
         laws = proved;

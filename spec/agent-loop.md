@@ -405,3 +405,8 @@ the goal over a commons containing a prior `double_then_add` composite (whose bo
 - **Example-exact, not proven.** A CONFIRMED verdict means the claim's equation evaluated true on the
   concrete values asserted. It is a re-execution of *that* computation, not a proof over all inputs
   (that is the generative property-testing engine, still the next rung — see the project README).
+  What IS proved over all inputs is the applied function's contract and laws, and `orchestrate
+  --verify` lists exactly those after `result:` (`proved about this result:` — each SOUND post and
+  proved law, callees by name), or says `proved: nothing about this result beyond certification
+  and an agreeing re-run` when none constrains the value (2026-11-04, stranger 18: a pre-only
+  `is_prime` and a fully-specified `div_half_even` read as the same CONFIRMED).

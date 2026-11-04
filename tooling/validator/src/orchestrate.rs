@@ -154,6 +154,82 @@ pub struct VerifiedRun {
     pub other_laws: Vec<(String, bool)>,
     /// Whether the applied result's claim re-verified by re-running it.
     pub confirmed: bool,
+    /// What is PROVED about the applied function's result, in surface syntax: each SOUND post
+    /// (`post  …`, `post  result >= 0` for a `nat` result) and each proved law (`law <name>  …`).
+    /// Empty = nothing beyond certification and an agreeing re-run. Stranger 18 (2026-11-04): one
+    /// CONFIRMED read the same for `is_prime` (a pre only) as for a fully-specified function.
+    pub vouched: Vec<String>,
+}
+
+/// The facts a verified run proved about the result (see [`VerifiedRun::vouched`]): the certify
+/// step's SOUND `post[i]` / `nat-result` checks, rendered from the record's refinements, then
+/// every law the loop proved.
+fn vouched_facts<'a>(
+    record: Option<&J>,
+    steps: &[Step],
+    laws: &[(String, J)],
+    proved: impl Iterator<Item = &'a (String, bool)>,
+    name_of: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    // A callee the predicate applies is written by its name, as the node's summaries do (a bare
+    // 64-hex address is unreadable; the transcript keeps addresses).
+    let render = |e: &J| {
+        let text = crate::surface::unparse_predicate(e).unwrap_or_else(|_| "?".into());
+        named_callees(&text, &name_of)
+    };
+    let mut out = Vec::new();
+    let sound: Vec<String> = steps
+        .iter()
+        .rev()
+        .find(|s| s.label == "certify")
+        .and_then(|s| s.message.get("checks"))
+        .and_then(|c| c.as_array())
+        .map(|cs| {
+            cs.iter()
+                .filter(|c| c.get("verdict").and_then(|v| v.as_str()) == Some("SOUND"))
+                .filter_map(|c| c.get("check").and_then(|x| x.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if sound.iter().any(|c| c.starts_with("refinement:nat-result")) {
+        out.push("post  result >= 0".to_string());
+    }
+    let posts: Vec<&J> = record
+        .and_then(|r| r.pointer("/signature/refinements"))
+        .and_then(|r| r.as_array())
+        .map(|rs| rs.iter().filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("post")).filter_map(|r| r.get("expr")).collect())
+        .unwrap_or_default();
+    for (i, e) in posts.iter().enumerate() {
+        if sound.contains(&format!("refinement:post[{i}]")) {
+            out.push(format!("post  {}", render(e)));
+        }
+    }
+    let proved: Vec<&String> = proved.filter(|(_, p)| *p).map(|(n, _)| n).collect();
+    for (name, e) in laws {
+        if proved.contains(&name) {
+            out.push(format!("law {name}  {}", render(e)));
+        }
+    }
+    out
+}
+
+/// Every `fn_<64 hex>` in a rendered predicate replaced by the callee's name where it is known.
+fn named_callees(text: &str, name_of: &impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("fn_") {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        let len = 3 + tail[3..].chars().take_while(|c| c.is_ascii_hexdigit()).count();
+        let addr = &tail[..len];
+        match (len == 67).then(|| name_of(addr)).flatten() {
+            Some(name) => out.push_str(&name),
+            None => out.push_str(addr),
+        }
+        rest = &tail[len..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Trust-ranking key for a candidate: prefer higher aggregate confidence, then more vertex-disjoint
@@ -731,7 +807,7 @@ pub fn orchestrate_verified_with_order(
         })
         .collect();
     if compatible.is_empty() {
-        return Ok(VerifiedRun { steps, trusted: None, certified: None, property: None, other_laws: Vec::new(), confirmed: false });
+        return Ok(VerifiedRun { steps, trusted: None, certified: None, property: None, other_laws: Vec::new(), confirmed: false, vouched: Vec::new() });
     }
 
     // The attestation graph over the supplied attestations — including any signed CERTIFICATION records,
@@ -770,7 +846,7 @@ pub fn orchestrate_verified_with_order(
                         message: json!({ "chosen": null, "trusted": false,
                             "reason": "no discovered function is trusted under the policy", "candidates": candidates }),
                     });
-                    return Ok(VerifiedRun { steps, trusted: Some(false), certified: None, property: None, other_laws: Vec::new(), confirmed: false });
+                    return Ok(VerifiedRun { steps, trusted: Some(false), certified: None, property: None, other_laws: Vec::new(), confirmed: false, vouched: Vec::new() });
                 }
             }
         }
@@ -926,7 +1002,7 @@ pub fn orchestrate_verified_with_order(
 
         if require_certified && certified != Some(true) {
             if last {
-                return Ok(VerifiedRun { steps, trusted, certified, property: None, other_laws: Vec::new(), confirmed: false });
+                return Ok(VerifiedRun { steps, trusted, certified, property: None, other_laws: Vec::new(), confirmed: false, vouched: Vec::new() });
             }
             steps.push(Step {
                 label: "retry".into(),
@@ -997,7 +1073,7 @@ pub fn orchestrate_verified_with_order(
         steps.push(Step { label: kind.clone(), message: commit.clone() });
         if kind != "commit" {
             if last {
-                return Ok(VerifiedRun { steps, trusted, certified, property, other_laws, confirmed: false });
+                return Ok(VerifiedRun { steps, trusted, certified, property, other_laws, confirmed: false, vouched: Vec::new() });
             }
             steps.push(Step {
                 label: "retry".into(),
@@ -1018,7 +1094,9 @@ pub fn orchestrate_verified_with_order(
         // RE-VERIFY the result by re-running the claim (trust nothing — principle 3).
         let confirmed = verify_claim(&assert, link.clone()).unwrap_or(false);
         steps.push(Step { label: "assert".into(), message: assert });
-        return Ok(VerifiedRun { steps, trusted, certified, property, other_laws, confirmed });
+        let name_of = |addr: &str| records.get(addr).and_then(|r| r.pointer("/name_hints/0")).and_then(|n| n.as_str()).map(String::from);
+        let vouched = vouched_facts(records.get(&target), &steps, &laws, property.iter().chain(&other_laws), name_of);
+        return Ok(VerifiedRun { steps, trusted, certified, property, other_laws, confirmed, vouched });
     }
     // `compatible` was non-empty, so the loop always returns from its last iteration.
     unreachable!("candidate loop returns on its last attempt")
@@ -1247,6 +1325,19 @@ mod tests {
         // Certify's linked derivation proved it first; the loop reuses that (2026-11-03).
         assert_eq!(prove.message["via"], json!("certify's contract derivation"), "{}", prove.message);
         assert!(run.confirmed);
+        // The run says what it proved about the value, in surface syntax (stranger 18).
+        assert!(run.vouched.iter().any(|v| v.starts_with("law unit_rate  forall")), "{:?}", run.vouched);
+        assert!(run.vouched.iter().any(|v| v.starts_with("post  ")), "{:?}", run.vouched);
+    }
+
+    #[test]
+    fn a_vouched_predicate_names_its_callees() {
+        let a = format!("fn_{}", "ab".repeat(32));
+        let name_of = |x: &str| (x == a).then(|| "list_sum".to_string());
+        assert_eq!(named_callees(&format!("{a}(result) == total"), &name_of), "list_sum(result) == total");
+        // An unknown or short address stays as written.
+        let b = format!("fn_{}", "cd".repeat(32));
+        assert_eq!(named_callees(&format!("{b}(x) && fn_12(y)"), &name_of), format!("{b}(x) && fn_12(y)"));
     }
 
     /// The loop's certify step is LINKED, like `certify --records`: `fx_convert_text`'s posts rest on

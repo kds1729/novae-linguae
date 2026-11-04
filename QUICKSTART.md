@@ -1,5 +1,9 @@
 # Novae Linguae in ten minutes
 
+**Have a goal of your own (compute something with a published, verified function)?** You do not
+need this page: read `AGENTS.md` — *Just the binary* and *Finding a function for a goal* — and
+skip the demo below, which ingests an API and PUBLISHES a signed claim to the public node.
+
 You need `python3` (3.10+), `curl`, and a network. Nothing else — no Rust, no venv, no account.
 
 ```bash

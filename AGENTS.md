@@ -58,12 +58,16 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
 1. `POST https://nl.1105software.com/v0/search?include=summary` with `{"query": "<the goal in
    plain words>", "k": 10}`. **Always pass `?include=summary`**: without it each hit is a bare
    `{hash, score}` and you will fetch every record to tell them apart (a stranger did: 20 fetches).
+   The response is `{"results": [hit, …]}`, best first. A hit has `contract` only if the function
+   declares a pre/post and `laws` only if it declares laws — a missing key means none, not an error.
    Scores are close together (a 0.01 margin is normal); treat the top 3–5 as a shortlist, not the
    top 1 as the answer. Older versions of a function share its slot: they are listed by hash in
    `versions`, and the hit shown is the version with the strongest contract.
 2. Choose by the summary's `name`, `contract` (pre/post, surface syntax), `laws`, `params` (argument
    names, in order), `param_docs` (what each argument means, and its unit — the author's words)
-   and `type_surface`. A function the contract applies is written by name (`name@fn_1234abcd`
+   and `type_surface`. **Pass arguments in `params` order and read `param_docs` for which is
+   which** — e.g. `digit_sum`'s `params` are `["b", "n"]`, the BASE first (`--arg 10 --arg <n>`;
+   the other order answers a different question). A function the contract applies is written by name (`name@fn_1234abcd`
    where a bare name would be ambiguous); `refs` maps each full address to that name.
    The contract is what separates candidates with similar names — e.g. `allocate`'s
    `post: list_sum(result) == total` (the parts sum to the total) versus a plain `divide`.
@@ -74,7 +78,21 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
 3. Apply it with the verified loop using a tag from its `intent_tags`:
    `nl-validator orchestrate --node <node> --verify --require-certified --intent
    math/decimal/allocate --arg 10000 --arg '[1, 1, 1]'` → `CONFIRMED …` then
-   `result: [int(3333), int(3333), int(3334)]`.
+   `result: [int(3333), int(3333), int(3334)]`, then what is proved about that result:
+
+       proved about this result (read them: a bound is not the value):
+         post  length(result) == length(weights)
+         post  list_sum(result) == total
+
+   **How much to trust the answer is in that block, not in the word CONFIRMED.** CONFIRMED always
+   means: fetched and hash-checked, certified (types, effects, termination and cost checked; a
+   declared post it could not prove shows as `contract 1 of 2 post(s) proved` and is absent from
+   the block), applied, and a re-run agreed. Whether the VALUE is pinned down depends
+   on what the proved posts and laws say — `div_half_even`'s posts determine its answer;
+   `mod_pow`'s only says `0 <= result < m` (a bound: the exponentiation itself rests on the body);
+   `is_prime` declares none, and the block says `proved: nothing about this result beyond
+   certification and an agreeing re-run`. When it matters, read the body
+   (`nl-validator unparse-body`) or prefer a candidate whose contract states the answer.
 
 Decimal numbers from a user ("7.125", "1.0825") are not floats here — money must be exact. Pass
 them as TEXT to a function that takes text (`round_text_half_even`, `fx_convert_text`,
