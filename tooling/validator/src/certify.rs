@@ -239,6 +239,13 @@ pub struct LinkedView<'a> {
     shrink: std::cell::RefCell<HashMap<String, Option<u32>>>,
     preserve: std::cell::RefCell<HashMap<String, Option<Vec<usize>>>>,
     in_progress: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// The record whose contract set is being assembled at the OUTERMOST [`contracts_for_record`]
+    /// (`(primary name, hash)`): every witness scan under it, nested derivations included, skips
+    /// that record's OTHER versions. Stranger 22 (2026-11-04): certifying the new `gi_rem`, the
+    /// scan inside `gi_div`'s derivation took the OLD `gi_rem` as a witness of `gi_norm` and derived
+    /// it in full, whose own scan then took the new one — 2 × 24 s of an 82 s verified run. The
+    /// record itself is not excluded, so a module build (one version per name) is unchanged.
+    certifying: std::cell::RefCell<Option<(String, String)>>,
     /// How many contract lookups were refused because the target was mid-derivation (a cycle).
     /// A contract computed while this grew may lack facts and is never memoized or cached.
     cycle_refusals: std::cell::Cell<usize>,
@@ -263,6 +270,7 @@ impl<'a> LinkedView<'a> {
             shrink: Default::default(),
             preserve: Default::default(),
             in_progress: Default::default(),
+            certifying: Default::default(),
             callee_laws: true,
             law_budget: None,
         }
@@ -588,7 +596,17 @@ impl<'a> LinkedView<'a> {
             }
         }
         targets.remove(own);
-        self.contracts_closure(targets)
+        // The outermost call names the record being certified for every nested witness scan.
+        let outermost = self.certifying.borrow().is_none();
+        if outermost {
+            let name = record.pointer("/name_hints/0").and_then(|n| n.as_str());
+            *self.certifying.borrow_mut() = name.map(|n| (n.to_string(), own.to_string()));
+        }
+        let out = self.contracts_closure(targets);
+        if outermost {
+            *self.certifying.borrow_mut() = None;
+        }
+        out
     }
 
     fn contracts_closure(&self, targets: std::collections::BTreeSet<String>) -> std::collections::BTreeMap<String, crate::CalleeContract> {
@@ -642,6 +660,9 @@ impl<'a> LinkedView<'a> {
                     continue;
                 }
                 if name_of(h).is_some_and(|n| in_set.contains(&n)) {
+                    continue;
+                }
+                if self.certifying.borrow().as_ref().is_some_and(|(name, hash)| h != hash && name_of(h).as_ref() == Some(name)) {
                     continue;
                 }
                 // Not a record mid-derivation, nor one that APPLIES such a record: deriving it here
@@ -1690,6 +1711,40 @@ mod tests {
         let view = LinkedView::posts_only(&records, &bodies, "z3");
         let set = view.contracts_closure([ha.clone()].into_iter().collect());
         assert!(!set.contains_key(&hb), "another version of `same_name` was taken as a witness");
+    }
+
+    /// Nor is another version of the record BEING CERTIFIED, though no contract in the set names
+    /// it: certifying the new `gi_rem`, the old one (its post applies `gi_norm`) was a witness of
+    /// `gi_norm` and derived in full (stranger 22, 2026-11-04).
+    #[test]
+    fn the_witness_scan_skips_another_version_of_the_record_being_certified() {
+        let (helper, helper_body) = record_named("helper");
+        let hh = helper["hash"].as_str().unwrap().to_string();
+        let applies_helper = json!([{ "kind": "post", "expr":
+            { "kind": "app", "op": "eq", "args": [ { "kind": "var", "name": "result" },
+              { "kind": "app", "op": hh.clone(), "args": [ { "kind": "var", "name": "n" } ] } ] } }]);
+        let version = |seed: i64| {
+            let (mut r, b) = record_named("target");
+            r["examples"][0]["args"][0]["value"] = json!(seed);
+            r["examples"][0]["result"]["value"] = json!(2 * seed);
+            r["signature"]["refinements"] = applies_helper.clone();
+            r["hash"] = json!(crate::hash_artifact_with_kind(&r, crate::ArtifactKind::FunctionRecord).unwrap());
+            (r, b)
+        };
+        let ((new, new_body), (old, old_body)) = (version(3), version(5));
+        let (hn, ho) = (new["hash"].as_str().unwrap().to_string(), old["hash"].as_str().unwrap().to_string());
+        // The body applies the helper, so the helper is in the set and the old version's post names it.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body":
+            { "kind": "app", "fn": { "kind": "fn_ref", "target": hh.clone() }, "args": [{ "kind": "var", "name": "n" }] } });
+        let records: HashMap<String, J> =
+            [(hh.clone(), helper), (hn.clone(), new.clone()), (ho.clone(), old)].into_iter().collect();
+        let bodies: HashMap<String, J> =
+            [(hh.clone(), helper_body), (hn.clone(), new_body), (ho.clone(), old_body)].into_iter().collect();
+        let view = LinkedView::posts_only(&records, &bodies, "z3");
+        let set = view.contracts_for_record(&new, &body);
+        assert!(set.contains_key(&hh), "the helper the body applies is in the set");
+        assert!(!set.contains_key(&ho), "another version of the record being certified was taken as a witness");
+        assert!(view.certifying.borrow().is_none(), "the outermost call clears what it set");
     }
 
     /// A minimal well-formed v0.2 record over `\n -> add(n, n)` with the given primary name.
