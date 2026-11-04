@@ -198,7 +198,7 @@ enum Commands {
         body: PathBuf,
         /// Argument value, repeatable, positional order: a value-expression JSON file, inline JSON,
         /// or a surface literal (`10000`, `'[1, 1, 1]'`) — as `orchestrate --arg`.
-        #[arg(long = "arg")]
+        #[arg(long = "arg", allow_hyphen_values = true)]
         args: Vec<String>,
         /// Grant an effect the body may perform (e.g. `io.console`, `random`, `fs.read`, `fs.write`,
         /// `net.write@api.example.com` — a grant may be scoped: `@host`, `@host/path/prefix`, or
@@ -688,7 +688,7 @@ enum Commands {
         /// Argument value, repeatable, positional order: a value-expression JSON FILE, inline JSON
         /// (`'{"kind":"int","value":10000}'`), or a surface literal (`10000`, `'[1, 1, 1]'`,
         /// `'"text"'` — spec/surface-syntax.md §3). An existing file wins.
-        #[arg(long = "arg")]
+        #[arg(long = "arg", allow_hyphen_values = true)]
         args: Vec<String>,
         /// Seed for the orchestrator's signing identity (signs query + propose). Optional for a plain
         /// apply (a fixed, documented default identity — the transcript stays deterministic);
@@ -718,6 +718,11 @@ enum Commands {
         /// before applying it, and ABORT if it isn't certified — "assemble only from verified parts".
         #[arg(long)]
         require_certified: bool,
+        /// With `--verify`: fail the run (NOT-PROVEN) unless EVERY declared law proves. By default
+        /// laws are reported — `CONFIRMED` names the proved ones and any "not proved here" — and
+        /// the run is decided by certification, the contract and the re-run result.
+        #[arg(long, requires = "verify")]
+        require_laws: bool,
         /// With `--verify`: the EXPECTED result value (a file, inline JSON or a surface literal, as
         /// `--arg`) — goal-aware
         /// discovery ranking. Candidates whose declared result type cannot produce it are dropped
@@ -1141,7 +1146,7 @@ fn real_main() -> ExitCode {
         Commands::Authorize { policy, capability, grantee, delegations, at } => {
             (cmd_authorize(&policy, &capability, &grantee, &delegations, at.as_deref()), false)
         }
-        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, expect, grant, grant_certified, secret, oauth, verbose } => {
+        Commands::Orchestrate { records, node, publish, intents, args, seed, responder_seed, timestamp, verify, policy, attestations, solver, require_certified, require_laws, expect, grant, grant_certified, secret, oauth, verbose } => {
             nl_validator::set_effect_grants(grant.iter().cloned());
             let seed = match (seed, publish) {
                 (Some(s), _) => Ok(s),
@@ -1156,7 +1161,7 @@ fn real_main() -> ExitCode {
                     nl_validator::set_effect_secrets(s);
                     nl_validator::set_effect_oauth(o);
                     if verify {
-                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified, expect.as_ref(), &grant_certified, verbose), false)
+                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified, require_laws, expect.as_ref(), &grant_certified, verbose), false)
                     } else {
                         (cmd_orchestrate(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
                     }
@@ -2898,7 +2903,7 @@ fn post_tally(certify_step: &serde_json::Value) -> (usize, usize) {
 /// What a CONFIRMED verified run actually vouches for. Stranger 13 read "no property declared to
 /// prove" on a function whose three contract posts were all proved at certify time — the old line
 /// counted laws only.
-fn confirmed_summary(steps: &[nl_validator::Step], certified: Option<bool>, law: Option<&str>, others: &[(String, bool)]) -> String {
+fn confirmed_summary(steps: &[nl_validator::Step], certified: Option<bool>, laws: &[(String, bool)]) -> String {
     let mut parts = vec!["trusted".to_string()];
     match certified {
         Some(true) => parts.push("certified".into()),
@@ -2910,9 +2915,8 @@ fn confirmed_summary(steps: &[nl_validator::Step], certified: Option<bool>, law:
         parts.push(if sound == total { format!("contract proved ({total} post(s))") } else { format!("contract {sound} of {total} post(s) proved") });
     }
     // Every law the loop tried: proved ones named together, any it could not prove named apart.
-    let mut proved: Vec<String> = law.map(|n| format!("`{n}`")).into_iter().collect();
-    proved.extend(others.iter().filter(|(_, p)| *p).map(|(n, _)| format!("`{n}`")));
-    let open: Vec<String> = others.iter().filter(|(_, p)| !*p).map(|(n, _)| format!("`{n}`")).collect();
+    let proved: Vec<String> = laws.iter().filter(|(_, p)| *p).map(|(n, _)| format!("`{n}`")).collect();
+    let open: Vec<String> = laws.iter().filter(|(_, p)| !*p).map(|(n, _)| format!("`{n}`")).collect();
     match proved.len() {
         0 if total == 0 && open.is_empty() => parts.push("no contract or law declared".into()),
         0 => {}
@@ -2991,6 +2995,7 @@ fn cmd_orchestrate_verified(
     attestations: &[PathBuf],
     solver: &str,
     require_certified: bool,
+    require_laws: bool,
     expect: Option<&String>,
     grant_certified: &[String],
     verbose: bool,
@@ -3099,11 +3104,17 @@ fn cmd_orchestrate_verified(
         println!("{:>8}  {detail}", step.label);
     }
 
-    let property_ok = run.property.as_ref().map(|(_, p)| *p).unwrap_or(true);
+    // Every law the loop tried, in declaration order. They are REPORTED; only `--require-laws`
+    // makes one that did not prove fail the run. Until v0.1.17 the FIRST law gated it: `binomial`,
+    // whose first law `symmetry` its own module build leaves open, could never confirm a result
+    // it computes and re-runs exactly (stranger 16, 2026-11-03).
+    let laws: Vec<(String, bool)> = run.property.iter().chain(&run.other_laws).cloned().collect();
+    let open_law = laws.iter().find(|(_, p)| !*p).map(|(n, _)| n.clone());
+    let property_ok = !require_laws || open_law.is_none();
     let trust_ok = run.trusted != Some(false);
     let certify_ok = !require_certified || run.certified == Some(true);
     if run.confirmed && property_ok && trust_ok && certify_ok {
-        println!("CONFIRMED  {}", confirmed_summary(&run.steps, run.certified, run.property.as_ref().map(|(n, _)| n.as_str()), &run.other_laws));
+        println!("CONFIRMED  {}", confirmed_summary(&run.steps, run.certified, &laws));
         if let Some(r) = final_result_surface(&run.steps) {
             println!("result: {r}");
         }
@@ -3120,11 +3131,11 @@ fn cmd_orchestrate_verified(
         // a suppressed value read as a failed run (stranger 10, 2026-11-02).
         if run.confirmed {
             if let Some(r) = final_result_surface(&run.steps) {
-                println!("result (applied and re-run, but its law is NOT proved): {r}");
+                println!("result (applied and re-run, but a law is NOT proved): {r}");
             }
         }
-        let name = run.property.as_ref().map(|(n, _)| n.as_str()).unwrap_or("?");
-        Err(anyhow::anyhow!("NOT-PROVEN the discovered function's own property `{name}` did not prove"))
+        let name = open_law.unwrap_or_default();
+        Err(anyhow::anyhow!("NOT-PROVEN the discovered function's own law `{name}` did not prove (--require-laws)"))
     } else {
         Err(anyhow::anyhow!("orchestration did not confirm (rejected, or the claim failed to re-run)"))
     }
@@ -3520,7 +3531,17 @@ mod redaction_tests {
 
 #[cfg(test)]
 mod value_arg_tests {
-    use super::{confirmed_summary, read_value_arg};
+    use super::{confirmed_summary, read_value_arg, Cli};
+    use clap::Parser;
+
+    /// `--arg -22` is a value, not a flag (stranger 16 needed `--arg=-22`).
+    #[test]
+    fn a_negative_arg_is_a_value() {
+        let cli = Cli::try_parse_from(["nl-validator", "orchestrate", "--node", "http://n", "--intent", "x", "--arg", "-22", "--arg", "7"]);
+        assert!(cli.is_ok(), "{:?}", cli.err());
+        let cli = Cli::try_parse_from(["nl-validator", "eval", "b.json", "--arg", "-1"]);
+        assert!(cli.is_ok(), "{:?}", cli.err());
+    }
     use serde_json::json;
 
     fn certify_step(verdicts: &[&str]) -> nl_validator::Step {
@@ -3535,12 +3556,12 @@ mod value_arg_tests {
     #[test]
     fn confirmed_names_the_proved_contract_and_law() {
         let all = [certify_step(&["SOUND", "SOUND", "SOUND"])];
-        assert_eq!(confirmed_summary(&all, Some(true), None, &[]),
+        assert_eq!(confirmed_summary(&all, Some(true), &[]),
                    "trusted, certified, contract proved (3 post(s)), applied, and re-verified");
         let partial = [certify_step(&["SOUND", "UNVERIFIABLE"])];
-        assert_eq!(confirmed_summary(&partial, Some(true), Some("roundtrip"), &[]),
+        assert_eq!(confirmed_summary(&partial, Some(true), &[("roundtrip".to_string(), true)]),
                    "trusted, certified, contract 1 of 2 post(s) proved, law `roundtrip` proved, applied, and re-verified");
-        assert_eq!(confirmed_summary(&[certify_step(&[])], Some(true), None, &[]),
+        assert_eq!(confirmed_summary(&[certify_step(&[])], Some(true), &[]),
                    "trusted, certified, no contract or law declared, applied, and re-verified");
     }
 
@@ -3549,10 +3570,15 @@ mod value_arg_tests {
     #[test]
     fn confirmed_names_every_law_and_any_left_open() {
         let s = [certify_step(&["SOUND", "SOUND"])];
-        let others = [("floor_bounds".to_string(), true), ("associative".to_string(), false)];
-        assert_eq!(confirmed_summary(&s, Some(true), Some("square_root_of_square"), &others),
+        let laws = [("square_root_of_square".to_string(), true), ("floor_bounds".to_string(), true), ("associative".to_string(), false)];
+        assert_eq!(confirmed_summary(&s, Some(true), &laws),
                    "trusted, certified, contract proved (2 post(s)), laws `square_root_of_square`, `floor_bounds` proved, \
                     `associative` not proved here, applied, and re-verified");
+        // An open FIRST law no longer hides the rest (stranger 16: `binomial`'s `symmetry`).
+        let laws = [("symmetry".to_string(), false), ("pascal".to_string(), false), ("choose_zero".to_string(), true), ("beyond_n".to_string(), true)];
+        assert_eq!(confirmed_summary(&[certify_step(&["SOUND"])], Some(true), &laws),
+                   "trusted, certified, contract proved (1 post(s)), laws `choose_zero`, `beyond_n` proved, \
+                    `symmetry`, `pascal` not proved here, applied, and re-verified");
     }
 
     /// `--arg`/`--expect` take a file, inline JSON, or a surface literal (2026-11-02: a stranger

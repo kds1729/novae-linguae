@@ -14,7 +14,7 @@ use serde_json::{json, Value as J};
 use std::path::Path;
 
 use crate::{
-    analyze_termination, build_link_map, build_record_map, certify_record_linked, clear_resolver,
+    analyze_termination, build_link_map, build_record_map, clear_resolver,
     did_nova_from_pubkey, eval_body, infer_effects, prove_by_induction_with_exploration, prove_property,
     respond_to_message, set_resolver, sign_message, verify_claim, AttestationGraph, InductionOutcome,
     Policy, ProofOutcome, TerminationOutcome, TrustVerdict, DEFAULT_LEMMA_DEPTH,
@@ -859,6 +859,10 @@ pub fn orchestrate_verified_with_order(
         // an uncertified candidate is SKIPPED (the next may certify), and only the last aborts the run.
         // A signed certification from a certifier this policy trusts rides along (trust-delegation).
         let commons_cert = policy.map(|p| p.certification_verdict(&graph, &target, None, timestamp));
+        // One linked view for the candidate: certify's second pass and the law step below derive
+        // the same contracts, memoized here once.
+        let view = crate::LinkedView::new(&records, &link, solver);
+        let mut certified_laws: Option<(Vec<J>, bool)> = None;
         let certified = match (records.get(&target), link.get(&target)) {
             (Some(rec), Some(body)) => {
                 // LINKED, like the `certify` command: with the fetched callee bodies a contract that
@@ -875,7 +879,7 @@ pub fn orchestrate_verified_with_order(
                     " certify  {name} ({}…): proving its contract and its callees' — can take minutes",
                     &target[..target.len().min(11)]
                 );
-                let cert = certify_record_linked(rec, body, &records, Some(&link), solver);
+                let cert = crate::certify::certify_record_in_view(rec, body, &records, &view, solver);
                 let failed: Vec<&str> = cert.checks.iter().filter(|c| c.hard_fail).map(|c| c.check.as_str()).collect();
                 steps.push(Step {
                     label: "certify".into(),
@@ -885,6 +889,7 @@ pub fn orchestrate_verified_with_order(
                         "commons_certified": commons_cert.as_ref().map(|c| c.certified),
                         "trusted_certifiers": commons_cert.as_ref().map(|c| c.trusted_certifiers.clone()).unwrap_or_default() }),
                 });
+                certified_laws = Some((cert.laws.clone(), cert.laws_complete));
                 Some(cert.certified)
             }
             // No resolvable body to certify — leave `certified` unknown rather than claim a verdict.
@@ -928,8 +933,8 @@ pub fn orchestrate_verified_with_order(
         }
 
         // PROVE the discovered function's own declared properties — verify the *piece*, not just one
-        // result. Every `forall` law is tried; the first gates the run (as it always has), the rest
-        // are reported.
+        // result. Every `forall` law is tried; the caller reports them, and fails the run on one
+        // left open only when asked (`--require-laws`).
         let laws: Vec<(String, J)> = records
             .get(&target)
             .and_then(|r| r.get("properties"))
@@ -951,11 +956,17 @@ pub fn orchestrate_verified_with_order(
             // 2026-11-02 only the unlinked attempt ran: a law resting on a callee's contract
             // (`rescale`'s roundtrip on `div_half_even`'s exactness, `apply_rate`'s unit rate)
             // saw the callee as a bare symbol and the loop reported NOT-PROVEN (stranger 10).
-            let (proved, via) = if prove_law(expr, link.get(&target), solver) {
+            let (proved, via) = if certified_laws.as_ref().is_some_and(|(ls, _)| ls.contains(expr)) {
+                (true, "certify's contract derivation")
+            } else if crate::certify::law_attempt("loop", expr, || prove_law(expr, link.get(&target), solver)) {
                 (true, "unlinked")
+            } else if certified_laws.as_ref().is_some_and(|(_, complete)| *complete) {
+                // Certify's derivation saw every callee law and left this one open: deriving it
+                // again would only repeat the same attempts (`binomial`: 270 s, twice).
+                (false, "certify's contract derivation")
             } else {
                 let derived = linked_laws.get_or_insert_with(|| {
-                    crate::LinkedView::new(&records, &link, solver).contract(&target).map(|c| c.laws).unwrap_or_default()
+                    view.contract(&target).map(|c| c.laws).unwrap_or_default()
                 });
                 (derived.contains(expr), "linked contract derivation")
             };
@@ -1230,7 +1241,8 @@ mod tests {
         let prove = run.steps.iter().find(|s| s.label == "prove").expect("a prove step is recorded");
         assert_eq!(prove.message["property"], json!("unit_rate"), "{}", prove.message);
         assert_eq!(prove.message["proved"], json!(true), "{}", prove.message);
-        assert_eq!(prove.message["via"], json!("linked contract derivation"), "{}", prove.message);
+        // Certify's linked derivation proved it first; the loop reuses that (2026-11-03).
+        assert_eq!(prove.message["via"], json!("certify's contract derivation"), "{}", prove.message);
         assert!(run.confirmed);
     }
 

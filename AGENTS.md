@@ -15,8 +15,9 @@ If you have a task of your own, fetch the validator and skip the demo:
     sha256sum -c nl-validator-x86_64-linux.sha256
     chmod +x nl-validator-x86_64-linux
 
-(`nl-validator-aarch64-macos` on Apple silicon; `shasum -a 256 -c` there.) Keep the file name:
-the `.sha256` file names it, so `-c` fails on a renamed copy. The verified loop also needs **`z3`
+(`nl-validator-aarch64-macos` on Apple silicon; `shasum -a 256 -c` there.) Run `-c` in the
+directory you downloaded into and keep the file name: the `.sha256` file names the binary by its
+bare file name, so `-c` from elsewhere, or on a renamed copy, checks nothing. The verified loop also needs **`z3`
 on the PATH** (any 4.13+; `apt install z3`, `brew install z3`). Then go to *Finding a function
 for a goal* below.
 
@@ -24,7 +25,9 @@ A verified run (`--verify`) proves the function's contract AND what it rests on 
 with the solver: seconds to under a minute (`isqrt` ~2 s, `mod_inverse` ~20 s, `crt2` ~40 s —
 modular proofs through `mod_inverse`), longer when a contract needs a callee's laws too. It says so on stderr when
 it starts certifying. If your shell tool has a short time limit, run it in the background and
-wait. `NL_DERIVED_CACHE=1` keeps derived callee contracts on disk, so a second run over the same
+wait. A law the solver cannot close is reported as "not proved here" — it does not fail the run
+unless you pass `--require-laws` — but trying it costs time: `binomial` (two laws its own module
+build leaves open) takes ~4.5 min, the rational functions over `gcd` longer. `NL_DERIVED_CACHE=1` keeps derived callee contracts on disk, so a second run over the same
 callees skips them.
 
 ## In three sentences
@@ -58,6 +61,8 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    where a bare name would be ambiguous); `refs` maps each full address to that name.
    The contract is what separates candidates with similar names — e.g. `allocate`'s
    `post: list_sum(result) == total` (the parts sum to the total) versus a plain `divide`.
+   Read `complexity` before applying to a large argument: `binomial_pascal` is `O(2^n)` and does
+   not finish on (60, 30); `binomial` is `O(n)`.
    `certifications` counts signed certificates about the function; whose they are is your
    policy's question (`nl-validator certified`), and `--require-certified` re-certifies locally anyway.
 3. Apply it with the verified loop using a tag from its `intent_tags`:
@@ -105,11 +110,14 @@ them as TEXT to a function that takes text (`round_text_half_even`, `fx_convert_
 - `orchestrate --publish` needs `--seed <string>` (the signer of the published assert); a plain
   apply does not (a fixed default identity signs the transcript). `--arg`/`--expect` take a file,
   inline JSON, or a surface literal — `--arg 10000 --arg '[1, 1, 1]' --arg '"text"'`; a bare
-  numeral is a `nat` (accepted where an `int` is expected), `int(-5)` an explicit int. After
+  numeral is a `nat` (accepted where an `int` is expected), `-5` or `int(-5)` an int (`--arg -22`
+works as written). After
   `CONFIRMED`, a `result:` line prints the answer in that same syntax (a non-negative int shows
   as `int(1462)`, a negative one as `-322`). `CONFIRMED` says what was proved: `contract proved
   (3 post(s))` means the certifier proved every postcondition, and ``laws `a`, `b` proved`` names
-  every law the loop proved (one it could not is named as ``not proved here``). The transcript prints one line per step; `--verbose` adds the candidate scores, the merged
+  every law the loop proved (one it could not is named as ``not proved here``). The run is
+  decided by certification, the contract and the re-run result; laws are reported, and
+  `--require-laws` makes an unproved one fail the run (`NOT-PROVEN`). The transcript prints one line per step; `--verbose` adds the candidate scores, the merged
   pairs and every certify check.
 - A record's discovery tag is in its `intent_tags` (adapters derive `parse/<lowercase-hyphenated-
   field>`), its argument order in its `signature`. The adapters print the record's file, not these.

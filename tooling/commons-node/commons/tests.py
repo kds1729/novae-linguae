@@ -956,6 +956,22 @@ class SearchTests(TestCase):
         self.assertIn(self.map_hash, flat)
         self.assertIn(newer, flat)
 
+    def test_a_stronger_version_outside_the_window_still_speaks_for_the_group(self):
+        # Stranger 16: round 17's `crt2` (param_docs, two posts) ranked outside the k-hit window
+        # and the group was shown by an older version. Grouping reads every stored version.
+        from .search import group_versions
+        newer = "fn_" + "e" * 64
+        raw = json.loads(json.dumps(_MAP_REC))
+        raw["param_docs"] = ["the function", "the list"]
+        r = self._mk(newer, raw)
+        r.schema_version = "0.2.0"
+        r.save()
+        out = group_versions([{"hash": self.map_hash, "score": 0.9}])
+        self.assertEqual(out, [{"hash": newer, "score": 0.9, "versions": [self.map_hash]}])
+        # The caller's filter still applies to the versions brought in.
+        out = group_versions([{"hash": self.map_hash, "score": 0.9}], {"schema_version": "0.1.0"})
+        self.assertEqual(out, [{"hash": self.map_hash, "score": 0.9}])
+
     def test_malformed_filter_is_400(self):
         # The typed filter follows the same contract as /v0/query: a bare list is a clean 400.
         resp = self._search({"query": "encode", "filter": {"effects": ["io.console"]}})

@@ -2094,10 +2094,22 @@ pub fn run_smt_rlimit(script: &str, solver: &str, secs: u64) -> Result<SatAnswer
     run_smt_inner(script, solver, secs, Some(secs.max(1) * RLIMIT_PER_SEC))
 }
 
+thread_local! {
+    /// Solver queries spawned on this thread (for `NL_DERIVED_DEBUG`'s per-law counts).
+    static QUERIES_RUN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Solver queries spawned on this thread so far.
+pub fn queries_run() -> u64 {
+    QUERIES_RUN.with(|c| c.get())
+}
+
 fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> Result<SatAnswer> {
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
+
+    QUERIES_RUN.with(|c| c.set(c.get() + 1));
 
     let is_z3 = solver == "z3" || solver.ends_with("/z3");
     let rlimit = rlimit.filter(|_| is_z3);

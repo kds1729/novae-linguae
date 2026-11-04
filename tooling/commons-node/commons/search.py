@@ -19,7 +19,7 @@ stays listed) and `{"group_versions": false}` returns the flat ranking.
 
 from .embedding import get_embedder
 from .models import Record
-from .query import QueryError, certification_count, validate_filter
+from .query import QueryError, _array_ok, _scalar_qs, certification_count, type_loader, validate_filter
 from .vectorindex import get_vector_index
 
 _DEFAULT_K = 20
@@ -78,7 +78,7 @@ def run_search(body):
         results, truncated = get_vector_index().search(qvec, k, flt, emb.model_id)
         return results, emb.model_id, truncated
     results, truncated = get_vector_index().search(qvec, min(k * _GROUP_WINDOW, _MAX_K), flt, emb.model_id)
-    return group_versions(results)[:k], emb.model_id, truncated
+    return group_versions(results, flt)[:k], emb.model_id, truncated
 
 
 def _version_key(r):
@@ -98,8 +98,21 @@ def _strength(r):
     return (certification_count(r.hash) > 0, posts + laws, bool(raw.get("param_docs")), r.created_at, r.hash)
 
 
-def group_versions(results):
-    """Fold ranked hits into one per version group, at the group's best score, keeping rank order."""
+def _siblings(key, flt):
+    """Every stored version in a group, not only the ones the ranking window reached: a re-mint
+    whose text embeds a little further from the query (stranger 16, 2026-11-03: round 17's `crt2`,
+    whose added param_docs moved its vector) fell outside the k-hit window, and the group was shown
+    by an OLDER version without its posts or param_docs. The caller's typed filter still applies."""
+    qs = _scalar_qs(flt) if flt else Record.objects.all()
+    load = type_loader() if flt.get("type_pattern") else None
+    return [r for r in qs.filter(kind="function-record", name_hints__0=key[0])[:50]
+            if _version_key(r) == key and (not flt or _array_ok(r, flt, load))]
+
+
+def group_versions(results, flt=None):
+    """Fold ranked hits into one per version group, at the group's best score, keeping rank order.
+    A group's representative and `versions` cover all its stored versions (`_siblings`)."""
+    flt = flt or {}
     rows = {r.hash: r for r in Record.objects.filter(hash__in=[x["hash"] for x in results])}
     groups, order = {}, []
     for x in results:
@@ -113,10 +126,16 @@ def group_versions(results):
     out = []
     for key in order:
         hits = groups[key]
+        score = max(h["score"] for h in hits)
+        if key[0]:
+            for r in _siblings(key, flt):
+                if r.hash not in rows:
+                    rows[r.hash] = r
+                    hits.append({"hash": r.hash, "score": score})
         if len(hits) == 1:
             out.append(hits[0])
             continue
         best = max(hits, key=lambda x: _strength(rows[x["hash"]]))
-        out.append({"hash": best["hash"], "score": max(h["score"] for h in hits),
+        out.append({"hash": best["hash"], "score": score,
                     "versions": [h["hash"] for h in hits if h["hash"] != best["hash"]]})
     return out

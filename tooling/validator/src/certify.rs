@@ -52,6 +52,12 @@ pub struct Certification {
     pub checks: Vec<CertCheck>,
     /// True unless a check actively failed its declaration.
     pub certified: bool,
+    /// The record's own laws its refinement derivation PROVED (`derive_self_facts`) — and whether
+    /// that derivation saw every callee law it could use (`laws_complete`: a full linked view, or no
+    /// callee at all). The agent loop reports these instead of deriving them again: certify had
+    /// already spent `binomial`'s 270 s on them (2026-11-03).
+    pub laws: Vec<J>,
+    pub laws_complete: bool,
 }
 
 /// The result type of a record's `signature.type` (unwrapping a `forall`), for output-size analysis.
@@ -743,11 +749,13 @@ fn derive_self_facts_inner(
     let plain: Vec<J> = laws
         .iter()
         .filter(|law| {
-            matches!(crate::prove_property(law, Some(body), solver).0, crate::ProofOutcome::Proved)
-                || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved)
-                // A list law a bare structural induction closes (`scale_mod` preserves length) is
-                // a contract too — the lemma search is skipped here (cost).
-                || matches!(crate::prove_by_induction(law, Some(body), solver).0, crate::InductionOutcome::Proved)
+            law_attempt("phase 1", law, || {
+                matches!(crate::prove_property(law, Some(body), solver).0, crate::ProofOutcome::Proved)
+                    || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved)
+                    // A list law a bare structural induction closes (`scale_mod` preserves length) is
+                    // a contract too — the lemma search is skipped here (cost).
+                    || matches!(crate::prove_by_induction(law, Some(body), solver).0, crate::InductionOutcome::Proved)
+            })
         })
         .cloned()
         .collect();
@@ -768,7 +776,7 @@ fn derive_self_facts_inner(
             if proved.contains(law) {
                 continue;
             }
-            if matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved) {
+            if law_attempt("phase 3", law, || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved)) {
                 proved.push(law.clone());
                 // A law proved here is a fact for the laws after it (in the record's order): gcd
                 // associativity rests on the greatest-divisor law, which may itself have needed
@@ -797,14 +805,31 @@ fn derive_self_facts_inner(
                 c.laws = proved.clone();
                 // The staged rung is allowed here (`prove::in_self_contract_phase`): a law it
                 // proves on the derived record — uniqueness on `rat_normalize` — is a contract law.
-                let outcome = crate::prove::in_self_contract_phase(|| crate::prove::prove_from_self_contract(law, "fn_self_contract", c, nat_positions, solver).0);
-                if matches!(outcome, crate::ProofOutcome::Proved) {
+                let proved_here = law_attempt("phase 4", law, || {
+                    let outcome = crate::prove::in_self_contract_phase(|| crate::prove::prove_from_self_contract(law, "fn_self_contract", c, nat_positions, solver).0);
+                    matches!(outcome, crate::ProofOutcome::Proved)
+                });
+                if proved_here {
                     proved.push(law.clone());
                 }
             }
         }
     }
     (reports, proved)
+}
+
+/// One attempt at a law. `NL_DERIVED_DEBUG=1` prints the solver queries it spent (measured
+/// 2026-11-03: failing attempts on `binomial`'s open laws spend 31–65 queries at ~1 s each, while
+/// `rat_normalize`'s `idempotent` PROVES after 286 — no query budget separates the two).
+pub fn law_attempt(phase: &str, law: &J, f: impl FnOnce() -> bool) -> bool {
+    let before = crate::prove::queries_run();
+    let proved = f();
+    if std::env::var("NL_DERIVED_DEBUG").is_ok_and(|v| v == "1") {
+        let text = crate::surface::unparse_predicate(law).unwrap_or_else(|_| "?".into());
+        let text: String = text.chars().take(60).collect();
+        eprintln!("[law] {phase} {} queries, proved={proved}: {text}", crate::prove::queries_run() - before);
+    }
+    proved
 }
 
 /// Every `fn_ref` literal target in an AST.
@@ -1076,12 +1101,19 @@ pub fn certify_record_linked(
     let Some(b) = bodies else {
         return certify_with_view(record, body, records, None, solver);
     };
-    let first = certify_with_view(record, body, records, Some(&LinkedView::posts_only(records, b, solver)), solver);
+    certify_record_in_view(record, body, records, &LinkedView::new(records, b, solver), solver)
+}
+
+/// [`certify_record_linked`] with the caller's full view for the second pass, so what that pass
+/// derives (the record's own contract and laws, its callees') is memoized for the caller: the
+/// agent loop proves the same laws next and derived them all a second time (2026-11-03).
+pub fn certify_record_in_view(record: &J, body: &J, records: &HashMap<String, J>, full: &LinkedView<'_>, solver: &str) -> Certification {
+    let first = certify_with_view(record, body, records, Some(&LinkedView::posts_only(records, full.bodies, solver)), solver);
     let decided = first.checks.iter().filter(|c| uses_the_view(&c.check)).all(|c| matches!(c.verdict, "SOUND" | "VERIFIED" | "N/A"));
     if decided {
         return first;
     }
-    certify_with_view(record, body, records, Some(&LinkedView::new(records, b, solver)), solver)
+    certify_with_view(record, body, records, Some(full), solver)
 }
 
 /// The certification checks whose verdict can depend on callee contracts from the linked view.
@@ -1098,6 +1130,7 @@ fn certify_with_view(
 ) -> Certification {
     let sig = record.pointer("/signature");
     let mut checks: Vec<CertCheck> = Vec::new();
+    let (mut laws, mut laws_complete) = (Vec::new(), false);
 
     // 0. Schema (finding 12): "certified" must imply "the commons gate will accept it". A v0.2
     // record is held to the pinned record schema; SCHEMA-INVALID revokes certification. Other
@@ -1183,7 +1216,9 @@ fn certify_with_view(
         // may enter a post's induction), so this report and a dependent's view of it agree.
         let nat_positions = crate::terminate::nat_param_positions(record);
         let prev_measure = view.map(|v| crate::prove::set_self_measure(v.self_measure(body, &nat_positions)));
-        let (reports, _) = derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, solver);
+        let (reports, proved) = derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, solver);
+        laws = proved;
+        laws_complete = view.is_some_and(|v| v.callee_laws || v.contracts_for_record(record, body).is_empty());
         if let Some(p) = prev_measure {
             crate::prove::set_self_measure(p);
         }
@@ -1269,7 +1304,7 @@ fn certify_with_view(
     let certified = !checks.iter().any(|c| c.hard_fail);
     let subject = record.get("hash").and_then(|h| h.as_str()).unwrap_or("<unknown>").to_string();
     let body_hash = record.get("body_hash").and_then(|h| h.as_str()).unwrap_or("<unknown>").to_string();
-    Certification { subject, body_hash, checks, certified }
+    Certification { subject, body_hash, checks, certified, laws, laws_complete }
 }
 
 #[cfg(test)]

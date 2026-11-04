@@ -145,8 +145,11 @@ vertex-disjoint paths, then more distinct attesters; if none is trusted the run 
 function is touched. (This replaces a naive "take matches[0]": discovery returns candidates, and *which*
 to use is the consumer's trust decision, not the order they came back in.) It then **proves** the chosen
 function's own
-declared property over the unbounded domain (don't trust the record's claim — re-prove it with the SMT
-+ induction + lemma-discovery engine), then **apply** it and **re-verify** the result by re-running
+declared laws over the unbounded domain (don't trust the record's claim — re-prove each with the SMT
++ induction + lemma-discovery engine). Laws are reported, not gating: the run is decided by trust, certification, the
+contract and the re-run result, and `--require-laws` makes any unproved law fail it (until v0.1.17
+the first law gated — a record whose first law its own build leaves open could never confirm). It
+then **applies** it and **re-verify** the result by re-running
 (principle 3). The transcript gains `trust`, `rank`, `collapse`, `certify`, and `prove` steps between `ack` and
 `propose` (`certify` runs on every candidate — the `--require-certified` flag only decides whether a
 failed certification aborts), plus a `grants` step when `--grant-certified` is in play and `retry`
