@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "nl-validator"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "base64",
