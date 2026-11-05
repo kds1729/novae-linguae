@@ -1027,6 +1027,24 @@ pub fn orchestrate_verified_with_order(
             .unwrap_or_default();
         // The linked derivation runs at most once per candidate, whichever laws need it.
         let mut linked_laws: Option<Vec<J>> = None;
+        // One view for the law step's linked attempts, under the run's per-attempt law budget (the
+        // full `view` when `NL_LAW_BUDGET_SECS=0`): its callee contracts are derived once and serve
+        // both the callee-definition rung and the linked derivation below.
+        let budgeted_view = crate::certify::law_budget().map(|b| crate::LinkedView::budgeted(&records, &link, solver, b));
+        let law_view = budgeted_view.as_ref().unwrap_or(&view);
+        // Induction THROUGH the callees' definitions (`prove --records`' rung): a law of a
+        // non-recursive body whose truth is an induction inside a callee — `fib`'s base cases through
+        // `fib_iter`, `from_digits(b, digits(b, n)) = n`. The builder proved these; the loop never
+        // tried the rung and reported them "not proved here" (v0.1.25 end-to-end check, 2026-11-04).
+        let callee_induction = |expr: &J| -> bool {
+            let (Some(rec), Some(body)) = (records.get(&target), link.get(&target)) else { return false };
+            let nats = crate::terminate::nat_param_positions(rec);
+            let prev = crate::set_callee_contracts(law_view.contracts_for_record(rec, body));
+            let def = |t: &str| law_view.callee_def(t);
+            let out = matches!(crate::prove_by_callee_induction(expr, body, &nats, &def, solver).0, ProofOutcome::Proved);
+            crate::set_callee_contracts(prev);
+            out
+        };
         let mut proved_laws: Vec<(String, bool)> = Vec::new();
         for (name, expr) in &laws {
             // Unlinked first (cheap); else the law as the LINKED derivation proves it — the
@@ -1039,6 +1057,10 @@ pub fn orchestrate_verified_with_order(
                 (true, "certify's contract derivation")
             } else if crate::certify::law_attempt("loop", expr, || prove_law(expr, link.get(&target), solver)) {
                 (true, "unlinked")
+            } else if crate::certify::with_law_budget(crate::certify::law_budget(), || {
+                crate::certify::law_attempt("loop", expr, || callee_induction(expr))
+            }) {
+                (true, "induction through the callees' definitions")
             } else if certified_laws.as_ref().is_some_and(|(_, complete)| *complete) {
                 // Certify's derivation saw every callee law and left this one open: deriving it
                 // again would only repeat the same attempts (`binomial`: 270 s, twice).
@@ -1047,10 +1069,7 @@ pub fn orchestrate_verified_with_order(
                 // Under the run's per-attempt law budget, like certify's middle pass: laws are
                 // reported, not gating, and an uncapped derivation of `lcm`'s re-derived laws took
                 // 142 s of its 4 min (2026-11-04). `NL_LAW_BUDGET_SECS=0` derives without a cap.
-                let derived = linked_laws.get_or_insert_with(|| match crate::certify::law_budget() {
-                    Some(b) => crate::LinkedView::budgeted(&records, &link, solver, b).contract(&target).map(|c| c.laws).unwrap_or_default(),
-                    None => view.contract(&target).map(|c| c.laws).unwrap_or_default(),
-                });
+                let derived = linked_laws.get_or_insert_with(|| law_view.contract(&target).map(|c| c.laws).unwrap_or_default());
                 (derived.contains(expr), "linked contract derivation")
             };
             steps.push(Step {
