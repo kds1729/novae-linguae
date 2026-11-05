@@ -443,12 +443,12 @@ def main():
            {"args": [ilit(5), nlit(0), ilit(13)], "result": ilit(1)},
            {"args": [ilit(7), nlit(1), ilit(1)], "result": ilit(0)}],
           refinements=[("pre", "m > 0"), ("pre", f"m <= {I64_MAX}"), ("post", "result >= 0 && result < m")],
-          # Round 19 TRIED the value as a law here — `self(b, e, m) == pow_mod_naive(b, e, m)`, the
-          # fact `pow_mod_agree` proves — and it stayed UNKNOWN in both forms (with pow_mod_naive's
-          # one-step unfolding as a successor law, and as a predecessor law instantiable at the
-          # existing term): `pow_mod_agree`'s proof inducts THROUGH both callees' definitions, a rung a
-          # law on mod_pow itself does not reach (pow_mod_naive is a contract there, never unfolded).
-          # Not shipped: every verified mod_pow run would spend its law budget failing it.
+          # The VALUE as a law here — `m == 0 || self(b, e, m) == pow_mod_naive(b, e, m)`, the fact
+          # `pow_mod_agree` proves — PROVES since round 20 (the self-definition rung re-reads it as a
+          # checker over mod_pow's own address and inducts on `e` through both definitions; 28 s, the
+          # stepwise Euclidean rung) but is NOT SHIPPED: measured in the agent loop, a verified mod_pow
+          # run went from seconds to 165 s and still reported it unproved — the proof needs
+          # pow_mod_naive's doubling law (itself ~20 s) under the loop's 20 s per-law budget.
           hints=["modular_exponentiation", "square_and_multiply"], complexity="O(log n)")
     gauntlet("mod_pow", prove)
 
@@ -483,7 +483,11 @@ def main():
           FN([NAT, NAT, NAT], NAT),
           [{"args": [nlit(10), nlit(0), nlit(1)], "result": nlit(55)}, {"args": [nlit(0), nlit(3), nlit(5)], "result": nlit(3)},
            {"args": [nlit(1), nlit(3), nlit(5)], "result": nlit(5)}],
-          props=[("one_step", "forall n a b. n < 0 || self(n + 1, a, b) == self(n, b, a + b)")],
+          props=[("one_step", "forall n a b. n < 0 || self(n + 1, a, b) == self(n, b, a + b)"),
+                 # The recurrence over ANY start pair (round 20): the step is the hypothesis at the
+                 # recursive call, the base case two unfoldings below the goal's terms — the numeric
+                 # rung's two-level retry (2026-11-05).
+                 ("recurrence", "forall n a b. n < 0 || self(n + 2, a, b) == self(n + 1, a, b) + self(n, a, b)")],
           hints=["fibonacci_iteration"], complexity="O(n)")
     gauntlet("fib_iter", prove)
     build("fib", r"\n -> {fib_iter} n 0 1",
@@ -492,14 +496,14 @@ def main():
            ((0, 0), (1, 1), (2, 1), (10, 55), (20, 6765), (100, 354224848179261915075),
             (183, 78569350599398894027251472817058687522))],
           refinements=[("pre", "n <= 183")],
-          # The RECURRENCE F(n+2) = F(n+1) + F(n) was tried three ways in round 19 and stays UNKNOWN:
-          # on fib directly; with fib_iter's linearity (`iter(n, a+c, b+d) = iter(n,a,b) + iter(n,c,d)`,
-          # PROVED — but instantiating it needs the split (1,1)+(0,1) invented); and as a
-          # predecessor-form law on fib_iter itself (its induction needs `one_step` at the offset
-          # term iter(n − 1, a, b), which the instance generation does not produce). Not shipped:
-          # every verified fib run would spend its law budget failing it. A prover candidate.
+          # The RECURRENCE F(n+2) = F(n+1) + F(n) (round 20): from fib_iter's `recurrence` at (n, 0, 1),
+          # a callee law. Round 19 tried it three ways and left it UNKNOWN (directly; through the
+          # linearity law, which needs an invented split; as a predecessor law on fib_iter) — the
+          # generalized law over any start pair is the one whose induction closes. Guarded at the
+          # pre's edge (`n + 2 <= 183`).
           props=[("base_zero", "forall n. n != 0 || self(n) == 0"),
-                 ("base_one", "forall n. n != 1 || self(n) == 1")],
+                 ("base_one", "forall n. n != 1 || self(n) == 1"),
+                 ("recurrence", "forall n. n < 0 || n > 181 || self(n + 2) == self(n + 1) + self(n)")],
           hints=["fibonacci", "nth_fibonacci_number"], complexity="O(n)")
     gauntlet("fib", prove)
 

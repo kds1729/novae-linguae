@@ -352,7 +352,7 @@
    "double_exponent: CONSISTENT  |  generative: HELD (76 cases; 124 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
   ],
   "prove": [
-   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 159 of 161 premises verified separately, the final query over uninterpreted mod/div]"
+   "double_exponent: PROVED       by numeric induction on `e (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: 158 of 161 premises verified separately, the final query over uninterpreted mod/div]"
   ]
  },
  {
@@ -474,13 +474,16 @@
    "complexity": "within declared `O(n)` (inferred O(n))"
   },
   "properties_generative": [
-   "one_step: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
+   "one_step: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)",
+   "recurrence: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
-   "one_step: CONSISTENT  |  generative: HELD (44 cases; 156 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at n = 85647681, a = \"270574931514018517\", b = 166930048535190)"
+   "one_step: CONSISTENT  |  generative: HELD (44 cases; 156 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at n = 85647681, a = \"270574931514018517\", b = 166930048535190)",
+   "recurrence: CONSISTENT  |  generative: HELD (44 cases; 156 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at n = 85647681, a = \"270574931514018517\", b = 166930048535190)"
   ],
   "prove": [
-   "one_step: PROVED       by numeric induction on `n (by unfolding alone)` (strong induction over the measure; unsat)"
+   "one_step: PROVED       by numeric induction on `n (by unfolding alone)` (strong induction over the measure; unsat)",
+   "recurrence: PROVED       by numeric induction on `n (hypothesis as instances at the recursive calls), unfolded two levels` (strong induction over the measure; unsat)"
   ]
  },
  {
@@ -508,15 +511,18 @@
   },
   "properties_generative": [
    "base_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
-   "base_one: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+   "base_one: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
+   "recurrence: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
    "base_zero: CONSISTENT  |  generative: HELD (200 cases)",
-   "base_one: CONSISTENT  |  generative: HELD (200 cases)"
+   "base_one: CONSISTENT  |  generative: HELD (200 cases)",
+   "recurrence: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "base_zero: PROVED       by induction through the callees' definitions, on `<unfolding>` (unsat)",
-   "base_one: PROVED       by induction through the callees' definitions, on `<unfolding>` (unsat)"
+   "base_one: PROVED       by induction through the callees' definitions, on `<unfolding>` (unsat)",
+   "recurrence: PROVED       holds for all inputs (unsat negation)"
   ]
  },
  {
@@ -956,7 +962,7 @@
   ],
   "prove": [
    "symmetry: UNKNOWN      numeric induction on `k+n (hypothesis as instances at the recursive calls)` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
-   "pascal: UNKNOWN      numeric induction on `k (hypothesis as instances at the recursive calls)` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
+   "pascal: PROVED       by induction through its own and the callees' definitions, on `k (through `fn_self_def\u2026`)` (unsat)",
    "choose_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
    "beyond_n: PROVED       by numeric induction on `k` (strong induction over the measure; unsat)"
   ]

@@ -13,8 +13,8 @@
 | `mod_pow` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
 | `pow_mod_agree` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | fast_equals_naive=EXHAUSTIVE | fast_equals_naive=PROVED |
 | `isqrt` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | square_root_of_square=EXHAUSTIVE; floor_bounds=EXHAUSTIVE | square_root_of_square=PROVED; floor_bounds=PROVED |
-| `fib_iter` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | one_step=EXHAUSTIVE | one_step=PROVED |
-| `fib` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | base_zero=EXHAUSTIVE; base_one=EXHAUSTIVE | base_zero=PROVED; base_one=PROVED |
+| `fib_iter` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | one_step=EXHAUSTIVE; recurrence=EXHAUSTIVE | one_step=PROVED; recurrence=PROVED |
+| `fib` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | base_zero=EXHAUSTIVE; base_one=EXHAUSTIVE; recurrence=EXHAUSTIVE | base_zero=PROVED; base_one=PROVED; recurrence=PROVED |
 | `mr_squarings` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `mr_witness` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `odd_part_d` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | odd_or_zero=EXHAUSTIVE | odd_or_zero=PROVED |
@@ -30,7 +30,7 @@
 | `from_digits` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | — | — |
 | `digits_roundtrip` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | digits_then_from_digits=EXHAUSTIVE | digits_then_from_digits=PROVED |
 | `digit_sum` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | sum_bounded_by_value=EXHAUSTIVE | sum_bounded_by_value=PROVED |
-| `binomial` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | symmetry=EXHAUSTIVE; pascal=EXHAUSTIVE; choose_zero=EXHAUSTIVE; beyond_n=EXHAUSTIVE | symmetry=UNKNOWN; pascal=UNKNOWN; choose_zero=PROVED; beyond_n=PROVED |
+| `binomial` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | symmetry=EXHAUSTIVE; pascal=EXHAUSTIVE; choose_zero=EXHAUSTIVE; beyond_n=EXHAUSTIVE | symmetry=UNKNOWN; pascal=PROVED; choose_zero=PROVED; beyond_n=PROVED |
 | `binomial_pascal` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | pascal=EXHAUSTIVE; symmetry=EXHAUSTIVE; choose_zero=EXHAUSTIVE; beyond_n=EXHAUSTIVE | pascal=PROVED; symmetry=PROVED; choose_zero=PROVED; beyond_n=PROVED |
 | `binomial_agree` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | N/A | definitions_agree=EXHAUSTIVE | definitions_agree=UNKNOWN |
 | `ntt_split` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |

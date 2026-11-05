@@ -63,7 +63,7 @@
    }
   }
  ],
- "hash": "fn_8b21e18be4d7ad9c1216efbf1923eec228a64c36f9991a5382050856ae1c892b",
+ "hash": "fn_49c158fbacac8266b6bd49b4315d26291855130b98839338cf362244d1382019",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -171,6 +171,123 @@
     ]
    },
    "name": "one_step"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "n"
+            },
+            {
+             "kind": "lit",
+             "value": 2
+            }
+           ],
+           "kind": "app",
+           "op": "add"
+          },
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "n"
+              },
+              {
+               "kind": "lit",
+               "value": 1
+              }
+             ],
+             "kind": "app",
+             "op": "add"
+            },
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "n"
+            },
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "add"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n",
+     "a",
+     "b"
+    ]
+   },
+   "name": "recurrence"
   }
  ],
  "schema_version": "0.2.0",

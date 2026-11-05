@@ -1279,6 +1279,25 @@ offset term the instance generation does not produce). Those three are prover ca
 metadata. Every other verdict is unchanged (the round-19 cross-check under v0.1.25's parallel
 phase 1 and loop cache matched round 19a record for record outside the edited laws).
 
+Round 20 (2026-11-05; stranger 26). Stranger 26 computed `fib(150)` CONFIRMED but saw only the
+base cases proved. Two prover rungs, then two laws. (1) A recursive record's law can now be re-read
+as a checker over the record's own address and proved by the callee-definition rung through both
+its own and the callees' definitions (`prove_self_law_through_definitions`: the `prove` CLI,
+derivation phase 5, and the loop's law step). (2) When an instance-mode numeric induction stays
+UNKNOWN, it retries once with every recursive call also unfolded at the depth-1 call's arguments,
+which is what a two-step recurrence's base case needs. Shipped: `fib_iter` gains
+`recurrence` (`n ≥ 0 ⇒ self(n+2, a, b) = self(n+1, a, b) + self(n, a, b)`) and `fib` gains
+`recurrence` (`0 ≤ n ≤ 181 ⇒ F(n+2) = F(n+1) + F(n)`), both **PROVED**, so with the base laws they
+pin `fib` to the Fibonacci sequence. Side effect: `binomial`'s `pascal` moves from UNKNOWN to
+**PROVED** through the two-level retry. Tried and NOT shipped: mod_pow's value
+(`self(b, e, m) == pow_mod_naive(b, e, m)`) now PROVES through rung (1), in 28 s standalone (the
+stepwise Euclidean premises and the induction ladder now run concurrently). That still exceeds the
+loop's 20 s law budget, and a local verified run took 165 s and left it unproved, so it stays out
+until the rung is cheaper. lcm's leastness is still open: it needs lcm to divide every common
+multiple, which none of these rungs gives. Cross-check under the round-20 validator: rational,
+gaussian and decimal identical record for record; integer differs only in these three laws (log
+`integer-tier-poc-r20.log`, 37.4 min).
+
 ## Open questions (as they stood before the follow-up)
 
 - **Folding certified callees into termination and complexity.** Eighteen of twenty UNVERIFIABLE
