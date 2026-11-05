@@ -2109,7 +2109,7 @@ fn cmd_prove(
                     // the contract already, and a certificate that assumes its own goal is no proof.
                     let mut c = c;
                     c.laws.retain(|l| l != expr);
-                    let (sout, scert) = nl_validator::prove_from_self_contract(expr, &h, c, &nats, solver);
+                    let (sout, scert) = nl_validator::prove_from_self_contract(expr, &h, c.clone(), &nats, solver);
                     if let Some(c) = &scert {
                         write_cert(".contract", &c.smt)?;
                         write_euclid(&write_cert, c)?;
@@ -2119,7 +2119,21 @@ fn cmd_prove(
                             "PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat){}",
                             euclid_note(scert.as_ref())
                         ),
-                        _ => label,
+                        // By induction over the same facts: the law assumed at every smaller value
+                        // of a nat variable (`binomial`'s symmetry from `pascal`).
+                        _ => {
+                            let (iout, icert, v) = nl_validator::prove_from_self_contract_by_induction(expr, &h, c, &nats, solver);
+                            if let Some(c) = &icert {
+                                write_cert(".contract-induction", &c.smt)?;
+                            }
+                            match iout {
+                                ProofOutcome::Proved => format!(
+                                    "PROVED       by induction on `{}` from self's certified contract (its other proved laws; unsat)",
+                                    v.as_deref().unwrap_or("?")
+                                ),
+                                _ => label,
+                            }
+                        }
                     }
                 }
                 _ => label,

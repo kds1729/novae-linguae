@@ -852,6 +852,278 @@ pub fn prove_from_self_contract(
     out
 }
 
+thread_local! {
+    /// While set, a callee law is asserted with an E-matching TRIGGER on its own application whose
+    /// arguments are offsets of its variables (`pascal`'s `C(a+1, b+1)`): z3's own trigger choice
+    /// instantiates such a law in the direction that never reaches the goal's terms (measured
+    /// 2026-11-05: binomial symmetry by induction — unknown unpatterned, unsat in ms with it). Only
+    /// [`prove_from_self_contract_by_induction`] sets it, so every other certificate is unchanged.
+    static OFFSET_TRIGGERS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// One argument of a law's application, as offset matching reads it: a variable plus a constant
+/// (`n`, `k + 1`, `n - 1`), or a literal (its SMT text).
+#[derive(Clone)]
+enum OffsetArg {
+    Var(String, i64),
+    Lit(String),
+}
+
+/// A law ready for ground instantiation: its variables, its guarded body in SMT over them, its
+/// applications of the function, and the TRIGGER — the application at variable offsets covering every
+/// variable (`pascal`'s `C(a + 1, b + 1)`), when there is one.
+#[derive(Clone)]
+struct OffsetForm {
+    vars: Vec<String>,
+    body: String,
+    calls: Vec<Vec<OffsetArg>>,
+    trigger: Option<usize>,
+}
+
+const MAX_OFFSET_TERMS: usize = 80;
+const MAX_OFFSET_INSTANCES: usize = 400;
+
+fn offset_arg(a: &J) -> Option<OffsetArg> {
+    if let Some(v) = var_name(a) {
+        return Some(OffsetArg::Var(v.to_string(), 0));
+    }
+    let int = |l: &J| -> Option<i64> {
+        (l.get("kind").and_then(|k| k.as_str()) == Some("lit")).then_some(())?;
+        let v = l.get("value")?;
+        v.as_i64().or_else(|| v.get("value").and_then(|x| x.as_i64()))
+    };
+    if let Some(n) = int(a) {
+        return Some(OffsetArg::Lit(if n < 0 { format!("(- {})", -n) } else { n.to_string() }));
+    }
+    let op = a.get("op").and_then(|o| o.as_str())?;
+    let args = a.get("args")?.as_array()?;
+    let (v, k) = (var_name(args.first()?)?, int(args.get(1)?)?);
+    match op {
+        "add" if args.len() == 2 => Some(OffsetArg::Var(v.to_string(), k)),
+        "sub" if args.len() == 2 => Some(OffsetArg::Var(v.to_string(), -k)),
+        _ => None,
+    }
+}
+
+/// A proved law of the function (`self` read as `target`) as an [`OffsetForm`], guarded to the nat
+/// domain like the callee preamble's statement of it.
+fn offset_form(law: &J, target: &str, nats: &BTreeSet<usize>, sorts: &[Sort]) -> Option<OffsetForm> {
+    let law = uncurry(law);
+    let vars: Vec<String> = law.get("vars")?.as_array()?.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+    let pred = law_about(law.get("body")?, target);
+    let mut env = infer_var_sorts(&pred, &vars, Some(sorts)).ok()?;
+    let body = lower(&pred, &mut env, None).ok()?;
+    let apps = collect_self_applications_of(&pred, target);
+    let mut guards: Vec<String> = Vec::new();
+    for call in &apps {
+        for (i, a) in call.iter().enumerate() {
+            if let Some(v) = var_name(a).filter(|v| nats.contains(&i) && vars.iter().any(|x| x == v)) {
+                let g = format!("(>= {v} 0)");
+                if !guards.contains(&g) {
+                    guards.push(g);
+                }
+            }
+        }
+    }
+    let body = match guards.len() {
+        0 => body,
+        1 => format!("(=> {} {body})", guards[0]),
+        _ => format!("(=> (and {}) {body})", guards.join(" ")),
+    };
+    let calls: Vec<Vec<OffsetArg>> = apps.iter().filter_map(|c| c.iter().map(offset_arg).collect()).collect();
+    let trigger = calls.iter().position(|c| {
+        let names: BTreeSet<&str> = c.iter().filter_map(|a| if let OffsetArg::Var(v, _) = a { Some(v.as_str()) } else { None }).collect();
+        vars.iter().all(|v| names.contains(v.as_str())) && c.iter().any(|a| matches!(a, OffsetArg::Var(_, k) if *k != 0))
+    });
+    Some(OffsetForm { vars, body, calls, trigger })
+}
+
+/// Ground instances of `forms` (and the hypothesis `ih`) by OFFSET MATCHING: each form's trigger (or,
+/// without one, each of its applications) solved against each term — `C(a + 1, b + 1)` at `C(n, k)`
+/// binds `a := n − 1`, `b := k − 1` — the instance's own applications becoming the next round's terms;
+/// three rounds, capped. Every instance is a law instance, so asserting them is as sound as the law.
+fn ground_offset_instances(forms: &[OffsetForm], ih: &OffsetForm, goal_terms: &[Vec<String>]) -> String {
+    let all: Vec<&OffsetForm> = forms.iter().chain(std::iter::once(ih)).collect();
+    let mut seen_terms: BTreeSet<Vec<String>> = goal_terms.iter().cloned().collect();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut out = String::new();
+    let mut frontier: Vec<Vec<String>> = goal_terms.to_vec();
+    let shift = |s: &str, k: i64| match k {
+        0 => s.to_string(),
+        k if k > 0 => format!("(+ {s} {k})"),
+        k => format!("(- {s} {})", -k),
+    };
+    for _ in 0..3 {
+        let mut next: Vec<Vec<String>> = Vec::new();
+        for f in &all {
+            let triggers: Vec<&Vec<OffsetArg>> = match f.trigger {
+                Some(i) => vec![&f.calls[i]],
+                None => f.calls.iter().collect(),
+            };
+            for call in triggers {
+                for t in &frontier {
+                    if t.len() != call.len() {
+                        continue;
+                    }
+                    let mut bind: BTreeMap<String, String> = BTreeMap::new();
+                    let ok = call.iter().zip(t).all(|(a, s)| match a {
+                        OffsetArg::Var(v, k) => {
+                            let val = shift(s, -k);
+                            match bind.get(v) {
+                                Some(prev) => *prev == val,
+                                None => {
+                                    bind.insert(v.clone(), val);
+                                    true
+                                }
+                            }
+                        }
+                        OffsetArg::Lit(_) => true,
+                    });
+                    if !ok || !f.vars.iter().all(|v| bind.contains_key(v)) || seen.len() >= MAX_OFFSET_INSTANCES {
+                        continue;
+                    }
+                    let vals: Vec<String> = f.vars.iter().map(|v| bind[v].clone()).collect();
+                    let inst = let_params(&f.vars, &vals, &f.body);
+                    if !seen.insert(inst.clone()) {
+                        continue;
+                    }
+                    out.push_str(&format!("(assert {inst})\n"));
+                    for c2 in &f.calls {
+                        let args: Option<Vec<String>> = c2.iter().map(|a| match a {
+                            OffsetArg::Var(v, k) => bind.get(v).map(|b| shift(b, *k)),
+                            OffsetArg::Lit(s) => Some(s.clone()),
+                        }).collect();
+                        if let Some(args) = args {
+                            if seen_terms.len() < MAX_OFFSET_TERMS && seen_terms.insert(args.clone()) {
+                                next.push(args);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        frontier = next;
+    }
+    if out.is_empty() {
+        out
+    } else {
+        format!(";; ground instances by offset matching\n{out}")
+    }
+}
+
+/// [`prove_from_self_contract`] by STRONG INDUCTION on a law variable `v` the law feeds to a nat
+/// parameter: `self` stays uninterpreted under its certified contract (minus the law), and the law
+/// itself is assumed at every smaller `v` (`∀ ih… . 0 ≤ ih_v < v ⇒ law[vars := ih…]`) — one script, the
+/// base case included (at `v = 0` the hypothesis is vacuous). For a law that follows from OTHER laws
+/// by induction but not from the definition's own unfolding: `binomial`'s symmetry from `pascal`,
+/// `choose_zero` and `beyond_n` (the multiplicative body's division hides the step). Returns the
+/// outcome, its certificate and the variable inducted on.
+pub fn prove_from_self_contract_by_induction(
+    prop_expr: &J,
+    target: &str,
+    contract: CalleeContract,
+    nat_positions: &BTreeSet<usize>,
+    solver: &str,
+) -> (ProofOutcome, Option<Certificate>, Option<String>) {
+    let law = uncurry(prop_expr);
+    let vars: Vec<String> = law.get("vars").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    let Some(pred) = law.get("body") else { return (ProofOutcome::Unsupported("`forall` has no body".into()), None, None) };
+    // Candidates: law variables at a nat position of some `self` application, in law order.
+    let mut candidates: Vec<String> = Vec::new();
+    for call in collect_self_applications(pred) {
+        for (i, a) in call.iter().enumerate() {
+            if let Some(v) = var_name(a).filter(|v| nat_positions.contains(&i) && vars.iter().any(|x| x == v)) {
+                if !candidates.iter().any(|c| c == v) {
+                    candidates.push(v.to_string());
+                }
+            }
+        }
+    }
+    if candidates.is_empty() {
+        return (ProofOutcome::Unsupported("no law variable at a nat position to induct on".into()), None, None);
+    }
+    // The law as `prove_from_self_contract` states it (nat guards, `self` read as the target).
+    let guards: Vec<J> = candidates.iter().map(|v| serde_json::json!({ "kind": "app", "op": "ge", "args": [{ "kind": "var", "name": v }, { "kind": "lit", "value": 0 }] })).collect();
+    let conj = if guards.len() == 1 { guards[0].clone() } else { serde_json::json!({ "kind": "app", "op": "and", "args": guards }) };
+    let body = serde_json::json!({ "kind": "app", "op": "or", "args": [{ "kind": "app", "op": "not", "args": [conj] }, law_about(pred, target)] });
+    let step_law = serde_json::json!({ "kind": "forall", "vars": vars, "body": body });
+    let renamed: BTreeMap<String, J> = vars.iter().map(|v| (v.clone(), serde_json::json!({ "kind": "var", "name": format!("ih_{v}") }))).collect();
+    let ih_vars: Vec<String> = vars.iter().map(|v| format!("ih_{v}")).collect();
+    let ih_law = serde_json::json!({ "kind": "forall", "vars": ih_vars, "body": crate::equiv::subst_many(&body, &renamed) });
+    let (laws_c, law_nats, law_sorts) = (contract.laws.clone(), contract.nat_positions.clone(), contract.param_sorts.clone());
+    let mut contracts = CALLEE_CONTRACTS.with(|c| c.borrow().clone());
+    contracts.insert(target.to_string(), contract);
+    let prev = set_callee_contracts(contracts);
+    let prev_triggers = OFFSET_TRIGGERS.with(|t| t.replace(true));
+    let built = build_certificate_in_domain(&step_law, None, &BTreeSet::new()).and_then(|s| Ok((s, build_certificate_in_domain(&ih_law, None, &BTreeSet::new())?)));
+    OFFSET_TRIGGERS.with(|t| t.set(prev_triggers));
+    // The laws and the goal's applications, lowered for ground instantiation (contracts installed).
+    let law_forms: Vec<OffsetForm> = laws_c.iter().filter_map(|l| offset_form(l, target, &law_nats, &law_sorts)).collect();
+    let goal_terms: Vec<Vec<String>> = {
+        let mut env: BTreeMap<String, Sort> = infer_var_sorts(&law_about(pred, target), &vars, Some(&law_sorts)).unwrap_or_default();
+        collect_self_applications_of(&law_about(pred, target), target)
+            .iter()
+            .filter_map(|call| call.iter().map(|a| lower(a, &mut env, None)).collect::<Result<Vec<_>>>().ok())
+            .collect()
+    };
+    let ih_calls: Vec<Vec<OffsetArg>> = collect_self_applications_of(&law_about(pred, target), target)
+        .iter()
+        .filter_map(|call| call.iter().map(|a| offset_arg(a).map(|o| match o {
+            OffsetArg::Var(v, k) => OffsetArg::Var(format!("ih_{v}"), k),
+            lit => lit,
+        })).collect::<Option<Vec<_>>>())
+        .collect();
+    set_callee_contracts(prev);
+    let (step, ih) = match built {
+        Ok(p) => p,
+        Err(e) => return (ProofOutcome::Unsupported(format!("{e:#}")), None, None),
+    };
+    // The hypothesis's lowered predicate: the IH certificate's negated goal, `(assert (not P))`.
+    let goal_of = |smt: &str| -> Option<(usize, String)> {
+        let at = smt.rfind("(assert (not ")?;
+        let line_end = smt[at..].find('\n').map(|e| at + e)?;
+        let line = &smt[at..line_end];
+        Some((at, line.strip_prefix("(assert (not ")?.strip_suffix("))")?.to_string()))
+    };
+    let (Some((at, _)), Some((_, ih_pred))) = (goal_of(&step.smt), goal_of(&ih.smt)) else {
+        return (ProofOutcome::Unsupported("could not assemble the induction certificate".into()), None, None);
+    };
+    let sorts: BTreeMap<String, Sort> = ih.quantified.iter().cloned().collect();
+    let binders = ih_vars.iter().map(|v| format!("({v} {})", sorts.get(v).copied().unwrap_or(Sort::Int).smt())).collect::<Vec<_>>().join(" ");
+    let mut last = (ProofOutcome::Unknown, None, None);
+    for v in &candidates {
+        let hyp_body = format!("(=> (and (>= ih_{v} 0) (< ih_{v} {v})) {ih_pred})");
+        let mut hyp = format!(";; induction hypothesis: the law at every smaller `{v}`\n(assert (forall ({binders}) {hyp_body}))\n");
+        // …and GROUND instances (laws and hypothesis, offset-matched against the terms, three rounds):
+        // E-matching alone closed this step or not depending on how the laws were guarded (measured).
+        let ih_form = OffsetForm { vars: ih_vars.clone(), body: hyp_body.clone(), calls: ih_calls.clone(), trigger: None };
+        hyp.push_str(&ground_offset_instances(&law_forms, &ih_form, &goal_terms));
+        let cert = Certificate {
+            smt: format!("{}{hyp}{}", &step.smt[..at], &step.smt[at..]),
+            quantified: step.quantified.clone(),
+            uses_self: step.uses_self,
+            uses_callees: step.uses_callees,
+            euclid: step.euclid,
+            steps: None,
+            stepwise: None,
+            staged: None,
+        };
+        match run_solver(&cert, solver) {
+            Ok(ProofOutcome::Proved) => return (ProofOutcome::Proved, Some(cert), Some(v.clone())),
+            Ok(o) => last = (o, Some(cert), Some(v.clone())),
+            Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert), Some(v.clone())),
+        }
+    }
+    // A model of the step script with the hypothesis assumed is no counterexample to the law.
+    if matches!(last.0, ProofOutcome::Refuted(_)) {
+        last.0 = ProofOutcome::Unknown;
+    }
+    last
+}
+
 /// Install the callee contracts the next proofs may use (replacing any), returning the previous set so
 /// a nested use (proving a callee's own contract while computing it) can restore them.
 pub fn set_callee_contracts(contracts: BTreeMap<String, CalleeContract>) -> BTreeMap<String, CalleeContract> {
@@ -1036,7 +1308,28 @@ fn callee_preamble() -> Result<(String, String, bool)> {
                     _ => format!("(=> (and {}) {body})", guards.join(" ")),
                 };
                 if first && CONTRACT_QUANTIFIERS.with(|q| q.get()) {
-                    out.push_str(&format!(";; certified law of {target}\n(assert (forall ({lbinders}) {guarded}))\n"));
+                    // Under `OFFSET_TRIGGERS`, the trigger is the law's application at offsets of its
+                    // variables covering them all (`C(a + 1, b + 1)`), when it has one.
+                    let offset_of = |a: &J| -> Option<String> {
+                        if let Some(v) = var_name(a) {
+                            return Some(v.to_string());
+                        }
+                        let (op, args) = (a.get("op").and_then(|o| o.as_str())?, a.get("args")?.as_array()?);
+                        let lit = args.get(1).is_some_and(|l| l.get("kind").and_then(|k| k.as_str()) == Some("lit"));
+                        ((op == "add" || op == "sub") && args.len() == 2 && lit).then(|| var_name(&args[0]).map(String::from)).flatten()
+                    };
+                    let trigger = OFFSET_TRIGGERS.with(|t| t.get()).then(|| {
+                        calls.iter().find(|call| {
+                            let names: Vec<String> = call.iter().filter_map(offset_of).collect();
+                            names.len() == call.len() && vars.iter().all(|v| names.contains(v)) && call.iter().any(|a| var_name(a).is_none())
+                        })
+                    }).flatten().and_then(|call| {
+                        lower(&serde_json::json!({ "kind": "app", "op": target, "args": call }), &mut lenv.clone(), None).ok()
+                    });
+                    match trigger {
+                        Some(t) => out.push_str(&format!(";; certified law of {target}\n(assert (forall ({lbinders}) (! {guarded} :pattern ({t}))))\n")),
+                        None => out.push_str(&format!(";; certified law of {target}\n(assert (forall ({lbinders}) {guarded}))\n")),
+                    }
                 }
                 // The law's instance at each application the obligation makes, when one of the law's
                 // own applications of the callee fixes every law variable (distinct variables covering
@@ -5037,6 +5330,31 @@ mod tests {
         // Off by one: never proved.
         let (out, _, _) = prove_by_numeric_induction(&rec(1), Some(&fib_iter_body()), &nats, solver);
         assert!(!matches!(out, ProofOutcome::Proved), "{out:?}");
+    }
+
+    /// Binomial symmetry from Pascal's rule, `C(n, 0) = 1` and `C(n, k) = 0` past `n`, with `self`
+    /// uninterpreted: strong induction on `n` over the self-contract. A false variant never proves.
+    #[test]
+    fn symmetry_proves_by_induction_over_the_other_laws() {
+        let Some(solver) = solver() else { return };
+        let p = |s: &str| crate::surface::parse_predicate(s).unwrap();
+        let laws = vec![
+            p("forall n k. n < 0 || k < 0 || self(n + 1, k + 1) == self(n, k) + self(n, k + 1)"),
+            p("forall n. self(n, 0) == 1"),
+            p("forall n k. k <= n || self(n, k) == 0"),
+        ];
+        let nats: BTreeSet<usize> = [0, 1].into();
+        let contract = CalleeContract { symbol: "self_contract".into(), params: vec!["n".into(), "k".into()], param_sorts: vec![Sort::Int, Sort::Int], ret: Sort::Int, pres: vec![], posts: vec![], laws, nat_positions: nats.clone() };
+        let symmetry = p("forall n k. n < 0 || k < 0 || k > n || self(n, k) == self(n, n - k)");
+        // Not from the contract alone (no induction): the plain self-contract rung leaves it open.
+        assert!(!matches!(prove_from_self_contract(&symmetry, "fn_self_contract", contract.clone(), &nats, solver).0, ProofOutcome::Proved));
+        let (out, cert, v) = prove_from_self_contract_by_induction(&symmetry, "fn_self_contract", contract.clone(), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert_eq!(v.as_deref(), Some("n"));
+        assert!(cert.is_some_and(|c| c.smt.contains("induction hypothesis")));
+        // C(n, k) = C(n, k + 1) is false (C(2, 0) = 1, C(2, 1) = 2): never proved.
+        let wrong = p("forall n k. n < 0 || k < 0 || k > n || self(n, k) == self(n, k + 1)");
+        assert!(!matches!(prove_from_self_contract_by_induction(&wrong, "fn_self_contract", contract, &nats, solver).0, ProofOutcome::Proved));
     }
 
     #[test]

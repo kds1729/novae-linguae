@@ -340,6 +340,11 @@ pub trait LinkedCallees {
     fn cost_positions(&self, _target: &str) -> Option<Vec<usize>> {
         None
     }
+    /// Which components of the callee's tuple result (under a variant too) are size-bounded by its
+    /// arguments ([`component_bounds`]). Default: unknown.
+    fn result_components_bounded(&self, _target: &str) -> Option<Vec<bool>> {
+        None
+    }
 }
 
 /// The parameter positions `body`'s cost depends on, when that is decidable by structure: a body
@@ -395,6 +400,204 @@ pub fn cost_positions(body: &J) -> Option<Vec<usize>> {
     }
     let m = crate::terminate::induction_measure(body, &BTreeSet::new())?;
     m.by_callee.is_none().then(|| vec![m.position])
+}
+
+/// [`cost_positions`] through linked callees, for a NON-recursive body: its cost depends only on the
+/// parameters that flow (through `let` and `case` names) into an argument at a callee's own cost
+/// position, or into a linear-time builtin. Measured need (2026-11-05, the decimal tier): `fx_convert`
+/// applies `pow10` to its place counts and `div_half_even` (constant cost) to the scaled amounts, so
+/// its cost is the place counts' alone — but it applies callees, so [`cost_positions`] said "unknown"
+/// and every caller had to bound the amount it passed (a parsed decimal: exponential in its text).
+pub fn cost_positions_linked(body: &J, callee: Option<CalleeComplexity<'_>>) -> Option<Vec<usize>> {
+    if let Some(p) = cost_positions(body) {
+        return Some(p);
+    }
+    let callee = callee?;
+    let params = lambda_params(body)?;
+    let inner = body.get("body")?;
+    let env: BTreeMap<String, BTreeSet<usize>> = params.iter().enumerate().map(|(i, p)| (p.clone(), [i].into())).collect();
+    let mut relevant = BTreeSet::new();
+    cost_flow(inner, &env, callee, &mut relevant)?;
+    Some(relevant.into_iter().collect())
+}
+
+/// The parameter positions a node's free variables depend on (`env`: each name in scope ↦ positions).
+fn deps_of(node: &J, env: &BTreeMap<String, BTreeSet<usize>>, out: &mut BTreeSet<usize>) {
+    match node {
+        J::Object(m) => {
+            if m.get("kind").and_then(|k| k.as_str()) == Some("var") {
+                if let Some(ps) = m.get("name").and_then(|n| n.as_str()).and_then(|n| env.get(n)) {
+                    out.extend(ps.iter().copied());
+                }
+            }
+            m.iter().filter(|(k, _)| k.as_str() != "pattern").for_each(|(_, v)| deps_of(v, env, out));
+        }
+        J::Array(xs) => xs.iter().for_each(|x| deps_of(x, env, out)),
+        _ => {}
+    }
+}
+
+/// Walk for [`cost_positions_linked`]: `None` when the cost is not decidable this way (a lambda, a
+/// self-call, an opaque op, a callee whose own cost positions are unknown).
+fn cost_flow(node: &J, env: &BTreeMap<String, BTreeSet<usize>>, callee: CalleeComplexity<'_>, relevant: &mut BTreeSet<usize>) -> Option<()> {
+    let kind = node.get("kind").and_then(|k| k.as_str());
+    match kind {
+        Some("lambda") => return None,
+        Some("lit") => {
+            return (node.get("value").and_then(|v| v.get("kind")).and_then(|k| k.as_str()) != Some("fn_ref")).then_some(());
+        }
+        Some("var") => return Some(()),
+        Some("let") => {
+            let v = node.get("value")?;
+            cost_flow(v, env, callee, relevant)?;
+            let mut d = BTreeSet::new();
+            deps_of(v, env, &mut d);
+            let mut inner = env.clone();
+            inner.insert(node.get("name")?.as_str()?.to_string(), d);
+            return cost_flow(node.get("body")?, &inner, callee, relevant);
+        }
+        Some("case") => {
+            let s = node.get("scrutinee")?;
+            cost_flow(s, env, callee, relevant)?;
+            let mut d = BTreeSet::new();
+            deps_of(s, env, &mut d);
+            for arm in node.get("arms")?.as_array()? {
+                let mut inner = env.clone();
+                let mut names = Vec::new();
+                collect_binds(arm.get("pattern")?, &mut names);
+                for n in names {
+                    inner.insert(n, d.clone());
+                }
+                cost_flow(arm.get("body")?, &inner, callee, relevant)?;
+            }
+            return Some(());
+        }
+        _ => {}
+    }
+    if self_call_args(node).is_some() {
+        return None;
+    }
+    if let Some((target, cargs)) = crate::terminate::fn_ref_spine(node) {
+        callee.class_of(&target)?;
+        let ps = callee.cost_positions(&target)?;
+        for (i, a) in cargs.iter().enumerate() {
+            if ps.contains(&i) {
+                deps_of(a, env, relevant);
+            }
+            cost_flow(a, env, callee, relevant)?;
+        }
+        return Some(());
+    }
+    if kind == Some("app") {
+        let (op, args) = app_spine(node)?;
+        if LINEAR_OPS.contains(&op.as_str()) {
+            args.iter().for_each(|a| deps_of(a, env, relevant));
+        } else if !CONST_OPS.contains(&op.as_str()) {
+            return None;
+        }
+        for a in &args {
+            cost_flow(a, env, callee, relevant)?;
+        }
+        return Some(());
+    }
+    match node {
+        J::Object(m) => {
+            for (k, v) in m {
+                if k != "pattern" {
+                    cost_flow(v, env, callee, relevant)?;
+                }
+            }
+            Some(())
+        }
+        J::Array(xs) => xs.iter().try_for_each(|x| cost_flow(x, env, callee, relevant)),
+        _ => Some(()),
+    }
+}
+
+/// For a callee whose result is a TUPLE (or a variant carrying one — `Just((v, places))`): which
+/// components are size-bounded by its parameters, over every result leaf (a payload-less variant
+/// leaf constrains nothing). `parse_decimal`'s place count is (`max(0, len(text) − len(head) − 1)`);
+/// its value is not (a parsed number is exponential in its text). `None` when no leaf is a tuple, the
+/// arities differ, or a leaf is anything else.
+pub fn component_bounds(body: &J, callee: Option<CalleeComplexity<'_>>) -> Option<Vec<bool>> {
+    let params = lambda_params(body)?;
+    let bound: BTreeSet<String> = params.iter().cloned().collect();
+    let mut acc: Option<Vec<bool>> = None;
+    component_leaves(body.get("body")?, &bound, callee, &mut acc)?;
+    acc
+}
+
+fn component_leaves(node: &J, bound: &BTreeSet<String>, callee: Option<CalleeComplexity<'_>>, acc: &mut Option<Vec<bool>>) -> Option<()> {
+    match node.get("kind").and_then(|k| k.as_str()) {
+        Some("let") => {
+            let v = node.get("value")?;
+            let mut inner = bound.clone();
+            bind_poly(&mut inner, node.get("name")?.as_str()?, false, size_bounded_in(v, bound, callee, false));
+            component_leaves(node.get("body")?, &inner, callee, acc)
+        }
+        Some("case") => {
+            let s = node.get("scrutinee")?;
+            for arm in node.get("arms")?.as_array()? {
+                let mut inner = bound.clone();
+                bind_pattern_bounds(s, arm.get("pattern")?, bound, callee, &mut inner);
+                component_leaves(arm.get("body")?, &inner, callee, acc)?;
+            }
+            Some(())
+        }
+        Some("variant") => match node.get("payload") {
+            None => Some(()),
+            Some(p) => component_leaves(p, bound, callee, acc),
+        },
+        Some("tuple") => {
+            let comps: Vec<bool> = node.get("elems")?.as_array()?.iter().map(|e| size_bounded_in(e, bound, callee, false)).collect();
+            match acc {
+                Some(prev) if prev.len() != comps.len() => None,
+                Some(prev) => {
+                    prev.iter_mut().zip(&comps).for_each(|(p, c)| *p = *p && *c);
+                    Some(())
+                }
+                None => {
+                    *acc = Some(comps);
+                    Some(())
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The names a `case` arm's pattern binds that are size-bounded: all of them when the scrutinee is;
+/// else, for a scrutinee applying a callee to size-bounded arguments and a tuple pattern (bare or
+/// under a variant), those at the callee's size-bounded components ([`component_bounds`]).
+fn bind_pattern_bounds(scrut: &J, pat: &J, bound: &BTreeSet<String>, callee: Option<CalleeComplexity<'_>>, inner: &mut BTreeSet<String>) {
+    let mut names = Vec::new();
+    collect_binds(pat, &mut names);
+    if size_bounded_in(scrut, bound, callee, false) {
+        names.into_iter().for_each(|n| {
+            inner.insert(n);
+        });
+        return;
+    }
+    let Some((target, cargs)) = crate::terminate::fn_ref_spine(scrut) else { return };
+    if !cargs.iter().all(|a| size_bounded_in(a, bound, callee, false)) {
+        return;
+    }
+    let Some(comps) = callee.and_then(|c| c.result_components_bounded(&target)) else { return };
+    let tuple = match pat.get("kind").and_then(|k| k.as_str()) {
+        Some("variant") => pat.get("payload"),
+        _ => Some(pat),
+    };
+    let Some(elems) = tuple.filter(|t| t.get("kind").and_then(|k| k.as_str()) == Some("tuple")).and_then(|t| t.get("elems")).and_then(|e| e.as_array()) else { return };
+    if elems.len() != comps.len() {
+        return;
+    }
+    for (e, ok) in elems.iter().zip(&comps) {
+        if *ok && e.get("kind").and_then(|k| k.as_str()) == Some("bind") {
+            if let Some(n) = e.get("name").and_then(|n| n.as_str()) {
+                inner.insert(n.to_string());
+            }
+        }
+    }
 }
 
 /// Does `body`'s result — every component, through `let` and `case` — have a value bounded by a
@@ -845,6 +1048,11 @@ fn find_opaque_in(node: &J, callee: Option<CalleeComplexity<'_>>, bound: &BTreeS
                     collect_binds(pat, &mut names);
                     for n in names {
                         bind_poly(&mut inner, &n, scrut_poly, scrut_bounded);
+                    }
+                    // A component the callee bounds by its arguments is bounded though the whole
+                    // result is not (`parse_decimal`'s place count beside its parsed value).
+                    if !scrut_bounded {
+                        bind_pattern_bounds(s, pat, bound, callee, &mut inner);
                     }
                 }
                 if let Some(why) = arm.get("body").and_then(|b| find_opaque(b, callee, &inner)) {
@@ -1638,6 +1846,60 @@ mod tests {
         assert_eq!(analyze_complexity_linked(&caller, Some(&Positions(Some(vec![1])))), ComplexityOutcome::Bound(Class::poly(1)));
         assert!(matches!(analyze_complexity_linked(&caller, Some(&Positions(None))), ComplexityOutcome::Opaque(_)));
         assert!(matches!(analyze_complexity_linked(&caller, Some(&Positions(Some(vec![3])))), ComplexityOutcome::Opaque(_)));
+    }
+
+    /// Callee "ab" costs O(n) in position 1 only; "cd" returns a pair whose SECOND component alone is
+    /// size-bounded (`parse_decimal`'s value and place count).
+    struct Parsed;
+    impl LinkedCallees for Parsed {
+        fn class_of(&self, _: &str) -> Option<Class> {
+            Some(Class::poly(1))
+        }
+        fn result_bounded_by(&self, _: &str) -> Option<Vec<usize>> {
+            None
+        }
+        fn components_shrink_by(&self, _: &str) -> Option<u32> {
+            None
+        }
+        fn components_preserved_by(&self, _: &str) -> Option<Vec<usize>> {
+            None
+        }
+        fn cost_positions(&self, t: &str) -> Option<Vec<usize>> {
+            t.starts_with("fn_ab").then(|| vec![1])
+        }
+        fn result_components_bounded(&self, t: &str) -> Option<Vec<bool>> {
+            t.starts_with("fn_cd").then(|| vec![false, true])
+        }
+    }
+
+    #[test]
+    fn a_bounded_component_of_a_callees_tuple_is_a_bounded_argument() {
+        let fref = |s: &str| json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": format!("fn_{}", s.repeat(32)) } });
+        let call = |s: &str, args: Vec<J>| json!({ "kind": "app", "fn": fref(s), "args": args });
+        // \t k -> case cd(t) of { Just((x, p)) => ab(x, p); None => 0 } — ab's cost is in p alone.
+        let arm = |pat: J, body: J| json!({ "pattern": pat, "body": body });
+        let just = |a: &str, b: &str| json!({ "kind": "variant", "tag": "Just", "payload": { "kind": "tuple", "elems": [
+            { "kind": "bind", "name": a }, { "kind": "bind", "name": b }] } });
+        let none = json!({ "kind": "variant", "tag": "None" });
+        let over = |body: J| lambda(&["t", "k"], json!({ "kind": "case", "scrutinee": call("cd", vec![v("t")]), "arms": [
+            arm(just("x", "p"), body), arm(none.clone(), lit_i(0))] }));
+        assert_eq!(analyze_complexity_linked(&over(call("ab", vec![v("x"), v("p")])), Some(&Parsed)), ComplexityOutcome::Bound(Class::poly(1)));
+        // The unbounded component at the cost position: refused.
+        assert!(matches!(analyze_complexity_linked(&over(call("ab", vec![v("p"), v("x")])), Some(&Parsed)), ComplexityOutcome::Opaque(_)));
+        // component_bounds: Just((x, len(t))) and None leaves — the value of a callee is not bounded.
+        let parsed = lambda(&["t"], json!({ "kind": "case", "scrutinee": call("cd", vec![v("t")]), "arms": [
+            arm(just("x", "p"), json!({ "kind": "variant", "tag": "Just", "payload": { "kind": "tuple", "elems": [
+                v("x"), app("str_length", vec![v("t")])] } })),
+            arm(none.clone(), none.clone())] }));
+        assert_eq!(component_bounds(&parsed, Some(&Parsed)), Some(vec![false, true]));
+        // cost_positions_linked: \a b c -> ab(c, b) costs in b only (ab's position 1).
+        assert_eq!(cost_positions_linked(&lambda(&["a", "b", "c"], call("ab", vec![v("c"), v("b")])), Some(&Parsed)), Some(vec![1]));
+        // …through a let: \a b -> let y = add(a, 1) in ab(b, y) costs in a.
+        let via_let = lambda(&["a", "b"], json!({ "kind": "let", "name": "y", "value": app("add", vec![v("a"), lit_i(1)]),
+            "body": call("ab", vec![v("b"), v("y")]) }));
+        assert_eq!(cost_positions_linked(&via_let, Some(&Parsed)), Some(vec![0]));
+        // A callee of unknown cost positions: undecided.
+        assert_eq!(cost_positions_linked(&lambda(&["a"], call("cd", vec![v("a")])), Some(&Parsed)), None);
     }
 
     #[test]

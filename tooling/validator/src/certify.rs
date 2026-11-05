@@ -170,7 +170,9 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 // (`induct::trailing_list_descent` — `alloc_from t ws c w`): its laws prove where they were refused.
 // 12 (2026-11-05): phase 5 (a recursive body's law through its own and its callees' definitions),
 // the numeric rung's two-level unfolding retry, and the stepwise premises checked in parallel.
-const DERIVATION_VERSION: u32 = 12;
+// 13 (2026-11-05): phase 5 tries every open law (not only those applying a callee), and phase 6
+// inducts on a nat variable over the self-contract (`prove_from_self_contract_by_induction`).
+const DERIVATION_VERSION: u32 = 13;
 
 /// The cache file for one VIEW KIND: `""` = the full derivation, `b<secs>` = a budgeted one (each
 /// law attempt capped), `p` = posts only. A partial kind holds only facts proved here (fewer axioms
@@ -973,15 +975,15 @@ fn derive_self_facts_inner(
             }
         }
     }
-    // Phase 5 (2026-11-05): a law of a RECURSIVE body that applies a linked callee, re-read as a
-    // checker law over the record's own definition and proved through both (`mod_pow`'s value as
-    // the naive power — `prove::prove_self_law_through_definitions`). Under the facts proved above;
-    // never the law under proof. Laws applying no callee are left to the numeric rung (the same
-    // induction, already tried).
+    // Phase 5 (2026-11-05): a law of a RECURSIVE body re-read as a checker law over the record's own
+    // definition and proved through it and its callees' (`mod_pow`'s value as the naive power —
+    // `prove::prove_self_law_through_definitions`). Under the facts proved above; never the law under
+    // proof. Not only laws applying a callee: `binomial`'s `pascal` proves here and not by the numeric
+    // rung, and a phase-6 induction needs it in the contract.
     if let (Some(s), Some(def)) = (shape.as_ref(), callee_def) {
         if crate::prove::references_self(body) {
             for law in laws {
-                if proved.contains(law) || !applies_linked_callee(law) {
+                if proved.contains(law) {
                     continue;
                 }
                 let mut c = s.clone();
@@ -989,6 +991,29 @@ fn derive_self_facts_inner(
                 c.laws = proved.clone();
                 if law_attempt("phase 5", law, || {
                     matches!(crate::prove_self_law_through_definitions(law, body, c, nat_positions, def, solver).0, crate::ProofOutcome::Proved)
+                }) {
+                    proved.push(law.clone());
+                }
+            }
+        }
+    }
+    // Phase 6 (2026-11-05): STRONG INDUCTION on a nat variable over the self-contract — `self`
+    // uninterpreted under every fact proved above, the law assumed at smaller values
+    // (`prove::prove_from_self_contract_by_induction`): `binomial`'s symmetry from `pascal`,
+    // `choose_zero` and `beyond_n`, which the multiplicative body's division keeps from every
+    // unfolding rung.
+    if let Some(s) = shape.as_ref() {
+        if !proved.is_empty() {
+            for law in laws {
+                if proved.contains(law) {
+                    continue;
+                }
+                let mut c = s.clone();
+                c.symbol = "self_contract".to_string();
+                c.posts = posts.clone();
+                c.laws = proved.clone();
+                if law_attempt("phase 6", law, || {
+                    matches!(crate::prove::prove_from_self_contract_by_induction(law, "fn_self_contract", c, nat_positions, solver).0, crate::ProofOutcome::Proved)
                 }) {
                     proved.push(law.clone());
                 }
@@ -1020,19 +1045,6 @@ fn parallel_law_attempts(laws: &[&J], budget: std::time::Duration, attempt: &(dy
         }
     });
     proved.iter().map(|p| p.load(std::sync::atomic::Ordering::Relaxed)).collect()
-}
-
-/// Does an AST apply a linked callee (a `fn_…` head, in either application spelling)?
-fn applies_linked_callee(node: &J) -> bool {
-    match node {
-        J::Object(m) => {
-            let head = m.get("op").or_else(|| m.get("fn").and_then(|f| f.get("name"))).and_then(|h| h.as_str());
-            (m.get("kind").and_then(|k| k.as_str()) == Some("app") && head.is_some_and(|h| h.starts_with("fn_")))
-                || m.values().any(applies_linked_callee)
-        }
-        J::Array(xs) => xs.iter().any(applies_linked_callee),
-        _ => false,
-    }
 }
 
 /// One attempt at a law. `NL_DERIVED_DEBUG=1` prints the solver queries it spent (measured
@@ -1224,7 +1236,23 @@ impl crate::complexity::LinkedCallees for LinkedView<'_> {
         m.by_callee.filter(|b| b.halving).map(|b| b.target)
     }
     fn cost_positions(&self, target: &str) -> Option<Vec<usize>> {
-        self.callee(target).and_then(|(_, body)| crate::complexity::cost_positions(body))
+        // Composed through the callee's own callees (`cost_positions_linked`); a cycle is "unknown".
+        let key = format!("costpos:{target}");
+        if !self.in_progress.borrow_mut().insert(key.clone()) {
+            return None;
+        }
+        let out = self.callee(target).and_then(|(_, body)| crate::complexity::cost_positions_linked(body, Some(self)));
+        self.in_progress.borrow_mut().remove(&key);
+        out
+    }
+    fn result_components_bounded(&self, target: &str) -> Option<Vec<bool>> {
+        let key = format!("components:{target}");
+        if !self.in_progress.borrow_mut().insert(key.clone()) {
+            return None;
+        }
+        let out = self.callee(target).and_then(|(_, body)| crate::complexity::component_bounds(body, Some(self)));
+        self.in_progress.borrow_mut().remove(&key);
+        out
     }
     fn result_poly_bounded(&self, target: &str) -> bool {
         // Re-derived from the callee's body over this same view; a cycle is "not known".
