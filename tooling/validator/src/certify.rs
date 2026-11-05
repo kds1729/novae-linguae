@@ -699,6 +699,13 @@ impl<'a> LinkedView<'a> {
                 if self.certifying.borrow().as_ref().is_some_and(|(name, hash)| h != hash && name_of(h).as_ref() == Some(name)) {
                     continue;
                 }
+                // Nor, in a BUDGETED view (the agent loop's), the record being certified itself: its
+                // contract as its own witness is derived in full beside the derivation that certifies
+                // it — `rat_normalize`'s middle pass did the same 120 s twice (2026-11-05). Builders
+                // and the full view keep it (their verdicts stay byte-identical).
+                if self.law_budget.is_some() && self.certifying.borrow().as_ref().is_some_and(|(_, hash)| h == hash) {
+                    continue;
+                }
                 // Not a record mid-derivation, nor one that APPLIES such a record: deriving it here
                 // would see that dependency refused and come out short (`gi_rem` inside `gi_div`).
                 let busy = |t: &str| self.in_progress.borrow().contains(&format!("contract:{t}"));
@@ -1589,6 +1596,7 @@ fn certify_with_view(
     if let Some(sig_type) = record.pointer("/signature/type") {
         let refinements: Vec<J> =
             record.pointer("/signature/refinements").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+        let refusals_before = view.map(|v| v.cycle_refusals.get());
         let prev = view.map(|v| crate::set_callee_contracts(v.contracts_for_record(record, body)));
         let prev_refusals = view.map(|v| crate::prove::set_callee_refusals(v.refusals_for(body)));
         // The same phased derivation the linked view uses for a callee (its own plain-proved laws
@@ -1610,6 +1618,21 @@ fn certify_with_view(
             s.laws = proved.clone();
             s
         });
+        // A BUDGETED view (the agent loop's) keeps this derivation in the derived cache as the record's
+        // contract of that kind, as it does a callee's: the next run that applies the record reads it
+        // instead of deriving it (2026-11-05: with the record no longer its own witness, `rat_add`
+        // after `rat_normalize` re-derived it, 24 → 150 s). Not when a dependency was refused
+        // mid-derivation (tainted, as in `contract`); never for the full or posts-only kinds.
+        if let (Some(v), Some(c), Some(target)) = (view, self_contract.as_ref(), record.get("hash").and_then(|h| h.as_str())) {
+            let untainted = refusals_before == Some(v.cycle_refusals.get());
+            if v.callee_laws && v.law_budget.is_some() && untainted && target.len() > 3 {
+                if let Some(dir) = derived_cache_dir() {
+                    let mut c = c.clone();
+                    c.symbol = format!("callee_{}", &target[3..target.len().min(15)]);
+                    store_derived_kind(&dir, target, &c, &v.cache_kind());
+                }
+            }
+        }
         if progress() {
             let sound = reports.iter().filter(|r| matches!(r.outcome, RefinementOutcome::Sound)).count();
             // The lone NOT-APPLICABLE report of a record with nothing to check (a pre only —
