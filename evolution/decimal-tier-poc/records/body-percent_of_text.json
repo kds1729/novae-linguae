@@ -1,0 +1,203 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "kind": "variant",
+     "tag": "None"
+    },
+    "pattern": {
+     "kind": "variant",
+     "tag": "None"
+    }
+   },
+   {
+    "body": {
+     "arms": [
+      {
+       "body": {
+        "kind": "variant",
+        "tag": "None"
+       },
+       "pattern": {
+        "kind": "variant",
+        "tag": "None"
+       }
+      },
+      {
+       "body": {
+        "kind": "variant",
+        "payload": {
+         "args": [
+          {
+           "kind": "var",
+           "name": "to_places"
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "args": [
+             {
+              "args": [
+               {
+                "kind": "var",
+                "name": "pp"
+               }
+              ],
+              "fn": {
+               "kind": "lit",
+               "value": {
+                "kind": "fn_ref",
+                "target": "fn_43b869b845db008398d9f6e16e668158a6cb55de9118465eca2f185f2e40d284"
+               }
+              },
+              "kind": "app"
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "lit",
+               "value": {
+                "kind": "nat",
+                "value": 100
+               }
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "mul"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           }
+          ],
+          "fn": {
+           "args": [
+            {
+             "kind": "var",
+             "name": "p"
+            }
+           ],
+           "fn": {
+            "args": [
+             {
+              "kind": "var",
+              "name": "ap"
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "var",
+               "name": "a"
+              }
+             ],
+             "fn": {
+              "kind": "lit",
+              "value": {
+               "kind": "fn_ref",
+               "target": "fn_9bafc87c13c67329658ebac778bb5ec28295ec0b024706e13c38a6a0f626efb1"
+              }
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           },
+           "kind": "app"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        },
+        "tag": "Just"
+       },
+       "pattern": {
+        "kind": "variant",
+        "payload": {
+         "elems": [
+          {
+           "kind": "bind",
+           "name": "p"
+          },
+          {
+           "kind": "bind",
+           "name": "pp"
+          }
+         ],
+         "kind": "tuple"
+        },
+        "tag": "Just"
+       }
+      }
+     ],
+     "kind": "case",
+     "scrutinee": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "percent_text"
+       }
+      ],
+      "fn": {
+       "kind": "lit",
+       "value": {
+        "kind": "fn_ref",
+        "target": "fn_d1a9d5e3f9aea3871ae1e874b064657e3a40a9a3a7f25e472c3689e809086bab"
+       }
+      },
+      "kind": "app"
+     }
+    },
+    "pattern": {
+     "kind": "variant",
+     "payload": {
+      "elems": [
+       {
+        "kind": "bind",
+        "name": "a"
+       },
+       {
+        "kind": "bind",
+        "name": "ap"
+       }
+      ],
+      "kind": "tuple"
+     },
+     "tag": "Just"
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "kind": "var",
+     "name": "amount_text"
+    }
+   ],
+   "fn": {
+    "kind": "lit",
+    "value": {
+     "kind": "fn_ref",
+     "target": "fn_d1a9d5e3f9aea3871ae1e874b064657e3a40a9a3a7f25e472c3689e809086bab"
+    }
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "amount_text"
+  },
+  {
+   "name": "percent_text"
+  },
+  {
+   "name": "to_places"
+  }
+ ]
+}

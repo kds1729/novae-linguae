@@ -121,6 +121,9 @@ PARAM_DOCS = {
     "fx_convert_text": ["the source amount as decimal text, e.g. \"466.00\"",
                         "the exchange rate as decimal text, target per source, e.g. \"1.0825\"",
                         "decimal places wanted in the integer result (2 = cents)"],
+    "percent_of_text": ["the amount as decimal text, e.g. \"59.99\"",
+                        "the percentage as decimal text, e.g. \"8.875\" for 8.875%",
+                        "decimal places wanted in the integer result (2 = cents)"],
 }
 
 
@@ -536,6 +539,33 @@ def main():
                                 "2 * abs(fst(x) * fst(y) * {pow10}(to_places) - r * ({pow10}(snd(y)) * {pow10}(snd(x)))) != {pow10}(snd(y)) * {pow10}(snd(x)) || r % 2 == 0 }) }) }")],
           hints=["currency_conversion_text", "exchange_decimal_text"], complexity="O(n)")
     gauntlet("fx_convert_text", prove)
+
+    # Round 8 (2026-11-05): a PERCENTAGE as text — stranger 27 had 8.875% sales tax on $59.99, which
+    # is 887.5 basis points: no whole `percent_bps`, so it scaled amount and rate to `apply_rate` by
+    # hand. The rate is the percent over 100·10^places, one rounding at the end (`fx_convert`'s).
+    build("percent_of_text",
+          r"\amount_text percent_text to_places -> case {parse_decimal} amount_text of { None => None; Just((a, ap)) => "
+          r"case {parse_decimal} percent_text of { None => None; Just((p, pp)) => Just({fx_convert} a ap p (mul 100 ({pow10} pp)) to_places) } }",
+          FN([STR, STR, NAT], MAYBE(INT)),
+          [ex([slit(a), slit(p), nlit(k)], res) for a, p, k, res in
+           [("59.99", "8.875", 2, just(ilit(532))), ("1234.56", "7.25", 2, just(ilit(8951))), ("100", "50", 2, just(ilit(5000))),
+            ("0.50", "1", 2, just(ilit(0))), ("1.50", "1", 2, just(ilit(2))), ("-19.99", "8.25", 2, just(ilit(-165))),
+            ("x", "1", 2, NONE), ("1", "y", 2, NONE)]],
+          refinements=[("post", "case {parse_decimal}(amount_text) of { "
+                                "None => (case result of { Just(r) => false; None => true }); "
+                                "Just(x) => (case {parse_decimal}(percent_text) of { "
+                                "None => (case result of { Just(r) => false; None => true }); "
+                                "Just(y) => (case result of { Just(r) => r == {fx_convert}(fst(x), snd(x), fst(y), 100 * {pow10}(snd(y)), to_places); None => false }) }) }"),
+                       # The rounding rule over the parsed digits (amount a at ap places, percent p at pp
+                       # places: exact value a·p·10^to / (100·10^pp·10^ap)), as `fx_convert_text` states it.
+                       ("post", "case {parse_decimal}(amount_text) of { None => true; Just(x) => (case {parse_decimal}(percent_text) of { None => true; "
+                                "Just(y) => (case result of { None => true; Just(r) => snd(x) < 0 || snd(y) < 0 || "
+                                "2 * abs(fst(x) * fst(y) * {pow10}(to_places) - r * ((100 * {pow10}(snd(y))) * {pow10}(snd(x)))) <= (100 * {pow10}(snd(y))) * {pow10}(snd(x)) }) }) }"),
+                       ("post", "case {parse_decimal}(amount_text) of { None => true; Just(x) => (case {parse_decimal}(percent_text) of { None => true; "
+                                "Just(y) => (case result of { None => true; Just(r) => snd(x) < 0 || snd(y) < 0 || "
+                                "2 * abs(fst(x) * fst(y) * {pow10}(to_places) - r * ((100 * {pow10}(snd(y))) * {pow10}(snd(x)))) != (100 * {pow10}(snd(y))) * {pow10}(snd(x)) || r % 2 == 0 }) }) }")],
+          hints=["percentage_text", "sales_tax_text", "percent_of_amount", "tax_rate_percent"], complexity="O(n)")
+    gauntlet("percent_of_text", prove)
 
     (OUT / "REPORT.json").write_text(json.dumps(REPORT, indent=1) + "\n")
     lines = ["| record | run | certified | typecheck | effects | refinement | termination | complexity | properties (generative) | prove |",

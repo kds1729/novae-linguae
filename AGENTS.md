@@ -134,7 +134,9 @@ exact value is 8950.56 cents). The proved block says how it rounded:
 
 That is, the result is within half a cent of amount × bps / 10000, and an exact tie goes to the even
 cent. `apply_rate 123456 725 10000` gives the same answer for a rate with any denominator. Scale the
-result back yourself: minor units ÷ 100 for cents.
+result back yourself: minor units ÷ 100 for cents. A percentage that is not whole basis points
+(8.875% sales tax on $59.99) goes in as TEXT: `--intent math/decimal/percent-of-text --arg '"59.99"'
+--arg '"8.875"' --arg 2` → `Just(532)`, $5.32, the same rounding rule stated over the parsed digits.
 
 ## What things are
 
