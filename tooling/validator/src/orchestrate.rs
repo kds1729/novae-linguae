@@ -942,6 +942,7 @@ pub fn orchestrate_verified_with_order(
         // and law steps run (stranger 17: minutes of silence after the one "certify" line).
         let _progress = crate::certify::progress_on();
         let mut certified_laws: Option<(Vec<J>, bool)> = None;
+        let mut certified_self: Option<crate::CalleeContract> = None;
         let certified = match (records.get(&target), link.get(&target)) {
             (Some(rec), Some(body)) => {
                 // LINKED, like the `certify` command: with the fetched callee bodies a contract that
@@ -969,6 +970,11 @@ pub fn orchestrate_verified_with_order(
                         "trusted_certifiers": commons_cert.as_ref().map(|c| c.trusted_certifiers.clone()).unwrap_or_default() }),
                 });
                 certified_laws = Some((cert.laws.clone(), cert.laws_complete));
+                // A complete derivation's facts ARE the record's contract under this run's budget;
+                // the law step reads them rather than deriving it a second time.
+                if cert.laws_complete {
+                    certified_self = cert.self_contract.clone();
+                }
                 Some(cert.certified)
             }
             // No resolvable body to certify — leave `certified` unknown rather than claim a verdict.
@@ -1045,7 +1051,7 @@ pub fn orchestrate_verified_with_order(
             // A RECURSIVE body's law through its own definition and the callees' (`mod_pow`'s value
             // as the naive power), under its own certified contract minus the law.
             if !out && !crate::prove::past_deadline() {
-                if let Some(c) = law_view.contract(&target) {
+                if let Some(c) = certified_self.clone().or_else(|| law_view.contract(&target)) {
                     out = matches!(crate::prove_self_law_through_definitions(expr, body, c, &nats, &def, solver).0, ProofOutcome::Proved);
                 }
             }

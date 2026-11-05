@@ -3073,6 +3073,8 @@ fn cmd_orchestrate_verified(
     if intents.len() != 1 {
         anyhow::bail!("--verify supports exactly one --intent (got {})", intents.len());
     }
+    // The run's wall time goes on the verdict line (stranger 27 timed its runs by hand).
+    let started = std::time::Instant::now();
     // A verified run keeps the callee contracts it derives ON BY DEFAULT (opt out with
     // NL_DERIVED_CACHE=0): every entry is a proof this machine made, keyed by content address and
     // validator version, so a second run over the same callees (`rat_add` then `rat_sub`, both over
@@ -3191,7 +3193,7 @@ fn cmd_orchestrate_verified(
     let trust_ok = run.trusted != Some(false);
     let certify_ok = !require_certified || run.certified == Some(true);
     if run.confirmed && property_ok && trust_ok && certify_ok {
-        println!("CONFIRMED  {}", confirmed_summary(&run.steps, run.certified, &laws));
+        println!("CONFIRMED  {} (in {:.1} s)", confirmed_summary(&run.steps, run.certified, &laws), started.elapsed().as_secs_f64());
         if let Some(r) = final_result_surface(&run.steps) {
             println!("result: {r}");
         }

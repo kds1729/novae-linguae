@@ -67,6 +67,9 @@ pub struct Certification {
     /// already spent `binomial`'s 270 s on them (2026-11-03).
     pub laws: Vec<J>,
     pub laws_complete: bool,
+    /// That derivation's facts as a contract (the sound posts and the proved laws), for the loop's
+    /// law step to read rather than derive the record's own contract again (`binomial`: 40 s, 2026-11-05).
+    pub self_contract: Option<crate::CalleeContract>,
 }
 
 /// The result type of a record's `signature.type` (unwrapping a `forall`), for output-size analysis.
@@ -877,26 +880,10 @@ fn derive_self_facts_inner(
     // ~90 s in a row, four of them failing at the 20 s cap). Without a budget (`certify`, the module
     // builders) they stay sequential: the code path, and so every build, is unchanged.
     let budget = LAW_BUDGET.with(|b| b.get());
-    let plain: Vec<J> = if budget.is_some() && laws.len() > 1 {
-        let ctx = crate::prove::capture_context();
-        let workers = std::thread::available_parallelism().map(|n| n.get() / 2).unwrap_or(1).clamp(1, 4);
-        let next = std::sync::atomic::AtomicUsize::new(0);
-        let proved: Vec<std::sync::atomic::AtomicBool> = laws.iter().map(|_| std::sync::atomic::AtomicBool::new(false)).collect();
-        std::thread::scope(|s| {
-            for _ in 0..workers.min(laws.len()) {
-                let ctx = ctx.clone();
-                let (next, proved, attempt) = (&next, &proved, &attempt);
-                s.spawn(move || {
-                    crate::prove::install_context(ctx);
-                    with_law_budget(budget, || loop {
-                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some(law) = laws.get(i) else { break };
-                        proved[i].store(attempt(law), std::sync::atomic::Ordering::Relaxed);
-                    });
-                });
-            }
-        });
-        laws.iter().zip(&proved).filter(|(_, p)| p.load(std::sync::atomic::Ordering::Relaxed)).map(|(l, _)| l.clone()).collect()
+    let plain: Vec<J> = if let Some(b) = budget.filter(|_| laws.len() > 1) {
+        let all: Vec<&J> = laws.iter().collect();
+        let hits = parallel_law_attempts(&all, b, &attempt);
+        laws.iter().zip(hits).filter(|(_, p)| *p).map(|(l, _)| l.clone()).collect()
     } else {
         laws.iter().filter(|law| attempt(law)).cloned().collect()
     };
@@ -911,13 +898,36 @@ fn derive_self_facts_inner(
     let posts = sound_posts(&reports, &declared_posts);
     // Phase 3 (recursive bodies only — the rung that reads the facts is the induction one).
     let mut proved = plain.clone();
-    if shape.is_some() && (!posts.is_empty() || !plain.is_empty()) && crate::prove::references_self(body) {
+    let phase3 = |law: &J| {
+        law_attempt("phase 3", law, || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved))
+    };
+    let open_after_1 = laws.iter().filter(|l| !proved.contains(l)).count();
+    if shape.is_some() && (!posts.is_empty() || !plain.is_empty()) && crate::prove::references_self(body) && budget.is_some() && open_after_1 > 1 {
+        // Under a law BUDGET (the agent loop), in ROUNDS: every open law at once over the facts so
+        // far, then again over the laws that round proved, until a round proves none. Each law
+        // sees at least the facts it would in record order (2026-11-05: `binomial`'s two open
+        // laws spent 50 s here in a row on a stranger's first verified run).
+        loop {
+            crate::prove::set_self_facts(facts(posts.clone(), proved.clone()));
+            let open: Vec<&J> = laws.iter().filter(|l| !proved.contains(l)).collect();
+            let hits = parallel_law_attempts(&open, budget.unwrap(), &phase3);
+            if !hits.iter().any(|h| *h) {
+                break;
+            }
+            let new: Vec<&J> = open.iter().zip(&hits).filter(|(_, h)| **h).map(|(l, _)| *l).collect();
+            // Record order, so the facts (and the SMT text) do not depend on which worker finished first.
+            proved = laws.iter().filter(|l| proved.contains(l) || new.contains(l)).cloned().collect();
+            if new.len() == open.len() {
+                break;
+            }
+        }
+    } else if shape.is_some() && (!posts.is_empty() || !plain.is_empty()) && crate::prove::references_self(body) {
         crate::prove::set_self_facts(facts(posts.clone(), plain.clone()));
         for law in laws {
             if proved.contains(law) {
                 continue;
             }
-            if law_attempt("phase 3", law, || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved)) {
+            if phase3(law) {
                 proved.push(law.clone());
                 // A law proved here is a fact for the laws after it (in the record's order): gcd
                 // associativity rests on the greatest-divisor law, which may itself have needed
@@ -979,6 +989,30 @@ fn derive_self_facts_inner(
         }
     }
     (reports, proved)
+}
+
+/// `attempt` on each law at once, on ≤ nproc/2 (max 4) worker threads, each with the caller's prover
+/// context installed and every attempt capped at `budget`. Whether each law was proved, in order.
+fn parallel_law_attempts(laws: &[&J], budget: std::time::Duration, attempt: &(dyn Fn(&J) -> bool + Sync)) -> Vec<bool> {
+    let ctx = crate::prove::capture_context();
+    let workers = std::thread::available_parallelism().map(|n| n.get() / 2).unwrap_or(1).clamp(1, 4);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let proved: Vec<std::sync::atomic::AtomicBool> = laws.iter().map(|_| std::sync::atomic::AtomicBool::new(false)).collect();
+    std::thread::scope(|s| {
+        for _ in 0..workers.min(laws.len()) {
+            let ctx = ctx.clone();
+            let (next, proved) = (&next, &proved);
+            s.spawn(move || {
+                crate::prove::install_context(ctx);
+                with_law_budget(Some(budget), || loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(law) = laws.get(i) else { break };
+                    proved[i].store(attempt(law), std::sync::atomic::Ordering::Relaxed);
+                });
+            });
+        }
+    });
+    proved.iter().map(|p| p.load(std::sync::atomic::Ordering::Relaxed)).collect()
 }
 
 /// Does an AST apply a linked callee (a `fn_…` head, in either application spelling)?
@@ -1421,9 +1455,16 @@ fn certify_passes(
     solver: &str,
     budget: Option<std::time::Duration>,
 ) -> Certification {
-    let first = certify_with_view(record, body, records, Some(&LinkedView::posts_only(records, full.bodies, solver)), solver);
-    let decided = first.checks.iter().filter(|c| uses_the_view(&c.check)).all(|c| matches!(c.verdict, "SOUND" | "VERIFIED" | "N/A"));
-    if decided {
+    let decided = |c: &Certification| c.checks.iter().filter(|c| uses_the_view(&c.check)).all(|c| matches!(c.verdict, "SOUND" | "VERIFIED" | "N/A"));
+    // The agent loop's first pass caps the record's OWN laws too: a post rarely needs a slow own
+    // law, and the laws are reported, not gating (2026-11-05: stranger 27's first `binomial` spent
+    // 115 of 136 s failing `symmetry` and `pascal` with no cap, though its one post needs neither).
+    // Undecided ⇒ the middle pass, then the full view — which proves whatever the uncapped
+    // posts-only pass would have (a superset of its axioms, no cap), so no verdict is lost.
+    let budgeted = budget.filter(|_| full.is_full());
+    let first_view = LinkedView { law_budget: budgeted, ..LinkedView::posts_only(records, full.bodies, solver) };
+    let first = certify_with_view(record, body, records, Some(&first_view), solver);
+    if decided(&first) {
         return first;
     }
     let open = |c: &Certification| -> String {
@@ -1441,7 +1482,7 @@ fn certify_passes(
             progress_line!("   certify  {} undecided on callee posts alone — again with callee laws, {} s per attempt", open(&first), budget.as_secs());
         }
         let middle = certify_with_view(record, body, records, Some(&LinkedView::budgeted(records, full.bodies, solver, budget)), solver);
-        if middle.checks.iter().filter(|c| uses_the_view(&c.check)).all(|c| matches!(c.verdict, "SOUND" | "VERIFIED" | "N/A")) {
+        if decided(&middle) {
             return middle;
         }
         if progress() {
@@ -1468,6 +1509,7 @@ fn certify_with_view(
     let sig = record.pointer("/signature");
     let mut checks: Vec<CertCheck> = Vec::new();
     let (mut laws, mut laws_complete) = (Vec::new(), false);
+    let mut self_contract = None;
 
     // 0. Schema (finding 12): "certified" must imply "the commons gate will accept it". A v0.2
     // record is held to the pinned record schema; SCHEMA-INVALID revokes certification. Other
@@ -1558,13 +1600,26 @@ fn certify_with_view(
         let (reports, proved) = with_law_budget(view.and_then(|v| v.law_budget), || {
             derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, def.as_ref().map(|d| d as &dyn Fn(&str) -> _), solver)
         });
+        let declared_posts: Vec<J> = refinements
+            .iter()
+            .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("post"))
+            .filter_map(|r| r.get("expr").cloned())
+            .collect();
+        self_contract = self_shape(sig_type, &refinements, body).map(|mut s| {
+            s.posts = sound_posts(&reports, &declared_posts);
+            s.laws = proved.clone();
+            s
+        });
         if progress() {
             let sound = reports.iter().filter(|r| matches!(r.outcome, RefinementOutcome::Sound)).count();
             // The lone NOT-APPLICABLE report of a record with nothing to check (a pre only —
             // `is_prime`) is not an unproved post: stranger 18 read "0 of 1 sound" as one.
             let checked = reports.iter().filter(|r| !matches!(r.outcome, RefinementOutcome::NotApplicable)).count();
             let pass = match view {
-                Some(v) if !v.callee_laws => ", over callee posts only".to_string(),
+                Some(v) if !v.callee_laws => match v.law_budget {
+                    Some(b) => format!(", laws within {} s each, over callee posts only", b.as_secs()),
+                    None => ", over callee posts only".to_string(),
+                },
                 Some(v) if v.law_budget.is_some() => format!(", laws within {} s each", v.law_budget.unwrap().as_secs()),
                 _ => String::new(),
             };
@@ -1664,7 +1719,7 @@ fn certify_with_view(
     let certified = !checks.iter().any(|c| c.hard_fail);
     let subject = record.get("hash").and_then(|h| h.as_str()).unwrap_or("<unknown>").to_string();
     let body_hash = record.get("body_hash").and_then(|h| h.as_str()).unwrap_or("<unknown>").to_string();
-    Certification { subject, body_hash, checks, certified, laws, laws_complete }
+    Certification { subject, body_hash, checks, certified, laws, laws_complete, self_contract }
 }
 
 #[cfg(test)]
@@ -1866,6 +1921,36 @@ mod tests {
         assert_eq!(parallel, sequential, "the parallel phase 1 proved a different set");
         assert!(parallel.len() >= 2, "the true laws over the callee's contract prove: {parallel:?}");
         assert!(!parallel.contains(&law("forall n. self(n) == n")), "a false law never proves");
+    }
+
+    /// Under a budget, phase 3 runs its open laws in parallel ROUNDS; it proves the set the
+    /// sequential pass does on a recursive body (two false laws keep two attempts open).
+    #[test]
+    fn phase_three_rounds_prove_what_the_sequential_pass_does() {
+        let Some(solver) = ["z3", "cvc5"].into_iter().find(|s| std::process::Command::new(s).arg("--version").output().is_ok_and(|o| o.status.success())) else { return };
+        let law = |s: &str| crate::surface::parse_predicate(s).unwrap();
+        let slit = |n: i64| json!({ "kind": "lit", "value": { "kind": "int", "value": n } });
+        let n = json!({ "kind": "var", "name": "n" });
+        // \n -> case lt(n, 1) of true -> 0 | false -> add(2, self(sub(n, 1)))
+        let rec_call = json!({ "kind": "app", "op": "self", "args": [{ "kind": "app", "op": "sub", "args": [n.clone(), slit(1)] }] });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": { "kind": "case",
+            "scrutinee": { "kind": "app", "op": "lt", "args": [n, slit(1)] }, "arms": [
+            { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } }, "body": slit(0) },
+            { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } }, "body": { "kind": "app", "op": "add", "args": [slit(2), rec_call] } }] } });
+        let sig = json!({ "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }], "result": { "kind": "builtin", "name": "int" } });
+        let refinements = vec![json!({ "kind": "post", "expr": law("result >= 0") })];
+        let laws = vec![
+            law("forall n. n < 0 || self(n) == 2 * n"),
+            law("forall n. self(n) == n + 1"),
+            law("forall n. self(n) % 2 == 0"),
+            law("forall n. n < 1 || self(n) == 2 * n + 1"),
+        ];
+        let nats: std::collections::BTreeSet<usize> = Default::default();
+        let sequential = derive_self_facts(&sig, &refinements, &laws, &body, &nats, None, solver).1;
+        let rounds = with_law_budget(Some(std::time::Duration::from_secs(20)), || derive_self_facts(&sig, &refinements, &laws, &body, &nats, None, solver).1);
+        assert_eq!(rounds, sequential, "phase 3's rounds proved a different set");
+        assert!(rounds.contains(&laws[0]) && rounds.contains(&laws[2]), "the true laws prove: {rounds:?}");
+        assert!(!rounds.contains(&laws[1]) && !rounds.contains(&laws[3]), "a false law never proves");
     }
 
     /// Another VERSION of a function in the closure is not a witness (the agent loop's view holds
