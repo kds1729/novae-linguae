@@ -73,17 +73,20 @@
   "properties_generative": [
    "multiple_of_both: CONSISTENT  |  generative: EXHAUSTIVE (64 cases \u2014 bounded domain, no counterexample; 17 skipped: modulo by zero at a = 0, b = 0)",
    "multiple_of_both_pos: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
-   "commutative: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+   "commutative: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "product_with_gcd: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
    "multiple_of_both: CONSISTENT  |  generative: HELD (191 cases; 9 skipped: modulo by zero at a = 0, b = 3556)",
    "multiple_of_both_pos: CONSISTENT  |  generative: HELD (200 cases)",
-   "commutative: CONSISTENT  |  generative: HELD (200 cases)"
+   "commutative: CONSISTENT  |  generative: HELD (200 cases)",
+   "product_with_gcd: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
    "multiple_of_both: UNKNOWN      solver could not decide",
    "multiple_of_both_pos: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]",
-   "commutative: PROVED       holds for all inputs (unsat negation)"
+   "commutative: PROVED       holds for all inputs (unsat negation)",
+   "product_with_gcd: PROVED       holds for all inputs (unsat negation) [with the Euclidean-division lemma instantiated at its mod/div terms]"
   ]
  },
  {
@@ -445,6 +448,75 @@
   "prove": [
    "square_root_of_square: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)",
    "floor_bounds: PROVED       by numeric induction on `n` (strong induction over the measure; unsat)"
+  ]
+ },
+ {
+  "name": "fib_iter",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "param_docs": "SOUND",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:nat-result (\u2265 0)": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "param_docs": "3 parameter(s), 3 line(s)",
+   "typecheck": "(int, int, int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:nat-result (\u2265 0)": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  },
+  "properties_generative": [
+   "one_step: CONSISTENT  |  generative: EXHAUSTIVE (729 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "one_step: CONSISTENT  |  generative: HELD (44 cases; 156 skipped: integer overflow: the result does not fit the evaluator's 128-bit integers at n = 85647681, a = \"270574931514018517\", b = 166930048535190)"
+  ],
+  "prove": [
+   "one_step: PROVED       by numeric induction on `n (by unfolding alone)` (strong induction over the measure; unsat)"
+  ]
+ },
+ {
+  "name": "fib",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "param_docs": "SOUND",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:nat-result (\u2265 0)": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "param_docs": "1 parameter(s), 1 line(s)",
+   "typecheck": "(int) -> int",
+   "effects": "effects [] \u2286 declared",
+   "refinement:nat-result (\u2265 0)": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(n)` (inferred O(n))"
+  },
+  "properties_generative": [
+   "base_zero: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)",
+   "base_one: CONSISTENT  |  generative: EXHAUSTIVE (9 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "base_zero: CONSISTENT  |  generative: HELD (200 cases)",
+   "base_one: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "base_zero: PROVED       by induction through the callees' definitions, on `<unfolding>` (unsat)",
+   "base_one: PROVED       by induction through the callees' definitions, on `<unfolding>` (unsat)"
   ]
  },
  {

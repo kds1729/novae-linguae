@@ -1259,6 +1259,26 @@ the record or its search summary said so. Round 18 (46.8 min, log `integer-build
 declares `complexity = "O(2^n)"` on it: **SOUND** (was N/A, no declaration). Every other verdict is
 unchanged from round 17 except addresses (`binomial_pascal` and its dependent `binomial_agree`).
 
+Round 19 (2026-11-04; strangers 23–25). Stranger 25's verified `lcm` CONFIRMED 840 but proved only
+`result ≥ 0` and the guarded multiple-of-both; stranger 24 applied the commons' only `fib` — an early
+seed, naive double recursion with no contract, `terminates: unknown`, no complexity — to 100 and it
+ran until killed. Shipped: `lcm` gains `product_with_gcd` (`a, b ≥ 1 ⇒ lcm(a, b) · gcd(a, b) = a·b`,
+gcd applied by address) — **PROVED** with the Euclidean-division lemma, and with gcd certified it
+pins lcm's value; a new LINEAR `fib` (`\n -> fib_iter n 0 1`, pre `n <= 183` so F(n+1) stays in
+i128; termination SOUND, complexity `O(n)` SOUND; F(100) = 354224848179261915075 in its examples)
+over `fib_iter` (pair iteration, `one_step` PROVED by unfolding), with `base_zero`/`base_one`
+**PROVED** through the callee's definition. Tried and NOT shipped — each stayed UNKNOWN, and an
+unprovable law costs every verified run its law budget: lcm's leastness (`c` a positive common
+multiple ⇒ `lcm ≤ c`; it needs lcm to DIVIDE every common multiple); mod_pow's value as
+`self(b, e, m) == pow_mod_naive(b, e, m)` (with pow_mod_naive's one-step unfolding added as a
+successor law and, on a scratch copy, as a predecessor law — `pow_mod_agree` proves the same fact by
+inducting through BOTH callees' definitions, a rung a law on mod_pow itself does not reach); and
+fib's recurrence (directly; via fib_iter's linearity, PROVED but needing an invented split to
+instantiate; and as a predecessor-form law on fib_iter, whose induction needs `one_step` at an
+offset term the instance generation does not produce). Those three are prover candidates, not
+metadata. Every other verdict is unchanged (the round-19 cross-check under v0.1.25's parallel
+phase 1 and loop cache matched round 19a record for record outside the edited laws).
+
 ## Open questions (as they stood before the follow-up)
 
 - **Folding certified callees into termination and complexity.** Eighteen of twenty UNVERIFIABLE

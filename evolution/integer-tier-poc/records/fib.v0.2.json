@@ -1,0 +1,244 @@
+{
+ "body_hash": "expr_23941b04f9aa2f3ece07ec01f5d442abe343bdb3e736e7436e5a2d1aa5443501",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 0
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 0
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 1
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 1
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 2
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 1
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 10
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 55
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 20
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": 6765
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 100
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": "354224848179261915075"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "nat",
+     "value": 183
+    }
+   ],
+   "result": {
+    "kind": "nat",
+    "value": "78569350599398894027251472817058687522"
+   }
+  }
+ ],
+ "hash": "fn_23db14c7181268920243c7a9b807c73a1da6edd48db458e9f34991eff91e6527",
+ "intent_tags": [
+  "arithmetic/integer",
+  "math/number-theory",
+  "math/number-theory/fib"
+ ],
+ "name_hints": [
+  "fib",
+  "fibonacci",
+  "nth_fibonacci_number"
+ ],
+ "param_docs": [
+  "the index n, 0 to 183 (F(0) = 0, F(1) = 1; F(184) would overflow 128-bit integers)"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "neq"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "n"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n"
+    ]
+   },
+   "name": "base_zero"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "neq"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "n"
+          }
+         ],
+         "kind": "app",
+         "op": "self"
+        },
+        {
+         "kind": "lit",
+         "value": 1
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "n"
+    ]
+   },
+   "name": "base_one"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(n)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "kind": "var",
+       "name": "n"
+      },
+      {
+       "kind": "lit",
+       "value": 183
+      }
+     ],
+     "kind": "app",
+     "op": "le"
+    },
+    "kind": "pre"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   ],
+   "result": {
+    "kind": "builtin",
+    "name": "nat"
+   }
+  }
+ },
+ "supersedes": null
+}

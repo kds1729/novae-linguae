@@ -82,6 +82,8 @@ REPORT = []
 # the rational tier applies them BY ADDRESS, and re-minting them would fork its copies.
 _MOD = "the modulus, at least 1"
 PARAM_DOCS = {
+    "fib": ["the index n, 0 to 183 (F(0) = 0, F(1) = 1; F(184) would overflow 128-bit integers)"],
+    "fib_iter": ["steps left to take", "F(k) so far", "F(k+1) so far"],
     "lcm": ["a non-negative integer", "a non-negative integer (lcm with 0 is 0)"],
     "mod_inverse": ["the number to invert (any integer; only its residue mod m matters)",
                     "the modulus, at least 2; the result is None unless a and m are coprime"],
@@ -316,7 +318,13 @@ def main():
           # certified divisibility, one instance.
           props=[("multiple_of_both", "forall a b. self(a, b) % a == 0 && self(a, b) % b == 0"),
                  ("multiple_of_both_pos", "forall a b. a < 1 || b < 1 || self(a, b) % a == 0 && self(a, b) % b == 0"),
-                 ("commutative", "forall a b. self(a, b) == self(b, a)")],
+                 ("commutative", "forall a b. self(a, b) == self(b, a)"),
+                 # Round 19 (stranger 25: "nothing proves the result is the LEAST common multiple"):
+                 # the product identity pins the value through gcd's certified contract — PROVED.
+                 # Leastness itself (`c` a positive common multiple ⇒ `self(a, b) <= c`) was tried and
+                 # stays UNKNOWN (it needs lcm to DIVIDE every common multiple — Euclid's-lemma
+                 # territory); not shipped, as every verified run would spend its law budget on it.
+                 ("product_with_gcd", "forall a b. a < 1 || b < 1 || self(a, b) * {gcd}(a, b) == a * b")],
           hints=["least_common_multiple"], complexity="O(log n)")
     gauntlet("lcm", prove)
 
@@ -435,6 +443,12 @@ def main():
            {"args": [ilit(5), nlit(0), ilit(13)], "result": ilit(1)},
            {"args": [ilit(7), nlit(1), ilit(1)], "result": ilit(0)}],
           refinements=[("pre", "m > 0"), ("pre", f"m <= {I64_MAX}"), ("post", "result >= 0 && result < m")],
+          # Round 19 TRIED the value as a law here — `self(b, e, m) == pow_mod_naive(b, e, m)`, the
+          # fact `pow_mod_agree` proves — and it stayed UNKNOWN in both forms (with pow_mod_naive's
+          # one-step unfolding as a successor law, and as a predecessor law instantiable at the
+          # existing term): `pow_mod_agree`'s proof inducts THROUGH both callees' definitions, a rung a
+          # law on mod_pow itself does not reach (pow_mod_naive is a contract there, never unfolded).
+          # Not shipped: every verified mod_pow run would spend its law budget failing it.
           hints=["modular_exponentiation", "square_and_multiply"], complexity="O(log n)")
     gauntlet("mod_pow", prove)
 
@@ -460,6 +474,34 @@ def main():
           refinements=[("post", "result * result <= n"), ("post", "result <= n")],  # the second is the size bound the complexity fold reads
           hints=["integer_square_root"], complexity="O(log n)")
     gauntlet("isqrt", prove)
+
+    # 7b. Round 19: Fibonacci, LINEAR. The commons' only `fib` was an early seed — naive double
+    # recursion, no contract, `terminates: unknown`, no complexity — and stranger 24 (2026-11-04)
+    # ran F(100) until killed. The pair iteration (F(k), F(k+1)) → (F(k+1), F(k)+F(k+1)) descends
+    # its step count by one (termination SOUND, O(n)); the pre keeps F(n+1) inside i128.
+    build("fib_iter", r"\n a b -> case lt n 1 of { true => a; false => self (sub n 1) b (add a b) }",
+          FN([NAT, NAT, NAT], NAT),
+          [{"args": [nlit(10), nlit(0), nlit(1)], "result": nlit(55)}, {"args": [nlit(0), nlit(3), nlit(5)], "result": nlit(3)},
+           {"args": [nlit(1), nlit(3), nlit(5)], "result": nlit(5)}],
+          props=[("one_step", "forall n a b. n < 0 || self(n + 1, a, b) == self(n, b, a + b)")],
+          hints=["fibonacci_iteration"], complexity="O(n)")
+    gauntlet("fib_iter", prove)
+    build("fib", r"\n -> {fib_iter} n 0 1",
+          FN([NAT], NAT),
+          [{"args": [nlit(n)], "result": nlit(v)} for n, v in
+           ((0, 0), (1, 1), (2, 1), (10, 55), (20, 6765), (100, 354224848179261915075),
+            (183, 78569350599398894027251472817058687522))],
+          refinements=[("pre", "n <= 183")],
+          # The RECURRENCE F(n+2) = F(n+1) + F(n) was tried three ways in round 19 and stays UNKNOWN:
+          # on fib directly; with fib_iter's linearity (`iter(n, a+c, b+d) = iter(n,a,b) + iter(n,c,d)`,
+          # PROVED — but instantiating it needs the split (1,1)+(0,1) invented); and as a
+          # predecessor-form law on fib_iter itself (its induction needs `one_step` at the offset
+          # term iter(n − 1, a, b), which the instance generation does not produce). Not shipped:
+          # every verified fib run would spend its law budget failing it. A prover candidate.
+          props=[("base_zero", "forall n. n != 0 || self(n) == 0"),
+                 ("base_one", "forall n. n != 1 || self(n) == 1")],
+          hints=["fibonacci", "nth_fibonacci_number"], complexity="O(n)")
+    gauntlet("fib", prove)
 
     # 8. Deterministic Miller–Rabin for n < 2^63 (twelve prime bases; mod_pow's bound), plus trial division.
     build("mr_squarings", r"\n x s -> case gt s 0 of { true => let y = mod (mul x x) n in case eq y (sub n 1) of { true => true; false => self n y (sub s 1) }; false => false }",

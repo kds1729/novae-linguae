@@ -1,7 +1,7 @@
 | record | run | certified | typecheck | effects | refinement | termination | complexity | properties (generative) | prove |
 |---|---|---|---|---|---|---|---|---|---|
 | `gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | euclid_step=EXHAUSTIVE; commutative=EXHAUSTIVE; right_zero=EXHAUSTIVE; divides_both=EXHAUSTIVE; greatest_divisor=EXHAUSTIVE; associative=EXHAUSTIVE | euclid_step=PROVED; commutative=PROVED; right_zero=PROVED; divides_both=PROVED; greatest_divisor=PROVED; associative=PROVED |
-| `lcm` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | multiple_of_both=EXHAUSTIVE; multiple_of_both_pos=EXHAUSTIVE; commutative=EXHAUSTIVE | multiple_of_both=UNKNOWN; multiple_of_both_pos=PROVED; commutative=PROVED |
+| `lcm` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | multiple_of_both=EXHAUSTIVE; multiple_of_both_pos=EXHAUSTIVE; commutative=EXHAUSTIVE; product_with_gcd=EXHAUSTIVE | multiple_of_both=UNKNOWN; multiple_of_both_pos=PROVED; commutative=PROVED; product_with_gcd=PROVED |
 | `ext_gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND | SOUND | SOUND | euclid_lemma=EXHAUSTIVE | euclid_lemma=PROVED |
 | `bezout_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | bezout_identity=EXHAUSTIVE; bezout_identity_nat=EXHAUSTIVE | bezout_identity=PROVED; bezout_identity_nat=PROVED |
 | `mod_inverse` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
@@ -13,6 +13,8 @@
 | `mod_pow` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
 | `pow_mod_agree` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | fast_equals_naive=EXHAUSTIVE | fast_equals_naive=PROVED |
 | `isqrt` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | square_root_of_square=EXHAUSTIVE; floor_bounds=EXHAUSTIVE | square_root_of_square=PROVED; floor_bounds=PROVED |
+| `fib_iter` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | one_step=EXHAUSTIVE | one_step=PROVED |
+| `fib` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | base_zero=EXHAUSTIVE; base_one=EXHAUSTIVE | base_zero=PROVED; base_one=PROVED |
 | `mr_squarings` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `mr_witness` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `odd_part_d` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | odd_or_zero=EXHAUSTIVE | odd_or_zero=PROVED |
