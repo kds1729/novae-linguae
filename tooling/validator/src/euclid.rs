@@ -229,26 +229,56 @@ pub fn retry_stepwise(smt: &str, solver: &str) -> Option<Stepwise> {
     // The witness rung's premises (listed last) have their own, smaller budget: a premise that
     // rests on a hypothesis costs its whole timeout when it does not hold, and a law that is not
     // going to close must not pay thirty of them in every ladder it reaches.
-    let mut witness_deadline: Option<std::time::Instant> = None;
+    // The premises are independent queries: checked on a few worker threads (2026-11-05 — mod_pow's
+    // value law spent its whole 60 s budget here one premise at a time and left 10 of 251 out),
+    // each pulling the next instance in order under the same budgets; the steps script and the
+    // facts are assembled in instance order afterwards. `None` = not attempted (a budget ran out).
+    let witness_deadline: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let results: Vec<std::sync::Mutex<Option<bool>>> = insts.iter().map(|_| std::sync::Mutex::new(None)).collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let enclosing = crate::prove::query_deadline();
+    let workers = std::thread::available_parallelism().map(|n| (n.get() / 2).clamp(1, 4)).unwrap_or(1);
+    std::thread::scope(|s| {
+        for _ in 0..workers.min(insts.len()) {
+            let (next, results, witness_deadline, insts, header, small) = (&next, &results, &witness_deadline, &insts, &header, &small);
+            s.spawn(move || {
+                crate::prove::with_query_deadline(enclosing, || loop {
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(i) = insts.get(k) else { break };
+                    if crate::prove::past_deadline() {
+                        break;
+                    }
+                    let now = std::time::Instant::now();
+                    let wd = if i.witness {
+                        let mut w = witness_deadline.lock().unwrap();
+                        Some(*w.get_or_insert(now + std::time::Duration::from_secs(WITNESS_BUDGET_SECS)))
+                    } else {
+                        None
+                    };
+                    if now >= deadline || wd.is_some_and(|d| now >= d) {
+                        continue;
+                    }
+                    let uses: String = i.uses.iter().map(|u| format!("(assert {u})\n")).collect();
+                    let facts_here = if i.witness { small.as_str() } else { "" };
+                    let q = format!("{header}\n{facts_here}(assert (not (= {} 0)))\n{uses}(assert (not {}))\n(check-sat)\n", i.modulus, i.premise);
+                    let ok = matches!(run_smt_secs(&q, solver, STEP_SECS), Ok(SatAnswer::Unsat));
+                    *results[k].lock().unwrap() = Some(ok);
+                });
+            });
+        }
+    });
+    // An enclosing law budget ran out (`prove::with_query_deadline`): the attempt is spent.
+    if crate::prove::past_deadline() {
+        return None;
+    }
     let mut skipped = 0usize;
-    for i in &insts {
-        // An enclosing law budget ran out (`prove::with_query_deadline`): every remaining query
-        // would answer `unknown` unasked, and building them was most of a budgeted attempt's time.
-        if crate::prove::past_deadline() {
-            return None;
-        }
-        let now = std::time::Instant::now();
-        if i.witness && witness_deadline.is_none() {
-            witness_deadline = Some(now + std::time::Duration::from_secs(WITNESS_BUDGET_SECS));
-        }
-        if now >= deadline || (i.witness && witness_deadline.is_some_and(|d| now >= d)) {
+    for (i, r) in insts.iter().zip(&results) {
+        let Some(ok) = *r.lock().unwrap() else {
             skipped += 1;
             continue;
-        }
+        };
         let uses: String = i.uses.iter().map(|u| format!("(assert {u})\n")).collect();
         let facts_here = if i.witness { small.as_str() } else { "" };
-        let q = format!("{header}\n{facts_here}(assert (not (= {} 0)))\n{uses}(assert (not {}))\n(check-sat)\n", i.modulus, i.premise);
-        let ok = matches!(run_smt_secs(&q, solver, STEP_SECS), Ok(SatAnswer::Unsat));
         steps.push_str(&format!(
             "(push 1)\n{facts_here}(assert (not (= {} 0)))\n{uses}(assert (not {}))\n(check-sat){}\n(pop 1)\n",
             i.modulus,

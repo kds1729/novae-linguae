@@ -2121,6 +2121,11 @@ pub fn past_deadline() -> bool {
     QUERY_DEADLINE.with(|c| c.get()).is_some_and(|d| std::time::Instant::now() >= d)
 }
 
+/// This thread's query deadline, for a worker thread to inherit (`with_query_deadline` there).
+pub fn query_deadline() -> Option<std::time::Instant> {
+    QUERY_DEADLINE.with(|c| c.get())
+}
+
 /// Run `f` with every solver query it spawns cut off at `deadline` (the earlier of it and any
 /// enclosing deadline): an overrun reads as `unknown`, so a cut-off attempt can only fail to
 /// prove, never prove falsely. Used by the budgeted pass of a linked certify (2026-11-04).
@@ -2789,6 +2794,20 @@ fn prove_by_numeric_induction_inner(
                 Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert), Some(m)),
             }
         }
+        // The instances again, unfolded one level deeper (2026-11-05: `fib_iter`'s recurrence — its
+        // base case sits two steps below the goal's terms; measured unsat with the deeper equations
+        // and unknown without). A retry only: the depth-1 certificate stays the one the Euclidean
+        // rung reads, so every law that closed or failed before is decided by the same queries.
+        if !past_deadline() {
+            let prev = UNFOLD_DEEPER.with(|d| d.replace(true));
+            let built = build_induction_certificate(prop_expr, body, nat_positions, IhMode::Instances);
+            UNFOLD_DEEPER.with(|d| d.set(prev));
+            if let Ok((cert, m)) = built {
+                if cert.smt != last.0.smt && matches!(run_smt(&cert.smt, solver), Ok(SatAnswer::Unsat)) {
+                    return (ProofOutcome::Proved, Some(cert), Some(format!("{m}, unfolded two levels")));
+                }
+            }
+        }
     }
     if euclid_ladder(&mut last.0, solver) {
         return (ProofOutcome::Proved, Some(last.0), Some(last.1));
@@ -2831,6 +2850,9 @@ thread_local! {
     /// instances cost the solver time where they are not needed (lcm's plain certificate sits at
     /// the 5 s budget's edge), so they are a further rung, not the first.
     static DIVISIBILITY_CALLEES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The numeric rung's last retry: unfold the recursive calls two levels below each of the
+    /// goal's applications (see the ladder in `prove_by_numeric_induction_inner`).
+    static UNFOLD_DEEPER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Build with the callee-side divisibility rung on.
@@ -3451,6 +3473,22 @@ fn build_induction_certificate(prop_expr: &J, body: Option<&J>, nat_positions: &
             if seen.insert(instantiated.clone()) {
                 out.push_str(&format!("(assert {instantiated})\n"));
             }
+            // Two levels deeper (the ladder's retry, `UNFOLD_DEEPER`): the recursive calls inside this
+            // one — equations only, no hypothesis there. A base case reached two steps below the
+            // goal's terms needs them: `fib_iter(2, a, b) = fib_iter(1, b, a+b) = fib_iter(0, …) = a+b`.
+            if UNFOLD_DEEPER.with(|d| d.get()) {
+                for rc2 in &recursive_calls {
+                    if rc2.len() != sd.params.len() {
+                        continue;
+                    }
+                    let r2: Vec<String> = rc2.iter().map(|a| lower(a, &mut penv, Some(&sd))).collect::<Result<_>>()?;
+                    let eq2 = format!("(= (self {}) {})", r2.join(" "), let_params(&sd.params, &r2, &sd.body_smt));
+                    let deeper = let_params(&sd.params, &terms, &let_params(&sd.params, &rterms, &eq2));
+                    if seen.insert(deeper.clone()) {
+                        out.push_str(&format!("(assert {deeper})\n"));
+                    }
+                }
+            }
             // The recursive call's arguments in GOAL scope: the parameters substituted by this
             // application's arguments BEFORE lowering — no `let` over the parameter names, so a law
             // whose variables permute them cannot be shadowed. (A call reaching a body-local
@@ -3805,28 +3843,61 @@ pub fn prove_by_callee_induction(
     callee_def: &dyn Fn(&str) -> Option<(J, BTreeSet<usize>)>,
     solver: &str,
 ) -> (ProofOutcome, Option<Certificate>, Option<String>) {
-    // The ladder: unfolding alone, then with the hypothesis; each first with the callees' quantified
-    // contract axioms, then with their instances only (the contract ladder — measured here too: the
-    // round-trip is unsat in 14 ms on the instances and times out under the quantified `≥ 0`).
-    let mut last: (ProofOutcome, Option<Certificate>, Option<String>) = (ProofOutcome::Unknown, None, None);
-    for with_ih in [false, true] {
+    callee_induction_ladder(prop_expr, body, nat_positions, callee_def, &[false, true], solver)
+}
+
+/// The ladder of `prove_by_callee_induction` over the given hypothesis modes (`false` = unfolding
+/// alone). Each mode is tried first with the callees' quantified contract axioms, then with their
+/// instances only (the contract ladder — measured here too: the round-trip is unsat in 14 ms on the
+/// instances and times out under the quantified `≥ 0`). The certificates are BUILT in order on this
+/// thread (the builders read thread-local state) and SOLVED concurrently — independent queries, the
+/// outcome read in ladder order, so the verdict is the sequential one; the wall time is the slowest
+/// query instead of the sum (2026-11-05: `mod_pow`'s value law spent 20 s on four timeouts in a row).
+fn callee_induction_ladder(
+    prop_expr: &J,
+    body: &J,
+    nat_positions: &BTreeSet<usize>,
+    callee_def: &dyn Fn(&str) -> Option<(J, BTreeSet<usize>)>,
+    modes: &[bool],
+    solver: &str,
+) -> (ProofOutcome, Option<Certificate>, Option<String>) {
+    let mut built: Vec<Result<(Certificate, String)>> = Vec::new();
+    for &with_ih in modes {
         for quantified in [true, false] {
-            let built = if quantified {
+            let b = if quantified {
                 build_callee_induction(prop_expr, body, nat_positions, callee_def, with_ih)
             } else {
                 without_contract_quantifiers(|| build_callee_induction(prop_expr, body, nat_positions, callee_def, with_ih))
             };
-            let (cert, m) = match built {
-                Err(e) => return (ProofOutcome::Unsupported(format!("{e:#}")), None, None),
-                Ok(x) => x,
-            };
-            let m = if with_ih { m } else { "<unfolding>".to_string() };
-            match run_smt(&cert.smt, solver) {
-                Ok(SatAnswer::Unsat) => return (ProofOutcome::Proved, Some(cert), Some(m)),
-                Ok(SatAnswer::NoSolver) => return (ProofOutcome::NoSolver, Some(cert), Some(m)),
-                Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert), Some(m)),
-                Ok(SatAnswer::Sat(_)) | Ok(SatAnswer::Unknown) => last = (ProofOutcome::Unknown, Some(cert), Some(m)),
+            let failed = b.is_err();
+            built.push(b.map(|(c, m)| (c, if with_ih { m } else { "<unfolding>".to_string() })));
+            if failed {
+                break; // the sequential ladder stopped at the first refusal: so do the queries
             }
+        }
+        if built.last().is_some_and(|b| b.is_err()) {
+            break;
+        }
+    }
+    let enclosing = query_deadline();
+    let answers: Vec<Option<Result<SatAnswer>>> = std::thread::scope(|s| {
+        let handles: Vec<_> = built
+            .iter()
+            .map(|b| b.as_ref().ok().map(|(cert, _)| s.spawn(move || with_query_deadline(enclosing, || run_smt(&cert.smt, solver)))))
+            .collect();
+        handles.into_iter().map(|h| h.map(|h| h.join().unwrap_or_else(|_| Err(anyhow!("solver thread panicked"))))).collect()
+    });
+    let mut last: (ProofOutcome, Option<Certificate>, Option<String>) = (ProofOutcome::Unknown, None, None);
+    for (b, a) in built.into_iter().zip(answers) {
+        let (cert, m) = match b {
+            Err(e) => return (ProofOutcome::Unsupported(format!("{e:#}")), None, None),
+            Ok(x) => x,
+        };
+        match a.expect("a built certificate was solved") {
+            Ok(SatAnswer::Unsat) => return (ProofOutcome::Proved, Some(cert), Some(m)),
+            Ok(SatAnswer::NoSolver) => return (ProofOutcome::NoSolver, Some(cert), Some(m)),
+            Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert), Some(m)),
+            Ok(SatAnswer::Sat(_)) | Ok(SatAnswer::Unknown) => last = (ProofOutcome::Unknown, Some(cert), Some(m)),
         }
     }
     // The Euclidean rung over the last certificate (see `euclid`).
@@ -3837,6 +3908,78 @@ pub fn prove_by_callee_induction(
         return (ProofOutcome::Unknown, Some(cert), m);
     }
     last
+}
+
+/// A law about a RECURSIVE function, re-read as a checker law and proved through the definitions:
+/// `mod_pow`'s `self(b, e, m) == pow_mod_naive(b, e, m)` is `pow_mod_agree`'s claim, which the
+/// callee-definition rung proves by inducting through BOTH recursions — but stated on `mod_pow`
+/// itself, the numeric rung's hypothesis covers only `self`'s descent and the naive power stays a
+/// bare symbol under its contract (UNKNOWN, round 19). Here the law's predicate becomes the body of a
+/// synthetic non-recursive checker `\vars -> pred[self := own]`, its goal `self(vars) == true`, and
+/// the record's own address resolves to its recursive body — so `prove_by_callee_induction` unfolds
+/// both functions and inducts on the variable their measures share. `contract` is the record's own
+/// certified contract (posts + proved laws; the law under proof is dropped here too — a certificate
+/// that assumes its goal is no proof).
+pub fn prove_self_law_through_definitions(
+    prop_expr: &J,
+    body: &J,
+    contract: CalleeContract,
+    nat_positions: &BTreeSet<usize>,
+    callee_def: &dyn Fn(&str) -> Option<(J, BTreeSet<usize>)>,
+    solver: &str,
+) -> (ProofOutcome, Option<Certificate>, Option<String>) {
+    const OWN: &str = "fn_self_definition";
+    if !references_self(body) {
+        return (ProofOutcome::Unsupported("the body is not recursive (the callee-definition rung covers it)".into()), None, None);
+    }
+    let law = uncurry(prop_expr);
+    if law.get("kind").and_then(|k| k.as_str()) != Some("forall") {
+        return (ProofOutcome::Unsupported("not a `forall`".into()), None, None);
+    }
+    let vars: Vec<String> = law.get("vars").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    let Some(pred) = law.get("body") else { return (ProofOutcome::Unsupported("`forall` has no body".into()), None, None) };
+    if !references_self(pred) {
+        return (ProofOutcome::Unsupported("the law does not mention `self`".into()), None, None);
+    }
+    let var = |v: &String| serde_json::json!({ "kind": "var", "name": v });
+    let checker = serde_json::json!({
+        "kind": "lambda",
+        "params": vars.iter().map(|v| serde_json::json!({ "name": v })).collect::<Vec<_>>(),
+        "body": law_about(pred, OWN),
+    });
+    let goal = serde_json::json!({ "kind": "forall", "vars": vars, "body": { "kind": "app", "op": "eq", "args": [
+        { "kind": "app", "op": "self", "args": vars.iter().map(var).collect::<Vec<_>>() },
+        { "kind": "lit", "value": true },
+    ] } });
+    // The checker's `nat` positions: the law variables the law feeds to a `nat` parameter of self.
+    let mut checker_nats: BTreeSet<usize> = BTreeSet::new();
+    for call in collect_self_applications(pred) {
+        for (i, a) in call.iter().enumerate() {
+            if let (true, Some(v)) = (nat_positions.contains(&i), var_name(a)) {
+                if let Some(j) = vars.iter().position(|x| x == v) {
+                    checker_nats.insert(j);
+                }
+            }
+        }
+    }
+    let def = |t: &str| if t == OWN { Some((body.clone(), nat_positions.clone())) } else { callee_def(t) };
+    let mut c = contract;
+    c.symbol = "self_definition".to_string();
+    c.laws.retain(|l| l != prop_expr);
+    let mut contracts = CALLEE_CONTRACTS.with(|x| x.borrow().clone());
+    contracts.insert(OWN.to_string(), c);
+    let prev = set_callee_contracts(contracts);
+    // `self` is the CHECKER here: the record's declared type (an `int` result) and its self facts
+    // describe the record, now a callee — under them the checker lowered as `Int`, ill-sorted.
+    let prev_type = set_self_type(None);
+    let prev_facts = set_self_facts(None);
+    // With the hypothesis only: unfolding alone was the numeric rung's first try on this law, and a
+    // law that is an induction does not close without its hypothesis (two 5 s timeouts, measured).
+    let out = callee_induction_ladder(&goal, &checker, &checker_nats, &def, &[true], solver);
+    set_self_facts(prev_facts);
+    set_self_type(prev_type);
+    set_callee_contracts(prev);
+    out
 }
 
 fn smt_int_lit(n: i64) -> String {
@@ -4867,6 +5010,68 @@ mod tests {
         // Over all ints the callee's contract says nothing: UNKNOWN, never a false PROVED (nor REFUTED).
         let (out, _) = prove_property_in_domain(&law, Some(&body), &BTreeSet::new(), solver);
         assert!(matches!(out, ProofOutcome::Unknown), "{out:?}");
+        set_callee_contracts(prev);
+    }
+
+    /// fib_iter: \n a b -> case lt(n, 1) of true -> a | false -> self(sub(n, 1), b, add(a, b)).
+    fn fib_iter_body() -> J {
+        json!({ "kind": "lambda", "params": [{ "name": "n" }, { "name": "a" }, { "name": "b" }], "body":
+            case_bool(op("lt", vec![v("n"), slit(1)]), v("a"),
+                self_app(vec![op("sub", vec![v("n"), slit(1)]), v("b"), op("add", vec![v("a"), v("b")])])) })
+    }
+
+    #[test]
+    fn the_numeric_rung_unfolds_two_levels_on_retry() {
+        let Some(solver) = solver() else { return };
+        // The recurrence over any start pair: its base case (n = 0) is two unfoldings below the
+        // goal's `self(n + 2, a, b)`; at one level the instances leave it open.
+        let rec = |extra: i64| law(&["n", "a", "b"], op("or", vec![op("lt", vec![v("n"), lit(0)]), op("eq", vec![
+            self_app(vec![op("add", vec![v("n"), lit(2)]), v("a"), v("b")]),
+            op("add", vec![op("add", vec![self_app(vec![op("add", vec![v("n"), lit(1)]), v("a"), v("b")]), self_app(vec![v("n"), v("a"), v("b")])]), lit(extra)]),
+        ])]));
+        let nats: BTreeSet<usize> = [0, 1, 2].into();
+        let (out, cert, m) = prove_by_numeric_induction(&rec(0), Some(&fib_iter_body()), &nats, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert!(m.as_deref().is_some_and(|m| m.ends_with("unfolded two levels")), "{m:?}");
+        assert!(cert.unwrap().smt.contains("(let ((n (- n 1)) (a b) (b (+ a b))) (= (self (- n 1)"), "the deeper equation is stated");
+        // Off by one: never proved.
+        let (out, _, _) = prove_by_numeric_induction(&rec(1), Some(&fib_iter_body()), &nats, solver);
+        assert!(!matches!(out, ProofOutcome::Proved), "{out:?}");
+    }
+
+    #[test]
+    fn a_recursive_law_proves_through_its_own_and_the_callees_definitions() {
+        let Some(solver) = solver() else { return };
+        // self:   \n -> case lt(n, 1) of true -> 0 | false -> add(2, self(sub(n, 1)))
+        // callee: \n -> case lt(n, 1) of true -> 0 | false -> add(1, add(1, self(sub(n, 1))))
+        // Law: self(n) == callee(n). The numeric rung sees the callee as a bare contract (no posts):
+        // UNKNOWN. Through both definitions on `n`: PROVED.
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body":
+            case_bool(op("lt", vec![v("n"), slit(1)]), slit(0), op("add", vec![slit(2), self_app(vec![op("sub", vec![v("n"), slit(1)])])])) });
+        let callee = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body":
+            case_bool(op("lt", vec![v("n"), slit(1)]), slit(0),
+                op("add", vec![slit(1), op("add", vec![slit(1), self_app(vec![op("sub", vec![v("n"), slit(1)])])])])) });
+        let tc = "fn_twice_test_callee";
+        let contract = |sym: &str| CalleeContract { symbol: sym.into(), params: vec!["n".into()], param_sorts: vec![Sort::Int], ret: Sort::Int, pres: vec![], posts: vec![], laws: vec![], nat_positions: [0].into() };
+        let prev = set_callee_contracts([(tc.to_string(), contract("callee_twice"))].into_iter().collect());
+        let nats: BTreeSet<usize> = [0].into();
+        let agree = |rhs: J| law(&["n"], op("or", vec![op("lt", vec![v("n"), lit(0)]), op("eq", vec![self_app(vec![v("n")]), rhs])]));
+        let goal = agree(json!({ "kind": "app", "op": tc, "args": [v("n")] }));
+        assert!(!matches!(prove_by_numeric_induction(&goal, Some(&body), &nats, solver).0, ProofOutcome::Proved));
+        let defs = |t: &str| -> Option<(J, BTreeSet<usize>)> { (t == tc).then(|| (callee.clone(), [0].into())) };
+        let (out, _, m) = prove_self_law_through_definitions(&goal, &body, contract("self_contract"), &nats, &defs, solver);
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
+        assert!(m.as_deref().is_some_and(|m| m.starts_with("n (through")), "{m:?}");
+        // A false variant (callee + 1) is never proved.
+        let wrong = agree(op("add", vec![json!({ "kind": "app", "op": tc, "args": [v("n")] }), lit(1)]));
+        let (out, _, _) = prove_self_law_through_definitions(&wrong, &body, contract("self_contract"), &nats, &defs, solver);
+        assert!(!matches!(out, ProofOutcome::Proved), "{out:?}");
+        // The law under proof never enters its own contract: handed a contract that states the
+        // FALSE law, the rung still does not prove it (assuming its goal would).
+        let mut circular = contract("self_contract");
+        circular.laws.push(wrong.clone());
+        let (out, _, _) = prove_self_law_through_definitions(&wrong, &body, circular, &nats, &defs, solver);
+        assert!(!matches!(out, ProofOutcome::Proved), "{out:?}");
         set_callee_contracts(prev);
     }
 

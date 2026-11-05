@@ -165,7 +165,9 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 // another `Maybe` lowers where it refused), and a `replace_token` panic past a term's end is fixed.
 // 11 (2026-11-03): structural induction over a body that descends on a later parameter
 // (`induct::trailing_list_descent` — `alloc_from t ws c w`): its laws prove where they were refused.
-const DERIVATION_VERSION: u32 = 11;
+// 12 (2026-11-05): phase 5 (a recursive body's law through its own and its callees' definitions),
+// the numeric rung's two-level unfolding retry, and the stepwise premises checked in parallel.
+const DERIVATION_VERSION: u32 = 12;
 
 /// The cache file for one VIEW KIND: `""` = the full derivation, `b<secs>` = a budgeted one (each
 /// law attempt capped), `p` = posts only. A partial kind holds only facts proved here (fewer axioms
@@ -543,7 +545,7 @@ impl<'a> LinkedView<'a> {
                 progress_line!("   callee   {callee_name} ({}…): deriving its contract", &target[..target.len().min(11)]);
             }
             let (reports, laws) = with_law_budget(self.law_budget, || {
-                derive_self_facts(sig_type, &refinements, &all_laws, body, &nat_positions, &self.solver)
+                derive_self_facts(sig_type, &refinements, &all_laws, body, &nat_positions, Some(&|t: &str| self.callee_def(t)), &self.solver)
             });
             crate::prove::set_self_measure(prev_measure);
             crate::prove::set_self_type(prev_ty);
@@ -833,11 +835,12 @@ pub fn derive_self_facts(
     laws: &[J],
     body: &J,
     nat_positions: &std::collections::BTreeSet<usize>,
+    callee_def: Option<&dyn Fn(&str) -> Option<(J, std::collections::BTreeSet<usize>)>>,
     solver: &str,
 ) -> (Vec<crate::RefinementReport>, Vec<J>) {
     // A derivation: the prover's witness + staged retry stays off inside it (see
     // `prove::DERIVATION_DEPTH`) — it is the record under proof's rung, not every callee's.
-    crate::prove::in_derivation(|| derive_self_facts_inner(sig_type, refinements, laws, body, nat_positions, solver))
+    crate::prove::in_derivation(|| derive_self_facts_inner(sig_type, refinements, laws, body, nat_positions, callee_def, solver))
 }
 
 fn derive_self_facts_inner(
@@ -846,6 +849,7 @@ fn derive_self_facts_inner(
     laws: &[J],
     body: &J,
     nat_positions: &std::collections::BTreeSet<usize>,
+    callee_def: Option<&dyn Fn(&str) -> Option<(J, std::collections::BTreeSet<usize>)>>,
     solver: &str,
 ) -> (Vec<crate::RefinementReport>, Vec<J>) {
     let shape = self_shape(sig_type, refinements, body);
@@ -952,7 +956,42 @@ fn derive_self_facts_inner(
             }
         }
     }
+    // Phase 5 (2026-11-05): a law of a RECURSIVE body that applies a linked callee, re-read as a
+    // checker law over the record's own definition and proved through both (`mod_pow`'s value as
+    // the naive power — `prove::prove_self_law_through_definitions`). Under the facts proved above;
+    // never the law under proof. Laws applying no callee are left to the numeric rung (the same
+    // induction, already tried).
+    if let (Some(s), Some(def)) = (shape.as_ref(), callee_def) {
+        if crate::prove::references_self(body) {
+            for law in laws {
+                if proved.contains(law) || !applies_linked_callee(law) {
+                    continue;
+                }
+                let mut c = s.clone();
+                c.posts = posts.clone();
+                c.laws = proved.clone();
+                if law_attempt("phase 5", law, || {
+                    matches!(crate::prove_self_law_through_definitions(law, body, c, nat_positions, def, solver).0, crate::ProofOutcome::Proved)
+                }) {
+                    proved.push(law.clone());
+                }
+            }
+        }
+    }
     (reports, proved)
+}
+
+/// Does an AST apply a linked callee (a `fn_…` head, in either application spelling)?
+fn applies_linked_callee(node: &J) -> bool {
+    match node {
+        J::Object(m) => {
+            let head = m.get("op").or_else(|| m.get("fn").and_then(|f| f.get("name"))).and_then(|h| h.as_str());
+            (m.get("kind").and_then(|k| k.as_str()) == Some("app") && head.is_some_and(|h| h.starts_with("fn_")))
+                || m.values().any(applies_linked_callee)
+        }
+        J::Array(xs) => xs.iter().any(applies_linked_callee),
+        _ => false,
+    }
 }
 
 /// One attempt at a law. `NL_DERIVED_DEBUG=1` prints the solver queries it spent (measured
@@ -1515,8 +1554,9 @@ fn certify_with_view(
         let nat_positions = crate::terminate::nat_param_positions(record);
         let prev_measure = view.map(|v| crate::prove::set_self_measure(v.self_measure(body, &nat_positions)));
         let started = std::time::Instant::now();
+        let def = view.map(|v| move |t: &str| v.callee_def(t));
         let (reports, proved) = with_law_budget(view.and_then(|v| v.law_budget), || {
-            derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, solver)
+            derive_self_facts(sig_type, &refinements, &law_exprs(record), body, &nat_positions, def.as_ref().map(|d| d as &dyn Fn(&str) -> _), solver)
         });
         if progress() {
             let sound = reports.iter().filter(|r| matches!(r.outcome, RefinementOutcome::Sound)).count();

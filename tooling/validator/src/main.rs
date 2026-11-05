@@ -1522,7 +1522,8 @@ fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str, records:
     // The phased derivation `certify` and the linked view use (the record's plain-proved laws may
     // enter a post's induction), so all three agree on what is SOUND.
     let nat_positions = nl_validator::nat_param_positions(&record);
-    let (reports, _) = nl_validator::certify::derive_self_facts(sig_type, &refinements, &nl_validator::certify::law_exprs(&record), &body, &nat_positions, solver);
+    let def = view.as_ref().map(|v| move |t: &str| v.callee_def(t));
+    let (reports, _) = nl_validator::certify::derive_self_facts(sig_type, &refinements, &nl_validator::certify::law_exprs(&record), &body, &nat_positions, def.as_ref().map(|d| d as &dyn Fn(&str) -> _), solver);
     let mut violated = false;
     let mut no_solver = false;
     for r in &reports {
@@ -2142,6 +2143,38 @@ fn cmd_prove(
                         euclid_note(ccert.as_ref())
                     ),
                     _ => label,
+                }
+            }
+            _ => label,
+        };
+        // And a law about a RECURSIVE body re-read as a checker law over the record's own address:
+        // `mod_pow(b, e, m) == pow_mod_naive(b, e, m)` inducts through both definitions.
+        let label = match (label.starts_with("PROVED"), contract_view.as_ref(), body_ast.as_ref()) {
+            (false, Some(v), Some(b)) => {
+                let own = value.get("hash").and_then(|h| h.as_str()).map(String::from);
+                match own.and_then(|h| v.contract(&h)) {
+                    Some(c) => {
+                        let nats = nl_validator::nat_param_positions(&value);
+                        let def = |t: &str| v.callee_def(t);
+                        let started = std::time::Instant::now();
+                        let (dout, dcert, m) = nl_validator::prove_self_law_through_definitions(expr, b, c, &nats, &def, solver);
+                        if std::env::var("NL_DERIVED_DEBUG").is_ok_and(|v| v == "1") {
+                            eprintln!("[self-definition] {name}: {dout:?} on {m:?} in {:.1} s", started.elapsed().as_secs_f64());
+                        }
+                        if let Some(c) = &dcert {
+                            write_cert(".self-definition", &c.smt)?;
+                            write_euclid(&write_cert, c)?;
+                        }
+                        match dout {
+                            ProofOutcome::Proved => format!(
+                                "PROVED       by induction through its own and the callees' definitions, on `{}` (unsat){}",
+                                m.as_deref().unwrap_or("?"),
+                                euclid_note(dcert.as_ref())
+                            ),
+                            _ => label,
+                        }
+                    }
+                    None => label,
                 }
             }
             _ => label,

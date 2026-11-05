@@ -1041,7 +1041,14 @@ pub fn orchestrate_verified_with_order(
             let nats = crate::terminate::nat_param_positions(rec);
             let prev = crate::set_callee_contracts(law_view.contracts_for_record(rec, body));
             let def = |t: &str| law_view.callee_def(t);
-            let out = matches!(crate::prove_by_callee_induction(expr, body, &nats, &def, solver).0, ProofOutcome::Proved);
+            let mut out = matches!(crate::prove_by_callee_induction(expr, body, &nats, &def, solver).0, ProofOutcome::Proved);
+            // A RECURSIVE body's law through its own definition and the callees' (`mod_pow`'s value
+            // as the naive power), under its own certified contract minus the law.
+            if !out && !crate::prove::past_deadline() {
+                if let Some(c) = law_view.contract(&target) {
+                    out = matches!(crate::prove_self_law_through_definitions(expr, body, c, &nats, &def, solver).0, ProofOutcome::Proved);
+                }
+            }
             crate::set_callee_contracts(prev);
             out
         };
