@@ -3040,6 +3040,13 @@ fn cmd_orchestrate_verified(
     if intents.len() != 1 {
         anyhow::bail!("--verify supports exactly one --intent (got {})", intents.len());
     }
+    // A verified run keeps the callee contracts it derives ON BY DEFAULT (opt out with
+    // NL_DERIVED_CACHE=0): every entry is a proof this machine made, keyed by content address and
+    // validator version, so a second run over the same callees (`rat_add` then `rat_sub`, both over
+    // `rat_normalize` and `gcd`) skips their minutes of derivation. Set before any thread exists.
+    if std::env::var_os("NL_DERIVED_CACHE").is_none() {
+        std::env::set_var("NL_DERIVED_CACHE", "1");
+    }
     let argv = args.iter().map(|a| read_value_arg(a)).collect::<Result<Vec<_>>>()?;
     let orch = nl_validator::signing_key_from_seed(seed);
     let resp = nl_validator::signing_key_from_seed(responder_seed);

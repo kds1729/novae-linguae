@@ -763,7 +763,17 @@ and the validator version, and the next process reads it instead of re-proving: 
 every post and law in it was proved here, from that record, by this validator — not a declaration
 taken on trust, and the address covers the body and, through its `fn_ref`s, the callees. Off by
 default, so a test run or a fresh audit never reads yesterday's proofs; the module builder turns it
-on. A contract over a per-process datatype sort is never cached.
+on, and so does the agent loop's verified run (2026-11-04; `NL_DERIVED_CACHE=0` opts out — a
+stranger's second rational call re-derived `rat_normalize` and `gcd` for ~4 min). A PARTIAL
+derivation is kept under its own kind (`.b<secs>` for the loop's budgeted middle pass, `.p` for the
+posts-only pass) and read only by a view of that kind: still nothing but this machine's proofs, but
+weaker than the full contract (and, budgeted, dependent on the load it ran under), so a full entry
+always takes precedence. A contract over a per-process datatype sort was never cached until it was
+stored structurally (2026-10-31).
+**Parallel phase 1 (2026-11-04).** Under a law budget the derivation's phase-1 attempts (each law
+with nothing about `self` assumed) run on worker threads, the prover's caller-installed context
+copied into each (`prove::capture_context`); the proved set is the sequential one, the wall time the
+slowest attempt. Unbudgeted derivations — `certify`, the module builders — stay sequential.
 
 **The divisibility rung (2026-10-30, the eleventh follow-up).** `gcd` associativity was "a fact
 no contract states" for ten follow-ups. Measured first: it follows from two facts the contract CAN

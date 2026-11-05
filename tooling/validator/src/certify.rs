@@ -167,8 +167,13 @@ pub fn derived_cache_dir() -> Option<std::path::PathBuf> {
 // (`induct::trailing_list_descent` — `alloc_from t ws c w`): its laws prove where they were refused.
 const DERIVATION_VERSION: u32 = 11;
 
-fn derived_cache_path(dir: &std::path::Path, target: &str) -> std::path::PathBuf {
-    dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}.json", env!("CARGO_PKG_VERSION")))
+/// The cache file for one VIEW KIND: `""` = the full derivation, `b<secs>` = a budgeted one (each
+/// law attempt capped), `p` = posts only. A partial kind holds only facts proved here (fewer axioms
+/// can only lose proofs), so it is as sound as the full one — but weaker, and for the budgeted kind
+/// load-dependent, so it is read only by a view of the same kind, and a full entry is preferred.
+fn derived_cache_path_kind(dir: &std::path::Path, target: &str, kind: &str) -> std::path::PathBuf {
+    let kind = if kind.is_empty() { String::new() } else { format!(".{kind}") };
+    dir.join(format!("{target}.v{}.d{DERIVATION_VERSION}{kind}.json", env!("CARGO_PKG_VERSION")))
 }
 
 /// A derived contract as the cache keeps it: the sorts STRUCTURAL (`prove::PortableSort`), so a
@@ -189,7 +194,11 @@ struct PortableContract {
 /// The cached contract for `target`, if this validator version derived one here before — its
 /// datatypes re-registered in this process.
 pub fn load_derived(dir: &std::path::Path, target: &str) -> Option<crate::CalleeContract> {
-    let text = std::fs::read_to_string(derived_cache_path(dir, target)).ok()?;
+    load_derived_kind(dir, target, "")
+}
+
+fn load_derived_kind(dir: &std::path::Path, target: &str, kind: &str) -> Option<crate::CalleeContract> {
+    let text = std::fs::read_to_string(derived_cache_path_kind(dir, target, kind)).ok()?;
     let p: PortableContract = serde_json::from_str(&text).ok()?;
     Some(crate::CalleeContract {
         symbol: p.symbol,
@@ -205,6 +214,10 @@ pub fn load_derived(dir: &std::path::Path, target: &str) -> Option<crate::Callee
 
 /// Keep a derived contract for the next process (best effort: an unwritable cache is no cache).
 pub fn store_derived(dir: &std::path::Path, target: &str, c: &crate::CalleeContract) {
+    store_derived_kind(dir, target, c, "")
+}
+
+fn store_derived_kind(dir: &std::path::Path, target: &str, c: &crate::CalleeContract, kind: &str) {
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }
@@ -221,7 +234,7 @@ pub fn store_derived(dir: &std::path::Path, target: &str, c: &crate::CalleeContr
         nat_positions: c.nat_positions.clone(),
     };
     let Ok(text) = serde_json::to_string(&p) else { return };
-    let path = derived_cache_path(dir, target);
+    let path = derived_cache_path_kind(dir, target, kind);
     let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
     if std::fs::write(&tmp, text).is_ok() && std::fs::rename(&tmp, &path).is_err() {
         let _ = std::fs::remove_file(&tmp);
@@ -298,6 +311,15 @@ impl<'a> LinkedView<'a> {
     /// Whether this view's derivations try every callee law without a time cap.
     pub fn is_full(&self) -> bool {
         self.callee_laws && self.law_budget.is_none()
+    }
+
+    /// This view's derived-cache kind (see `derived_cache_path_kind`).
+    fn cache_kind(&self) -> String {
+        match (self.callee_laws, self.law_budget) {
+            (true, None) => String::new(),
+            (true, Some(b)) => format!("b{}", b.as_secs()),
+            (false, _) => "p".to_string(),
+        }
     }
 
     /// `complexity::component_preserve` of the callee's body (memoized).
@@ -466,7 +488,14 @@ impl<'a> LinkedView<'a> {
         // This machine's own earlier derivation of the same record (same content address, same
         // validator), when the operator opted in: see `derived_cache_dir`.
         if self.callee(target).is_some() {
-            if let Some(c) = derived_cache_dir().and_then(|d| load_derived(&d, target)) {
+            // A full derivation serves every view; a partial one (budgeted, posts-only) serves only
+            // a view of its own kind — the agent loop's middle pass on its next run (2026-11-04: a
+            // second `rat_sub` re-derived `rat_normalize` and `gcd` from scratch, ~4 min each time).
+            let kind = self.cache_kind();
+            let cached = derived_cache_dir().and_then(|d| {
+                load_derived(&d, target).or_else(|| if kind.is_empty() { None } else { load_derived_kind(&d, target, &kind) })
+            });
+            if let Some(c) = cached {
                 self.in_progress.borrow_mut().remove(&key);
                 self.contracts.borrow_mut().insert(target.to_string(), Some(c.clone()));
                 return Some(c);
@@ -561,8 +590,8 @@ impl<'a> LinkedView<'a> {
         if self.cycle_refusals.get() > refusals_before {
             return out;
         }
-        if let (Some(c), Some(dir), true) = (&out, derived_cache_dir(), self.is_full()) {
-            store_derived(&dir, target, c);
+        if let (Some(c), Some(dir)) = (&out, derived_cache_dir()) {
+            store_derived_kind(&dir, target, c, &self.cache_kind());
         }
         self.contracts.borrow_mut().insert(target.to_string(), out.clone());
         out
@@ -829,19 +858,44 @@ fn derive_self_facts_inner(
     };
     // Phase 1.
     let prev = crate::prove::set_self_facts(None);
-    let plain: Vec<J> = laws
-        .iter()
-        .filter(|law| {
-            law_attempt("phase 1", law, || {
-                matches!(crate::prove_property(law, Some(body), solver).0, crate::ProofOutcome::Proved)
-                    || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved)
-                    // A list law a bare structural induction closes (`scale_mod` preserves length) is
-                    // a contract too — the lemma search is skipped here (cost).
-                    || matches!(crate::prove_by_induction(law, Some(body), solver).0, crate::InductionOutcome::Proved)
-            })
+    let attempt = |law: &J| {
+        law_attempt("phase 1", law, || {
+            matches!(crate::prove_property(law, Some(body), solver).0, crate::ProofOutcome::Proved)
+                || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved)
+                // A list law a bare structural induction closes (`scale_mod` preserves length) is
+                // a contract too — the lemma search is skipped here (cost).
+                || matches!(crate::prove_by_induction(law, Some(body), solver).0, crate::InductionOutcome::Proved)
         })
-        .cloned()
-        .collect();
+    };
+    // Phase-1 attempts assume nothing about `self` and nothing from each other, so under a law
+    // BUDGET (the agent loop's middle pass) they run in PARALLEL — the proved set is the same, the
+    // wall time the slowest attempt rather than the sum (2026-11-04: `rat_normalize`'s five took
+    // ~90 s in a row, four of them failing at the 20 s cap). Without a budget (`certify`, the module
+    // builders) they stay sequential: the code path, and so every build, is unchanged.
+    let budget = LAW_BUDGET.with(|b| b.get());
+    let plain: Vec<J> = if budget.is_some() && laws.len() > 1 {
+        let ctx = crate::prove::capture_context();
+        let workers = std::thread::available_parallelism().map(|n| n.get() / 2).unwrap_or(1).clamp(1, 4);
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let proved: Vec<std::sync::atomic::AtomicBool> = laws.iter().map(|_| std::sync::atomic::AtomicBool::new(false)).collect();
+        std::thread::scope(|s| {
+            for _ in 0..workers.min(laws.len()) {
+                let ctx = ctx.clone();
+                let (next, proved, attempt) = (&next, &proved, &attempt);
+                s.spawn(move || {
+                    crate::prove::install_context(ctx);
+                    with_law_budget(budget, || loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(law) = laws.get(i) else { break };
+                        proved[i].store(attempt(law), std::sync::atomic::Ordering::Relaxed);
+                    });
+                });
+            }
+        });
+        laws.iter().zip(&proved).filter(|(_, p)| p.load(std::sync::atomic::Ordering::Relaxed)).map(|(l, _)| l.clone()).collect()
+    } else {
+        laws.iter().filter(|law| attempt(law)).cloned().collect()
+    };
     // Phase 2.
     crate::prove::set_self_facts(if plain.is_empty() { None } else { facts(vec![], plain.clone()) });
     let reports = check_refinements(sig_type, refinements, body, solver);
@@ -1605,6 +1659,18 @@ mod tests {
         d
     }
 
+    /// A partial derivation (budgeted, posts-only) is kept under its own kind and never read as
+    /// the full one; the full one is the only entry every kind may read.
+    #[test]
+    fn partial_derivations_are_cached_under_their_own_kind() {
+        let dir = fresh_cache_dir("kinds");
+        let c = a_contract(crate::Sort::Int);
+        store_derived_kind(&dir, "fn_test_kind", &c, "b20");
+        assert_eq!(load_derived_kind(&dir, "fn_test_kind", "b20"), Some(c.clone()));
+        assert_eq!(load_derived(&dir, "fn_test_kind"), None, "a budgeted entry is not the full contract");
+        assert_eq!(load_derived_kind(&dir, "fn_test_kind", "p"), None, "nor a posts-only one");
+    }
+
     #[test]
     fn a_derived_contract_round_trips_through_the_cache() {
         let dir = fresh_cache_dir("roundtrip");
@@ -1716,6 +1782,50 @@ mod tests {
         assert_eq!(view.contract(&hash).expect("a contract").laws.len(), 1, "a cheap law proves within budget");
         let spent = LinkedView::budgeted(&records, &bodies, solver, std::time::Duration::ZERO);
         assert!(spent.contract(&hash).expect("a contract").laws.is_empty(), "a spent budget proves nothing");
+    }
+
+    /// Under a budget phase 1 runs its law attempts on worker threads (the prover context
+    /// installed in each): the proved set must be exactly the sequential one, including a law
+    /// that needs a callee contract and one that does not hold.
+    #[test]
+    fn parallel_phase_one_proves_what_the_sequential_one_does() {
+        let _env = CACHE_ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(solver) = ["z3", "cvc5"].into_iter().find(|s| std::process::Command::new(s).arg("--version").output().is_ok_and(|o| o.status.success())) else { return };
+        let law = |s: &str| crate::surface::parse_predicate(s).unwrap();
+        // `doubles`, with the law the parallel attempts need from its contract.
+        let (mut callee, callee_body) = record_named("doubles");
+        callee["properties"] = json!([{ "name": "twice", "expr": law("forall n. self(n) == n + n") }]);
+        let hc = crate::hash_artifact_with_kind(&callee, crate::ArtifactKind::FunctionRecord).unwrap();
+        callee["hash"] = json!(hc);
+        // \n -> doubles(doubles(n)): its laws rest on the callee's derived contract.
+        let callee_ref = json!({ "kind": "lit", "value": { "kind": "fn_ref", "target": hc.clone() } });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body":
+            { "kind": "app", "fn": callee_ref.clone(), "args": [
+              { "kind": "app", "fn": callee_ref, "args": [{ "kind": "var", "name": "n" }] } ] } });
+        let (mut rec, _) = record_named("quadruples");
+        rec["body_hash"] = json!(crate::hash_artifact_with_kind(&body, crate::ArtifactKind::BodyExpression).unwrap());
+        rec["examples"] = json!([{ "args": [{ "kind": "int", "value": 2 }], "result": { "kind": "int", "value": 8 } }]);
+        rec["properties"] = json!([
+            { "name": "four_times", "expr": law("forall n. self(n) == 4 * n") },
+            { "name": "even", "expr": law("forall n. self(n) % 2 == 0") },
+            { "name": "false_one", "expr": law("forall n. self(n) == n") },
+            { "name": "monotone", "expr": law("forall m n. m > n || self(m) <= self(n)") } ]);
+        let hash = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
+        rec["hash"] = json!(hash);
+        let records: HashMap<String, J> = [(hash.clone(), rec), (hc.clone(), callee)].into_iter().collect();
+        let bodies: HashMap<String, J> = [(hash.clone(), body), (hc.clone(), callee_body)].into_iter().collect();
+        let prev = std::env::var_os("NL_DERIVED_CACHE");
+        std::env::set_var("NL_DERIVED_CACHE", "0");
+        let budget = std::time::Duration::from_secs(30);
+        let parallel = LinkedView::budgeted(&records, &bodies, solver, budget).contract(&hash).expect("a contract").laws;
+        let sequential = LinkedView::new(&records, &bodies, solver).contract(&hash).expect("a contract").laws;
+        match prev {
+            Some(v) => std::env::set_var("NL_DERIVED_CACHE", v),
+            None => std::env::remove_var("NL_DERIVED_CACHE"),
+        }
+        assert_eq!(parallel, sequential, "the parallel phase 1 proved a different set");
+        assert!(parallel.len() >= 2, "the true laws over the callee's contract prove: {parallel:?}");
+        assert!(!parallel.contains(&law("forall n. self(n) == n")), "a false law never proves");
     }
 
     /// Another VERSION of a function in the closure is not a witness (the agent loop's view holds

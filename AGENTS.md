@@ -37,10 +37,13 @@ the background and read its output file. A law the solver cannot close is report
 here" — it does not fail the run unless you pass `--require-laws`. Each law ATTEMPT in a verified
 run is capped at 20 s (`NL_LAW_BUDGET_SECS`; `0` = no cap, every law tried to the end — slower,
 may prove more): the certification itself never depends on the cap (a contract the capped pass
-cannot decide is re-proved without it), only which laws are reported proved. Expect ~3–5 min for
-`binomial`/`lcm` and ~4–5 min for a rational function over `rat_normalize` (`rat_add`: 257 s;
-21 min before the cap). `NL_DERIVED_CACHE=1` keeps fully derived callee contracts on disk, so a
-second run over the same callees skips them.
+cannot decide is re-proved without it), only which laws are reported proved. The FIRST run over
+a set of callees is the slow one — ~2–3 min for a rational function over `rat_normalize` (its
+callee laws are attempted in parallel), ~2–4 min for `binomial`/`lcm`. A verified run keeps every
+callee contract it derived in `~/.cache/nl-validator/derived` (each entry a proof made on your
+machine, keyed by content address and validator version), so the NEXT run over the same callees
+takes seconds (`rat_sub` then `rat_mul`: 159 s, then 6 s). `NL_DERIVED_CACHE=0` turns that off;
+a path puts it elsewhere.
 
 ## In three sentences
 

@@ -39,6 +39,11 @@ pub fn set_resolver(map: HashMap<String, J>) {
     RESOLVER.with(|r| *r.borrow_mut() = map);
 }
 
+/// A copy of the installed link map (for a worker thread: `prove::capture_context`).
+pub fn resolver_snapshot() -> HashMap<String, J> {
+    RESOLVER.with(|r| r.borrow().clone())
+}
+
 /// Clear the link map.
 pub fn clear_resolver() {
     RESOLVER.with(|r| r.borrow_mut().clear());

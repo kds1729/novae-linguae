@@ -72,6 +72,16 @@ thread_local! {
     static DISCHARGED: RefCell<HashMap<String, bool>> = RefCell::new(HashMap::new());
 }
 
+/// The lemma verdicts this thread has (for a worker thread: `prove::capture_context`).
+pub fn discharged_snapshot() -> HashMap<String, bool> {
+    DISCHARGED.with(|d| d.borrow().clone())
+}
+
+/// Install lemma verdicts captured on another thread.
+pub fn discharged_restore(m: HashMap<String, bool>) {
+    DISCHARGED.with(|d| *d.borrow_mut() = m);
+}
+
 /// Has `solver` proved the lemma? Run once per solver per thread; a solver that cannot (or is
 /// absent) makes the rung unavailable, stated — never assumed.
 pub fn lemma_discharged(solver: &str) -> bool {

@@ -2876,6 +2876,66 @@ thread_local! {
     static SELF_CONTRACT_PHASE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// The prover state a CALLER installs on its thread before a proof — everything a proof reads that
+/// is not rebuilt per query — so a worker thread can run the same attempt (`certify`'s parallel
+/// phase-1 law attempts, 2026-11-04). Per-query scratch (instance lists, list flags, the query
+/// deadline, counters) is not carried: each query sets it.
+#[derive(Clone)]
+pub struct ProverContext {
+    datatypes: Vec<Datatype>,
+    self_type: Option<J>,
+    callee_contracts: BTreeMap<String, CalleeContract>,
+    callee_refusals: BTreeMap<String, String>,
+    contract_quantifiers: bool,
+    self_facts: Option<CalleeContract>,
+    divisibility_solver: Option<String>,
+    self_measure: Option<crate::terminate::Measure>,
+    divisibility_callees: bool,
+    witness_callees: bool,
+    derivation_depth: usize,
+    self_contract_phase: bool,
+    resolver: std::collections::HashMap<String, J>,
+    discharged: std::collections::HashMap<String, bool>,
+}
+
+/// This thread's [`ProverContext`].
+pub fn capture_context() -> ProverContext {
+    ProverContext {
+        datatypes: DATATYPES.with(|d| d.borrow().clone()),
+        self_type: SELF_TYPE.with(|s| s.borrow().clone()),
+        callee_contracts: CALLEE_CONTRACTS.with(|c| c.borrow().clone()),
+        callee_refusals: CALLEE_REFUSALS.with(|c| c.borrow().clone()),
+        contract_quantifiers: CONTRACT_QUANTIFIERS.with(|c| c.get()),
+        self_facts: SELF_FACTS.with(|s| s.borrow().clone()),
+        divisibility_solver: DIVISIBILITY_SOLVER.with(|s| s.borrow().clone()),
+        self_measure: SELF_MEASURE.with(|s| s.borrow().clone()),
+        divisibility_callees: DIVISIBILITY_CALLEES.with(|c| c.get()),
+        witness_callees: WITNESS_CALLEES.with(|c| c.get()),
+        derivation_depth: DERIVATION_DEPTH.with(|d| d.get()),
+        self_contract_phase: SELF_CONTRACT_PHASE.with(|c| c.get()),
+        resolver: crate::interp::resolver_snapshot(),
+        discharged: crate::euclid::discharged_snapshot(),
+    }
+}
+
+/// Install a captured [`ProverContext`] on THIS thread (a fresh worker).
+pub fn install_context(c: ProverContext) {
+    DATATYPES.with(|d| *d.borrow_mut() = c.datatypes);
+    SELF_TYPE.with(|s| *s.borrow_mut() = c.self_type);
+    CALLEE_CONTRACTS.with(|x| *x.borrow_mut() = c.callee_contracts);
+    CALLEE_REFUSALS.with(|x| *x.borrow_mut() = c.callee_refusals);
+    CONTRACT_QUANTIFIERS.with(|x| x.set(c.contract_quantifiers));
+    SELF_FACTS.with(|s| *s.borrow_mut() = c.self_facts);
+    DIVISIBILITY_SOLVER.with(|s| *s.borrow_mut() = c.divisibility_solver);
+    SELF_MEASURE.with(|s| *s.borrow_mut() = c.self_measure);
+    DIVISIBILITY_CALLEES.with(|x| x.set(c.divisibility_callees));
+    WITNESS_CALLEES.with(|x| x.set(c.witness_callees));
+    DERIVATION_DEPTH.with(|d| d.set(c.derivation_depth));
+    SELF_CONTRACT_PHASE.with(|x| x.set(c.self_contract_phase));
+    crate::set_resolver(c.resolver);
+    crate::euclid::discharged_restore(c.discharged);
+}
+
 /// Run `f` as a contract derivation (the witness + staged retry off inside it).
 pub fn in_derivation<T>(f: impl FnOnce() -> T) -> T {
     DERIVATION_DEPTH.with(|d| d.set(d.get() + 1));
