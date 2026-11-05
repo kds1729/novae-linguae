@@ -122,6 +122,19 @@ The decimal tier's MONEY rule is round half to EVEN (banker's rounding): `rescal
 named by their suffix. Results are MINOR UNITS at the places asked for: `round_text_half_even "0.125" 2`
 → `Just(12)` means 0.12.
 
+End to end, "7.25% of $1,234.56": the amount in cents is 123456 and the rate in basis points is
+725 (1 bp = 0.01%), so
+`nl-validator orchestrate --node <node> --verify --require-certified --intent
+math/decimal/percent-bps --arg 123456 --arg 725` → `CONFIRMED …`, `result: 8951`, so $89.51 (the
+exact value is 8950.56 cents). The proved block says how it rounded:
+
+    post  2 * abs(amount * basis_points - result * 10000) <= 10000
+    post  2 * abs(amount * basis_points - result * 10000) != 10000 || result % 2 == 0
+
+That is, the result is within half a cent of amount × bps / 10000, and an exact tie goes to the even
+cent. `apply_rate 123456 725 10000` gives the same answer for a rate with any denominator. Scale the
+result back yourself: minor units ÷ 100 for cents.
+
 ## What things are
 
 | you see | it is |
