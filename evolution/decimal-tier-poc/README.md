@@ -28,7 +28,7 @@ currency conversion with an exact rational rate), `list_sum`, `alloc_from` + `al
 total over weights), and `format_amount` / `parse_amount` / `amount_text_roundtrip` (the text
 boundary, where an agent meets amounts in JSON, CSV and API payloads).
 
-**Round 9: 20/20 run and certify; 30 of 30 contracts SOUND (round 5 added the tie rule to every rounding record, round 6 decimal-text entry points and parameter docs, round 7 the rule on the text records, round 9 a percentage as text); termination 20/20; complexity 16/20;
+**Round 9: 20/20 run and certify; 30 of 30 contracts SOUND (round 5 added the tie rule to every rounding record, round 6 decimal-text entry points and parameter docs, round 7 the rule on the text records, round 9 a percentage as text); termination 20/20; complexity 19/20 (round 10: the complexity fold bounds the parsed place count a text record passes on, so fx_convert_text, round_text_half_even and percent_of_text are SOUND; amount_text_roundtrip stays UNVERIFIABLE because format_amount's text length is not bounded by any fact);
 laws 23 PROVED / 1 UNKNOWN / 0 UNSUPPORTED of 24, all 24 held generatively (the text roundtrip's
 wide sample mostly skipped — see *Still open*).** The guarantees an
 agent most needs are certified, not tested:

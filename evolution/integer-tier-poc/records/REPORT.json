@@ -961,7 +961,7 @@
    "beyond_n: CONSISTENT  |  generative: HELD (125 cases; 75 skipped: recursion depth exceeded 100000 nested applications: the evaluator is a tree walker without tail-call elimination \u2014 restructure the recursion to descend fast\u2026)"
   ],
   "prove": [
-   "symmetry: UNKNOWN      numeric induction on `k+n (hypothesis as instances at the recursive calls)` did not close (the step needs a lemma, or the arithmetic is nonlinear)",
+   "symmetry: PROVED       by induction on `n` from self's certified contract (its other proved laws; unsat)",
    "pascal: PROVED       by induction through its own and the callees' definitions, on `k (through `fn_self_def\u2026`)` (unsat)",
    "choose_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
    "beyond_n: PROVED       by numeric induction on `k` (strong induction over the measure; unsat)"
@@ -1004,7 +1004,7 @@
   ],
   "prove": [
    "pascal: PROVED       by numeric induction on `n (by unfolding alone)` (strong induction over the measure; unsat)",
-   "symmetry: PROVED       by numeric induction on `n, with self's certified contract at the instantiated points` (strong induction over the measure; unsat)",
+   "symmetry: PROVED       by induction on `n` from self's certified contract (its other proved laws; unsat)",
    "choose_zero: PROVED       by numeric induction on `n (by unfolding alone)` (strong induction over the measure; unsat)",
    "beyond_n: PROVED       by numeric induction on `n` (strong induction over the measure; unsat)"
   ]
