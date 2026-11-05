@@ -1101,20 +1101,26 @@ pub fn prove_from_self_contract_by_induction(
         // E-matching alone closed this step or not depending on how the laws were guarded (measured).
         let ih_form = OffsetForm { vars: ih_vars.clone(), body: hyp_body.clone(), calls: ih_calls.clone(), trigger: None };
         hyp.push_str(&ground_offset_instances(&law_forms, &ih_form, &goal_terms));
-        let cert = Certificate {
-            smt: format!("{}{hyp}{}", &step.smt[..at], &step.smt[at..]),
-            quantified: step.quantified.clone(),
-            uses_self: step.uses_self,
-            uses_callees: step.uses_callees,
-            euclid: step.euclid,
-            steps: None,
-            stepwise: None,
-            staged: None,
-        };
-        match run_solver(&cert, solver) {
-            Ok(ProofOutcome::Proved) => return (ProofOutcome::Proved, Some(cert), Some(v.clone())),
-            Ok(o) => last = (o, Some(cert), Some(v.clone())),
-            Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert), Some(v.clone())),
+        let full = format!("{}{hyp}{}", &step.smt[..at], &step.smt[at..]);
+        // The ground instances alone first (every quantified assertion dropped — weaker, as sound):
+        // z3 5.x times out on the full script, quantifiers and all, where 4.x answers at once (measured).
+        let ground: String = full.lines().filter(|l| !l.starts_with("(assert (forall")).map(|l| format!("{l}\n")).collect();
+        for smt in [ground, full] {
+            let cert = Certificate {
+                smt,
+                quantified: step.quantified.clone(),
+                uses_self: step.uses_self,
+                uses_callees: step.uses_callees,
+                euclid: step.euclid,
+                steps: None,
+                stepwise: None,
+                staged: None,
+            };
+            match run_solver(&cert, solver) {
+                Ok(ProofOutcome::Proved) => return (ProofOutcome::Proved, Some(cert), Some(v.clone())),
+                Ok(o) => last = (o, Some(cert), Some(v.clone())),
+                Err(e) => return (ProofOutcome::Unsupported(format!("solver error: {e:#}")), Some(cert), Some(v.clone())),
+            }
         }
     }
     // A model of the step script with the hypothesis assumed is no counterexample to the law.
