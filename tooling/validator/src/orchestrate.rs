@@ -1065,7 +1065,9 @@ pub fn orchestrate_verified_hinted(
         // One view for the law step's linked attempts, under the run's per-attempt law budget (the
         // full `view` when `NL_LAW_BUDGET_SECS=0`): its callee contracts are derived once and serve
         // both the callee-definition rung and the linked derivation below.
-        let budgeted_view = crate::certify::law_budget().map(|b| crate::LinkedView::budgeted(&records, &link, solver, b));
+        // With the hints too: without them this view re-derived `gcd`'s and `lcm`'s laws in every
+        // phase (2026-11-06, 64 s of a 129 s `lcm` run on laws its certification records unproved).
+        let budgeted_view = crate::certify::law_budget().map(|b| crate::LinkedView::budgeted(&records, &link, solver, b).with_hints(hints.clone()));
         let law_view = budgeted_view.as_ref().unwrap_or(&view);
         // Induction THROUGH the callees' definitions (`prove --records`' rung): a law of a
         // non-recursive body whose truth is an induction inside a callee — `fib`'s base cases through
