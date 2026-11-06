@@ -299,6 +299,76 @@ fn fetch_all(node: &str, addrs: &[String]) -> Vec<Result<J>> {
     out
 }
 
+/// Per-law HINTS for each function record in `records`, from the certifications the node serves
+/// about it (`GET /v0/records/{fn}/certifications`, spec/certification.schema.json `laws`): for each
+/// function, the NEWEST certification that hash- and signature-verifies, certifies this record's body
+/// and carries `laws`. Returns the hints (function → law key → hint) and, per function used, the
+/// certification's address — so a run can say whose hint skipped what. Lenient: a function whose
+/// certifications cannot be fetched or verified gets no hints. A hint only steers which attempts a
+/// verified run makes; it never counts as a proof, so any certifier's will do.
+#[allow(clippy::type_complexity)]
+pub fn law_hints_from_node(
+    node: &str,
+    records: &HashMap<String, J>,
+) -> (HashMap<String, crate::certify::LawHints>, HashMap<String, String>) {
+    let fns: Vec<&String> = records
+        .iter()
+        .filter(|(h, r)| h.starts_with("fn_") && r.get("properties").and_then(|p| p.as_array()).is_some_and(|p| !p.is_empty()))
+        .map(|(h, _)| h)
+        .collect();
+    let fetch = |addr: &String| -> Option<J> {
+        let url = format!("{}/v0/records/{}/certifications", node.trim_end_matches('/'), addr);
+        serde_json::from_str(&crate::interp::http_request("GET", &url, None).ok()?).ok()
+    };
+    let mut responses: Vec<(&String, Option<J>)> = Vec::new();
+    for chunk in fns.chunks(FETCH_CONCURRENCY) {
+        std::thread::scope(|s| {
+            let handles: Vec<_> = chunk.iter().map(|a| (*a, s.spawn(move || fetch(a)))).collect();
+            for (a, h) in handles {
+                responses.push((a, h.join().ok().flatten()));
+            }
+        });
+    }
+    let (mut hints, mut used) = (HashMap::new(), HashMap::new());
+    for (addr, resp) in responses {
+        let Some(rec) = records.get(addr) else { continue };
+        let certs = resp.as_ref().and_then(|r| r.get("certifications")).and_then(|c| c.as_array()).cloned().unwrap_or_default();
+        // The node serves them in publication order: the newest that qualifies.
+        let cert = certs.iter().rev().find(|c| {
+            c.get("body_hash") == rec.get("body_hash")
+                && c.get("laws").is_some_and(|l| l.is_array())
+                && crate::verify_artifact_hash_with_kind(c, ArtifactKind::Certification).is_ok_and(|v| v.matches)
+                && crate::verify_signature(c).is_ok()
+        });
+        let Some(cert) = cert else { continue };
+        let exprs: HashMap<&str, &J> = rec
+            .get("properties")
+            .and_then(|p| p.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|p| Some((p.get("name")?.as_str()?, p.get("expr")?)))
+            .collect();
+        let mut h = crate::certify::LawHints::new();
+        for law in cert["laws"].as_array().into_iter().flatten() {
+            let Some(expr) = law.get("name").and_then(|n| n.as_str()).and_then(|n| exprs.get(n)) else { continue };
+            let hint = match law.get("verdict").and_then(|v| v.as_str()) {
+                Some("PROVED") => match law.get("rung").and_then(|r| r.as_str()).and_then(crate::certify::Rung::parse) {
+                    Some(r) => crate::certify::LawHint::ProvedBy(r),
+                    None => continue,
+                },
+                Some("UNPROVED") => crate::certify::LawHint::Unproved,
+                _ => continue,
+            };
+            h.insert(crate::certify::law_key(expr), hint);
+        }
+        if !h.is_empty() {
+            used.insert(addr.clone(), cert.get("hash").and_then(|x| x.as_str()).unwrap_or("?").to_string());
+            hints.insert(addr.clone(), h);
+        }
+    }
+    (hints, used)
+}
+
 fn crawl(node: &str, seeds: &[String], lenient: bool, max_fetches: usize) -> Result<(HashMap<String, J>, HashMap<String, J>)> {
     let mut record_map: HashMap<String, J> = HashMap::new();
     let mut link_map: HashMap<String, J> = HashMap::new();

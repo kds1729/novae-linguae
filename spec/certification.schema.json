@@ -48,6 +48,24 @@
         }
       }
     },
+    "laws": {
+      "type": "array",
+      "description": "Optional (2026-11-06): the subject's declared laws (`properties`) by name, each PROVED with the rung of the certifier's CONTRACT DERIVATION that proved it, or UNPROVED — from a complete derivation (every callee law available, no time cap). UNPROVED means that derivation could not prove it (not that it is false; a costlier prover rung outside the derivation, such as lemma search, may). Scheduling information for a verified run's contract derivations (which attempts to make, which to skip), never evidence: a run proves every law it reports itself. Absent on a record with no laws.",
+      "items": {
+        "type": "object",
+        "required": ["name", "verdict"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "description": "The law's `name` in the subject's `properties`." },
+          "verdict": { "type": "string", "enum": ["PROVED", "UNPROVED"] },
+          "rung": {
+            "type": "string",
+            "enum": ["plain", "with-self-facts", "self-contract", "self-definition", "contract-induction"],
+            "description": "For PROVED: the derivation phase that proved it — `plain` (no fact about the function assumed), `with-self-facts` (induction over its proved posts and earlier laws), `self-contract` (from its contract, the function uninterpreted), `self-definition` (through its own and its callees' definitions), `contract-induction` (strong induction over its contract)."
+          }
+        }
+      }
+    },
     "certified": {
       "type": "boolean",
       "description": "True unless a check actively FAILED its declaration (a SCHEMA-INVALID record, an ILL-TYPED body, an UNDER-DECLARED effect, or a VIOLATED refinement). Conservative UNVERIFIABLE verdicts do not revoke certification."

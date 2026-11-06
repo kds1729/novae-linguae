@@ -1716,6 +1716,21 @@ fn cmd_certify(
     if let Some(ts) = timestamp {
         cert_json.as_object_mut().unwrap().insert("timestamp".into(), serde_json::Value::String(ts.into()));
     }
+    // Per-law results from a complete derivation (spec/certification.schema.json `laws`): which rung
+    // proved each law, or UNPROVED — a verified run's scheduling hint. Only a record with laws; a
+    // certification without them stays byte-identical to before the field existed.
+    if let Some(results) = nl_validator::certify::complete_law_results(&cert, &record, &body, &record_map, link_map.as_ref(), solver) {
+        if !results.is_empty() {
+            let laws: Vec<serde_json::Value> = results
+                .iter()
+                .map(|(name, rung)| match rung {
+                    Some(r) => serde_json::json!({ "name": name, "verdict": "PROVED", "rung": r.name() }),
+                    None => serde_json::json!({ "name": name, "verdict": "UNPROVED" }),
+                })
+                .collect();
+            cert_json.as_object_mut().unwrap().insert("laws".into(), serde_json::Value::Array(laws));
+        }
+    }
 
     if let Some(seed) = sign {
         // Sign the certification into a content-addressed, verifiable commons artifact.
@@ -3118,7 +3133,31 @@ fn cmd_orchestrate_verified(
             None => format!("{short}…"),
         }
     };
-    let run = nl_validator::orchestrate_verified_with_order(link, recs, &published, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp, grant_certified)?;
+    // Per-law HINTS from the certifications the node serves (spec/certification.schema.json `laws`;
+    // `NL_LAW_HINTS=0` = none): which rung proved each law at the certifier's, or that a complete
+    // derivation could not — so the run's capped law attempts go straight to the rung that works and
+    // skip the ones that never do. Scheduling, not evidence: every law reported proved, the run proved.
+    let hints = match node {
+        Some(url) if !std::env::var("NL_LAW_HINTS").is_ok_and(|v| v == "0") => {
+            let (hints, used) = nl_validator::commons_client::law_hints_from_node(url, &recs);
+            for (f, cert) in &used {
+                let h = &hints[f];
+                let unproved: Vec<String> = recs[f]
+                    .get("properties")
+                    .and_then(|p| p.as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter(|p| p.get("expr").is_some_and(|e| h.get(&nl_validator::certify::law_key(e)) == Some(&nl_validator::certify::LawHint::Unproved)))
+                    .filter_map(|p| p.get("name")?.as_str().map(String::from))
+                    .collect();
+                let skip = if unproved.is_empty() { String::new() } else { format!("; not attempting {} (unproved there)", unproved.join(", ")) };
+                eprintln!("    hints  {}: {} law(s) from {}…{skip}", label(f), h.len(), &cert[..cert.len().min(13)]);
+            }
+            hints
+        }
+        _ => Default::default(),
+    };
+    let run = nl_validator::orchestrate_verified_hinted(link, recs, &published, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp, grant_certified, hints)?;
 
     for step in &run.steps {
         let m = &step.message;

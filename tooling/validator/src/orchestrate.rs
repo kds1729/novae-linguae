@@ -770,6 +770,35 @@ pub fn orchestrate_verified_with_order(
     expect: Option<J>,
     certified_grants: &[String],
 ) -> Result<VerifiedRun> {
+    orchestrate_verified_hinted(
+        link, records, published, intent, args, orchestrator, responder, solver, policy, attestations, timestamp,
+        require_certified, expect, certified_grants, Default::default(),
+    )
+}
+
+/// [`orchestrate_verified_with_order`] with per-law HINTS from certifications (function address →
+/// hints, [`crate::commons_client::law_hints_from_node`]): under the run's law budget a law a
+/// certification records PROVED is attempted at that rung only, and one a COMPLETE certifier
+/// derivation left UNPROVED is not attempted. Scheduling only — every law the run reports proved it
+/// proved itself; a wrong hint can cost a proof, never fake one.
+#[allow(clippy::too_many_arguments)]
+pub fn orchestrate_verified_hinted(
+    link: std::collections::HashMap<String, J>,
+    records: std::collections::HashMap<String, J>,
+    published: &[String],
+    intent: &str,
+    args: Vec<J>,
+    orchestrator: &SigningKey,
+    responder: &SigningKey,
+    solver: &str,
+    policy: Option<&Policy>,
+    attestations: &[J],
+    timestamp: Option<&str>,
+    require_certified: bool,
+    expect: Option<J>,
+    certified_grants: &[String],
+    hints: std::collections::HashMap<String, crate::certify::LawHints>,
+) -> Result<VerifiedRun> {
     let responder_did = did_nova_from_pubkey(&responder.verifying_key());
     let mut steps = Vec::new();
     // TRUST-GATED GRANTS (spec/agent-loop.md §Scope): `certified_grants` apply only to a target
@@ -937,7 +966,7 @@ pub fn orchestrate_verified_with_order(
         let commons_cert = policy.map(|p| p.certification_verdict(&graph, &target, None, timestamp));
         // One linked view for the candidate: certify's second pass and the law step below derive
         // the same contracts, memoized here once.
-        let view = crate::LinkedView::new(&records, &link, solver);
+        let view = crate::LinkedView::new(&records, &link, solver).with_hints(hints.clone());
         // A stderr line per callee derived and per law attempted, while this candidate's certify
         // and law steps run (stranger 17: minutes of silence after the one "certify" line).
         let _progress = crate::certify::progress_on();

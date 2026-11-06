@@ -2440,14 +2440,40 @@ pub fn with_query_deadline<T>(deadline: Option<std::time::Instant>, f: impl FnOn
     out
 }
 
-fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> Result<SatAnswer> {
-    use std::io::{Read, Write};
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
+/// Answers already given in this process, by blake3 of (solver, timeout, resource limit, script) —
+/// see [`run_smt_inner`]. Measured need (2026-11-06, a z3 capture of six cold verified runs): a
+/// cold `binomial` sent 84 byte-identical queries (later phases re-asking failed scripts), 67 s of
+/// solver time; lcm/rat_* 82–147 duplicates each.
+static QUERY_CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], SatAnswer>>> = std::sync::OnceLock::new();
+thread_local! {
+    /// Queries on this thread answered from [`QUERY_CACHE`] (for `NL_DERIVED_DEBUG`).
+    static QUERY_CACHE_HITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 
+/// Queries on this thread answered from the query cache so far (counted in [`queries_run`] too).
+pub fn query_cache_hits() -> u64 {
+    QUERY_CACHE_HITS.with(|c| c.get())
+}
+
+fn query_cache_on() -> bool {
+    !std::env::var("NL_QUERY_CACHE").is_ok_and(|v| v == "0")
+}
+
+fn query_key(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> [u8; 32] {
+    let mut h = blake3::Hasher::new();
+    h.update(format!("{solver}\0{secs}\0{rlimit:?}\0").as_bytes());
+    h.update(script.as_bytes());
+    *h.finalize().as_bytes()
+}
+
+/// One query, answered from the process's query cache when the same script was already asked with
+/// the same solver and budget. `sat`/`unsat` are kept always; `unknown` only when the solver gave up
+/// at the query's OWN limit — a query cut short by an attempt's deadline may decide when asked again
+/// with time left. The deadline check stays first, so a cached answer never outlives a spent budget.
+fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> Result<SatAnswer> {
     QUERIES_RUN.with(|c| c.set(c.get() + 1));
     let cutoff = QUERY_DEADLINE.with(|c| c.get());
-    if cutoff.is_some_and(|d| Instant::now() >= d) {
+    if cutoff.is_some_and(|d| std::time::Instant::now() >= d) {
         if std::env::var("NL_QUERY_TRACE").is_ok_and(|v| v == "1") {
             let bt = std::backtrace::Backtrace::force_capture().to_string();
             let frames: Vec<&str> = bt.lines().filter(|l| l.contains("nl_validator::") && !l.contains("run_smt")).take(6).map(|l| l.trim()).collect();
@@ -2455,6 +2481,27 @@ fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> 
         }
         return Ok(SatAnswer::Unknown);
     }
+    if !query_cache_on() {
+        return run_smt_uncached(script, solver, secs, rlimit, cutoff).map(|(a, _)| a);
+    }
+    let key = query_key(script, solver, secs, rlimit);
+    let cache = QUERY_CACHE.get_or_init(Default::default);
+    if let Some(a) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        QUERY_CACHE_HITS.with(|c| c.set(c.get() + 1));
+        return Ok(a.clone());
+    }
+    let (answer, keep) = run_smt_uncached(script, solver, secs, rlimit, cutoff)?;
+    if keep {
+        cache.lock().unwrap_or_else(|e| e.into_inner()).insert(key, answer.clone());
+    }
+    Ok(answer)
+}
+
+/// The solver run itself; the flag says whether the answer may be cached (see [`run_smt_inner`]).
+fn run_smt_uncached(script: &str, solver: &str, secs: u64, rlimit: Option<u64>, cutoff: Option<std::time::Instant>) -> Result<(SatAnswer, bool)> {
+    use std::io::{Read, Write};
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
 
     let is_z3 = solver == "z3" || solver.ends_with("/z3");
     let rlimit = rlimit.filter(|_| is_z3);
@@ -2488,7 +2535,7 @@ fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> 
         .spawn()
     {
         Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(SatAnswer::NoSolver),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((SatAnswer::NoSolver, false)),
         Err(e) => return Err(anyhow!("spawning solver `{solver}`: {e}")),
     };
     child
@@ -2499,10 +2546,8 @@ fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> 
         .map_err(|e| anyhow!("writing to solver: {e}"))?; // dropping the handle closes stdin (EOF)
 
     // Poll for completion, killing the process if it overruns the timeout backstop.
-    let mut deadline = Instant::now() + Duration::from_secs(secs + 5);
-    if let Some(d) = cutoff {
-        deadline = deadline.min(d);
-    }
+    let backstop = Instant::now() + Duration::from_secs(secs + 5);
+    let deadline = cutoff.map_or(backstop, |d| backstop.min(d));
     loop {
         match child.try_wait().map_err(|e| anyhow!("waiting on solver: {e}"))? {
             Some(_) => break,
@@ -2510,7 +2555,8 @@ fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> 
                 if Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Ok(SatAnswer::Unknown); // timed out ⇒ undecided
+                    // Timed out ⇒ undecided; cacheable only at the query's own backstop.
+                    return Ok((SatAnswer::Unknown, deadline == backstop));
                 }
                 std::thread::sleep(Duration::from_millis(40));
             }
@@ -2521,14 +2567,17 @@ fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> 
         let _ = out.read_to_string(&mut stdout);
     }
     match stdout.split_whitespace().next().unwrap_or("") {
-        "unsat" => Ok(SatAnswer::Unsat),
+        "unsat" => Ok((SatAnswer::Unsat, true)),
         "sat" => {
             let model = stdout.splitn(2, '\n').nth(1).unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
-            Ok(SatAnswer::Sat(model))
+            Ok((SatAnswer::Sat(model), true))
         }
-        "unknown" | "timeout" | "" => Ok(SatAnswer::Unknown),
-        // Over the memory cap (`(error "out of memory")`): undecided, like a timeout.
-        _ if stdout.contains("out of memory") || stdout.contains("memory") => Ok(SatAnswer::Unknown),
+        // The solver's own verdict at its own limit.
+        "unknown" | "timeout" => Ok((SatAnswer::Unknown, true)),
+        // No output (the process died), or over the memory cap (`(error "out of memory")`):
+        // undecided, like a timeout — not kept, a second ask may fare differently.
+        "" => Ok((SatAnswer::Unknown, false)),
+        _ if stdout.contains("out of memory") || stdout.contains("memory") => Ok((SatAnswer::Unknown, false)),
         _ => Err(anyhow!("unexpected solver output: {}", stdout.trim())),
     }
 }
@@ -4322,6 +4371,33 @@ pub fn type_mentions_float(ty: &J) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The same script asked twice is answered from the query cache the second time; a query cut
+    /// short by an attempt's deadline is not kept (asked again with time left, it decides).
+    #[test]
+    fn a_repeated_query_is_answered_from_the_cache_but_a_cut_short_one_is_not_kept() {
+        if std::process::Command::new("z3").arg("--version").output().is_err() || !query_cache_on() {
+            return;
+        }
+        // A script no other test sends (the cache is process-wide).
+        let tag = "a_repeated_query_is_answered_from_the_cache";
+        let script = format!("; {tag}\n(declare-const x Int)\n(assert (> x 3))\n(assert (< x 2))\n(check-sat)\n");
+        let hits = query_cache_hits();
+        assert_eq!(run_smt(&script, "z3").unwrap(), SatAnswer::Unsat);
+        assert_eq!(query_cache_hits(), hits, "the first ask runs the solver");
+        assert_eq!(run_smt(&script, "z3").unwrap(), SatAnswer::Unsat);
+        assert_eq!(query_cache_hits(), hits + 1, "the second ask is a hit");
+
+        // A query that cannot finish before its deadline: unknown, and not cached.
+        let hard = format!("; {tag} hard\n(declare-const x Int)\n(declare-const y Int)\n(declare-const z Int)\n\
+            (assert (> x 0))\n(assert (> y 0))\n(assert (> z 0))\n(assert (= (+ (* x x x) (* y y y)) (* z z z)))\n(check-sat)\n");
+        let soon = Some(std::time::Instant::now() + std::time::Duration::from_millis(300));
+        let cut = with_query_deadline(soon, || run_smt(&hard, "z3").unwrap());
+        assert_eq!(cut, SatAnswer::Unknown);
+        let key = query_key(&hard, "z3", SOLVER_TIMEOUT_SECS, None);
+        let kept = QUERY_CACHE.get().is_some_and(|c| c.lock().unwrap().contains_key(&key));
+        assert!(!kept, "a deadline-cut unknown is not cached");
+    }
 
     /// Past a query deadline a query answers `unknown` without asking the solver — even a trivially
     /// unsat one — and the deadline is scoped: outside `with_query_deadline` the same query decides.

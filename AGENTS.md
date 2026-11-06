@@ -44,7 +44,12 @@ line ends with the run's wall time. A verified run
 keeps every callee contract it derived in `~/.cache/nl-validator/derived` (each entry a proof made on
 your machine, keyed by content address and validator version), so the NEXT run over the same callees
 takes seconds (measured on v0.1.25: `rat_sub` 126 s, then `rat_mul` 3.5 s; `lcm` 93 s; `fib(100)`
-9 s). `NL_DERIVED_CACHE=0` turns that off; a path puts it elsewhere.
+9 s). `NL_DERIVED_CACHE=0` turns that off; a path puts it elsewhere. Over a node the run also
+reads each function's certifications for per-law HINTS (which proof rung worked for each law at
+the certifier's, and which laws its full derivation could not prove) and prints a `hints  <name>: …`
+line per function: the capped law attempts go straight to the rung that works and skip the ones
+that never do. Hints only choose which attempts run — every law reported proved, your run proved;
+`NL_LAW_HINTS=0` turns them off.
 
 ## In three sentences
 

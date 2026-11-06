@@ -417,3 +417,16 @@ the goal over a commons containing a prior `double_then_add` composite (whose bo
   view-dependent check undecided, so the verdict is the uncapped one. The loop's own law
   attempts run under the same cap: a law "not proved here" may be one the uncapped prover closes
   (2026-11-04, stranger 19 — one verified `rat_add` 21.5 min → 257 s).
+- **Per-law hints from certifications (scheduling, not evidence).** A signed certification may
+  record each law's result in the certifier's contract derivation (`laws`,
+  spec/certification.schema.json: PROVED with the rung that proved it, or UNPROVED by a complete,
+  uncapped derivation). Over a node, the loop fetches every function's certifications and, under
+  the law cap only, attempts a hinted-PROVED law at its rung alone and does not attempt a
+  hinted-UNPROVED one in a contract derivation (stderr: `hints  <name>: N law(s) from cert_…;
+  not attempting …`). Any certifier's hints are used, trusted or not, because a hint cannot make
+  anything count as proved: every law the run reports proved, it proved itself; a wrong hint can
+  only cost a proof the run would otherwise have found. `NL_LAW_HINTS=0` turns hints off. Why
+  (2026-11-06, a z3 capture of six cold verified runs): ~88% of solver time went to queries that
+  ran out their timeout, most of it in rungs that could never prove the law at hand — shorter
+  timeouts lost real proofs (gi_rem's norm posts need a 2.1 s query), so the only way to fail
+  faster is not to send the hopeless query.

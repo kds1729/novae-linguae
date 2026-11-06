@@ -8,6 +8,7 @@ nl-validator; the whole suite skips if that binary is absent.
 """
 
 import base64
+import os
 import io
 import json
 import subprocess
@@ -370,6 +371,42 @@ class CommonsProtocolTests(TestCase):
         # `?certified=true` returns only positive certifications (this one is certified).
         only = self.client.get(f"/v0/records/{subject}/certifications?certified=true").json()
         self.assertEqual(only["count"], 1)
+
+    def _make_certification_with_laws(self, seed="novae-linguae-example-certifier"):
+        """`certify --sign --records`: with linked bodies the certification records each law's result."""
+        out = subprocess.run(
+            [str(VALIDATOR), "certify", str(EXAMPLES / "reverse.json"), "--body", str(EXAMPLES / "body-reverse.json"),
+             "--records", str(EXAMPLES), "--sign", seed],
+            capture_output=True, text=True,
+        )
+        return json.loads(out.stdout)
+
+    def test_certification_with_per_law_results_publishes_and_is_served(self):
+        # 2026-11-06: a certification may carry `laws` — each declared law's result in the certifier's
+        # contract derivation (a verified run's scheduling hint). It passes the gate and comes back
+        # with the subject's certifications, byte-for-byte.
+        cert = self._make_certification_with_laws()
+        self.assertEqual([l["name"] for l in cert["laws"]], ["involution"])
+        resp = self._publish(cert)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        served = self.client.get(f"/v0/records/{cert['subject']}/certifications").json()
+        self.assertEqual(served["certifications"][0], cert)
+
+    def test_certification_with_a_malformed_law_entry_rejected(self):
+        # The schema bounds the field: an unknown verdict is refused at the gate (before any hash check
+        # could pass — the edited bytes no longer match the signed address either).
+        cert = self._make_certification_with_laws()
+        cert["laws"][0]["verdict"] = "MAYBE"
+        resp = self._publish(cert)
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn(resp.json()["error"], {"schema_invalid", "hash_mismatch", "signature_invalid"})
+        # …and the schema itself refuses it, whatever the gate checks first.
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(cert, f)
+        checked = subprocess.run([str(VALIDATOR), "validate", str(Path(settings.COMMONS_SPEC_DIR) / "certification.schema.json"), f.name],
+                                 capture_output=True, text=True)
+        os.unlink(f.name)
+        self.assertNotEqual(checked.returncode, 0, checked.stdout)
 
     def test_certifications_absent_subject_is_empty(self):
         resp = self.client.get("/v0/records/fn_" + "0" * 64 + "/certifications")
