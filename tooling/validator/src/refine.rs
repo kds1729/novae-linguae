@@ -198,10 +198,22 @@ pub fn check_refinements(sig_type: &J, refinements: &[J], body: &J, solver: &str
         .filter_map(|r| r.get("expr"))
         .enumerate()
     {
-        reports.push(RefinementReport {
-            label: format!("post[{i}]"),
-            outcome: check_post(&pnames, &pre, post, &result_expr, body_opt, solver, &nat_positions),
-        });
+        let started = std::time::Instant::now();
+        let outcome = check_post(&pnames, &pre, post, &result_expr, body_opt, solver, &nat_positions);
+        // A verified run's progress line per post that took a while (the laws have one each; a
+        // stranger saw "still working — 92 s" with nothing between two law lines while
+        // `rat_normalize`'s lowest-terms post proved, 2026-11-07).
+        let secs = started.elapsed().as_secs_f64();
+        if crate::certify::progress() && secs >= 1.0 {
+            let verdict = match &outcome {
+                RefinementOutcome::Sound => "sound   ",
+                RefinementOutcome::Violated(_) => "VIOLATED",
+                _ => "undecided",
+            };
+            let text: String = crate::certify::short_addresses(&crate::surface::unparse_predicate(post).unwrap_or_else(|_| "?".into())).chars().take(60).collect();
+            crate::certify::progress_line!("   post     {verdict} {secs:>6.1} s  {text}");
+        }
+        reports.push(RefinementReport { label: format!("post[{i}]"), outcome });
     }
     // The type-implied `nat` refinement: result ≥ 0.
     if is_nat(result_ty) {

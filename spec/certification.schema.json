@@ -62,6 +62,11 @@
             "type": "string",
             "enum": ["plain", "with-self-facts", "self-contract", "self-definition", "contract-induction"],
             "description": "For PROVED: the derivation phase that proved it — `plain` (no fact about the function assumed), `with-self-facts` (induction over its proved posts and earlier laws), `self-contract` (from its contract, the function uninterpreted), `self-definition` (through its own and its callees' definitions), `contract-induction` (strong induction over its contract)."
+          },
+          "secs": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Optional (2026-11-07), for PROVED: the wall-clock seconds the proving attempt took at the certifier's. A verified run that caps each attempt does not attempt a law proved in longer than its cap (the proof would only run out the cap); still scheduling, never evidence."
           }
         }
       }

@@ -69,7 +69,7 @@ pub struct Certification {
     pub laws_complete: bool,
     /// Every declared law by name with the rung that proved it (`None` = not proved), in the
     /// record's order — what a signed certification records (`laws`, when `laws_complete`).
-    pub law_results: Vec<(String, Option<Rung>)>,
+    pub law_results: Vec<(String, Option<(Rung, f64)>)>,
     /// That derivation's facts as a contract (the sound posts and the proved laws), for the loop's
     /// law step to read rather than derive the record's own contract again (`binomial`: 40 s, 2026-11-05).
     pub self_contract: Option<crate::CalleeContract>,
@@ -908,9 +908,11 @@ impl Rung {
 /// What a certification says about one law, as a verified run uses it: which rung proved it, or that
 /// a COMPLETE derivation (every callee law available, no time cap) could not. Untrusted scheduling
 /// information — it decides which attempts run, never what counts as proved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LawHint {
-    ProvedBy(Rung),
+    /// Proved at this rung — and, when the certification said, in this many seconds there (a proof
+    /// that took longer than a run's cap is not attempted under it).
+    ProvedBy(Rung, Option<f64>),
     Unproved,
 }
 
@@ -928,6 +930,9 @@ pub struct Derivation {
     pub reports: Vec<crate::RefinementReport>,
     pub proved: Vec<J>,
     pub rungs: Vec<Rung>,
+    /// The wall time of the attempt that proved each (same order) — what a certification records
+    /// as `laws[].secs`, so a verified run can tell a proof its cap allows from one it never will.
+    pub secs: Vec<f64>,
 }
 
 /// [`derive_self_facts`] with optional per-law HINTS (from a certification): a law hinted
@@ -960,13 +965,19 @@ fn derive_self_facts_inner(
     hints: Option<&LawHints>,
     solver: &str,
 ) -> Derivation {
-    // Whether a hint keeps `law` from being attempted at `rung`.
+    let budget = LAW_BUDGET.with(|b| b.get());
+    // Whether a hint keeps `law` from being attempted at `rung`: hinted to another rung, hinted
+    // unproved, or proved at the certifier's in longer than this derivation's cap allows — the cap
+    // is wall-clock on one attempt, so a proof that took 59 s there cannot finish in 20 s here
+    // (2026-11-07: `rat_normalize`'s uniqueness, a staged proof of ~1 min at build, burned its full
+    // cap on every rational first run; `rat_add` cold 162 s).
+    let over_cap = |secs: Option<f64>| matches!((secs, budget), (Some(s), Some(b)) if s > b.as_secs_f64());
     let skip = |law: &J, rung: Rung| match hints.and_then(|h| h.get(&law_key(law))) {
-        Some(LawHint::ProvedBy(r)) => *r != rung,
+        Some(LawHint::ProvedBy(r, secs)) => *r != rung || over_cap(*secs),
         Some(LawHint::Unproved) => true,
         None => false,
     };
-    let mut rungs: Vec<(J, Rung)> = Vec::new();
+    let mut rungs: Vec<(J, Rung, f64)> = Vec::new();
     let shape = self_shape(sig_type, refinements, body);
     let facts = |posts: Vec<J>, laws: Vec<J>| {
         shape.clone().map(|mut s| {
@@ -978,7 +989,7 @@ fn derive_self_facts_inner(
     // Phase 1.
     let prev = crate::prove::set_self_facts(None);
     let attempt = |law: &J| {
-        law_attempt("phase 1", law, || {
+        law_attempt_timed("phase 1", law, || {
             matches!(crate::prove_property(law, Some(body), solver).0, crate::ProofOutcome::Proved)
                 || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved)
                 // A list law a bare structural induction closes (`scale_mod` preserves length) is
@@ -991,15 +1002,15 @@ fn derive_self_facts_inner(
     // wall time the slowest attempt rather than the sum (2026-11-04: `rat_normalize`'s five took
     // ~90 s in a row, four of them failing at the 20 s cap). Without a budget (`certify`, the module
     // builders) they stay sequential: the code path, and so every build, is unchanged.
-    let budget = LAW_BUDGET.with(|b| b.get());
     let tried: Vec<&J> = laws.iter().filter(|l| !skip(l, Rung::Plain)).collect();
-    let plain: Vec<J> = if let Some(b) = budget.filter(|_| tried.len() > 1) {
+    let plain: Vec<(J, f64)> = if let Some(b) = budget.filter(|_| tried.len() > 1) {
         let hits = parallel_law_attempts(&tried, b, &attempt);
-        tried.iter().zip(hits).filter(|(_, p)| *p).map(|(l, _)| (*l).clone()).collect()
+        tried.iter().zip(hits).filter(|(_, (p, _))| *p).map(|(l, (_, s))| ((*l).clone(), s)).collect()
     } else {
-        tried.iter().filter(|law| attempt(law)).map(|l| (*l).clone()).collect()
+        tried.iter().filter_map(|law| { let (p, s) = attempt(law); p.then(|| ((*law).clone(), s)) }).collect()
     };
-    rungs.extend(plain.iter().map(|l| (l.clone(), Rung::Plain)));
+    rungs.extend(plain.iter().map(|(l, s)| (l.clone(), Rung::Plain, *s)));
+    let plain: Vec<J> = plain.into_iter().map(|(l, _)| l).collect();
     // Phase 2.
     crate::prove::set_self_facts(if plain.is_empty() { None } else { facts(vec![], plain.clone()) });
     let reports = check_refinements(sig_type, refinements, body, solver);
@@ -1012,7 +1023,7 @@ fn derive_self_facts_inner(
     // Phase 3 (recursive bodies only — the rung that reads the facts is the induction one).
     let mut proved = plain.clone();
     let phase3 = |law: &J| {
-        law_attempt("phase 3", law, || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved))
+        law_attempt_timed("phase 3", law, || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved))
     };
     let open_after_1 = laws.iter().filter(|l| !proved.contains(l) && !skip(l, Rung::WithSelfFacts)).count();
     if shape.is_some() && (!posts.is_empty() || !plain.is_empty()) && crate::prove::references_self(body) && budget.is_some() && open_after_1 > 1 {
@@ -1024,11 +1035,11 @@ fn derive_self_facts_inner(
             crate::prove::set_self_facts(facts(posts.clone(), proved.clone()));
             let open: Vec<&J> = laws.iter().filter(|l| !proved.contains(l) && !skip(l, Rung::WithSelfFacts)).collect();
             let hits = parallel_law_attempts(&open, budget.unwrap(), &phase3);
-            if !hits.iter().any(|h| *h) {
+            if !hits.iter().any(|(h, _)| *h) {
                 break;
             }
-            let new: Vec<&J> = open.iter().zip(&hits).filter(|(_, h)| **h).map(|(l, _)| *l).collect();
-            rungs.extend(new.iter().map(|l| ((*l).clone(), Rung::WithSelfFacts)));
+            let new: Vec<&J> = open.iter().zip(&hits).filter(|(_, (h, _))| *h).map(|(l, _)| *l).collect();
+            rungs.extend(open.iter().zip(&hits).filter(|(_, (h, _))| *h).map(|(l, (_, s))| ((*l).clone(), Rung::WithSelfFacts, *s)));
             // Record order, so the facts (and the SMT text) do not depend on which worker finished first.
             proved = laws.iter().filter(|l| proved.contains(l) || new.contains(l)).cloned().collect();
             if new.len() == open.len() {
@@ -1041,9 +1052,10 @@ fn derive_self_facts_inner(
             if proved.contains(law) || skip(law, Rung::WithSelfFacts) {
                 continue;
             }
-            if phase3(law) {
+            let (hit, secs) = phase3(law);
+            if hit {
                 proved.push(law.clone());
-                rungs.push((law.clone(), Rung::WithSelfFacts));
+                rungs.push((law.clone(), Rung::WithSelfFacts, secs));
                 // A law proved here is a fact for the laws after it (in the record's order): gcd
                 // associativity rests on the greatest-divisor law, which may itself have needed
                 // the posts (2026-10-30, the divisibility rung).
@@ -1071,13 +1083,13 @@ fn derive_self_facts_inner(
                 c.laws = proved.clone();
                 // The staged rung is allowed here (`prove::in_self_contract_phase`): a law it
                 // proves on the derived record — uniqueness on `rat_normalize` — is a contract law.
-                let proved_here = law_attempt("phase 4", law, || {
+                let (proved_here, secs) = law_attempt_timed("phase 4", law, || {
                     let outcome = crate::prove::in_self_contract_phase(|| crate::prove::prove_from_self_contract(law, "fn_self_contract", c, nat_positions, solver).0);
                     matches!(outcome, crate::ProofOutcome::Proved)
                 });
                 if proved_here {
                     proved.push(law.clone());
-                    rungs.push((law.clone(), Rung::SelfContract));
+                    rungs.push((law.clone(), Rung::SelfContract, secs));
                 }
             }
         }
@@ -1096,11 +1108,12 @@ fn derive_self_facts_inner(
                 let mut c = s.clone();
                 c.posts = posts.clone();
                 c.laws = proved.clone();
-                if law_attempt("phase 5", law, || {
+                let (hit, secs) = law_attempt_timed("phase 5", law, || {
                     matches!(crate::prove_self_law_through_definitions(law, body, c, nat_positions, def, solver).0, crate::ProofOutcome::Proved)
-                }) {
+                });
+                if hit {
                     proved.push(law.clone());
-                    rungs.push((law.clone(), Rung::SelfDefinition));
+                    rungs.push((law.clone(), Rung::SelfDefinition, secs));
                 }
             }
         }
@@ -1120,50 +1133,61 @@ fn derive_self_facts_inner(
                 c.symbol = "self_contract".to_string();
                 c.posts = posts.clone();
                 c.laws = proved.clone();
-                if law_attempt("phase 6", law, || {
+                let (hit, secs) = law_attempt_timed("phase 6", law, || {
                     matches!(crate::prove::prove_from_self_contract_by_induction(law, "fn_self_contract", c, nat_positions, solver).0, crate::ProofOutcome::Proved)
-                }) {
+                });
+                if hit {
                     proved.push(law.clone());
-                    rungs.push((law.clone(), Rung::ContractInduction));
+                    rungs.push((law.clone(), Rung::ContractInduction, secs));
                 }
             }
         }
     }
     // The rung of each proved law, in proof order (phase 3's rounds reorder `proved` to record order).
-    let rungs = proved.iter().map(|l| rungs.iter().find(|(x, _)| x == l).map(|(_, r)| *r).unwrap_or(Rung::Plain)).collect();
-    Derivation { reports, proved, rungs }
+    let found: Vec<(Rung, f64)> =
+        proved.iter().map(|l| rungs.iter().find(|(x, _, _)| x == l).map(|(_, r, s)| (*r, *s)).unwrap_or((Rung::Plain, 0.0))).collect();
+    Derivation { reports, proved, rungs: found.iter().map(|(r, _)| *r).collect(), secs: found.iter().map(|(_, s)| *s).collect() }
 }
 
 /// `attempt` on each law at once, on ≤ nproc/2 (max 4) worker threads, each with the caller's prover
-/// context installed and every attempt capped at `budget`. Whether each law was proved, in order.
-fn parallel_law_attempts(laws: &[&J], budget: std::time::Duration, attempt: &(dyn Fn(&J) -> bool + Sync)) -> Vec<bool> {
+/// context installed and every attempt capped at `budget`. Whether each law was proved and the
+/// attempt's seconds, in order.
+fn parallel_law_attempts(laws: &[&J], budget: std::time::Duration, attempt: &(dyn Fn(&J) -> (bool, f64) + Sync)) -> Vec<(bool, f64)> {
     let ctx = crate::prove::capture_context();
     let workers = std::thread::available_parallelism().map(|n| n.get() / 2).unwrap_or(1).clamp(1, 4);
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let proved: Vec<std::sync::atomic::AtomicBool> = laws.iter().map(|_| std::sync::atomic::AtomicBool::new(false)).collect();
+    let results: Vec<std::sync::Mutex<(bool, f64)>> = laws.iter().map(|_| std::sync::Mutex::new((false, 0.0))).collect();
     std::thread::scope(|s| {
         for _ in 0..workers.min(laws.len()) {
             let ctx = ctx.clone();
-            let (next, proved) = (&next, &proved);
+            let (next, results) = (&next, &results);
             s.spawn(move || {
                 crate::prove::install_context(ctx);
                 with_law_budget(Some(budget), || loop {
                     let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let Some(law) = laws.get(i) else { break };
-                    proved[i].store(attempt(law), std::sync::atomic::Ordering::Relaxed);
+                    *results[i].lock().unwrap() = attempt(law);
                 });
             });
         }
     });
-    proved.iter().map(|p| p.load(std::sync::atomic::Ordering::Relaxed)).collect()
+    results.iter().map(|r| *r.lock().unwrap()).collect()
 }
 
 /// One attempt at a law. `NL_DERIVED_DEBUG=1` prints the solver queries it spent (measured
 /// 2026-11-03: failing attempts on `binomial`'s open laws spend 31–65 queries at ~1 s each, while
 /// `rat_normalize`'s `idempotent` PROVES after 286 — no query budget separates the two).
 pub fn law_attempt(phase: &str, law: &J, f: impl FnOnce() -> bool) -> bool {
+    law_attempt_timed(phase, law, f).0
+}
+
+/// [`law_attempt`] with the attempt's cost in seconds — its wall time plus what the query-cache
+/// answers it read cost when first asked (`prove::query_cache_secs`): the cold cost, which is what a
+/// certification records as `laws[].secs` for a proved law.
+pub fn law_attempt_timed(phase: &str, law: &J, f: impl FnOnce() -> bool) -> (bool, f64) {
     let before = crate::prove::queries_run();
     let hits_before = crate::prove::query_cache_hits();
+    let cached_secs_before = crate::prove::query_cache_secs();
     let started = std::time::Instant::now();
     let deadline = LAW_BUDGET.with(|b| b.get()).map(|b| started + b);
     let proved = crate::prove::with_query_deadline(deadline, f);
@@ -1183,7 +1207,7 @@ pub fn law_attempt(phase: &str, law: &J, f: impl FnOnce() -> bool) -> bool {
         let verdict = if proved { "proved  " } else { "unproved" };
         progress_line!("   law      {verdict} {:>6.1} s  {}", started.elapsed().as_secs_f64(), text());
     }
-    proved
+    (proved, started.elapsed().as_secs_f64() + crate::prove::query_cache_secs() - cached_secs_before)
 }
 
 thread_local! {
@@ -1275,7 +1299,7 @@ pub fn progress() -> bool {
 }
 
 /// Every `fn_<64 hex>` address in `s` cut to `fn_<8 hex>…` (progress lines only).
-fn short_addresses(s: &str) -> String {
+pub(crate) fn short_addresses(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(i) = rest.find("fn_") {
@@ -1596,7 +1620,7 @@ pub fn complete_law_results(
     records: &HashMap<String, J>,
     bodies: Option<&HashMap<String, J>>,
     solver: &str,
-) -> Option<Vec<(String, Option<Rung>)>> {
+) -> Option<Vec<(String, Option<(Rung, f64)>)>> {
     if cert.laws_complete {
         return Some(cert.law_results.clone());
     }
@@ -1678,7 +1702,7 @@ fn certify_with_view(
     let sig = record.pointer("/signature");
     let mut checks: Vec<CertCheck> = Vec::new();
     let (mut laws, mut laws_complete) = (Vec::new(), false);
-    let mut law_results: Vec<(String, Option<Rung>)> = Vec::new();
+    let mut law_results: Vec<(String, Option<(Rung, f64)>)> = Vec::new();
     let mut self_contract = None;
 
     // 0. Schema (finding 12): "certified" must imply "the commons gate will accept it". A v0.2
@@ -1769,13 +1793,13 @@ fn certify_with_view(
         let started = std::time::Instant::now();
         let def = view.map(|v| move |t: &str| v.callee_def(t));
         let hints = view.zip(record.get("hash").and_then(|h| h.as_str())).and_then(|(v, h)| v.hints_for(h));
-        let (reports, proved, rungs) = with_law_budget(view.and_then(|v| v.law_budget), || {
+        let (reports, proved, rungs, secs) = with_law_budget(view.and_then(|v| v.law_budget), || {
             let d = derive_self_facts_hinted(sig_type, &refinements, &law_exprs(record), body, &nat_positions, def.as_ref().map(|d| d as &dyn Fn(&str) -> _), hints, solver);
-            (d.reports, d.proved, d.rungs)
+            (d.reports, d.proved, d.rungs, d.secs)
         });
         law_results = record.get("properties").and_then(|p| p.as_array()).into_iter().flatten()
             .filter_map(|p| Some((p.get("name")?.as_str()?.to_string(), p.get("expr")?)))
-            .map(|(name, expr)| (name, proved.iter().position(|l| l == expr).map(|i| rungs[i])))
+            .map(|(name, expr)| (name, proved.iter().position(|l| l == expr).map(|i| (rungs[i], secs[i]))))
             .collect();
         let declared_posts: Vec<J> = refinements
             .iter()
@@ -2170,13 +2194,28 @@ mod tests {
         assert_eq!(plain.proved, vec![laws[0].clone()], "unhinted: the true law proves");
         let rung = plain.rungs[0];
 
-        let right: LawHints = [(law_key(&laws[0]), LawHint::ProvedBy(rung))].into_iter().collect();
+        let right: LawHints = [(law_key(&laws[0]), LawHint::ProvedBy(rung, None))].into_iter().collect();
         let d = derive(Some(&right));
         assert_eq!((d.proved, d.rungs), (vec![laws[0].clone()], vec![rung]), "hinted to its own rung it still proves there");
+        assert_eq!(d.secs.len(), 1, "the proving attempt's seconds come with the rung");
 
         let other = if rung == Rung::ContractInduction { Rung::SelfContract } else { Rung::ContractInduction };
-        let wrong: LawHints = [(law_key(&laws[0]), LawHint::ProvedBy(other))].into_iter().collect();
+        let wrong: LawHints = [(law_key(&laws[0]), LawHint::ProvedBy(other, None))].into_iter().collect();
         assert!(!derive(Some(&wrong)).proved.contains(&laws[0]), "hinted to a rung that cannot prove it, it is not proved");
+
+        // Proved at its rung but in longer than a cap allows: not attempted under that cap (no query
+        // beyond the posts' own), attempted — and proved — without one.
+        let slow: LawHints = [(law_key(&laws[0]), LawHint::ProvedBy(rung, Some(1000.0))), (law_key(&laws[1]), LawHint::Unproved)].into_iter().collect();
+        let posts_only_queries = {
+            let b = crate::prove::queries_run();
+            let _ = check_refinements(&sig, &refinements, &body, solver);
+            crate::prove::queries_run() - b
+        };
+        let before = crate::prove::queries_run();
+        let capped = with_law_budget(Some(std::time::Duration::from_secs(20)), || derive(Some(&slow)));
+        assert!(capped.proved.is_empty(), "a proof the cap cannot hold is not attempted under it");
+        assert_eq!(crate::prove::queries_run() - before, posts_only_queries, "no solver query beyond the posts' own");
+        assert_eq!(derive(Some(&slow)).proved, vec![laws[0].clone()], "without a cap the seconds do not matter");
 
         let unproved: LawHints = [(law_key(&laws[0]), LawHint::Unproved), (law_key(&laws[1]), LawHint::Unproved)].into_iter().collect();
         let before = crate::prove::queries_run();

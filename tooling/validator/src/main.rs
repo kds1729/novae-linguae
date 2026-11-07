@@ -1724,7 +1724,9 @@ fn cmd_certify(
             let laws: Vec<serde_json::Value> = results
                 .iter()
                 .map(|(name, rung)| match rung {
-                    Some(r) => serde_json::json!({ "name": name, "verdict": "PROVED", "rung": r.name() }),
+                    // `secs` to a tenth: the proving attempt's cold cost at this certifier's, so a run under a
+                    // cap can tell a proof the cap allows from one it never will.
+                    Some((r, secs)) => serde_json::json!({ "name": name, "verdict": "PROVED", "rung": r.name(), "secs": (secs * 10.0).round() / 10.0 }),
                     None => serde_json::json!({ "name": name, "verdict": "UNPROVED" }),
                 })
                 .collect();
@@ -3142,15 +3144,27 @@ fn cmd_orchestrate_verified(
             let (hints, used) = nl_validator::commons_client::law_hints_from_node(url, &recs);
             for (f, cert) in &used {
                 let h = &hints[f];
-                let unproved: Vec<String> = recs[f]
-                    .get("properties")
-                    .and_then(|p| p.as_array())
-                    .into_iter()
-                    .flatten()
-                    .filter(|p| p.get("expr").is_some_and(|e| h.get(&nl_validator::certify::law_key(e)) == Some(&nl_validator::certify::LawHint::Unproved)))
-                    .filter_map(|p| p.get("name")?.as_str().map(String::from))
-                    .collect();
-                let skip = if unproved.is_empty() { String::new() } else { format!("; not attempting {} (unproved there)", unproved.join(", ")) };
+                let named = |pick: &dyn Fn(&nl_validator::certify::LawHint) -> bool| -> Vec<String> {
+                    recs[f]
+                        .get("properties")
+                        .and_then(|p| p.as_array())
+                        .into_iter()
+                        .flatten()
+                        .filter(|p| p.get("expr").is_some_and(|e| h.get(&nl_validator::certify::law_key(e)).is_some_and(pick)))
+                        .filter_map(|p| p.get("name")?.as_str().map(String::from))
+                        .collect()
+                };
+                let unproved = named(&|h| *h == nl_validator::certify::LawHint::Unproved);
+                // Proved there, but in longer than this run's cap on one attempt: not attempted either.
+                let cap = nl_validator::certify::law_budget();
+                let slow = named(&|h| matches!((h, cap), (nl_validator::certify::LawHint::ProvedBy(_, Some(s)), Some(b)) if *s > b.as_secs_f64()));
+                let mut skip = String::new();
+                if !unproved.is_empty() {
+                    skip += &format!("; not attempting {} (unproved there)", unproved.join(", "));
+                }
+                if !slow.is_empty() {
+                    skip += &format!("; not attempting {} (proved there in longer than the {} s cap)", slow.join(", "), cap.map(|b| b.as_secs()).unwrap_or(0));
+                }
                 eprintln!("    hints  {}: {} law(s) from {}…{skip}", label(f), h.len(), &cert[..cert.len().min(13)]);
             }
             hints

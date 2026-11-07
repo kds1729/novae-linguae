@@ -2481,15 +2481,25 @@ pub fn with_query_deadline<T>(deadline: Option<std::time::Instant>, f: impl FnOn
 /// see [`run_smt_inner`]. Measured need (2026-11-06, a z3 capture of six cold verified runs): a
 /// cold `binomial` sent 84 byte-identical queries (later phases re-asking failed scripts), 67 s of
 /// solver time; lcm/rat_* 82–147 duplicates each.
-static QUERY_CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], SatAnswer>>> = std::sync::OnceLock::new();
+static QUERY_CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], (SatAnswer, f64)>>> = std::sync::OnceLock::new();
 thread_local! {
     /// Queries on this thread answered from [`QUERY_CACHE`] (for `NL_DERIVED_DEBUG`).
     static QUERY_CACHE_HITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// The solver seconds those answers cost when first asked — charged to the attempt that reads
+    /// them, so a law's recorded proof time (`laws[].secs`) is what the proof costs cold even when
+    /// an earlier derivation in the process already asked its queries (`certify` derives a record
+    /// as its own witness first, then as the subject: every law read 0.0 s, 2026-11-07).
+    static QUERY_CACHE_SECS: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
 }
 
 /// Queries on this thread answered from the query cache so far (counted in [`queries_run`] too).
 pub fn query_cache_hits() -> u64 {
     QUERY_CACHE_HITS.with(|c| c.get())
+}
+
+/// The solver seconds the query-cache answers read on this thread cost when first asked.
+pub fn query_cache_secs() -> f64 {
+    QUERY_CACHE_SECS.with(|c| c.get())
 }
 
 fn query_cache_on() -> bool {
@@ -2523,13 +2533,15 @@ fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> 
     }
     let key = query_key(script, solver, secs, rlimit);
     let cache = QUERY_CACHE.get_or_init(Default::default);
-    if let Some(a) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+    if let Some((a, cost)) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         QUERY_CACHE_HITS.with(|c| c.set(c.get() + 1));
+        QUERY_CACHE_SECS.with(|c| c.set(c.get() + cost));
         return Ok(a.clone());
     }
+    let started = std::time::Instant::now();
     let (answer, keep) = run_smt_uncached(script, solver, secs, rlimit, cutoff)?;
     if keep {
-        cache.lock().unwrap_or_else(|e| e.into_inner()).insert(key, answer.clone());
+        cache.lock().unwrap_or_else(|e| e.into_inner()).insert(key, (answer.clone(), started.elapsed().as_secs_f64()));
     }
     Ok(answer)
 }

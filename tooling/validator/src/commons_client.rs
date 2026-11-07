@@ -353,7 +353,7 @@ pub fn law_hints_from_node(
             let Some(expr) = law.get("name").and_then(|n| n.as_str()).and_then(|n| exprs.get(n)) else { continue };
             let hint = match law.get("verdict").and_then(|v| v.as_str()) {
                 Some("PROVED") => match law.get("rung").and_then(|r| r.as_str()).and_then(crate::certify::Rung::parse) {
-                    Some(r) => crate::certify::LawHint::ProvedBy(r),
+                    Some(r) => crate::certify::LawHint::ProvedBy(r, law.get("secs").and_then(|s| s.as_f64())),
                     None => continue,
                 },
                 Some("UNPROVED") => crate::certify::LawHint::Unproved,

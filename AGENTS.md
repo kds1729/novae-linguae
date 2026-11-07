@@ -49,9 +49,10 @@ your machine, keyed by content address and validator version), so the NEXT run o
 takes seconds (measured on v0.1.25: `rat_sub` 126 s, then `rat_mul` 3.5 s; `lcm` 93 s; `fib(100)`
 9 s). `NL_DERIVED_CACHE=0` turns that off; a path puts it elsewhere. Over a node the run also
 reads each function's certifications for per-law HINTS (which proof rung worked for each law at
-the certifier's, and which laws its full derivation could not prove) and prints a `hints  <name>: …`
-line per function: the capped law attempts go straight to the rung that works and skip the ones
-that never do. Hints only choose which attempts run — every law reported proved, your run proved;
+the certifier's and how long it took, and which laws its full derivation could not prove) and prints
+a `hints  <name>: …` line per function: the capped law attempts go straight to the rung that works
+and skip the ones that never do, and the ones whose proof took longer at the certifier's than the
+cap allows here. Hints only choose which attempts run — every law reported proved, your run proved;
 `NL_LAW_HINTS=0` turns them off.
 
 ## In three sentences
