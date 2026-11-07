@@ -38,12 +38,12 @@ here" — it does not fail the run unless you pass `--require-laws`. Each law AT
 run is capped at 20 s (`NL_LAW_BUDGET_SECS`; `0` = no cap, every law tried to the end — slower,
 may prove more): the certification itself never depends on the cap (a contract the capped pass
 cannot decide is re-proved without it), only which laws are reported proved. The FIRST run over
-a set of callees is the slow one — ~2 min for a rational function over `rat_normalize` (its
-callee laws are attempted in parallel), ~1.5 min for `lcm`, a few seconds for `binomial`; the
-`CONFIRMED` line ends with the run's wall time. **Run verified runs ONE AT A TIME**: the law caps
-are wall-clock, so two runs sharing the CPU each take longer and may report fewer laws proved (a
-stranger running `lcm` and `rat_add` together waited 153 s for `rat_add`). For several goals over
-the same callees, run them in sequence: the second reuses the first's proofs (below). A verified run
+a set of callees is the slow one — ~3 min for a rational function over `rat_normalize` (measured
+on v0.1.33: `rat_add` 162 s, most of it `rat_normalize`'s laws, attempted in parallel), ~1.5 min
+for `lcm`, a few seconds for `binomial`; the `CONFIRMED` line ends with the run's wall time.
+**Run verified runs ONE AT A TIME**: the law caps are wall-clock, so two runs sharing the CPU each
+take longer and may report fewer laws proved, and neither reuses the other's proofs. For several
+goals over the same callees, run them in sequence: the second reuses the first's (below). A verified run
 keeps every callee contract it derived in `~/.cache/nl-validator/derived` (each entry a proof made on
 your machine, keyed by content address and validator version), so the NEXT run over the same callees
 takes seconds (measured on v0.1.25: `rat_sub` 126 s, then `rat_mul` 3.5 s; `lcm` 93 s; `fib(100)`
