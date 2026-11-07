@@ -38,9 +38,10 @@ here" — it does not fail the run unless you pass `--require-laws`. Each law AT
 run is capped at 20 s (`NL_LAW_BUDGET_SECS`; `0` = no cap, every law tried to the end — slower,
 may prove more): the certification itself never depends on the cap (a contract the capped pass
 cannot decide is re-proved without it), only which laws are reported proved. The FIRST run over
-a set of callees is the slow one — ~3 min for a rational function over `rat_normalize` (measured
-on v0.1.33: `rat_add` 162 s, most of it `rat_normalize`'s laws, attempted in parallel), ~1.5 min
-for `lcm`, a few seconds for `binomial`; the `CONFIRMED` line ends with the run's wall time.
+a set of callees is the slow one — ~2.5 min for a rational function over `rat_normalize` (measured
+on v0.1.34: `rat_add` 134 s, most of it `rat_normalize`'s contract; a law proved at the certifier's
+in longer than the cap is not attempted), ~1.5 min for `lcm`, a few seconds for `binomial`; the
+`CONFIRMED` line ends with the run's wall time.
 **Run verified runs ONE AT A TIME**: the law caps are wall-clock, so two runs sharing the CPU each
 take longer and may report fewer laws proved, and neither reuses the other's proofs. For several
 goals over the same callees, run them in sequence: the second reuses the first's (below). A verified run
