@@ -96,7 +96,7 @@ tuple-sorted contracts, which every process of a round had been re-deriving):
 | `rat_coprime_holds` | checker | — | `lowest_terms` **PROVED** (round 1: UNSUPPORTED; round 2: UNKNOWN) | EXHAUSTIVE 81 |
 | `rat_neg` | | `snd = d` SOUND | involution ×2 **PROVED** | EXHAUSTIVE 81 ×2 |
 | `rat_inv` | pre `n ≠ 0` | `fst·n = d·snd` SOUND (round 4: UNVERIFIABLE) | `denominator_positive` **PROVED** (round 4: UNSUPPORTED) | EXHAUSTIVE 81 |
-| `rat_add` | 4 ints, pre `b, d ≥ 1` | `snd ≥ 1`, `fst·(b·d) = (a·d + c·b)·snd` both SOUND | `commutative` **PROVED**; `congruent` **PROVED** (round 8: equal cross-multiplied sums give the same pair — one instance of normalize's inherited `unique`) | HELD 400 ×2 |
+| `rat_add` | 4 ints, pre `b, d ≥ 1` | `snd ≥ 1`, `fst·(b·d) = (a·d + c·b)·snd`, `gcd(\|fst\|, snd) = 1` (round 23) all SOUND | `commutative` **PROVED**; `congruent` **PROVED** (round 8: equal cross-multiplied sums give the same pair — one instance of normalize's inherited `unique`) | HELD 400 ×2 |
 | `rat_sub` | | both SOUND | `self_difference_is_zero` **PROVED** | EXHAUSTIVE 81 |
 | `rat_mul` | | both SOUND | `commutative`, `zero_annihilates` **PROVED** | HELD 400, EXHAUSTIVE 729 |
 | `rat_eq` | 4 ints → bool | `result = (a·d = c·b)` SOUND (round 6) | `reflexive`, `symmetric` **PROVED** | EXHAUSTIVE 81, HELD 400 |
@@ -108,7 +108,7 @@ tuple-sorted contracts, which every process of a round had been re-deriving):
 
 Totals: 14/14 run PASS, 14/14 certified, termination SOUND 14/14, **complexity SOUND 14/14**
 (round 9; rounds 1–8: SOUND 7 / UNVERIFIABLE 7 — every record passing a product to a callee),
-contracts 12 SOUND / 0, laws 24 PROVED / 0 UNKNOWN / 0 UNSUPPORTED, 24/24 held (bounded; no skipped cases anywhere — every law is guarded, `d == 0 ||`,
+contracts 16 SOUND / 0 (round 23; every pre/post checked), laws 24 PROVED / 0 UNKNOWN / 0 UNSUPPORTED, 24/24 held (bounded; no skipped cases anywhere — every law is guarded, `d == 0 ||`,
 `b < 1 ||`, and the guards decide) and 22/22 held (`--wide`, 200 cases sampled across magnitudes;
 `associative` reports 194 held and 6 skipped — three-fraction sums at numerators near 10¹⁷
 overflow the evaluator's 128-bit integers, and the skipped-case report says so rather than
@@ -131,6 +131,11 @@ post `gcd(|fst|, snd) = 1` — SOUND, read off `rat_normalize`'s post. NOT `rat_
 `rat_add_assoc_holds`' `associative` went PROVED → UNKNOWN (13 min, measured twice — four `rat_add`
 applications each carrying a gcd atom drown the query), so the first round-10 build (`r9`, 46.6 min)
 was discarded and the post dropped. Laws 24/0/0, complexity 14/14, as in round 9.
+Round 23 (2026-11-06, stranger 28 — a verified `rat_add` vouched nothing about reduction): `rat_add`
+gained the lowest-terms post after all — SOUND — and `associative` stays PROVED through the
+validator's RELEVANCE retry (an undecided obligation is retried without callee facts that apply
+callees it never applies: here the four `gcd` atoms; `spec/evaluation.md`). Built with log
+`rational-tier-poc-x23b.log`; every other record as in round 22.
 Round 9 (38.1 min, log `rational-build-round9.log`, peak 979 MB, nl-validator at `78ba9fc`): no
 record changed; complexity SOUND 14/14 (rounds 1–8: 7/14) from the validator's polylogarithmic
 fold (`6a14d11`); laws 24/0/0 and every contract as in round 8. A first round-9 start ran beside

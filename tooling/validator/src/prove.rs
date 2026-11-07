@@ -669,6 +669,11 @@ thread_local! {
     /// form even when the instances alone are unsat in 10 ms (`isqrt(n·n) = n`; measured). The
     /// instances are consequences of the axioms, so the instances-only certificate is as sound.
     static CONTRACT_QUANTIFIERS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    /// The RELEVANCE rung: a callee's post or law that applies some OTHER callee the obligation
+    /// never applies is left out. Four `rat_add` applications each carrying lowest terms
+    /// (`gcd(|fst|, snd) = 1`) drowned `rat_add_assoc_holds`' associativity, which needs only the
+    /// value posts (stranger 28, measured twice before in round 10). Fewer hypotheses: as sound.
+    static RELEVANT_FACTS_ONLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Run `f` with the contracts' quantified axioms suppressed (instances only).
@@ -677,6 +682,30 @@ fn without_contract_quantifiers<T>(f: impl FnOnce() -> T) -> T {
     let out = f();
     CONTRACT_QUANTIFIERS.with(|q| q.set(prev));
     out
+}
+
+/// Run `f` with the callee facts that bring in callees the obligation does not apply left out.
+fn with_relevant_facts_only<T>(f: impl FnOnce() -> T) -> T {
+    let prev = RELEVANT_FACTS_ONLY.with(|q| q.replace(true));
+    let out = f();
+    RELEVANT_FACTS_ONLY.with(|q| q.set(prev));
+    out
+}
+
+/// Whether `node` applies a linked callee other than `target` outside `applied` (the relevance rung).
+fn applies_other_callee(node: &J, target: &str, applied: &BTreeSet<String>) -> bool {
+    match node {
+        J::Object(m) => {
+            if let Some(op) = m.get("op").and_then(|o| o.as_str()) {
+                if op != target && !applied.contains(op) && callee_contract(op).is_some() {
+                    return true;
+                }
+            }
+            m.values().any(|v| applies_other_callee(v, target, applied))
+        }
+        J::Array(a) => a.iter().any(|v| applies_other_callee(v, target, applied)),
+        _ => false,
+    }
 }
 
 /// Lower an obligation's predicate with callee-application recording on.
@@ -1173,6 +1202,8 @@ fn callee_preamble() -> Result<(String, String, bool)> {
     let mut used = take_callees_used();
     let mut apps = take_callee_apps();
     let any = !used.is_empty();
+    let relevant = RELEVANT_FACTS_ONLY.with(|r| r.get());
+    let applied = used.clone();
     let retry = DIVISIBILITY_CALLEES.with(|d| d.get());
     // The witness rung's additions (see `WITNESS_CALLEES`): rounds, witness callees, transitive
     // instances, pairs, Int-argument candidates — a further retry, never the divisibility one.
@@ -1236,6 +1267,9 @@ fn callee_preamble() -> Result<(String, String, bool)> {
             }
             let binders = c.params.iter().zip(&c.param_sorts).map(|(p, s)| format!("({p} {})", s.smt())).collect::<Vec<_>>().join(" ");
             for post in &c.posts {
+                if relevant && applies_other_callee(post, target, &applied) {
+                    continue;
+                }
                 // The post lowered in the callee's parameter scope, its own callee applications
                 // recorded (in that scope) for the transitive instances below.
                 let prev_en = CALLEE_APPS_ENABLED.with(|e| e.replace(true));
@@ -1287,6 +1321,9 @@ fn callee_preamble() -> Result<(String, String, bool)> {
                 let Some(vars_arr) = law.get("vars").and_then(|v| v.as_array()) else { continue };
                 let vars: Vec<String> = vars_arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
                 let Some(pred) = law.get("body") else { continue };
+                if relevant && applies_other_callee(pred, target, &applied) {
+                    continue;
+                }
                 let pred = law_about(pred, target);
                 let Ok(var_sorts) = infer_var_sorts(&pred, &vars, Some(&c.param_sorts)) else { continue };
                 let mut lenv: BTreeMap<String, Sort> = var_sorts.clone();
@@ -2636,7 +2673,21 @@ pub fn prove_property_in_domain(
     solver: &str,
 ) -> (ProofOutcome, Option<Certificate>) {
     let prev = DIVISIBILITY_SOLVER.with(|s| s.replace(Some(solver.to_string())));
-    let out = prove_property_in_domain_inner(prop_expr, body, self_nat_positions, solver);
+    let mut out = prove_property_in_domain_inner(prop_expr, body, self_nat_positions, solver);
+    // The RELEVANCE retry (see `RELEVANT_FACTS_ONLY`): an undecided obligation is tried once more,
+    // the whole ladder, without the callee facts that bring in callees it never applies — only
+    // when that leaves something out (otherwise it is the same ladder over again).
+    if matches!(out.0, ProofOutcome::Unknown) && !RELEVANT_FACTS_ONLY.with(|r| r.get()) && !past_deadline() {
+        let full = build_certificate_in_domain(prop_expr, body, self_nat_positions);
+        let rel = with_relevant_facts_only(|| build_certificate_in_domain(prop_expr, body, self_nat_positions));
+        let changed = matches!((full, rel), (Ok(f), Ok(r)) if r.uses_callees && r.smt != f.smt);
+        if changed {
+            let retry = with_relevant_facts_only(|| prove_property_in_domain_inner(prop_expr, body, self_nat_positions, solver));
+            if matches!(retry.0, ProofOutcome::Proved) {
+                out = retry;
+            }
+        }
+    }
     DIVISIBILITY_SOLVER.with(|s| *s.borrow_mut() = prev);
     out
 }
@@ -4961,6 +5012,33 @@ mod tests {
         let decl_b = smt.find("(declare-fun callee_bbbb").expect("B declared");
         let use_b = smt.find("(callee_bbbb ").expect("B used in A's axiom");
         assert!(decl_b < use_b, "B must be declared before A's axioms mention it:\n{smt}");
+    }
+
+    /// The relevance filter: a callee post that applies another callee the obligation never applies
+    /// (A's `B(result) == 1`) is left out, a post that does not (`A`'s `result >= 0`) stays — and
+    /// the obligation that needs only the latter still proves without the former.
+    #[test]
+    fn the_relevance_filter_drops_facts_about_callees_the_goal_never_applies() {
+        let Some(solver) = solver() else { return };
+        let a = format!("fn_{}", "1a".repeat(32));
+        let b = format!("fn_{}", "1b".repeat(32));
+        let contract = |symbol: &str, posts: Vec<J>| CalleeContract {
+            symbol: symbol.into(), params: vec!["x".into()], param_sorts: vec![Sort::Int], ret: Sort::Int,
+            pres: vec![], posts, laws: vec![], nat_positions: BTreeSet::new(),
+        };
+        let a_contract = contract("callee_1a1a", vec![op("ge", vec![v("result"), lit(0)]), op("eq", vec![op(&b, vec![v("result")]), lit(1)])]);
+        let b_contract = contract("callee_1b1b", vec![]);
+        let call_a = json!({ "kind": "app", "fn": { "kind": "lit", "value": { "kind": "fn_ref", "target": a } }, "args": [v("n")] });
+        let goal = law(&["n"], op("ge", vec![op("add", vec![call_a, lit(1)]), lit(1)]));
+        let prev = set_callee_contracts([(a.clone(), a_contract), (b.clone(), b_contract)].into_iter().collect());
+        let full = build_certificate(&goal, None).unwrap().smt;
+        let rel = with_relevant_facts_only(|| build_certificate(&goal, None)).unwrap().smt;
+        let (out, _) = with_relevant_facts_only(|| prove_property(&goal, None, solver));
+        set_callee_contracts(prev);
+        assert!(full.contains("(callee_1b1b "), "the full certificate states A's post about B:\n{full}");
+        assert!(!rel.contains("(callee_1b1b "), "the filtered one leaves it out:\n{rel}");
+        assert!(rel.contains("(>= x 0)") || rel.contains(">= (callee_1a1a"), "and keeps A's own post:\n{rel}");
+        assert!(matches!(out, ProofOutcome::Proved), "{out:?}");
     }
 
     /// pow_mod_naive: \b e m -> case gt(e, 0) of true -> mod(mul(self(b, sub(e, 1), m), mod(b, m)), m) | false -> mod(1, m)

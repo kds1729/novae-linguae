@@ -902,6 +902,17 @@ per process and the derived-contract cache keeps the result.
 
 *Determinism (2026-11-01).* Because the cache keeps what the rung concludes, the rung must not depend on the machine's load: every staged query runs under z3's RESOURCE limit (`rlimit` = budgeted seconds × 3 M units — the rate the rung's own hard queries spend here, so a budgeted second is about a wall second), the wall clock only a 30× backstop, and under the plain `smt` tactic — z3's default nonlinear strategy wraps sub-tactics in wall-clock `try-for` limits, which still varied the result under load (106 conclusions idle, 102 under 12 CPU burners at the same resource limit). The rung's overall budget is CHARGED (a decided query 50 ms, an undecided one its whole cap), not measured, and the steps script reports charged cost, not elapsed time, so the certificate's text is the same on every run. Measured: idle and loaded runs (2.5 vs 10.3 min) wrote byte-identical steps and finals for uniqueness on `rat_normalize`; the rational tier rebuilt byte-identical (43.3 min, was 38.1). The stepwise Euclidean checker keeps wall-clock budgets: under the same scheme the validator suite ran 4× slower (eight test threads contending for fixed resource budgets), and its variation is a premise count off by one on a law that stays PROVED.
 
+**The relevance retry (2026-11-06, stranger 28).** Every callee fact rides along at every
+application, so one strong post can drown an obligation that never needed it: given the
+lowest-terms post `gcd(|fst(result)|, snd(result)) = 1`, `rat_add` had four applications in
+`rat_add_assoc_holds`, each bringing a `gcd` term, and associativity went from PROVED to UNKNOWN
+(round 10, and again in round 23). So an obligation that the whole ladder leaves undecided is tried
+once more, the whole ladder again (`prove_property_in_domain`, `RELEVANT_FACTS_ONLY`), with every
+callee post and law that APPLIES a callee the obligation itself never applies left out — only when
+that leaves something out, so an undecided obligation without such facts pays nothing. Fewer
+hypotheses: the retry's UNSAT is the certificate's. With it `rat_add` states lowest terms like
+`rat_sub` and `rat_mul`, and associativity stays PROVED.
+
 **The stepwise checker (2026-10-18, the ninth follow-up).** The rung after the one-query
 Euclidean rung, in every ladder (`euclid::retry_stepwise`), for a goal whose residues the two
 sides reach only through the certificate's equations — the fast-exponentiation step. Measured

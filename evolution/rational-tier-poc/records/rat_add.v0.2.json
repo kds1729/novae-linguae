@@ -135,7 +135,7 @@
    }
   }
  ],
- "hash": "fn_f005b8189971a706b3f3b615c7c21b840b64be73cbc99f509b9f82a909bd86b1",
+ "hash": "fn_c65b8cb9d65a262c303d386d3034b737e3356016de0b8c33cb11ed7d8423f49f",
  "intent_tags": [
   "arithmetic/rational",
   "math/rational",
@@ -709,6 +709,51 @@
        ],
        "kind": "app",
        "op": "mul"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "fst"
+          }
+         ],
+         "kind": "app",
+         "op": "abs"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "result"
+          }
+         ],
+         "kind": "app",
+         "op": "snd"
+        }
+       ],
+       "kind": "app",
+       "op": "fn_29c0f131454ed433bfc54ffbdae2f0afc0448a41d9833351e6824ec0b787d8f6"
+      },
+      {
+       "kind": "lit",
+       "value": 1
       }
      ],
      "kind": "app",

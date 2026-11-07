@@ -285,11 +285,11 @@ def main():
                        ("post", "snd(result) >= 1"),
                        # The value: result = (a·d + c·b) / (b·d), as cross-multiplication (normalize's law
                        # at the body's application — composition by contract across the module boundary).
-                       ("post", "fst(result) * (b * d) == (a * d + c * b) * snd(result)")],
-          # Round 10 gave rat_sub/rat_mul a LOWEST-TERMS post (stranger 20); NOT rat_add: with it,
-          # rat_add_assoc_holds' `associative` went PROVED → UNKNOWN (13 min, measured twice) — four
-          # rat_add applications each carrying a gcd atom drown the query. Lowest terms of a sum is
-          # still rat_normalize's post at the body's application.
+                       ("post", "fst(result) * (b * d) == (a * d + c * b) * snd(result)"),
+                       # Lowest terms (stranger 28: without it a CONFIRMED sum vouched nothing about
+                       # reduction, unlike rat_sub/rat_mul). Round 10 left it off because
+                       # rat_add_assoc_holds' `associative` drowned in four gcd atoms; retried round 23.
+                       ("post", "{gcd}(abs(fst(result)), snd(result)) == 1")],
           props=[("commutative", "forall a b c d. self(a, b, c, d) == self(c, d, a, b)"),
                  # Round 8: CONGRUENCE — sums of equal value are the same pair. One instance of
                  # normalize's `unique` law at the body's application; the associativity checker
