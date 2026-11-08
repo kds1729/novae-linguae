@@ -75,12 +75,23 @@ _ZW = ["real part a of z = a + bi", "imaginary part b of z", "real part c of w =
 _ZW0 = _ZW[:2] + ["real part c of the divisor w = c + di",
                   "imaginary part d of w (w must be nonzero); the quotient is z/w with each component "
                   "rounded to the nearest integer, exact halves rounded UP (toward +infinity)"]
+# Round 6 (stranger 29, 2026-11-08: "the unit/sign normalization of a Gaussian gcd is unspecified in
+# what the tool proves"): the gcd's last line says what the RESULT is — one of four associates — and
+# the canonical records pin which one.
+_ZW_GCD = _ZW[:3] + ["imaginary part d of w. Result: A gcd of z and w, fixed only up to the units 1, -1, i, -i "
+                     "(which one comes out depends on the steps; gi_gcd_canonical pins it)"]
+_Z_CANON = ["real part a of z = a + bi", "imaginary part b of z. Result: the associate u * z (u one of the units 1, -1, "
+                                         "i, -i) with real part > 0 and imaginary part >= 0; 0 stays 0"]
+_ZW_GCDC = _ZW[:3] + ["imaginary part d of w. Result: the gcd of z and w as the ONE associate with real part > 0, "
+                      "imaginary part >= 0 (gi_gcd's result times a unit); 0 iff z = w = 0"]
+for _docs in (_ZW_GCD, _Z_CANON, _ZW_GCDC):
+    assert all(len(_d) <= 160 for _d in _docs), [len(_d) for _d in _docs]   # the record schema's cap
 PARAM_DOCS = {
     "gi_add": _ZW, "gi_sub": _ZW, "gi_mul": _ZW, "gi_norm_mul_holds": _ZW, "gi_conj_mul_holds": _ZW,
     "gi_neg": _Z, "gi_conj": _Z, "gi_norm": _Z, "gi_is_unit": _Z,
     "gi_round_div": ["the integer dividend n", "the integer divisor d, at least 1 (result is n/d rounded, ties up)"],
     "gi_div": _ZW0, "gi_rem": _ZW0, "gi_euclid_holds": _ZW0,
-    "gi_gcd": _ZW,
+    "gi_gcd": _ZW_GCD, "gi_canonical": _Z_CANON, "gi_gcd_canonical": _ZW_GCDC,
 }
 PARSE_ONLY = "--parse-only" in sys.argv
 
@@ -196,6 +207,15 @@ def gcd(a, b, c, d):
     while (c, d) != (0, 0):
         (a, b), (c, d) = (c, d), rem(a, b, c, d)
     return (a, b)
+
+
+def canon(a, b):
+    """The associate of a + bi in the closed-open first quadrant (a > 0, b >= 0); 0 stays 0."""
+    for _ in range(4):
+        if (a, b) == (0, 0) or (a > 0 and b >= 0):
+            return (a, b)
+        a, b = -b, a   # multiply by i
+    raise AssertionError
 
 
 def ex(args, result):
@@ -373,6 +393,52 @@ def main():
                  ("nonzero", "forall a b c d. (a == 0 && b == 0 && c == 0 && d == 0) || fst(self(a, b, c, d)) != 0 || snd(self(a, b, c, d)) != 0")],
           hints=["gaussian_gcd", "euclid_gaussian"], complexity="O(log n)")
     gauntlet("gi_gcd", prove)
+
+    # 10. Round 6 (stranger 29): a Gaussian gcd is defined only up to a unit, and gi_gcd's answer
+    # (-1 - 2i for gcd(-1 + 8i, -4 + 7i)) left the stranger to check by hand that it is an
+    # associate of 1 + 2i. `gi_canonical` rotates z by the unit that lands it in the closed-open
+    # first quadrant (a > 0, b >= 0; the four quadrants are the four rotations, 0 stays 0) — its
+    # posts say the result IS one of the four associates, lies there, and keeps the norm; its laws
+    # that it is a projection invariant under the rotations. All first-order; the norm post is a
+    # degree-2 identity per branch.
+    build("gi_canonical",
+          r"\a b -> case and (gt a 0) (ge b 0) of { true => (a, b); false => case and (le a 0) (gt b 0) of { true => (b, neg a); false => case and (lt a 0) (le b 0) of { true => (neg a, neg b); false => case lt b 0 of { true => (neg b, a); false => (0, 0) } } } }",
+          FN([INT, INT], GI),
+          [ex((3, 1), gi(3, 1)), ex((-1, 3), gi(3, 1)), ex((-3, -1), gi(3, 1)), ex((1, -3), gi(3, 1)),
+           ex((0, 0), gi(0, 0)), ex((0, 4), gi(4, 0)), ex((-2, 0), gi(2, 0)), ex((0, -5), gi(5, 0)), ex((-1, -2), gi(1, 2))],
+          refinements=[("post", "a == 0 && b == 0 || fst(result) > 0 && snd(result) >= 0"),
+                       ("post", "fst(result) == a && snd(result) == b || fst(result) == b && snd(result) == 0 - a"
+                                " || fst(result) == 0 - a && snd(result) == 0 - b || fst(result) == 0 - b && snd(result) == a"),
+                       ("post", "fst(result) * fst(result) + snd(result) * snd(result) == a * a + b * b")],
+          props=[("idempotent", "forall a b. self(fst(self(a, b)), snd(self(a, b))) == self(a, b)"),
+                 ("rotation_invariant", "forall a b. self(a, b) == self(0 - b, a)"),
+                 ("negation_invariant", "forall a b. self(a, b) == self(0 - a, 0 - b)")],
+          tags=["normalize"], hints=["canonical_associate", "first_quadrant_associate", "gaussian_normalize"], complexity="O(1)")
+    gauntlet("gi_canonical", prove)
+
+    # 10b. The gcd with its unit pinned: gi_gcd's result through gi_canonical. The first post needs
+    # gi_gcd's `nonzero` law (a law of the callee, so the posts-only pass leaves it open and the
+    # pass with callee laws closes it); the associate and norm posts are gi_canonical's posts at
+    # the application. `right_zero` needs gi_gcd's `right_zero`; `canonical_fixed` gi_canonical's
+    # `idempotent` — both callee LAWS, which the derivation's later phases bring in.
+    G = "{gi_gcd}(a, b, c, d)"
+    build("gi_gcd_canonical",
+          r"\a b c d -> case {gi_gcd} a b c d of { (g1, g2) => {gi_canonical} g1 g2 }",
+          FN([INT, INT, INT, INT], GI),
+          [ex((-1, 8, -4, 7), gi(*canon(*gcd(-1, 8, -4, 7)))), ex((4, 2, 2, 0), gi(*canon(*gcd(4, 2, 2, 0)))),
+           ex((7, 3, 2, 1), gi(*canon(*gcd(7, 3, 2, 1)))), ex((5, 0, 0, 0), gi(5, 0)), ex((0, 0, 3, 1), gi(3, 1)),
+           ex((0, 0, -2, 0), gi(2, 0)), ex((6, 8, 4, -2), gi(*canon(*gcd(6, 8, 4, -2)))), ex((0, 0, 0, 0), gi(0, 0))],
+          refinements=[("post", "a == 0 && b == 0 && c == 0 && d == 0 || fst(result) > 0 && snd(result) >= 0"),
+                       ("post", f"fst(result) == fst({G}) && snd(result) == snd({G})"
+                                f" || fst(result) == snd({G}) && snd(result) == 0 - fst({G})"
+                                f" || fst(result) == 0 - fst({G}) && snd(result) == 0 - snd({G})"
+                                f" || fst(result) == 0 - snd({G}) && snd(result) == fst({G})"),
+                       ("post", f"fst(result) * fst(result) + snd(result) * snd(result) == fst({G}) * fst({G}) + snd({G}) * snd({G})")],
+          props=[("right_zero", "forall a b. self(a, b, 0, 0) == {gi_canonical}(a, b)"),
+                 ("canonical_fixed", "forall a b c d. {gi_canonical}(fst(self(a, b, c, d)), snd(self(a, b, c, d))) == self(a, b, c, d)"),
+                 ("nonzero", "forall a b c d. (a == 0 && b == 0 && c == 0 && d == 0) || fst(self(a, b, c, d)) > 0")],
+          hints=["gaussian_gcd_canonical", "gcd_first_quadrant"], complexity="O(log n)")
+    gauntlet("gi_gcd_canonical", prove)
 
     if PARSE_ONLY:
         print(f"\n{len(ADDR)} records minted (parse only)")

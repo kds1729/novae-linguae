@@ -517,5 +517,91 @@
    "right_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
    "nonzero: PROVED       by numeric induction on `fn_46a821b4\u2026(c, d)` (strong induction over the measure; unsat)"
   ]
+ },
+ {
+  "name": "gi_canonical",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "param_docs": "SOUND",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "param_docs": "2 parameter(s), 2 line(s)",
+   "typecheck": "(int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "refinement:post[2]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(1)` (inferred O(1))"
+  },
+  "properties_generative": [
+   "idempotent: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "rotation_invariant: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "negation_invariant: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
+  ],
+  "properties_wide": [
+   "idempotent: CONSISTENT  |  generative: HELD (200 cases)",
+   "rotation_invariant: CONSISTENT  |  generative: HELD (200 cases)",
+   "negation_invariant: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "idempotent: PROVED       holds for all inputs (unsat negation)",
+   "rotation_invariant: PROVED       holds for all inputs (unsat negation)",
+   "negation_invariant: PROVED       holds for all inputs (unsat negation)"
+  ]
+ },
+ {
+  "name": "gi_gcd_canonical",
+  "schema": "VALID",
+  "run": "PASS",
+  "certified": true,
+  "checks": {
+   "schema": "VALID",
+   "param_docs": "SOUND",
+   "typecheck": "WELL-TYPED",
+   "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
+   "termination": "SOUND",
+   "complexity": "SOUND"
+  },
+  "check_details": {
+   "schema": "v0.2 function-record schema",
+   "param_docs": "4 parameter(s), 4 line(s)",
+   "typecheck": "(int, int, int, int) -> (int, int)",
+   "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "refinement:post[2]": "",
+   "termination": "provably always-terminates",
+   "complexity": "within declared `O(log n)` (inferred O(log n))"
+  },
+  "properties_generative": [
+   "right_zero: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
+   "canonical_fixed: CONSISTENT  |  generative: HELD (400 cases)",
+   "nonzero: CONSISTENT  |  generative: HELD (400 cases)"
+  ],
+  "properties_wide": [
+   "right_zero: CONSISTENT  |  generative: HELD (200 cases)",
+   "canonical_fixed: CONSISTENT  |  generative: HELD (200 cases)",
+   "nonzero: CONSISTENT  |  generative: HELD (200 cases)"
+  ],
+  "prove": [
+   "right_zero: PROVED       holds for all inputs (unsat negation)",
+   "canonical_fixed: PROVED       holds for all inputs (unsat negation)",
+   "nonzero: PROVED       holds for all inputs (unsat negation)"
+  ]
  }
 ]

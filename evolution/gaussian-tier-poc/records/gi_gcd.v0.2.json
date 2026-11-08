@@ -168,7 +168,7 @@
    }
   }
  ],
- "hash": "fn_a57cefaef3784cebe89c8b978bc6b69c3d935d03b60072919698b5e43de0cb86",
+ "hash": "fn_e2de582d6d8634fa7219eedb6f6122a0e0e3a63ab097064438c8c3a6b9c5e40f",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -183,7 +183,7 @@
   "real part a of z = a + bi",
   "imaginary part b of z",
   "real part c of w = c + di",
-  "imaginary part d of w"
+  "imaginary part d of w. Result: A gcd of z and w, fixed only up to the units 1, -1, i, -i (which one comes out depends on the steps; gi_gcd_canonical pins it)"
  ],
  "properties": [
   {

@@ -21,6 +21,8 @@ Euclid's algorithm on the norm, and three checker records — were authored in s
 put through the gauntlet four times, the validator changing between rounds. **Round 4: 14/14
 run and certify; termination SOUND on all 14; 19 of 19 contracts SOUND; laws 25 PROVED / 0 UNKNOWN
 / 0 UNSUPPORTED of 25.** (Round 3 stood at termination 13/14 and laws 23 / 0 / 1 of 24.)
+**Round 6 (2026-11-08) added the unit-pinned gcd — `gi_canonical` and `gi_gcd_canonical`, below —
+16/16 certified, contracts 26 / 26 SOUND, laws 31 / 0 / 0 of 31.**
 Every fact here is nonlinear — commutativity and associativity of the product (degree 2 and 3,
 six variables), the norm non-negative and zero only at zero, the norm multiplicative (the
 Brahmagupta–Fibonacci identity, degree 4), conjugation multiplicative, units on the axes
@@ -89,7 +91,23 @@ Builder round 3 (`records/REPORT.{json,md}`; the log in the author's sandbox), 1
 | `gi_rem` | 4 ints → pair, pre `w ≠ 0` | **`N(result) < N(w)` SOUND** (rounds 1–2: UNVERIFIABLE); **`2·N(result) ≤ N(w)` SOUND** (2026-11-01, the halving) | `by_one_is_zero` **PROVED** | EXHAUSTIVE 81 |
 | `gi_euclid_holds` | checker | — | `remainder_smaller` **PROVED** (rounds 1–2: UNKNOWN) | HELD 400 |
 | `gi_gcd` | 4 ints → pair, recursive; termination **SOUND** on `N(c, d)` by `gi_rem`'s post (rounds 1–3: UNVERIFIABLE) | — | `right_zero` **PROVED** by unfolding (rounds 1–3: UNSUPPORTED, no established measure); `nonzero` **PROVED** by strong induction on `N(c, d)` (round 4) | EXHAUSTIVE 81; HELD 400 |
+| `gi_canonical` (round 6) | 2 ints → pair: the associate in the closed-open first quadrant (a > 0, b ≥ 0; 0 stays 0) | the result lies there (or z = 0), IS one of the four associates (a four-way disjunction), and keeps the norm — three posts SOUND | `idempotent`, `rotation_invariant` (`self(z) = self(i·z)`), `negation_invariant` **PROVED** (first order) | EXHAUSTIVE 81 ×3 |
+| `gi_gcd_canonical` (round 6) | 4 ints → pair: `gi_gcd`'s result through `gi_canonical`, O(log n) | first quadrant unless z = w = 0 (needs `gi_gcd`'s `nonzero` LAW — the pass with callee laws closes it), an associate of `gi_gcd(z, w)`, same norm — three posts SOUND | `right_zero` (= `gi_canonical(z)`, from `gi_gcd`'s `right_zero`), `canonical_fixed` (from `gi_canonical`'s `idempotent`), `nonzero` **PROVED** | EXHAUSTIVE 81; HELD 400 ×2 |
 
+Round 6 (2026-11-08, log `gaussian-tier-poc-r6b.log`; stranger 29): a Gaussian gcd is defined only up
+to a unit, and `gi_gcd`'s answer for gcd(−1 + 8i, −4 + 7i) was −1 − 2i — correct, but the stranger
+had to check by hand that it is an associate of 1 + 2i, and wrote "the unit/sign normalization is
+unspecified in what the tool proves". Two records fix that: **`gi_canonical`** rotates z by the unit
+that lands it in the closed-open first quadrant (a > 0, b ≥ 0; the four quadrants are the four
+rotations, 0 stays 0), with posts saying the result IS one of the four associates, lies there, and
+keeps the norm, and laws that it is a projection invariant under rotation and negation — all first
+order, the norm post a degree-2 identity per branch; **`gi_gcd_canonical`** is `gi_gcd` through it,
+and its answer is 1 + 2i exactly, with the first-quadrant post needing `gi_gcd`'s `nonzero` LAW
+(the posts-only pass leaves it open; the pass with callee laws closes it) and `right_zero` /
+`canonical_fixed` needing the callees' laws `right_zero` and `idempotent`. `gi_gcd`'s own
+`param_docs` last line now says what the result is (a gcd fixed only up to the units ±1, ±i),
+which moves its address — a sixth version; the laws re-prove as before. 6 posts SOUND, 6 laws
+PROVED; everything else unchanged.
 Round 5 (2026-11-04, 1.5 min, log `gaussian-tier-poc-r9.log`; strangers 19/20): every record gained
 `param_docs` (a + bi passed as its two parts, the divisor's nonzero requirement, and — stranger 21
 — the quotient's rounding: nearest, halves up, which `gi_div`'s posts already pin); `gi_rem` gained the

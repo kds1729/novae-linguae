@@ -1,0 +1,915 @@
+{
+ "body_hash": "expr_7dbdb1c9e457b38767b6505fc133ee4b0b6628c25b422416b05853346435c106",
+ "derived_from": null,
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 3
+    },
+    {
+     "kind": "int",
+     "value": 1
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 3
+     },
+     {
+      "kind": "int",
+      "value": 1
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -1
+    },
+    {
+     "kind": "int",
+     "value": 3
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 3
+     },
+     {
+      "kind": "int",
+      "value": 1
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -3
+    },
+    {
+     "kind": "int",
+     "value": -1
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 3
+     },
+     {
+      "kind": "int",
+      "value": 1
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 1
+    },
+    {
+     "kind": "int",
+     "value": -3
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 3
+     },
+     {
+      "kind": "int",
+      "value": 1
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 0
+    },
+    {
+     "kind": "int",
+     "value": 0
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 0
+     },
+     {
+      "kind": "int",
+      "value": 0
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 0
+    },
+    {
+     "kind": "int",
+     "value": 4
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 4
+     },
+     {
+      "kind": "int",
+      "value": 0
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -2
+    },
+    {
+     "kind": "int",
+     "value": 0
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 2
+     },
+     {
+      "kind": "int",
+      "value": 0
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": 0
+    },
+    {
+     "kind": "int",
+     "value": -5
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 5
+     },
+     {
+      "kind": "int",
+      "value": 0
+     }
+    ],
+    "kind": "tuple"
+   }
+  },
+  {
+   "args": [
+    {
+     "kind": "int",
+     "value": -1
+    },
+    {
+     "kind": "int",
+     "value": -2
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "int",
+      "value": 1
+     },
+     {
+      "kind": "int",
+      "value": 2
+     }
+    ],
+    "kind": "tuple"
+   }
+  }
+ ],
+ "hash": "fn_8426f78feb9ce910ad4c9ccc06fb9da368079ea024861ef4b9f7562e0634a664",
+ "intent_tags": [
+  "arithmetic/gaussian",
+  "math/gaussian-integer",
+  "math/gaussian-integer/gi-canonical",
+  "normalize"
+ ],
+ "name_hints": [
+  "gi_canonical",
+  "canonical_associate",
+  "first_quadrant_associate",
+  "gaussian_normalize"
+ ],
+ "param_docs": [
+  "real part a of z = a + bi",
+  "imaginary part b of z. Result: the associate u * z (u one of the units 1, -1, i, -i) with real part > 0 and imaginary part >= 0; 0 stays 0"
+ ],
+ "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "fst"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "a"
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "self"
+          }
+         ],
+         "kind": "app",
+         "op": "snd"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "a"
+        },
+        {
+         "kind": "var",
+         "name": "b"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "idempotent"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "a"
+        },
+        {
+         "kind": "var",
+         "name": "b"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": 0
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "kind": "app",
+         "op": "sub"
+        },
+        {
+         "kind": "var",
+         "name": "a"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "rotation_invariant"
+  },
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "a"
+        },
+        {
+         "kind": "var",
+         "name": "b"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": 0
+          },
+          {
+           "kind": "var",
+           "name": "a"
+          }
+         ],
+         "kind": "app",
+         "op": "sub"
+        },
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": 0
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "kind": "app",
+         "op": "sub"
+        }
+       ],
+       "kind": "app",
+       "op": "self"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "forall",
+    "vars": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "negation_invariant"
+  }
+ ],
+ "schema_version": "0.2.0",
+ "signature": {
+  "capabilities": [],
+  "complexity": "O(1)",
+  "effects": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
+        }
+       ],
+       "kind": "app",
+       "op": "and"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "fst"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "gt"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "snd"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "ge"
+        }
+       ],
+       "kind": "app",
+       "op": "and"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "result"
+                }
+               ],
+               "kind": "app",
+               "op": "fst"
+              },
+              {
+               "kind": "var",
+               "name": "a"
+              }
+             ],
+             "kind": "app",
+             "op": "eq"
+            },
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "result"
+                }
+               ],
+               "kind": "app",
+               "op": "snd"
+              },
+              {
+               "kind": "var",
+               "name": "b"
+              }
+             ],
+             "kind": "app",
+             "op": "eq"
+            }
+           ],
+           "kind": "app",
+           "op": "and"
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "result"
+                }
+               ],
+               "kind": "app",
+               "op": "fst"
+              },
+              {
+               "kind": "var",
+               "name": "b"
+              }
+             ],
+             "kind": "app",
+             "op": "eq"
+            },
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "result"
+                }
+               ],
+               "kind": "app",
+               "op": "snd"
+              },
+              {
+               "args": [
+                {
+                 "kind": "lit",
+                 "value": 0
+                },
+                {
+                 "kind": "var",
+                 "name": "a"
+                }
+               ],
+               "kind": "app",
+               "op": "sub"
+              }
+             ],
+             "kind": "app",
+             "op": "eq"
+            }
+           ],
+           "kind": "app",
+           "op": "and"
+          }
+         ],
+         "kind": "app",
+         "op": "or"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "result"
+              }
+             ],
+             "kind": "app",
+             "op": "fst"
+            },
+            {
+             "args": [
+              {
+               "kind": "lit",
+               "value": 0
+              },
+              {
+               "kind": "var",
+               "name": "a"
+              }
+             ],
+             "kind": "app",
+             "op": "sub"
+            }
+           ],
+           "kind": "app",
+           "op": "eq"
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "result"
+              }
+             ],
+             "kind": "app",
+             "op": "snd"
+            },
+            {
+             "args": [
+              {
+               "kind": "lit",
+               "value": 0
+              },
+              {
+               "kind": "var",
+               "name": "b"
+              }
+             ],
+             "kind": "app",
+             "op": "sub"
+            }
+           ],
+           "kind": "app",
+           "op": "eq"
+          }
+         ],
+         "kind": "app",
+         "op": "and"
+        }
+       ],
+       "kind": "app",
+       "op": "or"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "fst"
+          },
+          {
+           "args": [
+            {
+             "kind": "lit",
+             "value": 0
+            },
+            {
+             "kind": "var",
+             "name": "b"
+            }
+           ],
+           "kind": "app",
+           "op": "sub"
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "snd"
+          },
+          {
+           "kind": "var",
+           "name": "a"
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
+        }
+       ],
+       "kind": "app",
+       "op": "and"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "fst"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "fst"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "snd"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "snd"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        }
+       ],
+       "kind": "app",
+       "op": "add"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "a"
+          },
+          {
+           "kind": "var",
+           "name": "a"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "kind": "app",
+         "op": "mul"
+        }
+       ],
+       "kind": "app",
+       "op": "add"
+      }
+     ],
+     "kind": "app",
+     "op": "eq"
+    },
+    "kind": "post"
+   }
+  ],
+  "terminates": "always",
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "int"
+    },
+    {
+     "kind": "builtin",
+     "name": "int"
+    }
+   ],
+   "result": {
+    "elems": [
+     {
+      "kind": "builtin",
+      "name": "int"
+     },
+     {
+      "kind": "builtin",
+      "name": "int"
+     }
+    ],
+    "kind": "tuple"
+   }
+  }
+ },
+ "supersedes": null
+}

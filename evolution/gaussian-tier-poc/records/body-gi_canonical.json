@@ -1,0 +1,427 @@
+{
+ "body": {
+  "arms": [
+   {
+    "body": {
+     "elems": [
+      {
+       "kind": "var",
+       "name": "a"
+      },
+      {
+       "kind": "var",
+       "name": "b"
+      }
+     ],
+     "kind": "tuple"
+    },
+    "pattern": {
+     "kind": "lit",
+     "value": {
+      "kind": "bool",
+      "value": true
+     }
+    }
+   },
+   {
+    "body": {
+     "arms": [
+      {
+       "body": {
+        "elems": [
+         {
+          "kind": "var",
+          "name": "b"
+         },
+         {
+          "args": [
+           {
+            "kind": "var",
+            "name": "a"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "neg"
+          },
+          "kind": "app"
+         }
+        ],
+        "kind": "tuple"
+       },
+       "pattern": {
+        "kind": "lit",
+        "value": {
+         "kind": "bool",
+         "value": true
+        }
+       }
+      },
+      {
+       "body": {
+        "arms": [
+         {
+          "body": {
+           "elems": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "a"
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "neg"
+             },
+             "kind": "app"
+            },
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "b"
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "neg"
+             },
+             "kind": "app"
+            }
+           ],
+           "kind": "tuple"
+          },
+          "pattern": {
+           "kind": "lit",
+           "value": {
+            "kind": "bool",
+            "value": true
+           }
+          }
+         },
+         {
+          "body": {
+           "arms": [
+            {
+             "body": {
+              "elems": [
+               {
+                "args": [
+                 {
+                  "kind": "var",
+                  "name": "b"
+                 }
+                ],
+                "fn": {
+                 "kind": "var",
+                 "name": "neg"
+                },
+                "kind": "app"
+               },
+               {
+                "kind": "var",
+                "name": "a"
+               }
+              ],
+              "kind": "tuple"
+             },
+             "pattern": {
+              "kind": "lit",
+              "value": {
+               "kind": "bool",
+               "value": true
+              }
+             }
+            },
+            {
+             "body": {
+              "elems": [
+               {
+                "kind": "lit",
+                "value": {
+                 "kind": "nat",
+                 "value": 0
+                }
+               },
+               {
+                "kind": "lit",
+                "value": {
+                 "kind": "nat",
+                 "value": 0
+                }
+               }
+              ],
+              "kind": "tuple"
+             },
+             "pattern": {
+              "kind": "lit",
+              "value": {
+               "kind": "bool",
+               "value": false
+              }
+             }
+            }
+           ],
+           "kind": "case",
+           "scrutinee": {
+            "args": [
+             {
+              "kind": "lit",
+              "value": {
+               "kind": "nat",
+               "value": 0
+              }
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "var",
+               "name": "b"
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "lt"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           }
+          },
+          "pattern": {
+           "kind": "lit",
+           "value": {
+            "kind": "bool",
+            "value": false
+           }
+          }
+         }
+        ],
+        "kind": "case",
+        "scrutinee": {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "lit",
+             "value": {
+              "kind": "nat",
+              "value": 0
+             }
+            }
+           ],
+           "fn": {
+            "args": [
+             {
+              "kind": "var",
+              "name": "b"
+             }
+            ],
+            "fn": {
+             "kind": "var",
+             "name": "le"
+            },
+            "kind": "app"
+           },
+           "kind": "app"
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "args": [
+             {
+              "kind": "lit",
+              "value": {
+               "kind": "nat",
+               "value": 0
+              }
+             }
+            ],
+            "fn": {
+             "args": [
+              {
+               "kind": "var",
+               "name": "a"
+              }
+             ],
+             "fn": {
+              "kind": "var",
+              "name": "lt"
+             },
+             "kind": "app"
+            },
+            "kind": "app"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "and"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        }
+       },
+       "pattern": {
+        "kind": "lit",
+        "value": {
+         "kind": "bool",
+         "value": false
+        }
+       }
+      }
+     ],
+     "kind": "case",
+     "scrutinee": {
+      "args": [
+       {
+        "args": [
+         {
+          "kind": "lit",
+          "value": {
+           "kind": "nat",
+           "value": 0
+          }
+         }
+        ],
+        "fn": {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          }
+         ],
+         "fn": {
+          "kind": "var",
+          "name": "gt"
+         },
+         "kind": "app"
+        },
+        "kind": "app"
+       }
+      ],
+      "fn": {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "lit",
+           "value": {
+            "kind": "nat",
+            "value": 0
+           }
+          }
+         ],
+         "fn": {
+          "args": [
+           {
+            "kind": "var",
+            "name": "a"
+           }
+          ],
+          "fn": {
+           "kind": "var",
+           "name": "le"
+          },
+          "kind": "app"
+         },
+         "kind": "app"
+        }
+       ],
+       "fn": {
+        "kind": "var",
+        "name": "and"
+       },
+       "kind": "app"
+      },
+      "kind": "app"
+     }
+    },
+    "pattern": {
+     "kind": "lit",
+     "value": {
+      "kind": "bool",
+      "value": false
+     }
+    }
+   }
+  ],
+  "kind": "case",
+  "scrutinee": {
+   "args": [
+    {
+     "args": [
+      {
+       "kind": "lit",
+       "value": {
+        "kind": "nat",
+        "value": 0
+       }
+      }
+     ],
+     "fn": {
+      "args": [
+       {
+        "kind": "var",
+        "name": "b"
+       }
+      ],
+      "fn": {
+       "kind": "var",
+       "name": "ge"
+      },
+      "kind": "app"
+     },
+     "kind": "app"
+    }
+   ],
+   "fn": {
+    "args": [
+     {
+      "args": [
+       {
+        "kind": "lit",
+        "value": {
+         "kind": "nat",
+         "value": 0
+        }
+       }
+      ],
+      "fn": {
+       "args": [
+        {
+         "kind": "var",
+         "name": "a"
+        }
+       ],
+       "fn": {
+        "kind": "var",
+        "name": "gt"
+       },
+       "kind": "app"
+      },
+      "kind": "app"
+     }
+    ],
+    "fn": {
+     "kind": "var",
+     "name": "and"
+    },
+    "kind": "app"
+   },
+   "kind": "app"
+  }
+ },
+ "kind": "lambda",
+ "params": [
+  {
+   "name": "a"
+  },
+  {
+   "name": "b"
+  }
+ ]
+}

@@ -6,6 +6,24 @@ agents, no prior context — Sonnet-class twice and Haiku-class once — all thr
 unaided in 90 s to 6 min and 20–36 tool calls) and its
 list of what slowed it down — read it once and you will go faster than it did.
 
+## Fast path (a goal in, a proved answer out — five moves; the rest of this page is the detail)
+
+1. **Binary**: the four lines under *Just the binary* (download, checksum, `chmod`); `z3` on the PATH.
+2. **Find**: `POST https://nl.1105software.com/v0/search?include=summary` with
+   `{"query": "<the goal in plain words>", "k": 10, "filter": {"kind": "function-record"}}`; choose
+   by `contract`, `params` (argument order), `param_docs` (what each is; for a tuple result, the
+   last line also says what the RESULT is).
+3. **Its family**: a hit's `intent_tags` carry a family tag (`math/number-theory`, `math/rational`, `math/decimal`,
+   `math/gaussian-integer`); the same search with the tag as the query and the filter
+   `{"kind": "function-record", "intent_tags": {"any": ["math/rational"]}}` lists every function of
+   that family, one slot each with its contract — the one your words did not reach (`rat_add` for
+   "reduce a fraction") is there, so you need not guess a tag from the naming pattern.
+4. **Run**: `nl-validator orchestrate --node https://nl.1105software.com --verify --require-certified
+   --intent <a tag from its intent_tags> --arg … --arg …` (in `params` order), ONE run at a time; the
+   first run over a set of callees is the slow one (seconds to ~2.5 min, a stderr line every 30 s).
+5. **Read**: the `result:` line, then the `proved about this result` block — how far the answer is
+   pinned down is in that block, not in the word CONFIRMED.
+
 ## Just the binary (no side effects)
 
 If you have a task of your own, fetch the validator and skip the demo:
@@ -84,7 +102,13 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    declares a pre/post and `laws` only if it declares laws — a missing key means none, not an error.
    Scores are close together (a 0.01 margin is normal); treat the top 3–5 as a shortlist, not the
    top 1 as the answer. Older versions of a function share its slot: they are listed by hash in
-   `versions`, and the hit shown is the version with the strongest contract.
+   `versions`, and the hit shown is the version with the strongest contract. The ranking is lexical
+   (overlap between your words and the record's names, tags and contract), so a sibling your words
+   do not name can miss the top 10 — stranger 29 found `rat_normalize` for "reduce a fraction" and
+   had to guess `rat_add`'s tag. Do not guess: every hit's `intent_tags` include its FAMILY tag
+   (the middle one, `math/rational`), and the same request with that tag as the `query` and
+   `"intent_tags": {"any": ["math/rational"]}` added to the filter returns the whole family (14
+   functions for the rational tier, one slot each, every version folded) with their contracts.
 2. Choose by the summary's `name`, `contract` (pre/post, surface syntax), `laws`, `params` (argument
    names, in order), `param_docs` (what each argument means, and its unit — the author's words)
    and `type_surface`. **Pass arguments in `params` order and read `param_docs` for which is
