@@ -93,7 +93,7 @@ PARAM_DOCS = {
     "mod_pow": ["the base (any integer)", "the exponent, non-negative", "the modulus, 1 to 2^63-1"],
     "is_even": ["any integer"],
     "isqrt": ["the non-negative integer whose square root is floored"],
-    "is_prime": ["the number to test, 0 to 2^63-1 (deterministic Miller-Rabin, twelve bases)"],
+    "is_prime": ["the number to test, 0 to 2^63-1 (deterministic Miller-Rabin, twelve bases; its posts pin the small cases only — is_prime_trial's post IS the specification)"],
     "is_prime_trial": ["the number to test (trial division up to its square root)"],
     "crt2": ["the residue wanted modulo m1", "the first modulus, at least 2",
              "the residue wanted modulo m2", "the second modulus, at least 2; None unless m1 and m2 are coprime"],
@@ -325,6 +325,11 @@ def main():
                  # stays UNKNOWN (it needs lcm to DIVIDE every common multiple — Euclid's-lemma
                  # territory); not shipped, as every verified run would spend its law budget on it.
                  ("product_with_gcd", "forall a b. a < 1 || b < 1 || self(a, b) * {gcd}(a, b) == a * b")],
+          # Round 22 (stranger 30): the same two facts as POSTS — a verified run's `proved about
+          # this result` block lists posts, and a caller's contract inherits posts; the laws were
+          # PROVED since rounds 10 and 19, the posts are SOUND by the same Euclidean instances.
+          refinements=[("post", "a < 1 || b < 1 || result * {gcd}(a, b) == a * b"),
+                       ("post", "a < 1 || b < 1 || result % a == 0 && result % b == 0")],
           hints=["least_common_multiple"], complexity="O(log n)")
     gauntlet("lcm", prove)
 
@@ -546,7 +551,14 @@ def main():
           FN([NAT], BOOL),
           [{"args": [nlit(n)], "result": blit(py_is_prime(n))} for n in
            (0, 1, 2, 3, 4, 9, 37, 561, 1105, 2047, 1373653, 25326001, 3215031751, 1000000007, 3825123056546413051, 2**61 - 1, 9223372036854775783, 9223372036854775781)],
-          refinements=[("pre", f"n <= {I64_MAX}")],
+          # Round 22 (stranger 30: "is_prime proves nothing about the result"): the posts the body's
+          # first branches decide, independent of the Miller–Rabin tail — a `true` means n ≥ 2 and
+          # n is 2 or odd; 2 and 3 are prime. Primality itself has no first-order post (it needs a
+          # quantifier over divisors); the trial-division record states that specification.
+          refinements=[("pre", f"n <= {I64_MAX}"),
+                       ("post", "result == false || n >= 2"),
+                       ("post", "result == false || n == 2 || n % 2 == 1"),
+                       ("post", "n < 2 || n > 3 || result == true")],
           # O(n) in the checker's measure: the squaring loop descends `s` by a constant step, and the
           # checker reads a constant-step recursion as linear in ITS input (it cannot know s ≤ log n).
           tags=["predicate/number"], hints=["primality", "miller_rabin"], complexity="O(n^2)")
@@ -554,11 +566,16 @@ def main():
     build("no_divisor_from", r"\n d -> case lt d 2 of { true => true; false => case eq (mod n d) 0 of { true => false; false => self n (sub d 1) } }",
           FN([NAT, NAT], BOOL),
           [{"args": [nlit(91), nlit(9)], "result": blit(False)}, {"args": [nlit(97), nlit(9)], "result": blit(True)}],
+          refinements=[("post", "result == false || d < 2 || n % d != 0")],  # round 22
           hints=["trial_division_downward"], complexity="O(n)")
     gauntlet("no_divisor_from", prove)
     build("is_prime_trial", r"\n -> case lt n 2 of { true => false; false => {no_divisor_from} n ({isqrt} n) }",
           FN([NAT], BOOL),
           [{"args": [nlit(n)], "result": blit(py_is_prime(n))} for n in (0, 1, 2, 9, 97, 561, 7919, 1000003)],
+          # Round 22: the specification as a contract — below 2 nothing is prime; from 2 the answer IS
+          # "no divisor from isqrt(n) down to 2", the callees applied by address.
+          refinements=[("post", "n >= 2 || result == false"),
+                       ("post", "n < 2 || result == {no_divisor_from}(n, {isqrt}(n))")],
           tags=["predicate/number"], hints=["primality_trial_division"], complexity="O(n)")
     gauntlet("is_prime_trial", prove)
     build("prime_agree", r"\n -> eq ({is_prime} n) ({is_prime_trial} n)",
@@ -616,7 +633,16 @@ def main():
     build("digit_sum", r"\b n -> case lt b 2 of { true => 0; false => case lt n 1 of { true => 0; false => add (mod n b) (self b (div n b)) } }",
           FN([NAT, NAT], NAT),
           [{"args": [nlit(10), nlit(1234)], "result": nlit(10)}, {"args": [nlit(10), nlit(0)], "result": nlit(0)}, {"args": [nlit(2), nlit(255)], "result": nlit(8)}],
-          props=[("sum_bounded_by_value", "forall b n. n < 0 || self(b, n) <= n")],
+          # Round 22 (stranger 30: "the digit-sum value is pinned by nothing proved"). Casting out
+          # (b − 1): the digit sum is congruent to the number modulo b − 1 — the one fact that ties
+          # the VALUE to n. PROVED by numeric induction on n with the record's own certified
+          # contract at the instantiated points, FIRST in the law order and with NO posts on the
+          # record: the post form was UNVERIFIABLE in the refinement checker's induction, and with
+          # two true posts added (`result >= 1`, `result <= n`) as self facts the same law went
+          # UNKNOWN in the full build (log integer-tier-poc-r22.log) — the nonlinear step is at the
+          # solver's edge, so the record stays in the configuration that proves.
+          props=[("congruent_mod_base_minus_one", "forall b n. b < 2 || n < 0 || (n - self(b, n)) % (b - 1) == 0"),
+                 ("sum_bounded_by_value", "forall b n. n < 0 || self(b, n) <= n")],
           hints=["sum_of_digits"], complexity="O(log n)")
     gauntlet("digit_sum", prove)
 

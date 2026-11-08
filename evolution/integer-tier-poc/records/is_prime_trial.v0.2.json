@@ -1,5 +1,5 @@
 {
- "body_hash": "expr_8ce913b3d738ece1f91c9c8cdde852df95e9d4c4e787bd946d5eb6741bc476f9",
+ "body_hash": "expr_aed76407df50519b604ae647b419c6e8ea21d00fd43bf8a603c6a034438eaac1",
  "derived_from": null,
  "examples": [
   {
@@ -99,7 +99,7 @@
    }
   }
  ],
- "hash": "fn_7e34d7e9dd6fd79aca9ef7539042d2656df980a2443c2c5806b5abd407671f7b",
+ "hash": "fn_c62e1adf81c3c211272a790068d959bb6476a9f831d4fe29e97a5557d0ca5faa",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -119,7 +119,98 @@
   "capabilities": [],
   "complexity": "O(n)",
   "effects": [],
-  "refinements": [],
+  "refinements": [
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "lit",
+         "value": 2
+        }
+       ],
+       "kind": "app",
+       "op": "ge"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "result"
+        },
+        {
+         "kind": "lit",
+         "value": false
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "n"
+        },
+        {
+         "kind": "lit",
+         "value": 2
+        }
+       ],
+       "kind": "app",
+       "op": "lt"
+      },
+      {
+       "args": [
+        {
+         "kind": "var",
+         "name": "result"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "n"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "n"
+            }
+           ],
+           "kind": "app",
+           "op": "fn_bdf9c9bddf8c45b8142c2e7b1a05836739227a970548cbaf0ef460e8c6cf8285"
+          }
+         ],
+         "kind": "app",
+         "op": "fn_2570adc174364bc7562d56350e2c5c17fe5bd23c2018dee4aad102a13545e80a"
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "post"
+   }
+  ],
   "terminates": "always",
   "type": {
    "kind": "fn",

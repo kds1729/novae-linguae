@@ -21,7 +21,7 @@
   inverse and CRT checkers on their callees' domains (from the contracts) — and all 43 held over
   the bounded domain and across magnitudes (the generative checker now says what it skips).
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-10-17, last updated 2026-10-31 (thirteenth note)
+- **Dates:** first published 2026-10-17, last updated 2026-11-08 (round 22: contracts for the thin records)
 - **Scope:** `tooling/validator` (`interp.rs` arithmetic + comparison + recursion depth,
   `proptest.rs`, `eval.rs`, `prove.rs`, `induct.rs`, `terminate.rs`, `complexity.rs`, `main.rs`),
   `spec/evaluation.md`; read against `spec/surface-syntax.md` §2 (predicate surface) and
@@ -1312,6 +1312,28 @@ phase 5 (the self-definition rung) now tries every open law. Result: **`binomial
 moves from UNKNOWN to PROVED** in one query, and all four of binomial's laws are now PROVED.
 Cross-check under the round-21 validator: rational, gaussian and decimal are verdict-identical
 record for record, and integer differs only in this law (log `integer-tier-poc-r21.log`, 39.8 min).
+
+Round 22 (2026-11-08; stranger 30, the first stranger given goals that need several records). It
+read the `proved about this result` blocks exactly right and named the thin contracts: `lcm`'s only
+post was `result ≥ 0` (the value rested on the `product_with_gcd` LAW, which a caller's contract does
+not inherit); `digit_sum`'s value "is pinned by nothing proved"; `is_prime` "has no contract at
+all". Shipped, each SOUND on a scratch copy first (`~/sandbox/agentfacing/posts_*.txt`, logs
+`posts_*.log`): **`lcm`** gains the two laws as POSTS — `a, b ≥ 1 ⇒ result · gcd(a, b) = a · b` and
+`result mod a = 0 ∧ result mod b = 0`, gcd by address — so a verified run's block now pins lcm's
+value and every caller inherits it; **`digit_sum`** gains the law **`congruent_mod_base_minus_one`**
+— `(n − digit_sum(b, n)) mod (b − 1) = 0` (casting out nines, for every base), PROVED by numeric
+induction on n with the record's own certified contract at the instantiated points, the one fact
+that ties the value to n. Its post form was UNVERIFIABLE in the refinement checker's induction (no
+Euclidean retry there), and a first build that also added two true posts (`result ≥ 1`,
+`result ≤ n`) saw the LAW go UNKNOWN — the same query with two more self facts, at the nonlinear
+step's edge (log `integer-tier-poc-r22.log`; reproduced on a scratch copy, 140 s) — so the record
+ships the law alone, first in order, the configuration that proves; **`is_prime`**
+gains the three posts its first branches decide independent of the Miller–Rabin tail — `true ⇒
+n ≥ 2`, `true ⇒ n = 2 ∨ n odd`, `n ∈ {2, 3} ⇒ true` — and its `param_docs` say that primality itself
+has no first-order post here; **`is_prime_trial`** gains the specification as a contract — `n < 2 ⇒
+false` and `n ≥ 2 ⇒ result = no_divisor_from(n, isqrt(n))` (callees by address) — and
+**`no_divisor_from`** `true ∧ d ≥ 2 ⇒ n mod d ≠ 0`. Not shipped: `gi_gcd`'s divides-both (gaussian
+README, round 7 note — UNKNOWN; the step needs the Gaussian exact-division lemma). Build: 45/45 certified (34.8 min, log `integer-tier-poc-r22b.log`); REPORT verdicts differ from round 21 in exactly these five records (lcm, digit_sum, is_prime, is_prime_trial, no_divisor_from), everything else identical. Published to Arca (round 27).
 
 ## Open questions (as they stood before the follow-up)
 

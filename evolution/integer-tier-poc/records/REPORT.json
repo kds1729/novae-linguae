@@ -57,6 +57,8 @@
    "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
    "refinement:nat-result (\u2265 0)": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
@@ -66,6 +68,8 @@
    "param_docs": "2 parameter(s), 2 line(s)",
    "typecheck": "(int, int) -> int",
    "effects": "effects [] \u2286 declared",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
    "refinement:nat-result (\u2265 0)": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
@@ -662,7 +666,9 @@
    "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:refinements": "N/A",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
+   "refinement:post[2]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -671,7 +677,9 @@
    "param_docs": "1 parameter(s), 1 line(s)",
    "typecheck": "(int) -> bool",
    "effects": "effects [] \u2286 declared",
-   "refinement:refinements": "",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
+   "refinement:post[2]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(n^2)` (inferred O(n^2))"
   }
@@ -685,7 +693,7 @@
    "schema": "VALID",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:refinements": "N/A",
+   "refinement:post[0]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -693,7 +701,7 @@
    "schema": "v0.2 function-record schema",
    "typecheck": "(int, int) -> bool",
    "effects": "effects [] \u2286 declared",
-   "refinement:refinements": "",
+   "refinement:post[0]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(n)` (inferred O(n))"
   }
@@ -708,7 +716,8 @@
    "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:refinements": "N/A",
+   "refinement:post[0]": "SOUND",
+   "refinement:post[1]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -717,7 +726,8 @@
    "param_docs": "1 parameter(s), 1 line(s)",
    "typecheck": "(int) -> bool",
    "effects": "effects [] \u2286 declared",
-   "refinement:refinements": "",
+   "refinement:post[0]": "",
+   "refinement:post[1]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(n)` (inferred O(n))"
   }
@@ -916,12 +926,15 @@
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },
   "properties_generative": [
+   "congruent_mod_base_minus_one: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)",
    "sum_bounded_by_value: CONSISTENT  |  generative: EXHAUSTIVE (81 cases \u2014 bounded domain, no counterexample)"
   ],
   "properties_wide": [
+   "congruent_mod_base_minus_one: CONSISTENT  |  generative: HELD (200 cases)",
    "sum_bounded_by_value: CONSISTENT  |  generative: HELD (200 cases)"
   ],
   "prove": [
+   "congruent_mod_base_minus_one: PROVED       by numeric induction on `n, with self's certified contract at the instantiated points (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat)",
    "sum_bounded_by_value: PROVED       by numeric induction on `n (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat)"
   ]
  },

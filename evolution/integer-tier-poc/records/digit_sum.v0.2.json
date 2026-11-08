@@ -51,7 +51,7 @@
    }
   }
  ],
- "hash": "fn_2fc10957c7fb81e604033290d4d93624092e4e757bcfeb4137bd452530df30a9",
+ "hash": "fn_159c23a79d5b72bb95e18fd088ed60ea1f8e8a52c18bbe25dea05dc137d32c07",
  "intent_tags": [
   "arithmetic/integer",
   "math/number-theory",
@@ -66,6 +66,110 @@
   "the non-negative number whose digits are summed"
  ],
  "properties": [
+  {
+   "expr": {
+    "body": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "b"
+          },
+          {
+           "kind": "lit",
+           "value": 2
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        },
+        {
+         "args": [
+          {
+           "kind": "var",
+           "name": "n"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "lt"
+        }
+       ],
+       "kind": "app",
+       "op": "or"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "n"
+            },
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "b"
+              },
+              {
+               "kind": "var",
+               "name": "n"
+              }
+             ],
+             "kind": "app",
+             "op": "self"
+            }
+           ],
+           "kind": "app",
+           "op": "sub"
+          },
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "b"
+            },
+            {
+             "kind": "lit",
+             "value": 1
+            }
+           ],
+           "kind": "app",
+           "op": "sub"
+          }
+         ],
+         "kind": "app",
+         "op": "mod"
+        },
+        {
+         "kind": "lit",
+         "value": 0
+        }
+       ],
+       "kind": "app",
+       "op": "eq"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
+    },
+    "kind": "forall",
+    "vars": [
+     "b",
+     "n"
+    ]
+   },
+   "name": "congruent_mod_base_minus_one"
+  },
   {
    "expr": {
     "body": {

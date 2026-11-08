@@ -1,7 +1,7 @@
 | record | run | certified | typecheck | effects | refinement | termination | complexity | properties (generative) | prove |
 |---|---|---|---|---|---|---|---|---|---|
 | `gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | euclid_step=EXHAUSTIVE; commutative=EXHAUSTIVE; right_zero=EXHAUSTIVE; divides_both=EXHAUSTIVE; greatest_divisor=EXHAUSTIVE; associative=EXHAUSTIVE | euclid_step=PROVED; commutative=PROVED; right_zero=PROVED; divides_both=PROVED; greatest_divisor=PROVED; associative=PROVED |
-| `lcm` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | multiple_of_both=EXHAUSTIVE; multiple_of_both_pos=EXHAUSTIVE; commutative=EXHAUSTIVE; product_with_gcd=EXHAUSTIVE | multiple_of_both=UNKNOWN; multiple_of_both_pos=PROVED; commutative=PROVED; product_with_gcd=PROVED |
+| `lcm` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | multiple_of_both=EXHAUSTIVE; multiple_of_both_pos=EXHAUSTIVE; commutative=EXHAUSTIVE; product_with_gcd=EXHAUSTIVE | multiple_of_both=UNKNOWN; multiple_of_both_pos=PROVED; commutative=PROVED; product_with_gcd=PROVED |
 | `ext_gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND | SOUND | SOUND | euclid_lemma=EXHAUSTIVE | euclid_lemma=PROVED |
 | `bezout_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | bezout_identity=EXHAUSTIVE; bezout_identity_nat=EXHAUSTIVE | bezout_identity=PROVED; bezout_identity_nat=PROVED |
 | `mod_inverse` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
@@ -20,16 +20,16 @@
 | `odd_part_d` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | odd_or_zero=EXHAUSTIVE | odd_or_zero=PROVED |
 | `odd_part_s` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / nat-result (≥ 0)=SOUND | SOUND | SOUND | — | — |
 | `mr_all` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
-| `is_prime` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
-| `no_divisor_from` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
-| `is_prime_trial` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
+| `is_prime` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / post[2]=SOUND | SOUND | SOUND | — | — |
+| `no_divisor_from` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | — | — |
+| `is_prime_trial` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND | SOUND | SOUND | — | — |
 | `prime_agree` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | miller_rabin_agrees_with_trial=EXHAUSTIVE | miller_rabin_agrees_with_trial=UNKNOWN |
 | `crt2` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND | SOUND | SOUND | — | — |
 | `crt_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | solves_both_congruences=HELD; solves_both_congruences_pre=HELD | solves_both_congruences=UNKNOWN; solves_both_congruences_pre=PROVED |
 | `digits` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | — | — |
 | `from_digits` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | — | — |
 | `digits_roundtrip` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | digits_then_from_digits=EXHAUSTIVE | digits_then_from_digits=PROVED |
-| `digit_sum` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | sum_bounded_by_value=EXHAUSTIVE | sum_bounded_by_value=PROVED |
+| `digit_sum` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | congruent_mod_base_minus_one=EXHAUSTIVE; sum_bounded_by_value=EXHAUSTIVE | congruent_mod_base_minus_one=PROVED; sum_bounded_by_value=PROVED |
 | `binomial` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | symmetry=EXHAUSTIVE; pascal=EXHAUSTIVE; choose_zero=EXHAUSTIVE; beyond_n=EXHAUSTIVE | symmetry=PROVED; pascal=PROVED; choose_zero=PROVED; beyond_n=PROVED |
 | `binomial_pascal` | PASS | True | WELL-TYPED | SOUND | nat-result (≥ 0)=SOUND | SOUND | SOUND | pascal=EXHAUSTIVE; symmetry=EXHAUSTIVE; choose_zero=EXHAUSTIVE; beyond_n=EXHAUSTIVE | pascal=PROVED; symmetry=PROVED; choose_zero=PROVED; beyond_n=PROVED |
 | `binomial_agree` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | N/A | definitions_agree=EXHAUSTIVE | definitions_agree=UNKNOWN |

@@ -108,6 +108,22 @@ and its answer is 1 + 2i exactly, with the first-quadrant post needing `gi_gcd`'
 `param_docs` last line now says what the result is (a gcd fixed only up to the units ±1, ±i),
 which moves its address — a sixth version; the laws re-prove as before. 6 posts SOUND, 6 laws
 PROVED; everything else unchanged.
+
+Round 7 note (2026-11-08; stranger 30): "`gi_gcd` has zero proved posts, so 'this is a greatest
+common divisor' is not proved; it rests on the body." True, and still so. The divisibility law was
+tried — `divides_both`: unless z = w = 0, `gi_rem(z, g) = 0 ∧ gi_rem(w, g) = 0` for `g = gi_gcd(z, w)`,
+`gi_rem` by address (`~/sandbox/agentfacing/laws_gi_gcd.txt`, log `laws_gi_gcd.log`) — and stays
+**UNKNOWN** at the measured-descent rung with the hypothesis as instances (99.7 s): the step must
+pass from `g | w` and `g | rem(z, w)` to `g | z` through `z = q·w + rem(z, w)` (gi_rem's exactness
+post), which is `g | x ⇔ gi_rem(x, g) = 0` — the Gaussian EXACT-DIVISION lemma: `x = s·g` forces
+`gi_div(x, g) = s` by the rounding posts (`2·|N(g)·s − N(g)·q'| ≤ N(g)`), a degree-3 statement in
+six unknowns that z3's nonlinear arithmetic does not close inside the induction. As a POST the same
+statement is refused earlier (`unsupported expression kind tuple`): the refinement checker's
+induction does not lower a tuple-valued recursive body, which the law ladder's measured descent
+does — a second, smaller gap. The integer tier's Euclidean checker (`euclid::retry_stepwise`,
+premises verified alone, the final query over uninterpreted products) is the shape a Gaussian
+version would take. Recorded under *Still open*; nothing shipped for `gi_gcd` this round (an
+unprovable law would cost every verified run its law budget).
 Round 5 (2026-11-04, 1.5 min, log `gaussian-tier-poc-r9.log`; strangers 19/20): every record gained
 `param_docs` (a + bi passed as its two parts, the divisor's nonzero requirement, and — stranger 21
 — the quotient's rounding: nearest, halves up, which `gi_div`'s posts already pin); `gi_rem` gained the
@@ -207,6 +223,11 @@ default budget.
   in the self-call's argument, and a measure of THREE or more positions needs a tuple pattern with
   that many binds (the pair form is what the Gaussian tier needed; `fst`/`snd` are the projections
   the predicate grammar has).
+- **`gi_gcd` divides both inputs** (round 7 note, stranger 30): UNKNOWN — needs the Gaussian
+  exact-division lemma (`g | x ⇔ gi_rem(x, g) = 0`) as a stepwise checker over uninterpreted
+  products, and, for the post form, the refinement checker's induction lowering tuple-valued
+  recursive bodies. Until then "is a gcd" is the body's word; `gi_gcd_canonical`'s posts relate it
+  to `gi_gcd`, not to divisibility.
 - **The hypothesis as instances for a callee measure.** `nonzero` closed on the quantified
   hypothesis; the instances form (at the recursive call, under `N(rem) < N(w)`) is emitted too but
   was not what closed it. A law that needs the instances would measure that path.
