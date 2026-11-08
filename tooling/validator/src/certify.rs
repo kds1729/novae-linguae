@@ -990,8 +990,17 @@ fn derive_self_facts_inner(
     let prev = crate::prove::set_self_facts(None);
     let attempt = |law: &J| {
         law_attempt_timed("phase 1", law, || {
-            matches!(crate::prove_property(law, Some(body), solver).0, crate::ProofOutcome::Proved)
-                || matches!(crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver).0, crate::ProofOutcome::Proved)
+            if matches!(crate::prove_property(law, Some(body), solver).0, crate::ProofOutcome::Proved) {
+                return true;
+            }
+            let (numeric, _, measure) = crate::prove_by_numeric_induction(law, Some(body), nat_positions, solver);
+            // `NL_DERIVED_DEBUG=1`: WHY the measure rung declined — a refusal spends no query, so the
+            // per-law count alone cannot tell "no measure here" from "the solver gave up" (stranger
+            // 29, 2026-11-07: `gi_gcd`'s two laws read UNPROVED at the certifier with 0 queries).
+            if !matches!(numeric, crate::ProofOutcome::Proved) && std::env::var("NL_DERIVED_DEBUG").is_ok_and(|v| v == "1") {
+                eprintln!("[law] phase 1 numeric induction on {measure:?}: {numeric:?}");
+            }
+            matches!(numeric, crate::ProofOutcome::Proved)
                 // A list law a bare structural induction closes (`scale_mod` preserves length) is
                 // a contract too — the lemma search is skipped here (cost).
                 || matches!(crate::prove_by_induction(law, Some(body), solver).0, crate::InductionOutcome::Proved)
@@ -1790,6 +1799,12 @@ fn certify_with_view(
         // may enter a post's induction), so this report and a dependent's view of it agree.
         let nat_positions = crate::terminate::nat_param_positions(record);
         let prev_measure = view.map(|v| crate::prove::set_self_measure(v.self_measure(body, &nat_positions)));
+        // The record's own declared type, as the callee derivation installs it (and the CLI's
+        // `prove`): the induction rung lowers a recursive body with `self` uninterpreted, and a
+        // result sort outside Int/Bool/String — `gi_gcd`'s pair — is only knowable from the
+        // signature. Without it every law of a tuple-valued recursive record read UNPROVED here
+        // with no solver query, while the builder proved them (stranger 29, 2026-11-07).
+        let prev_ty = crate::prove::set_self_type(Some(sig_type.clone()));
         let started = std::time::Instant::now();
         let def = view.map(|v| move |t: &str| v.callee_def(t));
         let hints = view.zip(record.get("hash").and_then(|h| h.as_str())).and_then(|(v, h)| v.hints_for(h));
@@ -1850,6 +1865,7 @@ fn certify_with_view(
         // available (a full view; a budgeted one — the loop tries laws under the same budget), or
         // there is no callee.
         laws_complete = view.is_some_and(|v| v.callee_laws || v.contracts_for_record(record, body).is_empty());
+        crate::prove::set_self_type(prev_ty);
         if let Some(p) = prev_measure {
             crate::prove::set_self_measure(p);
         }
@@ -2228,6 +2244,51 @@ mod tests {
         };
         assert!(none.proved.is_empty(), "laws hinted unproved are not attempted");
         assert_eq!(spent, posts_only, "no solver query beyond the posts' own");
+    }
+
+    /// A TUPLE-valued recursive record's laws prove in its own certification (stranger 29,
+    /// 2026-11-07): the induction rung lowers `self` uninterpreted and takes the result sort from
+    /// the declared type — which the certify path installed for a callee's derivation and the CLI's
+    /// `prove`, but not for the record being certified, so `gi_gcd`'s two laws read UNPROVED there
+    /// with no solver query while the builder proved both.
+    #[test]
+    fn a_tuple_valued_recursive_records_laws_prove_in_its_own_certification() {
+        let Some(solver) = ["z3", "cvc5"].into_iter().find(|s| std::process::Command::new(s).arg("--version").output().is_ok_and(|o| o.status.success())) else { return };
+        let law = |s: &str| crate::surface::parse_predicate(s).unwrap();
+        let slit = |n: i64| json!({ "kind": "lit", "value": { "kind": "int", "value": n } });
+        let var = |v: &str| json!({ "kind": "var", "name": v });
+        // \n -> case lt(n, 1) of true -> (0, 0) | false -> case self(sub(n, 1)) of (a, b) -> (add(a, 1), add(b, 2))
+        let rec_call = json!({ "kind": "app", "fn": { "kind": "var", "name": "self" }, "args": [{ "kind": "app", "fn": { "kind": "var", "name": "sub" }, "args": [var("n"), slit(1)] }] });
+        let body = json!({ "kind": "lambda", "params": [{ "name": "n" }], "body": { "kind": "case",
+            "scrutinee": { "kind": "app", "fn": { "kind": "var", "name": "lt" }, "args": [var("n"), slit(1)] }, "arms": [
+            { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": true } },
+              "body": { "kind": "tuple", "elems": [slit(0), slit(0)] } },
+            { "pattern": { "kind": "lit", "value": { "kind": "bool", "value": false } },
+              "body": { "kind": "case", "scrutinee": rec_call, "arms": [
+                { "pattern": { "kind": "tuple", "elems": [{ "kind": "bind", "name": "a" }, { "kind": "bind", "name": "b" }] },
+                  "body": { "kind": "tuple", "elems": [
+                      { "kind": "app", "fn": { "kind": "var", "name": "add" }, "args": [var("a"), slit(1)] },
+                      { "kind": "app", "fn": { "kind": "var", "name": "add" }, "args": [var("b"), slit(2)] }] } }] } }] } });
+        let bh = crate::hash_artifact_with_kind(&body, crate::ArtifactKind::BodyExpression).unwrap();
+        let mut rec = json!({
+            "schema_version": "0.2.0", "hash": "fn_".to_string() + &"0".repeat(64),
+            "name_hints": ["count_pair"],
+            "signature": { "type": { "kind": "fn", "params": [{ "kind": "builtin", "name": "int" }],
+                                     "result": { "kind": "tuple", "elems": [{ "kind": "builtin", "name": "int" }, { "kind": "builtin", "name": "int" }] } },
+                           "refinements": [], "effects": [], "capabilities": [], "terminates": "always" },
+            "examples": [{ "args": [{ "kind": "int", "value": 2 }],
+                           "result": { "kind": "tuple", "elems": [{ "kind": "int", "value": 2 }, { "kind": "int", "value": 4 }] } }],
+            "properties": [
+                { "name": "first_counts", "expr": law("forall n. n < 0 || fst(self(n)) == n") },
+                { "name": "second_doubles", "expr": law("forall n. n < 0 || snd(self(n)) == 2 * n") }],
+            "intent_tags": [], "derived_from": J::Null, "supersedes": J::Null, "body_hash": bh });
+        let h = crate::hash_artifact_with_kind(&rec, crate::ArtifactKind::FunctionRecord).unwrap();
+        rec["hash"] = json!(h);
+        let cert = certify_record(&rec, &body, &HashMap::new(), solver);
+        assert!(cert.certified, "the record certifies: {:?}", cert.checks);
+        let verdicts: Vec<(String, bool)> = cert.law_results.iter().map(|(n, r)| (n.clone(), r.is_some())).collect();
+        assert_eq!(verdicts, vec![("first_counts".to_string(), true), ("second_doubles".to_string(), true)], "both laws prove by induction on `n`");
+        assert_eq!(cert.laws.len(), 2);
     }
 
     /// Another VERSION of a function in the closure is not a witness (the agent loop's view holds
