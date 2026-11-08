@@ -20,7 +20,7 @@ list of what slowed it down — read it once and you will go faster than it did.
    "reduce a fraction") is there, so you need not guess a tag from the naming pattern.
 4. **Run**: `nl-validator orchestrate --node https://nl.1105software.com --verify --require-certified
    --intent <a tag from its intent_tags> --arg … --arg …` (in `params` order), ONE run at a time; the
-   first run over a set of callees is the slow one (seconds to ~2.5 min, a stderr line every 30 s).
+   first run over a set of callees is the slow one (seconds to ~2 min, a stderr line every 30 s).
 5. **Read**: the `result:` line, then the `proved about this result` block — how far the answer is
    pinned down is in that block, not in the word CONFIRMED.
 
@@ -56,9 +56,10 @@ here" — it does not fail the run unless you pass `--require-laws`. Each law AT
 run is capped at 20 s (`NL_LAW_BUDGET_SECS`; `0` = no cap, every law tried to the end — slower,
 may prove more): the certification itself never depends on the cap (a contract the capped pass
 cannot decide is re-proved without it), only which laws are reported proved. The FIRST run over
-a set of callees is the slow one — ~2.5 min for a rational function over `rat_normalize` (measured
-on v0.1.34: `rat_add` 134 s, most of it `rat_normalize`'s contract; a law proved at the certifier's
-in longer than the cap is not attempted), ~1.5 min for `lcm`, a few seconds for `binomial`; the
+a set of callees is the slow one — ~2 min for a rational function over `rat_normalize` (measured
+on v0.1.35 with a fresh cache: `rat_normalize` 114 s — 144 s on v0.1.34 — most of it its own
+contract; a law proved at the certifier's in longer than the cap is not attempted; `rat_add` right
+after it 29 s), ~45 s for `lcm`, ~70 s for `gi_gcd_canonical`, a few seconds for `binomial`; the
 `CONFIRMED` line ends with the run's wall time.
 **Run verified runs ONE AT A TIME**: the law caps are wall-clock, so two runs sharing the CPU each
 take longer and may report fewer laws proved, and neither reuses the other's proofs. For several
