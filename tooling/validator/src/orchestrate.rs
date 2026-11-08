@@ -8,7 +8,7 @@
 //! This is "assemble, don't write" (principle 4) made autonomous — the agent never names the
 //! function, it discovers one.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use ed25519_dalek::SigningKey;
 use serde_json::{json, Value as J};
 use std::path::Path;
@@ -51,8 +51,81 @@ pub fn orchestrate(
     orchestrate_with_maps(link, records, stages, args, orchestrator, responder, timestamp)
 }
 
+/// One argument of a pipeline stage: a value, or a reference to the PREVIOUS stage's result — `_`
+/// the whole result, `_1`, `_2`, … the components of a tuple result (1-based, as `fst`/`snd` read).
+/// Stranger 30 (2026-11-08) copied every intermediate result into the next run's `--arg` by hand and
+/// scaled one itself; the chain was its own, not the tool's.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StageArg {
+    Value(J),
+    Prev,
+    Component(usize),
+}
+
+impl StageArg {
+    /// `_` → the previous result; `_<k>` (k ≥ 1) → its k-th tuple component; anything else is a value.
+    pub fn placeholder(s: &str) -> Option<StageArg> {
+        if s == "_" {
+            return Some(StageArg::Prev);
+        }
+        let k: usize = s.strip_prefix('_')?.parse().ok()?;
+        (k >= 1).then_some(StageArg::Component(k - 1))
+    }
+
+    pub fn is_placeholder(&self) -> bool {
+        !matches!(self, StageArg::Value(_))
+    }
+}
+
+/// A pipeline stage: the intent a function is discovered by, and that function's arguments.
+#[derive(Clone, Debug)]
+pub struct PipelineStage {
+    pub intent: String,
+    pub args: Vec<StageArg>,
+}
+
+impl PipelineStage {
+    /// A stage over plain values (the first stage, or a test's).
+    pub fn values(intent: &str, args: Vec<J>) -> PipelineStage {
+        PipelineStage { intent: intent.to_string(), args: args.into_iter().map(StageArg::Value).collect() }
+    }
+}
+
+/// A stage's actual arguments given the previous stage's result: NO arguments → the previous
+/// result alone (the pipeline's original rule); otherwise `_` and `_k` resolved against it.
+pub fn resolve_stage_args(args: &[StageArg], prev: Option<&J>) -> Result<Vec<J>> {
+    if args.is_empty() {
+        return Ok(prev.into_iter().cloned().collect());
+    }
+    args.iter()
+        .map(|a| match a {
+            StageArg::Value(v) => Ok(v.clone()),
+            StageArg::Prev => prev.cloned().ok_or_else(|| anyhow!("`_` names the previous stage's result, and this is the first stage")),
+            StageArg::Component(i) => {
+                let p = prev.ok_or_else(|| anyhow!("`_{}` names a component of the previous stage's result, and this is the first stage", i + 1))?;
+                let elems = p
+                    .get("elems")
+                    .and_then(|e| e.as_array())
+                    .filter(|_| p.get("kind").and_then(|k| k.as_str()) == Some("tuple"))
+                    .ok_or_else(|| {
+                        anyhow!("`_{}` needs a tuple result from the previous stage; it returned {}", i + 1, p.to_string())
+                    })?;
+                elems.get(*i).cloned().ok_or_else(|| anyhow!("`_{}`: the previous stage's tuple has {} component(s)", i + 1, elems.len()))
+            }
+        })
+        .collect()
+}
+
+/// The value a run's final `assert` claims — the stage's result — when it carries one inline.
+pub fn asserted_result(steps: &[Step]) -> Option<J> {
+    let m = &steps.iter().rev().find(|s| s.label.rsplit(':').next() == Some("assert"))?.message;
+    m.pointer("/body/claim/expr/args/1/value").cloned()
+}
+
 /// [`orchestrate`] over already-materialized maps — the commons view may come from a local
 /// directory or a remote node ([`crate::commons_client::maps_from_node`]); the loop is identical.
+/// `args` are the first stage's; every later stage receives the previous result alone (for
+/// per-stage arguments and `_` placeholders, [`orchestrate_stages_with_maps`]).
 pub fn orchestrate_with_maps(
     link: std::collections::HashMap<String, J>,
     records: std::collections::HashMap<String, J>,
@@ -62,14 +135,35 @@ pub fn orchestrate_with_maps(
     responder: &SigningKey,
     timestamp: Option<&str>,
 ) -> Result<Run> {
+    let stages: Vec<PipelineStage> = stages
+        .iter()
+        .enumerate()
+        .map(|(i, intent)| if i == 0 { PipelineStage::values(intent, args.clone()) } else { PipelineStage { intent: intent.clone(), args: Vec::new() } })
+        .collect();
+    orchestrate_stages_with_maps(link, records, &stages, orchestrator, responder, timestamp)
+}
+
+/// The plain pipeline over explicit stages: each stage's arguments are its own, with `_` / `_k`
+/// standing for the previous stage's result (or its tuple components), and a stage without
+/// arguments taking the previous result alone.
+pub fn orchestrate_stages_with_maps(
+    link: std::collections::HashMap<String, J>,
+    records: std::collections::HashMap<String, J>,
+    stages: &[PipelineStage],
+    orchestrator: &SigningKey,
+    responder: &SigningKey,
+    timestamp: Option<&str>,
+) -> Result<Run> {
     let mut link = link;
     let responder_did = did_nova_from_pubkey(&responder.verifying_key());
     let mut steps = Vec::new();
-    let mut stage_args = args; // stage 0 gets the initial args; each later stage gets [prev result]
+    let mut prev: Option<J> = None;
     let mut confirmed = !stages.is_empty();
     let multi = stages.len() > 1;
 
-    for (i, intent) in stages.iter().enumerate() {
+    for (i, stage) in stages.iter().enumerate() {
+        let intent = &stage.intent;
+        let stage_args = resolve_stage_args(&stage.args, prev.as_ref())?;
         let pfx = if multi { format!("{i}:") } else { String::new() };
 
         // QUERY the commons for a function matching this stage's intent.
@@ -127,7 +221,7 @@ pub fn orchestrate_with_maps(
             .cloned()
             .or_else(crate::respond::take_result_value)
         {
-            Some(result) => stage_args = vec![result],
+            Some(result) => prev = Some(result),
             None => confirmed = false,
         }
         steps.push(Step { label: format!("{pfx}assert"), message: assert });
@@ -1188,6 +1282,83 @@ pub fn orchestrate_verified_hinted(
     unreachable!("candidate loop returns on its last attempt")
 }
 
+/// One stage of a verified pipeline as it ran: its intent, its ACTUAL arguments (placeholders
+/// resolved against the previous stage's result), the verified run, and the result it asserted.
+pub struct StageRun {
+    pub intent: String,
+    pub args: Vec<J>,
+    pub run: VerifiedRun,
+    pub result: Option<J>,
+}
+
+/// A verified multi-stage pipeline: every stage discovered, certified, applied and re-verified by
+/// [`orchestrate_verified_hinted`], each stage's result carried into the next BY THIS RUN. What
+/// is proved about the final value is each stage's facts over its arguments, which are the earlier
+/// stages' re-verified results — the chain is the tool's, where before (stranger 30, 2026-11-08) an
+/// agent ran one verified loop per function and copied the values between them by hand.
+pub struct VerifiedPipeline {
+    pub stages: Vec<StageRun>,
+    /// Every stage ran and re-verified, and every stage asserted a result for the next.
+    pub confirmed: bool,
+}
+
+/// The commons view a stage runs against — its link map, record map, the node's publication order
+/// and the per-law hints. A view is asked for PER STAGE, with the stage's intent and its resolved
+/// arguments, so a node's candidate page is shaped by each stage's own argument sorts.
+pub type StageView = (
+    std::collections::HashMap<String, J>,
+    std::collections::HashMap<String, J>,
+    Vec<String>,
+    std::collections::HashMap<String, crate::certify::LawHints>,
+);
+
+/// Run `stages` as a verified pipeline (see [`VerifiedPipeline`]). `expect` applies to the LAST
+/// stage's result. `on_stage` sees each stage as it completes (the CLI prints its transcript
+/// then). The pipeline stops at the first stage that does not confirm, is not certified under
+/// `require_certified`, is untrusted, or asserts no result to carry.
+#[allow(clippy::too_many_arguments)]
+pub fn orchestrate_verified_pipeline(
+    stages: &[PipelineStage],
+    mut view: impl FnMut(usize, &str, &[J]) -> Result<StageView>,
+    orchestrator: &SigningKey,
+    responder: &SigningKey,
+    solver: &str,
+    policy: Option<&Policy>,
+    attestations: &[J],
+    timestamp: Option<&str>,
+    require_certified: bool,
+    expect: Option<J>,
+    certified_grants: &[String],
+    mut on_stage: impl FnMut(usize, &StageRun),
+) -> Result<VerifiedPipeline> {
+    let mut out: Vec<StageRun> = Vec::new();
+    let mut prev: Option<J> = None;
+    for (i, stage) in stages.iter().enumerate() {
+        let args = resolve_stage_args(&stage.args, prev.as_ref())?;
+        let (link, records, published, hints) = view(i, &stage.intent, &args)?;
+        let last = i + 1 == stages.len();
+        let run = orchestrate_verified_hinted(
+            link, records, &published, &stage.intent, args.clone(), orchestrator, responder, solver, policy, attestations,
+            timestamp, require_certified, if last { expect.clone() } else { None }, certified_grants, hints,
+        )?;
+        // The result the stage asserted — inline, or drained when the claim carries it by address.
+        let result = if run.confirmed { asserted_result(&run.steps).or_else(crate::respond::take_result_value) } else { None };
+        let sr = StageRun { intent: stage.intent.clone(), args, run, result };
+        on_stage(i, &sr);
+        let stop = !sr.run.confirmed
+            || sr.result.is_none()
+            || (require_certified && sr.run.certified != Some(true))
+            || sr.run.trusted == Some(false);
+        prev = sr.result.clone();
+        out.push(sr);
+        if stop {
+            break;
+        }
+    }
+    let confirmed = out.len() == stages.len() && out.iter().all(|s| s.run.confirmed && s.result.is_some());
+    Ok(VerifiedPipeline { stages: out, confirmed })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1285,6 +1456,56 @@ mod tests {
         assert_eq!(run.steps.len(), 10); // 2 stages × 5 messages
         let final_result = run.steps.last().unwrap().message.pointer("/body/claim/expr/args/1/value").unwrap();
         assert_eq!(final_result, &json!({ "kind": "int", "value": 84 }));
+    }
+
+    #[test]
+    fn stage_placeholders_resolve_against_the_previous_result() {
+        assert_eq!(StageArg::placeholder("_"), Some(StageArg::Prev));
+        assert_eq!(StageArg::placeholder("_1"), Some(StageArg::Component(0)));
+        assert_eq!(StageArg::placeholder("_2"), Some(StageArg::Component(1)));
+        assert_eq!(StageArg::placeholder("_0"), None, "components are 1-based, like fst/snd");
+        assert_eq!(StageArg::placeholder("_x"), None);
+        assert_eq!(StageArg::placeholder("-1"), None, "a negative literal is a value");
+
+        let pair = json!({ "kind": "tuple", "elems": [ { "kind": "int", "value": 3 }, { "kind": "int", "value": 16 } ] });
+        // No arguments: the previous result alone (the pipeline's original rule).
+        assert_eq!(resolve_stage_args(&[], Some(&pair)).unwrap(), vec![pair.clone()]);
+        // `_1 _2 1000 1`: rat_mul(3, 16, 1000, 1) — the components spread over the first two params.
+        let args = [StageArg::Component(0), StageArg::Component(1), StageArg::Value(json!({ "kind": "int", "value": 1000 })), StageArg::Value(json!({ "kind": "int", "value": 1 }))];
+        let got = resolve_stage_args(&args, Some(&pair)).unwrap();
+        assert_eq!(got[0], json!({ "kind": "int", "value": 3 }));
+        assert_eq!(got[1], json!({ "kind": "int", "value": 16 }));
+        assert_eq!(got[2], json!({ "kind": "int", "value": 1000 }));
+        // The whole result as one argument.
+        assert_eq!(resolve_stage_args(&[StageArg::Prev], Some(&pair)).unwrap(), vec![pair.clone()]);
+        // Errors name the problem: a first stage has no previous result; a scalar has no components.
+        assert!(resolve_stage_args(&[StageArg::Prev], None).unwrap_err().to_string().contains("first stage"));
+        let n = json!({ "kind": "int", "value": 42 });
+        assert!(resolve_stage_args(&[StageArg::Component(0)], Some(&n)).unwrap_err().to_string().contains("tuple"));
+        assert!(resolve_stage_args(&[StageArg::Component(2)], Some(&pair)).unwrap_err().to_string().contains("2 component(s)"));
+    }
+
+    #[test]
+    fn the_plain_pipeline_takes_per_stage_arguments() {
+        // The plain loop applies the FIRST match by intent (`double`, unary — no signature filter
+        // here), so the second stage names the first's result explicitly: double(21) = 42, then
+        // double(_) = 84, the `_` resolved by the orchestrator before the stage's propose.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec/examples");
+        let n = |v: i64| json!({ "kind": "int", "value": v });
+        let stages = [
+            PipelineStage::values("arithmetic", vec![json!({ "kind": "nat", "value": 21 })]),
+            PipelineStage { intent: "arithmetic".into(), args: vec![StageArg::Prev] },
+        ];
+        let run = orchestrate_stages_with_maps(
+            build_link_map(&dir).unwrap(), build_record_map(&dir).unwrap(), &stages,
+            &signing_key_from_seed("test-orchestrator"), &signing_key_from_seed("test-responder"), None,
+        ).unwrap();
+        assert!(run.confirmed, "every stage's claim must verify");
+        let final_result = run.steps.last().unwrap().message.pointer("/body/claim/expr/args/1/value").unwrap();
+        assert_eq!(final_result, &n(84));
+        // The second propose carries the resolved argument: the first stage's 42.
+        let propose = &run.steps.iter().find(|s| s.label == "1:propose").unwrap().message;
+        assert_eq!(propose.pointer("/body/args").unwrap(), &json!([n(42)]));
     }
 
     // ---- verified orchestration: discover → trust → prove → apply → re-verify ----
@@ -1387,6 +1608,53 @@ mod tests {
         let gate = run.steps.iter().find(|s| s.label == "grants").expect("a grants step is recorded");
         assert_eq!(gate.message["trust_gate_open"], json!(true), "{}", gate.message);
         assert!(run.confirmed, "the certified target runs under the gated grant and re-verifies");
+    }
+
+    /// THE VERIFIED PIPELINE (stranger 30, 2026-11-08): two stages, each discovered, certified,
+    /// applied and re-verified, the first's result carried into the second by the run itself —
+    /// add(21, 21) = 42, then add(_, 1) = 43 — and `expect` applying to the last stage only.
+    #[test]
+    fn the_verified_pipeline_carries_each_stages_result_into_the_next() {
+        let Some(solver) = solver() else { return };
+        let dir = examples();
+        let n = |v: i64| json!({ "kind": "int", "value": v });
+        let stages = [
+            PipelineStage::values("arithmetic", vec![n(21), n(21)]),
+            PipelineStage { intent: "arithmetic".into(), args: vec![StageArg::Prev, StageArg::Value(n(1))] },
+        ];
+        let mut seen: Vec<(usize, Vec<J>)> = Vec::new();
+        let pipeline = orchestrate_verified_pipeline(
+            &stages,
+            |i, intent, args| {
+                assert_eq!(intent, "arithmetic");
+                seen.push((i, args.to_vec()));
+                Ok((build_link_map(&dir)?, build_record_map(&dir)?, Vec::new(), Default::default()))
+            },
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"), solver, None, &[], None,
+            true, Some(n(43)), &[],
+            |_, _| {},
+        ).unwrap();
+        assert!(pipeline.confirmed, "both stages confirm");
+        assert_eq!(pipeline.stages.len(), 2);
+        assert_eq!(pipeline.stages[0].result, Some(n(42)));
+        // The second stage's view was asked for with the RESOLVED arguments (42, 1), and it ran on them.
+        assert_eq!(seen[1].1, vec![n(42), n(1)]);
+        assert_eq!(pipeline.stages[1].args, vec![n(42), n(1)]);
+        assert_eq!(pipeline.stages[1].result, Some(n(43)));
+        assert!(pipeline.stages.iter().all(|s| s.run.certified == Some(true)), "every stage certified");
+
+        // A stage that cannot run stops the pipeline there, with no result to carry.
+        let bad = [PipelineStage::values("arithmetic", vec![n(21), n(21)]), PipelineStage { intent: "no-such-intent".into(), args: vec![StageArg::Prev] }];
+        let pipeline = orchestrate_verified_pipeline(
+            &bad,
+            |_, _, _| Ok((build_link_map(&dir)?, build_record_map(&dir)?, Vec::new(), Default::default())),
+            &signing_key_from_seed("orch"), &signing_key_from_seed("resp"), solver, None, &[], None,
+            true, None, &[],
+            |_, _| {},
+        ).unwrap();
+        assert!(!pipeline.confirmed);
+        assert_eq!(pipeline.stages.len(), 2, "the failing stage is in the record");
+        assert!(pipeline.stages[0].run.confirmed && !pipeline.stages[1].run.confirmed);
     }
 
     /// The loop's prove step proves a law that rests on a CALLEE's contract (2026-11-02, stranger

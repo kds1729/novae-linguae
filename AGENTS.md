@@ -21,8 +21,13 @@ list of what slowed it down — read it once and you will go faster than it did.
 4. **Run**: `nl-validator orchestrate --node https://nl.1105software.com --verify --require-certified
    --intent <a tag from its intent_tags> --arg … --arg …` (in `params` order), ONE run at a time; the
    first run over a set of callees is the slow one (seconds to ~2 min, a stderr line every 30 s).
+   A goal that needs SEVERAL functions is one run too: one `--intent` per stage, each followed by
+   its own `--arg`s, with `_` for the previous stage's result (`_1`, `_2`, … for the components of a
+   tuple result) — every stage is verified and the run carries each result into the next (see
+   *Chaining functions* below). Do not copy intermediate results between runs by hand.
 5. **Read**: the `result:` line, then the `proved about this result` block — how far the answer is
-   pinned down is in that block, not in the word CONFIRMED.
+   pinned down is in that block, not in the word CONFIRMED. For a chain, the block lists every
+   stage's call, result and proved facts.
 
 ## Just the binary (no side effects)
 
@@ -144,6 +149,30 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    `is_prime` declares none, and the block says `proved: nothing about this result beyond
    certification and an agreeing re-run`. When it matters, read the body
    (`nl-validator unparse-body`) or prefer a candidate whose contract states the answer.
+
+**Chaining functions (one verified run, several stages).** When no single function answers the
+goal, give `orchestrate` one `--intent` per stage; the `--arg`s after an `--intent` are that stage's,
+and in a later stage `_` is the previous stage's whole result, `_1`, `_2`, … the components of a
+tuple result (a stage with no `--arg` receives the previous result as its only argument). "1/8 +
+1/16 to 3 decimal places, ties to even" is the rational tier's `rat_add`, then `rat_mul` by 1000/1,
+then the decimal tier's `div_half_even` on the numerator and denominator:
+
+    nl-validator orchestrate --node <node> --verify --require-certified \
+      --intent math/rational/rat-add --arg 1 --arg 8 --arg 1 --arg 16 \
+      --intent math/rational/rat-mul --arg _1 --arg _2 --arg 1000 --arg 1 \
+      --intent math/decimal/div-half-even --arg _1 --arg _2
+
+Each stage is discovered, certified, applied and re-verified like a single run (its transcript lines
+carry the stage number, `0:certify`, `1:propose`, …), and the run itself feeds each result to the next
+stage — nothing is copied by hand. The verdict names every stage with its call and result, then the
+FINAL `result:` (here `188`, i.e. 0.188), then `proved about this result, stage by stage`: the facts
+each stage proved about ITS result. Read them as a chain — what pins the final value is the last
+stage's facts over the earlier stages' re-verified results (`rat_add`'s posts pin 3/16 exactly as
+the sum in lowest terms; `rat_mul`'s pin 375/2; `div_half_even`'s pin 188 as the half-even rounding
+of 375/2) — and a stage whose block says "nothing beyond certification and an agreeing re-run" is
+the weak link, whatever the others prove. `--expect` applies to the last stage; `--require-laws`
+to every stage; a stage that fails stops the run, which names the stage. Discovery is per stage, so
+each stage's candidates are shaped by its actual arguments. One run at a time still applies.
 
 Decimal numbers from a user ("7.125", "1.0825") are not floats here — money must be exact. Pass
 them as TEXT to a function that takes text (`round_text_half_even`, `fx_convert_text`,

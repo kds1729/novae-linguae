@@ -666,7 +666,10 @@ enum Commands {
     /// Autonomous orchestration (spec/agent-loop.md): drive a full `query → propose → commit →
     /// assert → verify` conversation. The orchestrator discovers a commons function by `--intent`,
     /// proposes applying it to the `--arg`s, the responder commits + fulfils, and the orchestrator
-    /// verifies the result. Prints the signed transcript; exit 1 if it isn't CONFIRMED.
+    /// verifies the result. Several `--intent`s make a PIPELINE: each starts a stage, the `--arg`s
+    /// after it are that stage's, and `_` (or `_1`, `_2`, … for a tuple's components) stands for the
+    /// previous stage's result — one run carries the chain. Prints the signed transcript; exit 1 if
+    /// it isn't CONFIRMED.
     Orchestrate {
         /// Directory of records/bodies (the commons view). Exactly one of `--records`/`--node`.
         #[arg(long, conflicts_with = "node", required_unless_present = "node")]
@@ -682,12 +685,18 @@ enum Commands {
         #[arg(long, requires = "node")]
         publish: bool,
         /// Intent tag for a pipeline stage (repeatable). Each `--intent` discovers a function by that
-        /// intent and applies it to the previous stage's result — composing the discovered functions.
+        /// intent and starts a STAGE: the `--arg`s that follow it are that stage's arguments; a later
+        /// stage with no `--arg` receives the previous stage's result alone. With `--verify`, every
+        /// stage is certified, applied and re-verified, and each result is carried into the next
+        /// stage by the run itself.
         #[arg(long = "intent")]
         intents: Vec<String>,
         /// Argument value, repeatable, positional order: a value-expression JSON FILE, inline JSON
         /// (`'{"kind":"int","value":10000}'`), or a surface literal (`10000`, `'[1, 1, 1]'`,
-        /// `'"text"'` — spec/surface-syntax.md §3). An existing file wins.
+        /// `'"text"'` — spec/surface-syntax.md §3). An existing file wins. In a later stage of a
+        /// pipeline, `_` is the previous stage's whole result and `_1`, `_2`, … its tuple components
+        /// (`--intent math/rational/rat-add --arg 1 --arg 8 --arg 1 --arg 16 --intent
+        /// math/rational/rat-mul --arg _1 --arg _2 --arg 1000 --arg 1`).
         #[arg(long = "arg", allow_hyphen_values = true)]
         args: Vec<String>,
         /// Seed for the orchestrator's signing identity (signs query + propose). Optional for a plain
@@ -701,8 +710,10 @@ enum Commands {
         /// Optional ISO 8601 timestamp for the messages (default: null, deterministic per seed).
         #[arg(long)]
         timestamp: Option<String>,
-        /// Run the *verified* loop: after discovering the function, prove its declared property and
-        /// (with `--policy`) trust-gate it before applying. Single `--intent` only.
+        /// Run the *verified* loop: after discovering the function, certify it, prove its declared
+        /// laws and (with `--policy`) trust-gate it before applying. With several `--intent`s every
+        /// stage is verified and the chain is this run's (`result:` is the last stage's; the proved
+        /// block lists every stage's facts).
         #[arg(long)]
         verify: bool,
         /// Local trust policy (JSON) for the `--verify` trust gate; an untrusted function aborts the run.
@@ -1044,7 +1055,13 @@ fn main() -> ExitCode {
 }
 
 fn real_main() -> ExitCode {
-    let cli = Cli::parse();
+    // The matches as well as the parsed `Cli`: `orchestrate` reads the POSITIONS of its `--intent`
+    // and `--arg` occurrences to tell which stage each argument belongs to (`pipeline_stages`).
+    let matches = <Cli as clap::CommandFactory>::command().get_matches();
+    let cli = match <Cli as clap::FromArgMatches>::from_arg_matches(&matches) {
+        Ok(cli) => cli,
+        Err(e) => e.exit(),
+    };
     let (result, print_ok) = match cli.command {
         Commands::Validate { schema, record } => (cmd_validate(&schema, &record), true),
         Commands::Canonicalize { record } => (cmd_canonicalize(&record), false),
@@ -1155,15 +1172,16 @@ fn real_main() -> ExitCode {
                 )),
                 (None, false) => Ok(DEFAULT_ORCHESTRATOR_SEED.to_string()),
             };
-            match seed.and_then(|seed| parse_secrets(&secret).and_then(|s| Ok((seed, s, parse_oauth(&oauth)?)))) {
+            let stages = pipeline_stages(matches.subcommand_matches("orchestrate"), &intents, &args);
+            match stages.and_then(|st| Ok((st, seed?))).and_then(|(st, seed)| parse_secrets(&secret).and_then(|s| Ok((st, seed, s, parse_oauth(&oauth)?)))) {
                 Err(e) => (Err(e), false),
-                Ok((seed, s, o)) => {
+                Ok((stages, seed, s, o)) => {
                     nl_validator::set_effect_secrets(s);
                     nl_validator::set_effect_oauth(o);
                     if verify {
-                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified, require_laws, expect.as_ref(), &grant_certified, verbose), false)
+                        (cmd_orchestrate_verified(records.as_ref(), node.as_deref(), publish, &stages, &seed, &responder_seed, timestamp.as_deref(), policy.as_ref(), &attestations, &solver, require_certified, require_laws, expect.as_ref(), &grant_certified, verbose), false)
                     } else {
-                        (cmd_orchestrate(records.as_ref(), node.as_deref(), publish, &intents, &args, &seed, &responder_seed, timestamp.as_deref()), false)
+                        (cmd_orchestrate(records.as_ref(), node.as_deref(), publish, &stages, &seed, &responder_seed, timestamp.as_deref()), false)
                     }
                 }
             }
@@ -3037,21 +3055,101 @@ fn plain_ints(v: &serde_json::Value) -> serde_json::Value {
     }
 }
 
+/// Which stage each `--arg` belongs to, from the command-line POSITIONS of every `--intent` and
+/// `--arg`: an argument before the first `--intent` (or when there is one stage) is the first
+/// stage's; after that, an argument belongs to the latest `--intent` before it.
+fn stage_of_each_arg(intent_positions: &[usize], arg_positions: &[usize]) -> Vec<usize> {
+    arg_positions.iter().map(|&a| intent_positions.iter().filter(|&&i| i < a).count().saturating_sub(1)).collect()
+}
+
+/// The pipeline's stages from the interleaved `--intent`/`--arg` occurrences ([`stage_of_each_arg`]),
+/// `_` / `_k` read as placeholders and every other argument as a value. The original order
+/// `--intent a --intent b --arg x` (every argument after the LAST intent, none a placeholder) keeps
+/// its meaning: the first stage's arguments, each later stage taking the previous result alone. A
+/// later stage whose arguments never name the previous result would silently drop it — refused.
+fn pipeline_stages(sub: Option<&clap::ArgMatches>, intents: &[String], args: &[String]) -> Result<Vec<nl_validator::PipelineStage>> {
+    use nl_validator::{PipelineStage, StageArg};
+    if intents.is_empty() {
+        bail!("orchestrate needs at least one --intent");
+    }
+    let (ip, ap): (Vec<usize>, Vec<usize>) = match sub {
+        Some(m) => (
+            m.indices_of("intents").map(|i| i.collect()).unwrap_or_default(),
+            m.indices_of("args").map(|i| i.collect()).unwrap_or_default(),
+        ),
+        None => (Vec::new(), Vec::new()),
+    };
+    let owner: Vec<usize> = if ip.len() == intents.len() && ap.len() == args.len() { stage_of_each_arg(&ip, &ap) } else { vec![0; args.len()] };
+    let parsed: Vec<StageArg> = args
+        .iter()
+        .map(|a| match StageArg::placeholder(a) {
+            Some(ph) => Ok(ph),
+            None => read_value_arg(a).map(StageArg::Value),
+        })
+        .collect::<Result<_>>()?;
+    let mut stages: Vec<PipelineStage> = intents.iter().map(|i| PipelineStage { intent: i.clone(), args: Vec::new() }).collect();
+    let legacy = stages.len() > 1 && !parsed.is_empty() && owner.iter().all(|&k| k == stages.len() - 1) && parsed.iter().all(|a| !a.is_placeholder());
+    for (k, a) in owner.into_iter().zip(parsed) {
+        stages[if legacy { 0 } else { k }].args.push(a);
+    }
+    for (k, st) in stages.iter().enumerate().skip(1) {
+        if !st.args.is_empty() && !st.args.iter().any(|a| a.is_placeholder()) {
+            bail!(
+                "stage {k} (`--intent {}`) has arguments but none is the previous stage's result: name it with `_` (the whole result) or `_1`, `_2`, … (its tuple components), or give the stage no --arg to receive the result alone",
+                st.intent
+            );
+        }
+    }
+    Ok(stages)
+}
+
+/// Arguments (or any values) in surface syntax, comma-separated, integers plain.
+fn values_surface(vals: &[serde_json::Value]) -> String {
+    vals.iter().map(|v| nl_validator::surface::unparse_value(&plain_ints(v)).unwrap_or_else(|_| v.to_string())).collect::<Vec<_>>().join(", ")
+}
+
+/// `name(args)` for a stage of a verified pipeline: the function the stage proposed, by name hint.
+fn stage_call(sr: &nl_validator::StageRun, names: &std::collections::HashMap<String, String>) -> String {
+    let target = sr.run.steps.iter().rev().find(|st| st.label == "propose").and_then(|st| st.message.pointer("/body/target")).and_then(|t| t.as_str()).unwrap_or("?");
+    let name = names.get(target).cloned().unwrap_or_else(|| format!("{}…", &target[..target.len().min(11)]));
+    format!("{name}({})", values_surface(&sr.args))
+}
+
+/// The `proved about this result` block of a multi-stage run: every stage's call, its result, and
+/// the facts proved about THAT result — the chain being the run's own, what pins the final value is
+/// the last stage's facts over the earlier stages' re-verified results.
+fn chain_lines(stages: &[nl_validator::StageRun], names: &std::collections::HashMap<String, String>) -> String {
+    let mut out = String::from(
+        "proved about this result, stage by stage (the chain is this run's: each stage's arguments are the previous \
+         stage's re-verified result, carried here, not copied; read the facts — a bound is not the value):",
+    );
+    for (i, sr) in stages.iter().enumerate() {
+        out.push_str(&format!("\n  stage {i}  {} = {}", stage_call(sr, names), values_surface(sr.result.as_slice())));
+        if sr.run.vouched.is_empty() {
+            out.push_str("\n    proved: nothing about this stage's result beyond certification and an agreeing re-run");
+        }
+        for v in &sr.run.vouched {
+            out.push_str("\n    ");
+            out.push_str(v);
+        }
+    }
+    out
+}
+
 fn cmd_orchestrate(
     records: Option<&PathBuf>,
     node: Option<&str>,
     publish: bool,
-    intents: &[String],
-    args: &[String],
+    stages: &[nl_validator::PipelineStage],
     seed: &str,
     responder_seed: &str,
     timestamp: Option<&str>,
 ) -> Result<()> {
-    let argv = args.iter().map(|a| read_value_arg(a)).collect::<Result<Vec<_>>>()?;
     let orch = nl_validator::signing_key_from_seed(seed);
     let resp = nl_validator::signing_key_from_seed(responder_seed);
-    let (link, recs, _) = commons_view(records, node, intents, None)?;
-    let run = nl_validator::orchestrate_with_maps(link, recs, intents, argv, &orch, &resp, timestamp)?;
+    let intents: Vec<String> = stages.iter().map(|s| s.intent.clone()).collect();
+    let (link, recs, _) = commons_view(records, node, &intents, None)?;
+    let run = nl_validator::orchestrate_stages_with_maps(link, recs, stages, &orch, &resp, timestamp)?;
     for step in &run.steps {
         let m = &step.message;
         let hash = m.get("hash").and_then(|h| h.as_str()).unwrap_or("");
@@ -3087,8 +3185,7 @@ fn cmd_orchestrate_verified(
     records: Option<&PathBuf>,
     node: Option<&str>,
     publish: bool,
-    intents: &[String],
-    args: &[String],
+    stages: &[nl_validator::PipelineStage],
     seed: &str,
     responder_seed: &str,
     timestamp: Option<&str>,
@@ -3101,8 +3198,8 @@ fn cmd_orchestrate_verified(
     grant_certified: &[String],
     verbose: bool,
 ) -> Result<()> {
-    if intents.len() != 1 {
-        anyhow::bail!("--verify supports exactly one --intent (got {})", intents.len());
+    if stages.is_empty() {
+        bail!("--verify needs at least one --intent");
     }
     // The run's wall time goes on the verdict line (stranger 27 timed its runs by hand).
     let started = std::time::Instant::now();
@@ -3113,67 +3210,120 @@ fn cmd_orchestrate_verified(
     if std::env::var_os("NL_DERIVED_CACHE").is_none() {
         std::env::set_var("NL_DERIVED_CACHE", "1");
     }
-    let argv = args.iter().map(|a| read_value_arg(a)).collect::<Result<Vec<_>>>()?;
     let orch = nl_validator::signing_key_from_seed(seed);
     let resp = nl_validator::signing_key_from_seed(responder_seed);
     let pol = policy.map(|p| nl_validator::read_json(p).and_then(|j| nl_validator::Policy::from_json(&j))).transpose()?;
     let atts = attestations.iter().map(|p| nl_validator::read_json(p)).collect::<Result<Vec<_>>>()?;
     let exp = expect.map(|a| read_value_arg(a)).transpose()?;
-    // Server-side typed narrowing (commons.md `type_pattern`): the arguments' sorts — and the
-    // expected result's, when stated — shape the discovery page itself.
-    let pattern = nl_validator::discovery_type_pattern(&argv, exp.as_ref());
-    let (link, recs, published) = commons_view(records, node, intents, Some(&pattern))?;
-    // Name each candidate by its first name hint for the compact transcript (`name (fn_1234abcd…)`).
-    let names: std::collections::HashMap<String, String> = recs
-        .iter()
-        .filter_map(|(h, r)| Some((h.clone(), r.pointer("/name_hints/0")?.as_str()?.to_string())))
-        .collect();
-    let label = |h: &str| -> String {
-        let short = &h[..h.len().min(11)];
-        match names.get(h) {
-            Some(n) => format!("{n} ({short}…)"),
-            None => format!("{short}…"),
-        }
-    };
-    // Per-law HINTS from the certifications the node serves (spec/certification.schema.json `laws`;
-    // `NL_LAW_HINTS=0` = none): which rung proved each law at the certifier's, or that a complete
-    // derivation could not — so the run's capped law attempts go straight to the rung that works and
-    // skip the ones that never do. Scheduling, not evidence: every law reported proved, the run proved.
-    let hints = match node {
-        Some(url) if !std::env::var("NL_LAW_HINTS").is_ok_and(|v| v == "0") => {
-            let (hints, used) = nl_validator::commons_client::law_hints_from_node(url, &recs);
-            for (f, cert) in &used {
-                let h = &hints[f];
-                let named = |pick: &dyn Fn(&nl_validator::certify::LawHint) -> bool| -> Vec<String> {
-                    recs[f]
-                        .get("properties")
-                        .and_then(|p| p.as_array())
-                        .into_iter()
-                        .flatten()
-                        .filter(|p| p.get("expr").is_some_and(|e| h.get(&nl_validator::certify::law_key(e)).is_some_and(pick)))
-                        .filter_map(|p| p.get("name")?.as_str().map(String::from))
-                        .collect()
-                };
-                let unproved = named(&|h| *h == nl_validator::certify::LawHint::Unproved);
-                // Proved there, but in longer than this run's cap on one attempt: not attempted either.
-                let cap = nl_validator::certify::law_budget();
-                let slow = named(&|h| matches!((h, cap), (nl_validator::certify::LawHint::ProvedBy(_, Some(s)), Some(b)) if *s > b.as_secs_f64()));
-                let mut skip = String::new();
-                if !unproved.is_empty() {
-                    skip += &format!("; not attempting {} (unproved there)", unproved.join(", "));
-                }
-                if !slow.is_empty() {
-                    skip += &format!("; not attempting {} (proved there in longer than the {} s cap)", slow.join(", "), cap.map(|b| b.as_secs()).unwrap_or(0));
-                }
-                eprintln!("    hints  {}: {} law(s) from {}…{skip}", label(f), h.len(), &cert[..cert.len().min(13)]);
+    let multi = stages.len() > 1;
+    // Every candidate any stage fetched, named by its first name hint for the compact transcript
+    // (`name (fn_1234abcd…)`) and the chain lines.
+    let names: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>> = Default::default();
+    let label = {
+        let names = names.clone();
+        move |h: &str| -> String {
+            let short = &h[..h.len().min(11)];
+            match names.borrow().get(h) {
+                Some(n) => format!("{n} ({short}…)"),
+                None => format!("{short}…"),
             }
-            hints
         }
-        _ => Default::default(),
     };
-    let run = nl_validator::orchestrate_verified_hinted(link, recs, &published, &intents[0], argv, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp, grant_certified, hints)?;
+    // The commons view PER STAGE: the stage's resolved arguments (and, for the last stage, the
+    // expected result) shape its discovery page server-side (commons.md `type_pattern`), and the
+    // per-law hints of the candidates it fetched come with it.
+    let view = |i: usize, intent: &str, args: &[serde_json::Value]| -> Result<nl_validator::StageView> {
+        if multi {
+            eprintln!("   stage  {i} of {}: {intent} on ({})", stages.len(), values_surface(args));
+        }
+        let last = i + 1 == stages.len();
+        let pattern = nl_validator::discovery_type_pattern(args, if last { exp.as_ref() } else { None });
+        let (link, recs, published) = commons_view(records, node, &[intent.to_string()], Some(&pattern))?;
+        names.borrow_mut().extend(recs.iter().filter_map(|(h, r)| Some((h.clone(), r.pointer("/name_hints/0")?.as_str()?.to_string()))));
+        let hints = law_hints(node, &recs, &label);
+        Ok((link, recs, published, hints))
+    };
+    // Each stage's transcript prints as the stage completes (a long second stage should not hide
+    // the first's result), stage-prefixed when there are several.
+    let on_stage = |i: usize, sr: &nl_validator::StageRun| {
+        let pfx = if multi { format!("{i}:") } else { String::new() };
+        print_verified_steps(&sr.run.steps, &label, verbose, &pfx);
+    };
+    let pipeline = nl_validator::orchestrate_verified_pipeline(
+        stages, view, &orch, &resp, solver, pol.as_ref(), &atts, timestamp, require_certified, exp.clone(), grant_certified, on_stage,
+    )?;
+    let names = names.borrow();
 
-    for step in &run.steps {
+    // Every law each stage's loop tried, in declaration order. They are REPORTED; only
+    // `--require-laws` makes one that did not prove fail the run. Until v0.1.17 the FIRST law gated
+    // it: `binomial`, whose first law `symmetry` its own module build leaves open, could never
+    // confirm a result it computes and re-runs exactly (stranger 16, 2026-11-03).
+    let laws_of = |run: &nl_validator::VerifiedRun| -> Vec<(String, bool)> { run.property.iter().chain(&run.other_laws).cloned().collect() };
+    let last = pipeline.stages.last().expect("at least one stage ran");
+    let k = pipeline.stages.len() - 1; // the stage the pipeline stopped at
+    let at = |i: usize| -> String { if multi { format!("stage {i} (`{}`): ", pipeline.stages[i].intent) } else { String::new() } };
+    let open_law: Option<(usize, String)> =
+        pipeline.stages.iter().enumerate().find_map(|(i, s)| laws_of(&s.run).into_iter().find(|(_, p)| !*p).map(|(n, _)| (i, n)));
+    let property_ok = !require_laws || open_law.is_none();
+    let trust_ok = pipeline.stages.iter().all(|s| s.run.trusted != Some(false));
+    let certify_ok = !require_certified || pipeline.stages.iter().all(|s| s.run.certified == Some(true));
+    if pipeline.confirmed && property_ok && trust_ok && certify_ok {
+        if multi {
+            // One line per stage — the call, its result, what the stage vouches for — then the
+            // pipeline's verdict, the FINAL result, and every stage's proved facts (stranger 30:
+            // "each step is CONFIRMED on its own; there is no composed end-to-end proof").
+            for (i, sr) in pipeline.stages.iter().enumerate() {
+                println!(
+                    "stage {i}  {} = {}  — {}",
+                    stage_call(sr, &names),
+                    values_surface(sr.result.as_slice()),
+                    confirmed_summary(&sr.run.steps, sr.run.certified, &laws_of(&sr.run))
+                );
+            }
+            println!(
+                "CONFIRMED  {} stages, each discovered, certified, applied and re-verified, every result carried into the next stage by this run (in {:.1} s)",
+                pipeline.stages.len(),
+                started.elapsed().as_secs_f64()
+            );
+            println!("result: {}", values_surface(last.result.as_slice()));
+            println!("{}", chain_lines(&pipeline.stages, &names));
+        } else {
+            let laws = laws_of(&last.run);
+            println!("CONFIRMED  {} (in {:.1} s)", confirmed_summary(&last.run.steps, last.run.certified, &laws), started.elapsed().as_secs_f64());
+            if let Some(r) = final_result_surface(&last.run.steps) {
+                println!("result: {r}");
+            }
+            // CONFIRMED is the same word whether a post pins the value or nothing constrains it
+            // (stranger 18: `is_prime`, a pre only); say which facts the answer rests on.
+            println!("{}", vouched_lines(&last.run.vouched));
+        }
+        if publish {
+            publish_final_assert(node.expect("--publish requires --node"), &last.run.steps)?;
+        }
+        Ok(())
+    } else if last.run.trusted == Some(false) {
+        Err(anyhow::anyhow!("ABORTED    {}the discovered function is not trusted under the policy", at(k)))
+    } else if require_certified && last.run.certified != Some(true) {
+        Err(anyhow::anyhow!("ABORTED    {}the discovered function is not certified (--require-certified)", at(k)))
+    } else if !property_ok {
+        // The application still ran and re-verified; show its value, marked as not vouched for —
+        // a suppressed value read as a failed run (stranger 10, 2026-11-02).
+        if pipeline.confirmed {
+            if let Some(r) = final_result_surface(&last.run.steps) {
+                println!("result (applied and re-run, but a law is NOT proved): {r}");
+            }
+        }
+        let (i, name) = open_law.unwrap_or_default();
+        Err(anyhow::anyhow!("NOT-PROVEN {}the discovered function's own law `{name}` did not prove (--require-laws)", at(i)))
+    } else {
+        Err(anyhow::anyhow!("{}orchestration did not confirm (rejected, or the claim failed to re-run)", at(k)))
+    }
+}
+
+/// The transcript of one verified run, one line per step (the full detail behind `--verbose`),
+/// each label prefixed with `pfx` (`0:`, `1:`, … in a pipeline).
+fn print_verified_steps(steps: &[nl_validator::Step], label: &dyn Fn(&str) -> String, verbose: bool, pfx: &str) {
+    for step in steps {
         let m = &step.message;
         if !verbose {
             // One short line per step (stranger 13 piped the full transcript through `tail`); the
@@ -3181,15 +3331,15 @@ fn cmd_orchestrate_verified(
             let compact = match step.label.as_str() {
                 "ack" => Some(format!("{} match(es)", m.pointer("/body/result/matches").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0))),
                 "rank" => {
-                    let order: Vec<String> = m.get("scores").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.get("function")?.as_str().map(&label)).collect()).unwrap_or_default();
+                    let order: Vec<String> = m.get("scores").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.get("function")?.as_str().map(label)).collect()).unwrap_or_default();
                     Some(format!("{} candidate(s), best first: {}", order.len(), order.join(", ")))
                 }
                 "collapse" => {
-                    let dropped: Vec<String> = m.get("collapsed").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.get("dropped")?.as_str().map(&label)).collect()).unwrap_or_default();
+                    let dropped: Vec<String> = m.get("collapsed").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.get("dropped")?.as_str().map(label)).collect()).unwrap_or_default();
                     Some(format!("merged {} proven-equivalent version(s) into the higher-ranked: {}", dropped.len(), dropped.join(", ")))
                 }
                 "certify" => {
-                    let f = m.get("function").and_then(|v| v.as_str()).map(&label).unwrap_or_default();
+                    let f = m.get("function").and_then(|v| v.as_str()).map(label).unwrap_or_default();
                     let (sound, total) = post_tally(m);
                     let failed: Vec<&str> = m.get("failed").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
                     Some(format!(
@@ -3199,11 +3349,11 @@ fn cmd_orchestrate_verified(
                         if failed.is_empty() { String::new() } else { format!(", FAILED {}", failed.join(", ")) }
                     ))
                 }
-                "propose" => Some(format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).map(&label).unwrap_or_default())),
+                "propose" => Some(format!("apply {}", m.pointer("/body/target").and_then(|t| t.as_str()).map(label).unwrap_or_default())),
                 _ => None,
             };
             if let Some(d) = compact {
-                println!("{:>8}  {d}", step.label);
+                println!("{:>8}  {d}", format!("{pfx}{}", step.label));
                 continue;
             }
         }
@@ -3247,46 +3397,50 @@ fn cmd_orchestrate_verified(
             ),
             other => other.to_string(),
         };
-        println!("{:>8}  {detail}", step.label);
+        println!("{:>8}  {detail}", format!("{pfx}{}", step.label));
     }
+}
 
-    // Every law the loop tried, in declaration order. They are REPORTED; only `--require-laws`
-    // makes one that did not prove fail the run. Until v0.1.17 the FIRST law gated it: `binomial`,
-    // whose first law `symmetry` its own module build leaves open, could never confirm a result
-    // it computes and re-runs exactly (stranger 16, 2026-11-03).
-    let laws: Vec<(String, bool)> = run.property.iter().chain(&run.other_laws).cloned().collect();
-    let open_law = laws.iter().find(|(_, p)| !*p).map(|(n, _)| n.clone());
-    let property_ok = !require_laws || open_law.is_none();
-    let trust_ok = run.trusted != Some(false);
-    let certify_ok = !require_certified || run.certified == Some(true);
-    if run.confirmed && property_ok && trust_ok && certify_ok {
-        println!("CONFIRMED  {} (in {:.1} s)", confirmed_summary(&run.steps, run.certified, &laws), started.elapsed().as_secs_f64());
-        if let Some(r) = final_result_surface(&run.steps) {
-            println!("result: {r}");
-        }
-        // CONFIRMED is the same word whether a post pins the value or nothing constrains it
-        // (stranger 18: `is_prime`, a pre only); say which facts the answer rests on.
-        println!("{}", vouched_lines(&run.vouched));
-        if publish {
-            publish_final_assert(node.expect("--publish requires --node"), &run.steps)?;
-        }
-        Ok(())
-    } else if run.trusted == Some(false) {
-        Err(anyhow::anyhow!("ABORTED    the discovered function is not trusted under the policy"))
-    } else if require_certified && run.certified != Some(true) {
-        Err(anyhow::anyhow!("ABORTED    the discovered function is not certified (--require-certified)"))
-    } else if !property_ok {
-        // The application still ran and re-verified; show its value, marked as not vouched for —
-        // a suppressed value read as a failed run (stranger 10, 2026-11-02).
-        if run.confirmed {
-            if let Some(r) = final_result_surface(&run.steps) {
-                println!("result (applied and re-run, but a law is NOT proved): {r}");
+/// Per-law HINTS from the certifications the node serves (spec/certification.schema.json `laws`;
+/// `NL_LAW_HINTS=0` = none): which rung proved each law at the certifier's, or that a complete
+/// derivation could not — so the run's capped law attempts go straight to the rung that works and
+/// skip the ones that never do. Scheduling, not evidence: every law reported proved, the run proved.
+fn law_hints(
+    node: Option<&str>,
+    recs: &std::collections::HashMap<String, serde_json::Value>,
+    label: &dyn Fn(&str) -> String,
+) -> std::collections::HashMap<String, nl_validator::certify::LawHints> {
+    match node {
+        Some(url) if !std::env::var("NL_LAW_HINTS").is_ok_and(|v| v == "0") => {
+            let (hints, used) = nl_validator::commons_client::law_hints_from_node(url, &recs);
+            for (f, cert) in &used {
+                let h = &hints[f];
+                let named = |pick: &dyn Fn(&nl_validator::certify::LawHint) -> bool| -> Vec<String> {
+                    recs[f]
+                        .get("properties")
+                        .and_then(|p| p.as_array())
+                        .into_iter()
+                        .flatten()
+                        .filter(|p| p.get("expr").is_some_and(|e| h.get(&nl_validator::certify::law_key(e)).is_some_and(pick)))
+                        .filter_map(|p| p.get("name")?.as_str().map(String::from))
+                        .collect()
+                };
+                let unproved = named(&|h| *h == nl_validator::certify::LawHint::Unproved);
+                // Proved there, but in longer than this run's cap on one attempt: not attempted either.
+                let cap = nl_validator::certify::law_budget();
+                let slow = named(&|h| matches!((h, cap), (nl_validator::certify::LawHint::ProvedBy(_, Some(s)), Some(b)) if *s > b.as_secs_f64()));
+                let mut skip = String::new();
+                if !unproved.is_empty() {
+                    skip += &format!("; not attempting {} (unproved there)", unproved.join(", "));
+                }
+                if !slow.is_empty() {
+                    skip += &format!("; not attempting {} (proved there in longer than the {} s cap)", slow.join(", "), cap.map(|b| b.as_secs()).unwrap_or(0));
+                }
+                eprintln!("    hints  {}: {} law(s) from {}…{skip}", label(f), h.len(), &cert[..cert.len().min(13)]);
             }
+            hints
         }
-        let name = open_law.unwrap_or_default();
-        Err(anyhow::anyhow!("NOT-PROVEN the discovered function's own law `{name}` did not prove (--require-laws)"))
-    } else {
-        Err(anyhow::anyhow!("orchestration did not confirm (rejected, or the claim failed to re-run)"))
+        _ => Default::default(),
     }
 }
 
@@ -3680,7 +3834,7 @@ mod redaction_tests {
 
 #[cfg(test)]
 mod value_arg_tests {
-    use super::{confirmed_summary, read_value_arg, Cli};
+    use super::{confirmed_summary, read_value_arg, stage_of_each_arg, Cli};
     use clap::Parser;
 
     /// `--arg -22` is a value, not a flag (stranger 16 needed `--arg=-22`).
@@ -3728,6 +3882,20 @@ mod value_arg_tests {
         assert_eq!(confirmed_summary(&[certify_step(&["SOUND"])], Some(true), &laws),
                    "trusted, certified, contract proved (1 post(s)), laws `choose_zero`, `beyond_n` proved, \
                     `symmetry`, `pascal` not proved here, applied, and re-verified");
+    }
+
+    /// Which stage each `--arg` belongs to, from the positions of the flags on the command line
+    /// (stranger 30, 2026-11-08: a pipeline's later stages need arguments of their own).
+    #[test]
+    fn each_arg_belongs_to_the_latest_intent_before_it() {
+        // --arg 21 --intent a --intent b            → stage 0 gets 21, stage 1 nothing (the old form)
+        assert_eq!(stage_of_each_arg(&[3, 5], &[1]), vec![0]);
+        // --intent a --arg 1 --arg 8 --intent b --arg _ --arg 16
+        assert_eq!(stage_of_each_arg(&[1, 7], &[3, 5, 9, 11]), vec![0, 0, 1, 1]);
+        // --intent a --intent b --arg x                → the last stage by position (legacy: moved to stage 0)
+        assert_eq!(stage_of_each_arg(&[1, 3], &[5]), vec![1]);
+        // one stage: everything is its
+        assert_eq!(stage_of_each_arg(&[9], &[1, 3, 5, 7]), vec![0, 0, 0, 0]);
     }
 
     /// After `result:`, the facts the answer rests on — or, plainly, that none constrains it

@@ -115,14 +115,20 @@ prints the transcript and exits non-zero unless every stage's claim is CONFIRMED
 a pipeline stage** — the result of one feeds the next — so the orchestrator *composes* multiple
 discovered functions. Worked: a single `--intent arithmetic` over `[21]` discovers `double` and
 confirms `double(21) = 42` (five messages); `--intent arithmetic --intent arithmetic` discovers and
-composes `double` twice, confirming `double(double(21)) = 84` (ten messages).
+composes `double` twice, confirming `double(double(21)) = 84` (ten messages). **Stages take
+arguments of their own** (2026-11-08): the `--arg`s after an `--intent` are that stage's, and in a
+later stage `_` names the previous stage's whole result, `_1`, `_2`, … the components of a tuple
+result (`fst`, `snd`, …); a later stage with no `--arg` receives the previous result alone (the
+original rule, which the form `--intent a --intent b --arg x` — every argument after the last
+intent, none a placeholder — keeps). A later stage whose arguments never name the previous result
+would drop it and is refused. The placeholders are resolved by the orchestrator before the stage's
+`propose`, so the transcript carries the actual values (`PipelineStage`, `StageArg`,
+`resolve_stage_args`).
 
 ### Verified orchestration (`--verify`)
 
 `nl-validator orchestrate --verify [--policy <p> --attestation <a>…]` folds verification into the
-loop (single `--intent` only — the multi-stage pipeline is the plain loop's; a verified multi-stage
-composition is `assemble`'s job) —
-the project's thesis in one autonomous run: **discover** functions by intent (a query returns a *set*;
+loop — the project's thesis in one autonomous run: **discover** functions by intent (a query returns a *set*;
 against a live `--node`, the application's argument and result sorts additionally travel *in* the
 query as a structured `type_pattern` — commons.md — so the node's capped page is already
 argument-shaped, instead of a broad intent page that may have truncated the right candidate away;
@@ -207,6 +213,22 @@ jumps past two lexicographically-earlier candidates and confirms `441` with no w
 a trusted root vouching for `double`, `--verify --intent arithmetic` over `[21]` discovers `double`,
 confirms it trusted, proves its `doubles` property, applies it, and re-verifies `21 → 42` (CONFIRMED);
 drop the vouching attestation and the same run ABORTS at the trust gate.
+
+
+**The verified pipeline (2026-11-08, stranger 30).** With several `--intent`s, `--verify` runs the
+verified loop PER STAGE — discover, trust-gate, certify, prove the laws, apply, re-verify — and the
+orchestrator carries each stage's re-verified result into the next stage's arguments (`_`, `_k`),
+asking the commons for each stage's candidates with THAT stage's resolved argument sorts (and, for the
+last stage, `--expect`'s result sort). The run's verdict names every stage with its call and result,
+then the final `result:`, then the facts proved about each stage's result in turn. The composition
+claim is deliberately modest: the chain is the run's own (no value passes through an agent's hands),
+and what is proved about the final value is each stage's certified facts over the previous stage's
+re-verified result — the conjunction, read stage by stage, not a new theorem about the composite.
+A stage that does not confirm, is not certified under `--require-certified`, is untrusted, or
+asserts no result stops the pipeline, and the verdict names the stage. Before this, stranger 30
+(the first agent given goals no single record answers) ran one verified loop per function and
+copied the values between them by hand, and wrote, correctly, that "there is no composed
+end-to-end proof". `assemble` remains the way to make the composite a commons artifact of its own.
 
 ### Over a live node (`--node`)
 
