@@ -44,7 +44,7 @@
    "right_zero: PROVED       by numeric induction on `<unfolding>` (strong induction over the measure; unsat)",
    "divides_both: PROVED       by numeric induction on `b, with self's certified contract at the instantiated points (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms]",
    "greatest_divisor: PROVED       by numeric induction on `b (hypothesis as instances at the recursive calls)` (strong induction over the measure; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms]",
-   "associative: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat)"
+   "associative: PROVED       from self's certified contract (its proved postconditions and laws, instantiated at the law's applications; unsat) [with the Euclidean-division lemma instantiated at its mod/div terms]"
   ]
  },
  {

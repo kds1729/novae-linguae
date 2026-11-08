@@ -2540,6 +2540,20 @@ fn run_smt_inner(script: &str, solver: &str, secs: u64, rlimit: Option<u64>) -> 
     }
     let started = std::time::Instant::now();
     let (answer, keep) = run_smt_uncached(script, solver, secs, rlimit, cutoff)?;
+    // `NL_QUERY_TRACE=1`: one line per solver query — its wall time, answer and the prover frames
+    // that asked it — so a slow obligation's cost can be read rung by rung (rat_normalize's
+    // lowest-terms post: 51 s in the loop's middle pass, 2026-11-08).
+    if std::env::var("NL_QUERY_TRACE").is_ok_and(|v| v == "1") {
+        let bt = std::backtrace::Backtrace::force_capture().to_string();
+        let frames: Vec<String> = bt
+            .lines()
+            .filter(|l| l.contains("nl_validator::") && !l.contains("run_smt") && !l.contains("backtrace"))
+            .take(5)
+            .map(|l| l.trim().trim_start_matches(|c: char| c.is_ascii_digit() || c == ':' || c == ' ').replace("nl_validator::", ""))
+            .collect();
+        let word = match &answer { SatAnswer::Unsat => "unsat", SatAnswer::Sat(_) => "sat", SatAnswer::Unknown => "unknown", SatAnswer::NoSolver => "no-solver" };
+        eprintln!("[query] {:6.1} s  {:<8} {}", started.elapsed().as_secs_f64(), word, frames.join(" < "));
+    }
     if keep {
         cache.lock().unwrap_or_else(|e| e.into_inner()).insert(key, (answer.clone(), started.elapsed().as_secs_f64()));
     }
@@ -2641,6 +2655,15 @@ pub fn run_solver(cert: &Certificate, solver: &str) -> Result<ProofOutcome> {
 /// nothing where it is not needed and buys the proofs that sit at the default's edge — the
 /// lowest-terms post's closing query takes 3.2 s under z3 4.13 and 10.3 s under z3 4.16 (CI's
 /// pin), both past 5 s under a parallel test load. Solver version is part of the measurement.
+/// ORDER inside the rung (2026-11-08, traced query by query with `NL_QUERY_TRACE=1` on
+/// rat_normalize's certification): the one-shot query ran this budget out five times in five and
+/// proved nothing, and the Euclidean-instances form of the same certificate after it is what
+/// closes — the lowest-terms post in 4.0 s, `idempotent` in 25.6 s — so every cold rational run
+/// paid 30 s for nothing on its gating post. The instances form is asked FIRST now, the one-shot
+/// second: the same two queries, so nothing is lost; an obligation that proves at neither costs
+/// what it did; one the instances close skips the one-shot's 30 s. Cross-checked on all four
+/// evolution tiers: every verdict unchanged; `gcd`'s `associative` (one-shot before) closes at
+/// the instances form.
 const DIVISIBILITY_BUDGET_SECS: u64 = 30;
 
 /// [`run_solver`] with an explicit per-check budget.
@@ -2757,21 +2780,22 @@ fn prove_property_in_domain_inner(
     if last.uses_callees {
         if let Ok(mut cert3) = with_divisibility_callees(|| without_contract_quantifiers(|| build_certificate_in_domain(prop_expr, body, self_nat_positions))) {
             if cert3.smt != last.smt {
+                // The Euclidean instances over the rung's certificate FIRST (the lowest-terms
+                // post closes HERE: the product witness needs the quotients' decompositions),
+                // then the one-shot query — the order the trace of 2026-11-08 asks for (see
+                // `DIVISIBILITY_BUDGET_SECS`) — then the ordinary Euclidean ladder.
+                if crate::euclid::lemma_discharged(solver) && !past_deadline() {
+                    if let Some(aug) = crate::euclid::augment(&cert3.smt) {
+                        if matches!(run_smt_secs(&aug, solver, DIVISIBILITY_BUDGET_SECS), Ok(SatAnswer::Unsat)) {
+                            cert3.smt = aug;
+                            cert3.euclid = true;
+                            return (ProofOutcome::Proved, Some(cert3));
+                        }
+                    }
+                }
                 match run_solver_secs(&cert3, solver, DIVISIBILITY_BUDGET_SECS) {
                     Ok(ProofOutcome::Proved) => return (ProofOutcome::Proved, Some(cert3)),
                     _ => {
-                        // The Euclidean instances over the rung's certificate, at the rung's
-                        // budget (the lowest-terms post closes HERE: the product witness needs the
-                        // quotients' decompositions), then the ordinary Euclidean ladder.
-                        if crate::euclid::lemma_discharged(solver) {
-                            if let Some(aug) = crate::euclid::augment(&cert3.smt) {
-                                if matches!(run_smt_secs(&aug, solver, DIVISIBILITY_BUDGET_SECS), Ok(SatAnswer::Unsat)) {
-                                    cert3.smt = aug;
-                                    cert3.euclid = true;
-                                    return (ProofOutcome::Proved, Some(cert3));
-                                }
-                            }
-                        }
                         if euclid_ladder(&mut cert3, solver) {
                             return (ProofOutcome::Proved, Some(cert3));
                         }

@@ -806,6 +806,17 @@ its instances cost the solver time where they are not needed (`lcm`'s plain cert
 the 5 s budget's edge). `binomial`'s symmetry and Pascal remain open: the
 record's multiplicative definition divides (`binomial(n, k−1)·(n−k+1) div k`), and the fact that
 `k` divides that product is a theorem about factorials no contract states — recorded, not reached.
+Order inside the rung (2026-11-08, traced query by query with `NL_QUERY_TRACE=1` on
+`rat_normalize`'s certification): the one-shot query ran its 30 s budget out five times in five
+and proved nothing, and the Euclidean-instances form of the same certificate after it is what
+closes — the lowest-terms post in 4.0 s, `idempotent` in 25.6 s — so every cold verified run of a
+rational function paid 30 s for nothing on its gating post. The instances form is asked FIRST
+now, the one-shot second, then the Euclidean ladder: the same two queries, so a proof is never
+lost and an obligation that proves at neither costs what it did; the lowest-terms post costs 4 s
+where it cost 34, and only an obligation the one-shot alone closes would cost 30 s more — the
+cross-check round over all four tiers found none: every verdict unchanged, and the one certificate
+that changed form (`gcd`'s `associative`, which the one-shot used to close) now closes at the
+instances form.
 
 **The ground rung (2026-10-30, the Gaussian tier).** A nonlinear obligation that is a theorem of
 plain integer arithmetic once the callees' contract instances are in hand can still be undecided
