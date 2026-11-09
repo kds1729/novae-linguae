@@ -2,10 +2,11 @@
 
 - **Status:** published (2026-10-30). <!-- exploring | published | absorbed | superseded -->
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-10-30, last updated 2026-11-01 (complexity through products: 13 / 14 SOUND)
+- **Dates:** first published 2026-10-30, last updated 2026-11-09 (round 7: `gi_gcd` divides both inputs, through the exact-division rung)
 - **Scope:** `tooling/validator` (the prover's ladder — a new ground rung; the contract set; closed
   laws; the refinement checker's reporting; round 4: the termination checker's measured descent and
-  the induction rung over a callee measure), `spec/evaluation.md`.
+  the induction rung over a callee measure; round 7: the exact-division rung, `src/gauss.rs`),
+  `spec/evaluation.md`.
 - **Provenance:** upstream commit `0307132` (nl-validator 0.1.6 in-tree, after the ground rung) for
   rounds 1–3; round 4 on the measured-descent commit (nl-validator 0.1.7 in-tree, see git log);
   z3 4.13.3 (Debian/Ubuntu package); python 3.14 for the builder, whose reference values are
@@ -22,7 +23,9 @@ put through the gauntlet four times, the validator changing between rounds. **Ro
 run and certify; termination SOUND on all 14; 19 of 19 contracts SOUND; laws 25 PROVED / 0 UNKNOWN
 / 0 UNSUPPORTED of 25.** (Round 3 stood at termination 13/14 and laws 23 / 0 / 1 of 24.)
 **Round 6 (2026-11-08) added the unit-pinned gcd — `gi_canonical` and `gi_gcd_canonical`, below —
-16/16 certified, contracts 26 / 26 SOUND, laws 31 / 0 / 0 of 31.**
+16/16 certified, contracts 26 / 26 SOUND, laws 31 / 0 / 0 of 31. Round 7 (2026-11-09) gave `gi_gcd`
+its first post — the result is 0 or DIVIDES BOTH INPUTS — SOUND through a new prover rung:
+contracts 27 / 27, laws 31 / 0 / 0.**
 Every fact here is nonlinear — commutativity and associativity of the product (degree 2 and 3,
 six variables), the norm non-negative and zero only at zero, the norm multiplicative (the
 Brahmagupta–Fibonacci identity, degree 4), conjugation multiplicative, units on the axes
@@ -90,7 +93,7 @@ Builder round 3 (`records/REPORT.{json,md}`; the log in the author's sandbox), 1
 | `gi_div` | 4 ints → pair, pre `w ≠ 0` | the rounding bounds on both components (four posts, through the `let`-bound norm) SOUND | `by_one` **PROVED** | EXHAUSTIVE 81 |
 | `gi_rem` | 4 ints → pair, pre `w ≠ 0` | **`N(result) < N(w)` SOUND** (rounds 1–2: UNVERIFIABLE); **`2·N(result) ≤ N(w)` SOUND** (2026-11-01, the halving) | `by_one_is_zero` **PROVED** | EXHAUSTIVE 81 |
 | `gi_euclid_holds` | checker | — | `remainder_smaller` **PROVED** (rounds 1–2: UNKNOWN) | HELD 400 |
-| `gi_gcd` | 4 ints → pair, recursive; termination **SOUND** on `N(c, d)` by `gi_rem`'s post (rounds 1–3: UNVERIFIABLE) | — | `right_zero` **PROVED** by unfolding (rounds 1–3: UNSUPPORTED, no established measure); `nonzero` **PROVED** by strong induction on `N(c, d)` (round 4) | EXHAUSTIVE 81; HELD 400 |
+| `gi_gcd` | 4 ints → pair, recursive; termination **SOUND** on `N(c, d)` by `gi_rem`'s post (rounds 1–3: UNVERIFIABLE) | **round 7: `result = 0 ∨ (gi_rem(z, result) = 0 ∧ gi_rem(w, result) = 0)` SOUND** — the result divides both inputs, through the EXACT-DIVISION rung (below) | `right_zero` **PROVED** by unfolding (rounds 1–3: UNSUPPORTED, no established measure); `nonzero` **PROVED** by strong induction on `N(c, d)` (round 4) | EXHAUSTIVE 81; HELD 400 |
 | `gi_canonical` (round 6) | 2 ints → pair: the associate in the closed-open first quadrant (a > 0, b ≥ 0; 0 stays 0) | the result lies there (or z = 0), IS one of the four associates (a four-way disjunction), and keeps the norm — three posts SOUND | `idempotent`, `rotation_invariant` (`self(z) = self(i·z)`), `negation_invariant` **PROVED** (first order) | EXHAUSTIVE 81 ×3 |
 | `gi_gcd_canonical` (round 6) | 4 ints → pair: `gi_gcd`'s result through `gi_canonical`, O(log n) | first quadrant unless z = w = 0 (needs `gi_gcd`'s `nonzero` LAW — the pass with callee laws closes it), an associate of `gi_gcd(z, w)`, same norm — three posts SOUND | `right_zero` (= `gi_canonical(z)`, from `gi_gcd`'s `right_zero`), `canonical_fixed` (from `gi_canonical`'s `idempotent`), `nonzero` **PROVED** | EXHAUSTIVE 81; HELD 400 ×2 |
 
@@ -109,21 +112,40 @@ and its answer is 1 + 2i exactly, with the first-quadrant post needing `gi_gcd`'
 which moves its address — a sixth version; the laws re-prove as before. 6 posts SOUND, 6 laws
 PROVED; everything else unchanged.
 
-Round 7 note (2026-11-08; stranger 30): "`gi_gcd` has zero proved posts, so 'this is a greatest
-common divisor' is not proved; it rests on the body." True, and still so. The divisibility law was
-tried — `divides_both`: unless z = w = 0, `gi_rem(z, g) = 0 ∧ gi_rem(w, g) = 0` for `g = gi_gcd(z, w)`,
-`gi_rem` by address (`~/sandbox/agentfacing/laws_gi_gcd.txt`, log `laws_gi_gcd.log`) — and stays
-**UNKNOWN** at the measured-descent rung with the hypothesis as instances (99.7 s): the step must
-pass from `g | w` and `g | rem(z, w)` to `g | z` through `z = q·w + rem(z, w)` (gi_rem's exactness
-post), which is `g | x ⇔ gi_rem(x, g) = 0` — the Gaussian EXACT-DIVISION lemma: `x = s·g` forces
-`gi_div(x, g) = s` by the rounding posts (`2·|N(g)·s − N(g)·q'| ≤ N(g)`), a degree-3 statement in
-six unknowns that z3's nonlinear arithmetic does not close inside the induction. As a POST the same
-statement is refused earlier (`unsupported expression kind tuple`): the refinement checker's
-induction does not lower a tuple-valued recursive body, which the law ladder's measured descent
-does — a second, smaller gap. The integer tier's Euclidean checker (`euclid::retry_stepwise`,
-premises verified alone, the final query over uninterpreted products) is the shape a Gaussian
-version would take. Recorded under *Still open*; nothing shipped for `gi_gcd` this round (an
-unprovable law would cost every verified run its law budget).
+Round 7 (2026-11-09, 2.0 min, log `gaussian-tier-poc-x28.log`; stranger 30's "`gi_gcd` has zero
+proved posts, so 'this is a greatest common divisor' is not proved; it rests on the body" — true until
+this round). The divisibility law was first tried on 2026-11-08 — `divides_both`: unless z = w = 0,
+`gi_rem(z, g) = 0 ∧ gi_rem(w, g) = 0` for `g = gi_gcd(z, w)`, `gi_rem` by address
+(`~/sandbox/agentfacing/laws_gi_gcd.txt`, log `laws_gi_gcd.log`) — and stayed **UNKNOWN** at the
+measured-descent rung with the hypothesis as instances (99.7 s): the step must pass from `g | w` and
+`g | rem(z, w)` to `g | z` through `z = q·w + rem(z, w)` (gi_rem's identity post), which is the
+Gaussian EXACT-DIVISION lemma `x = k·g ⇒ gi_rem(x, g) = 0`, a degree-3 statement z3's nonlinear
+arithmetic does not close inside the induction; as a POST the same statement was refused earlier
+(`unsupported expression kind tuple`), which turned out to be `check-refinement` not installing the
+record's declared type and linked measure as `certify` does (fixed). **Measured by hand on the
+rung's own certificate** (`~/sandbox/gi_exact/`): the lemma is out of reach in one query (100 s) and
+decided at once as two — the identity `x = k·g ∧ x = r + q·g ⇒ r = (k − q)·g` and the bound `g ≠ 0 ∧
+r = u·g ∧ N(r) < N(g) ⇒ r = 0`; the step closes in milliseconds once the two zero remainders are
+facts and not at all with them supplied as implications (the premise `z = k·g` is a degree-3
+identity through three contract instances — z3 does not find the substitutions); and the premise is
+LINEAR written as the chain `w = D(w, g)·g ∧ y = D(y, g)·g ∧ z = D(z, w)·w + y` for `y = R(z, w)`,
+closed by a distributivity lemma. **Built as the EXACT-DIVISION rung** (`tooling/validator/src/gauss.rs`,
+`spec/evaluation.md`): the contract shape detected from the certificate's axioms by polynomial
+normalization (a four-integer tuple-valued callee whose two identity posts name a quotient callee,
+a norm callee with the descent post and `N(a, b) = a² + b²`), the three lemmas discharged once per
+solver, the instances `x = 1·g`, `x = 0·g` and the chain through every divisor the certificate
+reduces, each premise verified alone (against the hypotheses and the negated goal, the remainder's
+contract stated at its applications, outright or under a branch of the body's `case`, one-second
+resource limit) and its conclusion `g ≠ 0 ∧ branch ⇒ R(x, g) = 0` a fact of the final query. The LAW
+form PROVED (3 of 7 premises; the rest belong to the other branch or to a divisor nothing reduces).
+Shipped as a POST, stated "the result is 0 or divides both" rather than "unless z = w = 0": the
+latter needs `gi_gcd`'s own `nonzero` law for `g ≠ 0` in the step, which a verified run's posts-only
+callee pass does not have — it would cost that pass its whole ladder before the fallback — while the
+former proves from the contract alone (`nonzero` then says the 0 case is z = w = 0). SOUND; the rung's
+share of the check is ~5 s (19 probes), the measured-descent ladder's four 5 s probes before it the
+rest. Before the candidate set was cut to divisors the certificate reduces and the branch order fixed,
+the rung spent 76 s on 36 failing probes. Every other verdict unchanged (the cross-check rebuilt all
+four tiers); `gi_gcd_canonical` inherits the post through its contract.
 Round 5 (2026-11-04, 1.5 min, log `gaussian-tier-poc-r9.log`; strangers 19/20): every record gained
 `param_docs` (a + bi passed as its two parts, the divisor's nonzero requirement, and — stranger 21
 — the quotient's rounding: nearest, halves up, which `gi_div`'s posts already pin); `gi_rem` gained the
@@ -223,11 +245,10 @@ default budget.
   in the self-call's argument, and a measure of THREE or more positions needs a tuple pattern with
   that many binds (the pair form is what the Gaussian tier needed; `fst`/`snd` are the projections
   the predicate grammar has).
-- **`gi_gcd` divides both inputs** (round 7 note, stranger 30): UNKNOWN — needs the Gaussian
-  exact-division lemma (`g | x ⇔ gi_rem(x, g) = 0`) as a stepwise checker over uninterpreted
-  products, and, for the post form, the refinement checker's induction lowering tuple-valued
-  recursive bodies. Until then "is a gcd" is the body's word; `gi_gcd_canonical`'s posts relate it
-  to `gi_gcd`, not to divisibility.
+- ~~**`gi_gcd` divides both inputs**~~ — CLOSED in round 7 (the exact-division rung; above). Its
+  residue: "divides both" is half of "is a gcd" — GREATEST (every common divisor divides the result,
+  Bézout over the Gaussian integers) is not stated; the integer tier's `greatest_divisor` law and
+  `ext_gcd`'s Bézout post are the shape it would take, with a Gaussian `ext_gcd` first.
 - **The hypothesis as instances for a callee measure.** `nonzero` closed on the quantified
   hypothesis; the instances form (at the recursive call, under `N(rem) < N(w)`) is emitted too but
   was not what closed it. A law that needs the instances would measure that path.

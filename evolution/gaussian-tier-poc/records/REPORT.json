@@ -492,7 +492,7 @@
    "param_docs": "SOUND",
    "typecheck": "WELL-TYPED",
    "effects": "SOUND",
-   "refinement:refinements": "N/A",
+   "refinement:post[0]": "SOUND",
    "termination": "SOUND",
    "complexity": "SOUND"
   },
@@ -501,7 +501,7 @@
    "param_docs": "4 parameter(s), 4 line(s)",
    "typecheck": "(int, int, int, int) -> (int, int)",
    "effects": "effects [] \u2286 declared",
-   "refinement:refinements": "",
+   "refinement:post[0]": "",
    "termination": "provably always-terminates",
    "complexity": "within declared `O(log n)` (inferred O(log n))"
   },

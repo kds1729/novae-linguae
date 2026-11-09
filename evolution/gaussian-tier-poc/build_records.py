@@ -384,11 +384,23 @@ def main():
     # which the false arm of the guard discharges), and a NONLINEAR one (a² + b²). `right_zero`
     # is an unfolding; `nonzero` is a genuine strong induction on N(c, d): the result is nonzero
     # unless both inputs are — the hypothesis at (c, d, rem(z, w)) under N(rem) < N(w).
+    # Round 7 (2026-11-09; stranger 30: "gi_gcd has zero proved posts, so 'is a gcd' rests on the
+    # body"): the result DIVIDES BOTH INPUTS — gi_rem of each by the result is 0 — or it is 0
+    # (which `nonzero` says happens only at z = w = 0; nothing divides by 0, so the post cannot
+    # say more there). Euclid's step: g divides w and rem(z, w), hence z. SOUND through the
+    # validator's EXACT-DIVISION rung (src/gauss.rs): the induction's step needs the Gaussian
+    # exact-division lemma `x = k·g ⇒ gi_rem(x, g) = 0`, which z3 decides only as three small
+    # lemmas plus a linear chain premise verified alone. Stated with `result = 0` as the escape
+    # (not `z = w = 0`) so the post proves WITHOUT `nonzero`: a verified run's posts-only pass
+    # has no laws, and the stronger form costs that pass its whole ladder before the fallback.
     build("gi_gcd",
           r"\a b c d -> case and (eq c 0) (eq d 0) of { true => (a, b); false => case {gi_rem} a b c d of { (r1, r2) => self c d r1 r2 } }",
           FN([INT, INT, INT, INT], GI),
           [ex((4, 2, 2, 0), gi(*gcd(4, 2, 2, 0))), ex((7, 3, 2, 1), gi(*gcd(7, 3, 2, 1))), ex((5, 0, 0, 0), gi(5, 0)),
            ex((6, 8, 4, -2), gi(*gcd(6, 8, 4, -2))), ex((0, 0, 3, 1), gi(3, 1))],
+          refinements=[("post", "(fst(result) == 0 && snd(result) == 0) || "
+                                "(fst({gi_rem}(a, b, fst(result), snd(result))) == 0 && snd({gi_rem}(a, b, fst(result), snd(result))) == 0 && "
+                                "fst({gi_rem}(c, d, fst(result), snd(result))) == 0 && snd({gi_rem}(c, d, fst(result), snd(result))) == 0)")],
           props=[("right_zero", "forall a b. fst(self(a, b, 0, 0)) == a && snd(self(a, b, 0, 0)) == b"),
                  ("nonzero", "forall a b c d. (a == 0 && b == 0 && c == 0 && d == 0) || fst(self(a, b, c, d)) != 0 || snd(self(a, b, c, d)) != 0")],
           hints=["gaussian_gcd", "euclid_gaussian"], complexity="O(log n)")

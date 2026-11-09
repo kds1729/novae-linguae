@@ -13,6 +13,6 @@
 | `gi_div` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / post[2]=SOUND / post[3]=SOUND | SOUND | SOUND | by_one=EXHAUSTIVE | by_one=PROVED |
 | `gi_rem` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / post[2]=SOUND / post[3]=SOUND | SOUND | SOUND | by_one_is_zero=EXHAUSTIVE | by_one_is_zero=PROVED |
 | `gi_euclid_holds` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | remainder_smaller=HELD | remainder_smaller=PROVED |
-| `gi_gcd` | PASS | True | WELL-TYPED | SOUND | refinements=N/A | SOUND | SOUND | right_zero=EXHAUSTIVE; nonzero=HELD | right_zero=PROVED; nonzero=PROVED |
+| `gi_gcd` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND | SOUND | SOUND | right_zero=EXHAUSTIVE; nonzero=HELD | right_zero=PROVED; nonzero=PROVED |
 | `gi_canonical` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / post[2]=SOUND | SOUND | SOUND | idempotent=EXHAUSTIVE; rotation_invariant=EXHAUSTIVE; negation_invariant=EXHAUSTIVE | idempotent=PROVED; rotation_invariant=PROVED; negation_invariant=PROVED |
 | `gi_gcd_canonical` | PASS | True | WELL-TYPED | SOUND | post[0]=SOUND / post[1]=SOUND / post[2]=SOUND | SOUND | SOUND | right_zero=EXHAUSTIVE; canonical_fixed=HELD; nonzero=HELD | right_zero=PROVED; canonical_fixed=PROVED; nonzero=PROVED |
