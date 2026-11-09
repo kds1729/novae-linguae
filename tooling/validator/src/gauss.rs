@@ -41,8 +41,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::euclid::{definitions, discharged_get, discharged_set, expand, is_literal, p_add, p_atom, p_mul, p_scale, parse_all, render, to_poly, Poly, S};
-use crate::prove::{run_smt_rlimit, run_smt_secs, SatAnswer};
+use crate::euclid::{definitions, discharged_get, discharged_set, equations_in, expand, is_literal, p_add, p_atom, p_mul, p_scale, parse_all, render, to_poly, Poly, S};
+use crate::prove::{run_smt_rlimit, SatAnswer};
 
 /// `x = k·g ∧ x = r + q·g ⇒ r = (k − q)·g`, componentwise over the Gaussian product.
 pub const LEMMA_IDENTITY_SMT: &str = "(set-logic QF_NIA)\n\
@@ -81,6 +81,20 @@ pub const LEMMA_CLOSURE_SMT: &str = "(set-logic QF_NIA)\n\
                   (= x2 (+ (* (+ (- (* m1 kw1) (* m2 kw2)) ky1) g2) (* (+ (+ (* m1 kw2) (* m2 kw1)) ky2) g1))))))\n\
 (check-sat)\n";
 
+/// `x = k·g ∧ G = u·g` for a unit `u` ⇒ `x = (ū·k)·G`: a divisor's associates divide the same
+/// numbers (the four units, each a ring identity).
+pub const LEMMA_ASSOCIATE_SMT: &str = "(set-logic QF_NIA)\n\
+;; associates: x = k·g ∧ G = u·g (u a unit) ⇒ x = (conj(u)·k)·G, for each of the four units\n\
+(declare-const g1 Int) (declare-const g2 Int) (declare-const k1 Int) (declare-const k2 Int)\n\
+(declare-const x1 Int) (declare-const x2 Int) (declare-const G1 Int) (declare-const G2 Int)\n\
+(assert (= x1 (- (* k1 g1) (* k2 g2))))\n(assert (= x2 (+ (* k1 g2) (* k2 g1))))\n\
+(assert (not (and\n\
+  (=> (and (= G1 g1) (= G2 g2)) (and (= x1 (- (* k1 G1) (* k2 G2))) (= x2 (+ (* k1 G2) (* k2 G1)))))\n\
+  (=> (and (= G1 (- g2)) (= G2 g1)) (and (= x1 (- (* k2 G1) (* (- k1) G2))) (= x2 (+ (* k2 G2) (* (- k1) G1)))))\n\
+  (=> (and (= G1 (- g1)) (= G2 (- g2))) (and (= x1 (- (* (- k1) G1) (* (- k2) G2))) (= x2 (+ (* (- k1) G2) (* (- k2) G1)))))\n\
+  (=> (and (= G1 g2) (= G2 (- g1))) (and (= x1 (- (* (- k2) G1) (* k1 G2))) (= x2 (+ (* (- k2) G2) (* k1 G1))))))))\n\
+(check-sat)\n";
+
 /// The marker the rung's final query carries (the CLI writes the lemma scripts beside a
 /// certificate that carries it).
 pub const MARKER: &str = ";; the exact-division rung";
@@ -102,9 +116,19 @@ pub fn lemmas_discharged(solver: &str) -> bool {
     if let Some(v) = discharged_get(&key) {
         return v;
     }
-    let unsat = |smt: &str| matches!(run_smt_secs(smt, solver, 5), Ok(SatAnswer::Unsat));
-    let ok = unsat(LEMMA_IDENTITY_SMT) && unsat(LEMMA_ZERO_SMT) && unsat(LEMMA_CLOSURE_SMT);
-    discharged_set(&key, ok);
+    // Under a RESOURCE limit, not a wall clock: a verdict cached for the thread must not depend on
+    // how loaded the machine was when it was asked (the full test suite's eight threads beside a
+    // module build once timed the associate lemma out at 5 s wall and left the rung unavailable to
+    // that thread for good, 2026-11-09).
+    let unsat = |smt: &str| matches!(run_smt_rlimit(smt, solver, 5), Ok(SatAnswer::Unsat));
+    let ok = unsat(LEMMA_IDENTITY_SMT) && unsat(LEMMA_ZERO_SMT) && unsat(LEMMA_CLOSURE_SMT) && unsat(LEMMA_ASSOCIATE_SMT);
+    // A negative under an expired enclosing budget (`prove::past_deadline`: the solver was not
+    // asked, or was cut short) says nothing about the solver and must not be remembered for the
+    // thread — the suite's threads share these verdicts across tests, and one test's spent law
+    // budget made the rung unavailable to the next (intermittent, 2026-11-09).
+    if ok || !crate::prove::past_deadline() {
+        discharged_set(&key, ok);
+    }
     ok
 }
 
@@ -236,9 +260,12 @@ pub fn pairs(forms: &[S]) -> Vec<Pair> {
         .map(|(n, (_, ret))| (n, ret))
         .collect();
     let norms: Vec<&String> = funs.iter().filter(|(_, (ps, ret))| ps.len() == 2 && ps.iter().all(|p| p == "Int") && ret == "Int").map(|(n, _)| n).collect();
-    // N(a, b) = a² + b², as an axiom.
+    // N(a, b) = a² + b² — as an axiom of the certificate, or, when the norm is applied only inside
+    // the remainder's posts and the certificate states no axiom of its own for it, as a PROVED post
+    // of its installed contract (the linked view's closure; `gi_gcd_canonical`'s certificate
+    // declares `gi_norm` without its contract, 2026-11-09).
     let norm_ok = |n: &str| {
-        axioms.iter().any(|(vs, body)| {
+        installed_norm_is_square(n) || axioms.iter().any(|(vs, body)| {
             if vs.len() != 2 {
                 return false;
             }
@@ -307,6 +334,58 @@ pub fn pairs(forms: &[S]) -> Vec<Pair> {
     out
 }
 
+/// A contract predicate over the callee's parameters and `result`, as a polynomial over atoms (the
+/// parameter names and `result`): `var`, integer `lit`, `add`/`sub`/`mul`/`neg`; `None` otherwise.
+fn pred_poly(node: &serde_json::Value) -> Option<Poly> {
+    match node.get("kind").and_then(|k| k.as_str())? {
+        "var" => Some(p_atom(node.get("name")?.as_str()?.to_string())),
+        "lit" => {
+            let v = node.get("value")?;
+            if v.get("kind").and_then(|k| k.as_str()) != Some("int") {
+                return None;
+            }
+            let n = match v.get("value")? {
+                serde_json::Value::Number(n) => n.as_i64()? as i128,
+                serde_json::Value::String(s) => s.parse::<i128>().ok()?,
+                _ => return None,
+            };
+            Some(crate::euclid::p_const(n))
+        }
+        "app" => {
+            let args = node.get("args")?.as_array()?;
+            match node.get("op").and_then(|o| o.as_str())? {
+                "add" if args.len() == 2 => p_add(&pred_poly(&args[0])?, &pred_poly(&args[1])?),
+                "sub" if args.len() == 2 => p_add(&pred_poly(&args[0])?, &p_scale(&pred_poly(&args[1])?, -1)?),
+                "mul" if args.len() == 2 => p_mul(&pred_poly(&args[0])?, &pred_poly(&args[1])?),
+                "neg" if args.len() == 1 => p_scale(&pred_poly(&args[0])?, -1),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Does the installed contract of the callee with this symbol carry the proved post
+/// `result = a² + b²` over its two parameters?
+fn installed_norm_is_square(symbol: &str) -> bool {
+    let Some(c) = crate::prove::installed_contract_by_symbol(symbol) else { return false };
+    if c.params.len() != 2 {
+        return false;
+    }
+    let (a, b) = (&c.params[0], &c.params[1]);
+    let Some(sq) = p_mul(&p_atom(a.clone()), &p_atom(a.clone())).and_then(|aa| p_add(&aa, &p_mul(&p_atom(b.clone()), &p_atom(b.clone()))?)) else { return false };
+    let Some(want) = p_add(&p_atom("result".into()), &p_scale(&sq, -1).unwrap_or_default()) else { return false };
+    c.posts.iter().any(|post| {
+        let Some(items) = post.get("args").and_then(|a| a.as_array()) else { return false };
+        if post.get("op").and_then(|o| o.as_str()) != Some("eq") || items.len() != 2 {
+            return false;
+        }
+        let (Some(l), Some(r)) = (pred_poly(&items[0]), pred_poly(&items[1])) else { return false };
+        let Some(d) = p_add(&l, &p_scale(&r, -1).unwrap_or_default()) else { return false };
+        d == want || p_scale(&d, -1).as_ref() == Some(&want)
+    })
+}
+
 /// Every application `(R x1 x2 g1 g2)` of a remainder callee in a term, as (x, g) pairs of rendered components.
 fn rem_apps(s: &S, rems: &BTreeSet<&str>, out: &mut Vec<([String; 2], [String; 2], String)>) {
     let Some(items) = list(s) else { return };
@@ -369,6 +448,47 @@ struct Candidate {
     /// A chain through another divisor (its premise holds in a recursive step, where the
     /// induction hypothesis speaks) rather than a trivial witness (a base case's).
     chain: bool,
+    /// A fixed condition the premise is checked under and the conclusion guarded by (an
+    /// associate relation `G = u·w`), in place of the branch tries.
+    cond: Option<String>,
+}
+
+/// The units `u` for which the certificate's facts relate the goal's divisor `G` to another divisor
+/// `w` as `G = u·w` — read off its equations (through implications, conjunctions, disjunctions and
+/// `ite` branches) by polynomial normalization: both components' relations must appear. Returned as
+/// the two components of `u·w`.
+fn associate_units(all: &[S], g: &[String; 2], w: &[String; 2]) -> Vec<[String; 2]> {
+    let mut eqs: Vec<(S, S)> = Vec::new();
+    for e in all {
+        equations_in(e, true, &mut eqs);
+    }
+    let polys: Vec<Poly> = eqs
+        .iter()
+        .filter_map(|(l, r)| {
+            let d = p_add(&to_poly(l)?, &p_scale(&to_poly(r)?, -1)?)?;
+            (!d.is_empty()).then_some(d)
+        })
+        .collect();
+    let holds = |lhs: &str, rhs_atom: &str, sign: i128| -> bool {
+        let Some(t) = p_add(&p_atom(lhs.to_string()), &p_scale(&p_atom(rhs_atom.to_string()), -sign).unwrap_or_default()) else { return false };
+        polys.iter().any(|p| *p == t || p_scale(p, -1).as_ref() == Some(&t))
+    };
+    let neg = |t: &str| format!("(- {t})");
+    let mut out = Vec::new();
+    // u = 1: G = (w1, w2); u = i: (−w2, w1); u = −1: (−w1, −w2); u = −i: (w2, −w1)
+    if holds(&g[0], &w[0], 1) && holds(&g[1], &w[1], 1) {
+        out.push([w[0].clone(), w[1].clone()]);
+    }
+    if holds(&g[0], &w[1], -1) && holds(&g[1], &w[0], 1) {
+        out.push([neg(&w[1]), w[0].clone()]);
+    }
+    if holds(&g[0], &w[0], -1) && holds(&g[1], &w[1], -1) {
+        out.push([neg(&w[0]), neg(&w[1])]);
+    }
+    if holds(&g[0], &w[1], 1) && holds(&g[1], &w[0], -1) {
+        out.push([w[1].clone(), neg(&w[0])]);
+    }
+    out
 }
 
 /// The remainder's contract — the division identity's two components and the norm descent —
@@ -427,6 +547,7 @@ fn candidates(goal: &S, all: &[S], pairs: &[Pair]) -> Vec<Candidate> {
             note: "x = 1·g (the divisor is x itself)".into(),
             apps: vec![(x.clone(), g.clone())],
             chain: false,
+            cond: None,
         });
         out.push(Candidate {
             x: x.clone(),
@@ -436,10 +557,35 @@ fn candidates(goal: &S, all: &[S], pairs: &[Pair]) -> Vec<Candidate> {
             note: "x = 0·g".into(),
             apps: vec![(x.clone(), g.clone())],
             chain: false,
+            cond: None,
         });
         for (x2, w, _) in &every {
             if x2 != x || w == g {
                 continue;
+            }
+            // An ASSOCIATE: the certificate relates g to w as g = u·w for a unit u (`gi_canonical`'s
+            // post at `gi_gcd`'s result), and x's remainder by w is taken — then x = D(x, w)·w under
+            // `rem(x, w) = 0` and the associate lemma carries the multiple over to g. Checked under
+            // the relation itself as the condition (the facts state it as one disjunct of four).
+            for ug in associate_units(all, g, w) {
+                let xs: Vec<&str> = x.iter().map(|s| s.as_str()).collect();
+                let ws: Vec<&str> = w.iter().map(|s| s.as_str()).collect();
+                let d_xw = app(&pair.div, &[xs[0], xs[1], ws[0], ws[1]]);
+                let m = [app(&pair.sel0, &[&d_xw]), app(&pair.sel1, &[&d_xw])];
+                let mw = times(&m, w);
+                out.push(Candidate {
+                    x: x.clone(),
+                    g: g.clone(),
+                    pair: pair.clone(),
+                    premise: both([(x[0].clone(), mw[0].clone()), (x[1].clone(), mw[1].clone())]),
+                    note: format!("an associate: g = u·w for w = ({}, {}), x = D(x, w)·w", w[0], w[1]),
+                    apps: vec![(x.clone(), w.clone()), (x.clone(), g.clone())],
+                    chain: false,
+                    cond: Some(format!("(and (= {} {}) (= {} {}))", g[0], ug[0], g[1], ug[1])),
+                });
+                if out.len() >= MAX_INSTANCES {
+                    return out;
+                }
             }
             // Only a divisor the certificate itself reduces (some `R(w, ·)` — the hypothesis
             // `g | w` the chain needs has to be stated somewhere); the induction hypothesis's
@@ -473,6 +619,7 @@ fn candidates(goal: &S, all: &[S], pairs: &[Pair]) -> Vec<Candidate> {
                 note: format!("the chain through w = ({}, {}): w = D(w, g)·g, y = D(y, g)·g for y = R(x, w), x = D(x, w)·w + y", w[0], w[1]),
                 apps: vec![(x.clone(), g.clone()), (x.clone(), w.clone()), (w.clone(), g.clone()), (y.clone(), g.clone())],
                 chain: true,
+                cond: None,
             });
             if out.len() >= MAX_INSTANCES {
                 return out;
@@ -480,6 +627,14 @@ fn candidates(goal: &S, all: &[S], pairs: &[Pair]) -> Vec<Candidate> {
         }
     }
     out
+}
+
+/// Debug aid (`NL_EUCLID_DEBUG_DIR=<dir>`): why the rung declined a certificate, with the certificate.
+fn debug_declined(why: &str, smt: &str) {
+    if let Ok(dir) = std::env::var("NL_EUCLID_DEBUG_DIR") {
+        let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let _ = std::fs::write(format!("{dir}/exact-{n}.declined.txt"), format!("{why}\n\n{smt}"));
+    }
 }
 
 /// The rung over a certificate that stayed UNKNOWN: `Some` when it closed.
@@ -490,9 +645,11 @@ pub fn retry(smt: &str, solver: &str) -> Option<Exact> {
     let forms = parse_all(smt).ok()?;
     let pairs = pairs(&forms);
     if pairs.is_empty() {
+        debug_declined("no certified Euclidean pair among the contract axioms", smt);
         return None;
     }
     if !lemmas_discharged(solver) {
+        debug_declined("the lemmas did not discharge", smt);
         return None;
     }
     let defs = definitions(&forms);
@@ -508,6 +665,7 @@ pub fn retry(smt: &str, solver: &str) -> Option<Exact> {
     let goal = expanded.last()?;
     let cands = candidates(goal, &expanded, &pairs);
     if cands.is_empty() {
+        debug_declined("no remainder term with a non-literal divisor in the goal", smt);
         return None;
     }
     let mut conds: Vec<String> = Vec::new();
@@ -526,7 +684,7 @@ pub fn retry(smt: &str, solver: &str) -> Option<Exact> {
         .join("\n");
     let hyps: String = hyp_forms.iter().chain(std::iter::once(goal_form)).map(|f| format!("{}\n", render(f))).collect();
     let mut steps = String::new();
-    steps.push_str(";; the exact-division rung, stepwise: each instance's premise — linear consequences of the remainder's\n;; contract instances and the certificate's hypotheses — checked alone against the certificate's hypotheses and its\n;; negated goal (both hold in the final query), with the remainder's contract stated at the premise's applications,\n;; outright or under a branch of the body's case; every (check-sat) below\n;; must answer unsat for its conclusion to enter the final query.\n;; Lemmas (discharged by the solver first, written beside this script): the identity, the bound, closure.\n");
+    steps.push_str(";; the exact-division rung, stepwise: each instance's premise — linear consequences of the remainder's\n;; contract instances and the certificate's hypotheses — checked alone against the certificate's hypotheses and its\n;; negated goal (both hold in the final query), with the remainder's contract stated at the premise's applications,\n;; outright or under a branch of the body's case; every (check-sat) below\n;; must answer unsat for its conclusion to enter the final query.\n;; Lemmas (discharged by the solver first, written beside this script): the identity, the bound, closure, associates.\n");
     steps.push_str(&header);
     steps.push('\n');
     steps.push_str(&hyps);
@@ -548,7 +706,9 @@ pub fn retry(smt: &str, solver: &str) -> Option<Exact> {
         // condition), a chain in the step (its negation) — then outright, then the rest: each
         // failing try costs its budget.
         let mut tries: Vec<Option<String>> = Vec::new();
-        if let Some(cd) = conds.first() {
+        if let Some(fixed) = &c.cond {
+            tries.push(Some(fixed.clone()));
+        } else if let Some(cd) = conds.first() {
             let (likely, other) = (Some(cd.clone()), Some(format!("(not {cd})")));
             let (first, second) = if c.chain { (other, likely) } else { (likely, other) };
             tries.push(first);
@@ -557,9 +717,11 @@ pub fn retry(smt: &str, solver: &str) -> Option<Exact> {
         } else {
             tries.push(None);
         }
-        for cd in conds.iter().skip(1) {
-            tries.push(Some(cd.clone()));
-            tries.push(Some(format!("(not {cd})")));
+        if c.cond.is_none() {
+            for cd in conds.iter().skip(1) {
+                tries.push(Some(cd.clone()));
+                tries.push(Some(format!("(not {cd})")));
+            }
         }
         let insts = contract_instances(&c.pair, &c.apps);
         let mut closed = false;
@@ -595,6 +757,7 @@ pub fn retry(smt: &str, solver: &str) -> Option<Exact> {
         }
     }
     if facts.is_empty() {
+        debug_declined(&format!("no premise verified\n\n{steps}"), smt);
         return None;
     }
     // The final query: the certificate with the conclusions before its negated goal.
@@ -618,7 +781,7 @@ pub fn retry(smt: &str, solver: &str) -> Option<Exact> {
         let _ = std::fs::write(format!("{dir}/exact-{n}.final.smt2"), &fin);
         let _ = std::fs::write(format!("{dir}/exact-{n}.steps.smt2"), &steps);
     }
-    match run_smt_secs(&fin, solver, FINAL_SECS) {
+    match run_smt_rlimit(&fin, solver, FINAL_SECS) {
         Ok(SatAnswer::Unsat) => Some(Exact { final_smt: fin, steps_smt: steps, verified, total: cands.len() }),
         _ => None,
     }
@@ -697,9 +860,28 @@ mod tests {
 (assert (not (and (= (dt0_0 (rem a b g1 g2)) 0) (= (dt0_1 (rem a b g1 g2)) 0))))\n(check-sat)\n"
         );
         // The solver alone does not close it (a sanity check of what the rung adds).
-        assert!(!matches!(run_smt_secs(&smt, "z3", 2), Ok(SatAnswer::Unsat)), "the bare step should not be decided by the solver alone");
+        assert!(!matches!(crate::prove::run_smt_secs(&smt, "z3", 2), Ok(SatAnswer::Unsat)), "the bare step should not be decided by the solver alone");
         let out = retry(&smt, "z3").expect("the rung closes Euclid's step");
         assert!(out.steps_smt.contains("the chain through w"));
+    }
+
+    /// `gi_gcd_canonical`'s shape: G is one of the four associates of g (a disjunction), g divides x
+    /// (`rem(x, g) = 0`) — so G divides x.
+    #[test]
+    fn an_associate_of_a_divisor_divides() {
+        if !z3() {
+            return;
+        }
+        let smt = format!(
+            "{SHAPE}(declare-const G1 Int)\n(declare-const G2 Int)\n\
+(assert (or (not (= g1 0)) (not (= g2 0))))\n\
+(assert (or (and (= G1 g1) (= G2 g2)) (and (= G1 g2) (= G2 (- 0 g1))) (and (= G1 (- 0 g1)) (= G2 (- 0 g2))) (and (= G1 (- 0 g2)) (= G2 g1))))\n\
+(assert (and (= (dt0_0 (rem a b g1 g2)) 0) (= (dt0_1 (rem a b g1 g2)) 0)))\n\
+(assert (not (or (and (= G1 0) (= G2 0)) (and (= (dt0_0 (rem a b G1 G2)) 0) (= (dt0_1 (rem a b G1 G2)) 0)))))\n(check-sat)\n"
+        );
+        let out = retry(&smt, "z3").expect("the rung carries divisibility over to the associate");
+        assert!(out.steps_smt.contains("an associate"));
+        assert!(out.verified >= 4, "one premise per unit, got {}", out.verified);
     }
 
     #[test]

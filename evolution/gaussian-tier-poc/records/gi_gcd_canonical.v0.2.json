@@ -267,7 +267,7 @@
    }
   }
  ],
- "hash": "fn_593b61c78fe5a6f0f9c28d1d7eaf2ab7813b71f6dbb61091956c1f0c14aca433",
+ "hash": "fn_31be73ebdf49e017ff6d80b0ad9f4b6f62e4ae556dee8987a95f5120e72f7db6",
  "intent_tags": [
   "arithmetic/gaussian",
   "math/gaussian-integer",
@@ -1336,6 +1336,279 @@
      ],
      "kind": "app",
      "op": "eq"
+    },
+    "kind": "post"
+   },
+   {
+    "expr": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "fst"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "var",
+             "name": "result"
+            }
+           ],
+           "kind": "app",
+           "op": "snd"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
+        }
+       ],
+       "kind": "app",
+       "op": "and"
+      },
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "a"
+                  },
+                  {
+                   "kind": "var",
+                   "name": "b"
+                  },
+                  {
+                   "args": [
+                    {
+                     "kind": "var",
+                     "name": "result"
+                    }
+                   ],
+                   "kind": "app",
+                   "op": "fst"
+                  },
+                  {
+                   "args": [
+                    {
+                     "kind": "var",
+                     "name": "result"
+                    }
+                   ],
+                   "kind": "app",
+                   "op": "snd"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "fn_df34a6c3e0739c4101a01c718f4dd083c80f0f2789c5d45130a680e438d9c168"
+                }
+               ],
+               "kind": "app",
+               "op": "fst"
+              },
+              {
+               "kind": "lit",
+               "value": 0
+              }
+             ],
+             "kind": "app",
+             "op": "eq"
+            },
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "a"
+                  },
+                  {
+                   "kind": "var",
+                   "name": "b"
+                  },
+                  {
+                   "args": [
+                    {
+                     "kind": "var",
+                     "name": "result"
+                    }
+                   ],
+                   "kind": "app",
+                   "op": "fst"
+                  },
+                  {
+                   "args": [
+                    {
+                     "kind": "var",
+                     "name": "result"
+                    }
+                   ],
+                   "kind": "app",
+                   "op": "snd"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "fn_df34a6c3e0739c4101a01c718f4dd083c80f0f2789c5d45130a680e438d9c168"
+                }
+               ],
+               "kind": "app",
+               "op": "snd"
+              },
+              {
+               "kind": "lit",
+               "value": 0
+              }
+             ],
+             "kind": "app",
+             "op": "eq"
+            }
+           ],
+           "kind": "app",
+           "op": "and"
+          },
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "c"
+                },
+                {
+                 "kind": "var",
+                 "name": "d"
+                },
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "result"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "fst"
+                },
+                {
+                 "args": [
+                  {
+                   "kind": "var",
+                   "name": "result"
+                  }
+                 ],
+                 "kind": "app",
+                 "op": "snd"
+                }
+               ],
+               "kind": "app",
+               "op": "fn_df34a6c3e0739c4101a01c718f4dd083c80f0f2789c5d45130a680e438d9c168"
+              }
+             ],
+             "kind": "app",
+             "op": "fst"
+            },
+            {
+             "kind": "lit",
+             "value": 0
+            }
+           ],
+           "kind": "app",
+           "op": "eq"
+          }
+         ],
+         "kind": "app",
+         "op": "and"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "args": [
+              {
+               "kind": "var",
+               "name": "c"
+              },
+              {
+               "kind": "var",
+               "name": "d"
+              },
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "result"
+                }
+               ],
+               "kind": "app",
+               "op": "fst"
+              },
+              {
+               "args": [
+                {
+                 "kind": "var",
+                 "name": "result"
+                }
+               ],
+               "kind": "app",
+               "op": "snd"
+              }
+             ],
+             "kind": "app",
+             "op": "fn_df34a6c3e0739c4101a01c718f4dd083c80f0f2789c5d45130a680e438d9c168"
+            }
+           ],
+           "kind": "app",
+           "op": "snd"
+          },
+          {
+           "kind": "lit",
+           "value": 0
+          }
+         ],
+         "kind": "app",
+         "op": "eq"
+        }
+       ],
+       "kind": "app",
+       "op": "and"
+      }
+     ],
+     "kind": "app",
+     "op": "or"
     },
     "kind": "post"
    }

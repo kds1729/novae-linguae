@@ -721,7 +721,7 @@ fn literals(s: &S, positive: bool, out: &mut Vec<(S, bool)>) {
 /// Equations `L = R` in a hypothesis, read through implications' consequents, conjunctions,
 /// disjunctions and both branches of an `ite` (a conditional equation is still a candidate rule:
 /// the solver's check of the premise decides whether it applies).
-fn equations_in(s: &S, positive: bool, out: &mut Vec<(S, S)>) {
+pub(crate) fn equations_in(s: &S, positive: bool, out: &mut Vec<(S, S)>) {
     let S::List(items) = s else { return };
     let Some(S::Atom(h)) = items.first() else { return };
     match h.as_str() {

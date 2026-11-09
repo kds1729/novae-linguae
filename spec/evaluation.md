@@ -1033,7 +1033,20 @@ the fallback), SOUND with the rung's share 5 s of a 60 s check (the measured-des
 candidate set was cut to divisors the certificate reduces and the branch order was fixed. Also
 fixed en route: `check-refinement` did not install the record's declared type or the linked
 measure (as `certify` does), so a tuple-valued recursive record's post could not be lowered for
-the induction rung there while `certify` lowered it.
+the induction rung there while `certify` lowered it. *Same day, the associate instances:*
+`gi_gcd_canonical` is `gi_gcd`'s result times a unit, so its own "divides both" post must carry
+`g | x` over to `u·g` — a fourth lemma (for each of the four units, `x = k·g ∧ G = u·g ⇒ x =
+(ū·k)·G`, a ring identity) and an instance per unit whose premise `x = D(x, w)·w` is checked
+under the relation `G = u·w` itself as the condition (the callee's post states the four as a
+disjunction; the final query's facts, one per unit, cover it), generated only when the
+certificate's equations relate `G` to `±w`'s components (read by polynomial normalization). Two
+things the first-order ladder had to give the rung: the QUANTIFIED certificate (the ladder's
+later rungs hold the instances-only form, which has no contract axioms to read the shape from),
+and the norm's `a² + b²` post from the linked view's installed contract when the certificate
+declares the norm without an axiom of its own (it is applied only inside the remainder's posts
+there). Measured: the post SOUND, the rung's share 13 probes in about a second; a cold verified
+run of `gi_gcd_canonical` now names "divides both" in its own proved block, which stranger 32 had
+to establish with two extra `gi_rem` runs.
 
 ## Semantic equivalence
 

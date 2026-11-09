@@ -445,7 +445,15 @@ def main():
                                 f" || fst(result) == snd({G}) && snd(result) == 0 - fst({G})"
                                 f" || fst(result) == 0 - fst({G}) && snd(result) == 0 - snd({G})"
                                 f" || fst(result) == 0 - snd({G}) && snd(result) == fst({G})"),
-                       ("post", f"fst(result) * fst(result) + snd(result) * snd(result) == fst({G}) * fst({G}) + snd({G}) * snd({G})")],
+                       ("post", f"fst(result) * fst(result) + snd(result) * snd(result) == fst({G}) * fst({G}) + snd({G}) * snd({G})"),
+                       # Round 8 (2026-11-09; stranger 32 ran two extra gi_rem checks because gi_gcd's
+                       # divides-both post is a callee fact the chain's proved block does not surface):
+                       # the canonical gcd itself is 0 or divides both inputs. From gi_gcd's post through
+                       # the associate post above — the exact-division rung's associate instances carry
+                       # "g divides x" over to u·g for each of the four units.
+                       ("post", "(fst(result) == 0 && snd(result) == 0) || "
+                                "(fst({gi_rem}(a, b, fst(result), snd(result))) == 0 && snd({gi_rem}(a, b, fst(result), snd(result))) == 0 && "
+                                "fst({gi_rem}(c, d, fst(result), snd(result))) == 0 && snd({gi_rem}(c, d, fst(result), snd(result))) == 0)")],
           props=[("right_zero", "forall a b. self(a, b, 0, 0) == {gi_canonical}(a, b)"),
                  ("canonical_fixed", "forall a b c d. {gi_canonical}(fst(self(a, b, c, d)), snd(self(a, b, c, d))) == self(a, b, c, d)"),
                  ("nonzero", "forall a b c d. (a == 0 && b == 0 && c == 0 && d == 0) || fst(self(a, b, c, d)) > 0")],

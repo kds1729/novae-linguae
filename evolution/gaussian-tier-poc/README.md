@@ -2,7 +2,7 @@
 
 - **Status:** published (2026-10-30). <!-- exploring | published | absorbed | superseded -->
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** first published 2026-10-30, last updated 2026-11-09 (round 7: `gi_gcd` divides both inputs, through the exact-division rung)
+- **Dates:** first published 2026-10-30, last updated 2026-11-09 (rounds 7–8: `gi_gcd` and `gi_gcd_canonical` divide both inputs, through the exact-division rung)
 - **Scope:** `tooling/validator` (the prover's ladder — a new ground rung; the contract set; closed
   laws; the refinement checker's reporting; round 4: the termination checker's measured descent and
   the induction rung over a callee measure; round 7: the exact-division rung, `src/gauss.rs`),
@@ -25,7 +25,8 @@ run and certify; termination SOUND on all 14; 19 of 19 contracts SOUND; laws 25 
 **Round 6 (2026-11-08) added the unit-pinned gcd — `gi_canonical` and `gi_gcd_canonical`, below —
 16/16 certified, contracts 26 / 26 SOUND, laws 31 / 0 / 0 of 31. Round 7 (2026-11-09) gave `gi_gcd`
 its first post — the result is 0 or DIVIDES BOTH INPUTS — SOUND through a new prover rung:
-contracts 27 / 27, laws 31 / 0 / 0.**
+contracts 27 / 27, laws 31 / 0 / 0. Round 8 (same day) carried the post to `gi_gcd_canonical`,
+whose chain's proved block now says it: contracts 28 / 28.**
 Every fact here is nonlinear — commutativity and associativity of the product (degree 2 and 3,
 six variables), the norm non-negative and zero only at zero, the norm multiplicative (the
 Brahmagupta–Fibonacci identity, degree 4), conjugation multiplicative, units on the axes
@@ -95,7 +96,7 @@ Builder round 3 (`records/REPORT.{json,md}`; the log in the author's sandbox), 1
 | `gi_euclid_holds` | checker | — | `remainder_smaller` **PROVED** (rounds 1–2: UNKNOWN) | HELD 400 |
 | `gi_gcd` | 4 ints → pair, recursive; termination **SOUND** on `N(c, d)` by `gi_rem`'s post (rounds 1–3: UNVERIFIABLE) | **round 7: `result = 0 ∨ (gi_rem(z, result) = 0 ∧ gi_rem(w, result) = 0)` SOUND** — the result divides both inputs, through the EXACT-DIVISION rung (below) | `right_zero` **PROVED** by unfolding (rounds 1–3: UNSUPPORTED, no established measure); `nonzero` **PROVED** by strong induction on `N(c, d)` (round 4) | EXHAUSTIVE 81; HELD 400 |
 | `gi_canonical` (round 6) | 2 ints → pair: the associate in the closed-open first quadrant (a > 0, b ≥ 0; 0 stays 0) | the result lies there (or z = 0), IS one of the four associates (a four-way disjunction), and keeps the norm — three posts SOUND | `idempotent`, `rotation_invariant` (`self(z) = self(i·z)`), `negation_invariant` **PROVED** (first order) | EXHAUSTIVE 81 ×3 |
-| `gi_gcd_canonical` (round 6) | 4 ints → pair: `gi_gcd`'s result through `gi_canonical`, O(log n) | first quadrant unless z = w = 0 (needs `gi_gcd`'s `nonzero` LAW — the pass with callee laws closes it), an associate of `gi_gcd(z, w)`, same norm — three posts SOUND | `right_zero` (= `gi_canonical(z)`, from `gi_gcd`'s `right_zero`), `canonical_fixed` (from `gi_canonical`'s `idempotent`), `nonzero` **PROVED** | EXHAUSTIVE 81; HELD 400 ×2 |
+| `gi_gcd_canonical` (round 6) | 4 ints → pair: `gi_gcd`'s result through `gi_canonical`, O(log n) | first quadrant unless z = w = 0 (needs `gi_gcd`'s `nonzero` LAW — the pass with callee laws closes it), an associate of `gi_gcd(z, w)`, same norm — three posts SOUND; **round 8: `result = 0 ∨ (gi_rem(z, result) = 0 ∧ gi_rem(w, result) = 0)` SOUND** (the associate instances of the exact-division rung) | `right_zero` (= `gi_canonical(z)`, from `gi_gcd`'s `right_zero`), `canonical_fixed` (from `gi_canonical`'s `idempotent`), `nonzero` **PROVED** | EXHAUSTIVE 81; HELD 400 ×2 |
 
 Round 6 (2026-11-08, log `gaussian-tier-poc-r6b.log`; stranger 29): a Gaussian gcd is defined only up
 to a unit, and `gi_gcd`'s answer for gcd(−1 + 8i, −4 + 7i) was −1 − 2i — correct, but the stranger
@@ -146,6 +147,19 @@ share of the check is ~5 s (19 probes), the measured-descent ladder's four 5 s p
 rest. Before the candidate set was cut to divisors the certificate reduces and the branch order fixed,
 the rung spent 76 s on 36 failing probes. Every other verdict unchanged (the cross-check rebuilt all
 four tiers); `gi_gcd_canonical` inherits the post through its contract.
+Round 8 (2026-11-09, 2.1 min, log `gaussian-tier-poc-r8b.log`; stranger 32 on v0.1.37 ran two
+extra `gi_rem` checks because the divisibility it wanted lived on `gi_gcd`, a callee whose facts the
+chain's proved block does not surface): **`gi_gcd_canonical` gets the same post** — its result is 0 or
+divides both inputs. The proof carries `g | x` over to the associate `u·g`: the rung gained a fourth
+lemma (`x = k·g ∧ G = u·g ⇒ x = (ū·k)·G`, one ring identity per unit) and an instance per unit whose
+premise `x = D(x, w)·w` is checked under the relation `G = u·w` itself (`gi_canonical`'s post states
+the four as a disjunction; four facts cover it), generated only when the certificate's equations
+relate the goal's divisor to `±w`'s components. Two plumbing gaps surfaced: the first-order ladder
+reached the rung with the instances-only certificate, which has no quantified axioms to read the
+contract shape from (the rung now runs on the quantified form there), and this certificate declares
+`gi_norm` without its `a² + b²` axiom — the norm is applied only inside `gi_rem`'s posts — so the rung
+reads that post from the linked view's installed contract. SOUND; the rung's share is 13 probes in
+about a second. 16/16, contracts 28 / 28, laws 31 / 0 / 0; published (round 29).
 Round 5 (2026-11-04, 1.5 min, log `gaussian-tier-poc-r9.log`; strangers 19/20): every record gained
 `param_docs` (a + bi passed as its two parts, the divisor's nonzero requirement, and — stranger 21
 — the quotient's rounding: nearest, halves up, which `gi_div`'s posts already pin); `gi_rem` gained the

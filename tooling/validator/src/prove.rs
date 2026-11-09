@@ -1192,6 +1192,13 @@ fn callee_contract(target: &str) -> Option<CalleeContract> {
     CALLEE_CONTRACTS.with(|c| c.borrow().get(target).cloned())
 }
 
+/// The installed contract whose SMT symbol is `symbol` (`callee_<prefix>`): what a rung that reads a
+/// certificate can ask about a callee the certificate declares but states no axiom for — the
+/// exact-division rung's norm, applied only inside the remainder's posts (2026-11-09).
+pub(crate) fn installed_contract_by_symbol(symbol: &str) -> Option<CalleeContract> {
+    CALLEE_CONTRACTS.with(|c| c.borrow().values().find(|k| k.symbol == symbol).cloned())
+}
+
 /// The refusal for a callee without a contract: the linked view's stated reason when records were
 /// supplied, else the instruction to supply them.
 fn no_contract_reason(target: &str) -> String {
@@ -2763,6 +2770,9 @@ fn prove_property_in_domain_inner(
     // quantified contract axioms is retried with the contracts stated only at its own
     // applications (their instances — weaker, so as sound), which is where nonlinear
     // consequences close.
+    // (The quantified form is kept for the exact-division rung below, which reads the contract
+    // SHAPE off the quantified axioms — the instances-only form has none to read.)
+    let quantified_smt = cert.smt.clone();
     let mut last = cert;
     if last.uses_callees {
         if let Ok(cert2) = without_contract_quantifiers(|| build_certificate_in_domain(prop_expr, body, self_nat_positions)) {
@@ -2790,8 +2800,23 @@ fn prove_property_in_domain_inner(
     if euclid_ladder(&mut last, solver) {
         return (ProofOutcome::Proved, Some(last));
     }
-    if exact_ladder(&mut last, solver) {
-        return (ProofOutcome::Proved, Some(last));
+    // The exact-division rung, over the QUANTIFIED certificate (see `quantified_smt`): a non-recursive
+    // record's post about a Gaussian remainder — `gi_gcd_canonical`'s "divides both", through the
+    // associate relation its callee's post states (2026-11-09).
+    {
+        let mut q = Certificate {
+            smt: quantified_smt.clone(),
+            quantified: last.quantified.clone(),
+            uses_self: last.uses_self,
+            uses_callees: last.uses_callees,
+            euclid: false,
+            steps: None,
+            stepwise: None,
+            staged: None,
+        };
+        if exact_ladder(&mut q, solver) {
+            return (ProofOutcome::Proved, Some(q));
+        }
     }
     // The callee-side divisibility rung (see `DIVISIBILITY_CALLEES`): the instances-only
     // certificate with a callee law's free variable ranging over the callee's applications and
