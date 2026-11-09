@@ -37,6 +37,8 @@ pub use prove::{
 /// of the division-uniqueness lemma (a retry on UNKNOWN in every proof ladder).
 pub mod euclid;
 pub mod ground;
+/// The exact-division rung for the Gaussian integers (divisibility through a certified remainder's contract).
+pub mod gauss;
 /// The staged rung: disjunct elimination over contract-law instances, the final query over opaque
 /// witnesses (uniqueness of lowest terms).
 pub mod staged;

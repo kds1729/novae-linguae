@@ -77,6 +77,16 @@ pub fn discharged_snapshot() -> HashMap<String, bool> {
     DISCHARGED.with(|d| d.borrow().clone())
 }
 
+/// A cached lemma verdict of another rung (the exact-division rung keeps its lemmas' verdicts here,
+/// so a worker thread's `capture_context` carries them too).
+pub(crate) fn discharged_get(key: &str) -> Option<bool> {
+    DISCHARGED.with(|d| d.borrow().get(key).copied())
+}
+
+pub(crate) fn discharged_set(key: &str, v: bool) {
+    DISCHARGED.with(|d| d.borrow_mut().insert(key.to_string(), v));
+}
+
 /// Install lemma verdicts captured on another thread.
 pub fn discharged_restore(m: HashMap<String, bool>) {
     DISCHARGED.with(|d| *d.borrow_mut() = m);
@@ -509,7 +519,7 @@ const MAX_WITNESS_INSTANCES: usize = 32;
 
 /// [`instances`], with the witness rung's rules on or off.
 /// The certificate's `define-fun`s: name → (parameters, body).
-fn definitions(forms: &[S]) -> BTreeMap<String, (Vec<String>, S)> {
+pub(crate) fn definitions(forms: &[S]) -> BTreeMap<String, (Vec<String>, S)> {
     let mut defs: BTreeMap<String, (Vec<String>, S)> = BTreeMap::new();
     for f in forms {
         let S::List(items) = f else { continue };
@@ -1348,7 +1358,7 @@ pub fn render(s: &S) -> String {
 /// `let`s substituted (simultaneous binding), `define-fun` applications unfolded to a bounded
 /// depth, `!` annotations dropped; quantifiers left as they are (their bodies range over bound
 /// variables — nothing to instantiate at).
-fn expand(s: &S, env: &BTreeMap<String, S>, defs: &BTreeMap<String, (Vec<String>, S)>, depth: usize) -> S {
+pub(crate) fn expand(s: &S, env: &BTreeMap<String, S>, defs: &BTreeMap<String, (Vec<String>, S)>, depth: usize) -> S {
     match s {
         S::Atom(a) => env.get(a).cloned().unwrap_or_else(|| s.clone()),
         S::List(items) => {
@@ -1394,7 +1404,7 @@ fn is_numeral(a: &str) -> bool {
     !a.is_empty() && a.chars().all(|c| c.is_ascii_digit())
 }
 
-fn is_literal(s: &S) -> bool {
+pub(crate) fn is_literal(s: &S) -> bool {
     match s {
         S::Atom(a) => is_numeral(a),
         S::List(items) => items.len() == 2 && matches!(&items[0], S::Atom(h) if h == "-") && is_literal(&items[1]),
@@ -1431,10 +1441,10 @@ fn collect(s: &S, cands: &mut Vec<(S, S)>, decs: &mut BTreeSet<(String, String)>
 
 /// A monomial is the sorted multiset of its atom keys (rendered s-expressions); a polynomial maps
 /// monomials to integer coefficients. Atoms are whatever is not `+`, `-`, `*` or a numeral.
-type Mono = Vec<String>;
-type Poly = BTreeMap<Mono, i128>;
+pub(crate) type Mono = Vec<String>;
+pub(crate) type Poly = BTreeMap<Mono, i128>;
 
-fn p_const(c: i128) -> Poly {
+pub(crate) fn p_const(c: i128) -> Poly {
     let mut p = Poly::new();
     if c != 0 {
         p.insert(vec![], c);
@@ -1442,13 +1452,13 @@ fn p_const(c: i128) -> Poly {
     p
 }
 
-fn p_atom(key: String) -> Poly {
+pub(crate) fn p_atom(key: String) -> Poly {
     let mut p = Poly::new();
     p.insert(vec![key], 1);
     p
 }
 
-fn p_add(a: &Poly, b: &Poly) -> Option<Poly> {
+pub(crate) fn p_add(a: &Poly, b: &Poly) -> Option<Poly> {
     let mut out = a.clone();
     for (m, c) in b {
         let e = out.entry(m.clone()).or_insert(0);
@@ -1460,7 +1470,7 @@ fn p_add(a: &Poly, b: &Poly) -> Option<Poly> {
     (out.len() <= MAX_TERMS).then_some(out)
 }
 
-fn p_scale(a: &Poly, k: i128) -> Option<Poly> {
+pub(crate) fn p_scale(a: &Poly, k: i128) -> Option<Poly> {
     let mut out = Poly::new();
     for (m, c) in a {
         let v = c.checked_mul(k)?;
@@ -1471,7 +1481,7 @@ fn p_scale(a: &Poly, k: i128) -> Option<Poly> {
     Some(out)
 }
 
-fn p_mul(a: &Poly, b: &Poly) -> Option<Poly> {
+pub(crate) fn p_mul(a: &Poly, b: &Poly) -> Option<Poly> {
     let mut out = Poly::new();
     for (ma, ca) in a {
         for (mb, cb) in b {
@@ -1490,7 +1500,7 @@ fn p_mul(a: &Poly, b: &Poly) -> Option<Poly> {
     (out.len() <= MAX_TERMS).then_some(out)
 }
 
-fn to_poly(s: &S) -> Option<Poly> {
+pub(crate) fn to_poly(s: &S) -> Option<Poly> {
     match s {
         S::Atom(a) => {
             if is_numeral(a) {

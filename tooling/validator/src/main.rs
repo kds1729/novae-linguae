@@ -1540,8 +1540,20 @@ fn cmd_check_refinement(record: &PathBuf, body: &PathBuf, solver: &str, records:
     // The phased derivation `certify` and the linked view use (the record's plain-proved laws may
     // enter a post's induction), so all three agree on what is SOUND.
     let nat_positions = nl_validator::nat_param_positions(&record);
+    // The record's own declared type and its LINKED measure, as `certify` installs them: the
+    // induction rung lowers a recursive body with `self` uninterpreted, and a tuple result
+    // (`gi_gcd`'s pair) or a measure that is a callee of several positions (`N(c, d)`, smaller by
+    // `gi_rem`'s certified post) is knowable only from the signature and the view. Without them
+    // this command refused `gi_gcd`'s divides-both post as "unsupported expression kind `tuple`"
+    // while `certify` lowered the same obligation (2026-11-09).
+    let prev_ty = nl_validator::set_self_type(Some(sig_type.clone()));
+    let prev_measure = view.as_ref().map(|v| nl_validator::set_self_measure(v.self_measure(&body, &nat_positions)));
     let def = view.as_ref().map(|v| move |t: &str| v.callee_def(t));
     let (reports, _) = nl_validator::certify::derive_self_facts(sig_type, &refinements, &nl_validator::certify::law_exprs(&record), &body, &nat_positions, def.as_ref().map(|d| d as &dyn Fn(&str) -> _), solver);
+    nl_validator::set_self_type(prev_ty);
+    if let Some(p) = prev_measure {
+        nl_validator::set_self_measure(p);
+    }
     let mut violated = false;
     let mut no_solver = false;
     for r in &reports {
@@ -1900,6 +1912,10 @@ fn euclid_note(cert: Option<&nl_validator::Certificate>) -> String {
             let (b, d) = c.staged.unwrap();
             format!(" [STAGED: {d} conclusion(s) drawn by refuting the other disjuncts of contract-law instances one at a time, over {b} branch(es) of the negated goal; the final queries over uninterpreted div/mod]")
         }
+        Some(c) if c.stepwise.is_some() && c.smt.contains(nl_validator::gauss::MARKER) => {
+            let (v, t) = c.stepwise.unwrap();
+            format!(" [EXACT DIVISION through the remainder's contract, STEPWISE: {v} of {t} premises verified separately; the identity, bound and closure lemmas discharged first]")
+        }
         Some(c) if c.stepwise.is_some() => {
             let (v, t) = c.stepwise.unwrap();
             format!(" [with the Euclidean-division lemma instantiated at its mod/div terms, STEPWISE: {v} of {t} premises verified separately, the final query over uninterpreted mod/div]")
@@ -1993,7 +2009,14 @@ fn cmd_prove(
                 write_cert(".lemma-div-scale", nl_validator::euclid::DIV_SCALE_SMT)?;
                 write_cert(".lemma-div-bound", nl_validator::euclid::DIV_BOUND_SMT)?;
             }
-            if let Some(steps) = &c.steps {
+            if c.smt.contains(nl_validator::gauss::MARKER) {
+                write_cert(".lemma-exact-identity", nl_validator::gauss::LEMMA_IDENTITY_SMT)?;
+                write_cert(".lemma-exact-zero", nl_validator::gauss::LEMMA_ZERO_SMT)?;
+                write_cert(".lemma-exact-closure", nl_validator::gauss::LEMMA_CLOSURE_SMT)?;
+                if let Some(steps) = &c.steps {
+                    write_cert(".exact-steps", steps)?;
+                }
+            } else if let Some(steps) = &c.steps {
                 write_cert(".euclid-steps", steps)?;
                 write_cert(".lemma-mod-idem", nl_validator::euclid::IDEM_SMT)?;
             }

@@ -487,6 +487,23 @@ fn euclid_ladder(cert: &mut Certificate, solver: &str) -> bool {
     false
 }
 
+/// The EXACT-DIVISION rung (`gauss`) over a certificate the Euclidean ladder left UNKNOWN: a goal
+/// stating a Gaussian remainder is zero, closed through the remainder callee's own contract
+/// instances (stepwise; the three lemmas discharged by the solver first). `true` when it closed;
+/// the certificate then carries the final query, the premise queries as `steps` and the counts.
+fn exact_ladder(cert: &mut Certificate, solver: &str) -> bool {
+    if past_deadline() {
+        return false;
+    }
+    if let Some(ex) = crate::gauss::retry(&cert.smt, solver) {
+        cert.smt = ex.final_smt;
+        cert.steps = Some(ex.steps_smt);
+        cert.stepwise = Some((ex.verified, ex.total));
+        return true;
+    }
+    false
+}
+
 // --- self definition ------------------------------------------------------------------------------
 
 /// The function under test, lowered to an SMT `define-fun`. Parameter sorts are inferred from how
@@ -2773,6 +2790,9 @@ fn prove_property_in_domain_inner(
     if euclid_ladder(&mut last, solver) {
         return (ProofOutcome::Proved, Some(last));
     }
+    if exact_ladder(&mut last, solver) {
+        return (ProofOutcome::Proved, Some(last));
+    }
     // The callee-side divisibility rung (see `DIVISIBILITY_CALLEES`): the instances-only
     // certificate with a callee law's free variable ranging over the callee's applications and
     // their products, and the divisibility lemmas instantiated there — then the Euclidean rung
@@ -3246,6 +3266,9 @@ fn prove_by_numeric_induction_inner(
     }
     if euclid_ladder(&mut last.0, solver) {
         return (ProofOutcome::Proved, Some(last.0), Some(last.1));
+    }
+    if exact_ladder(&mut last.0, solver) {
+        return (ProofOutcome::Proved, Some(last.0), Some(format!("{}; exact division through the remainder's contract", last.1)));
     }
     (ProofOutcome::Unknown, Some(last.0), Some(last.1))
 }

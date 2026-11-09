@@ -988,6 +988,53 @@ certified divisibility, and `g·(a div g)` is `a` by the same facts read the oth
 unprovable as stated); a residue atom may be a rule's degree-one lead (`(mod a g) → 0`), and the
 goal's `ite` in arithmetic position is pushed to its branches as a variant.
 
+**The exact-division rung (2026-11-09; `tooling/validator/src/gauss.rs`).** The Euclidean rung
+proves divisibility steps in ℤ through the solver's own `mod`/`div`; the Gaussian tier states "g
+divides z" as `gi_rem(z, g) = 0` with the remainder a RECORD the solver knows only through its
+certified contract — the division identity `z = r + q·w` (the Gaussian product, componentwise)
+and the descent `N(r) < N(w)`. `gi_gcd`'s "the result divides both inputs" is Euclid's step
+through that contract, and stayed UNKNOWN at the measured-descent rung (stranger 30). Measured
+first, by hand on the rung's own certificate: the exact-division lemma `g ≠ 0 ∧ x = k·g ⇒
+gi_rem(x, g) = 0` is out of z3's reach in one query (100 s, QF_NIA) and decided at once as two —
+the identity `x = k·g ∧ x = r + q·g ⇒ r = (k − q)·g` and the bound `g ≠ 0 ∧ r = u·g ∧ N(r) < N(g)
+⇒ r = 0` (norm multiplicativity and the bound, which the solver proves given `r = u·g` and not
+without it); the step with the lemma's conclusions supplied as implications `x = k·g ⇒ rem = 0`
+does not close either (the premise is a degree-3 identity through three contract instances), and
+closes in milliseconds once the two zero remainders are facts; and the premise is a LINEAR
+statement when written as the chain `w = D(w, g)·g ∧ y = D(y, g)·g ∧ x = D(x, w)·w + y` for `y =
+R(x, w)` — every conjunct a contract instance plus a zero-remainder hypothesis — with the closure
+lemma `w = kw·g ∧ y = ky·g ∧ x = m·w + y ⇒ x = (m·kw + ky)·g` (distributivity) bridging to the
+exact-division lemma. So the rung: (1) detects the contract SHAPE from the certificate's
+`;; certified contract` axioms by polynomial normalization — a tuple-valued callee of four
+integers whose two identity posts name a quotient callee at the same arguments, a norm callee
+with the descent post and the post `N(a, b) = a² + b²` (no record is named; the Gaussian product
+is the one law it matches); (2) discharges the three lemmas once per solver, over integers; (3)
+for every `R(x, g)` of the negated goal with a non-literal divisor, generates the instances `x =
+1·g`, `x = 0·g` and, for every other divisor `w` the certificate reduces something by and takes
+`x`'s remainder by, the chain through `w`; (4) checks each instance's premise ALONE — against the
+hypotheses and the negated goal (both hold in the final query), with the remainder's contract
+stated at the premise's own applications (the quantified axioms alone leave z3 to find them:
+0.8 s against milliseconds), outright or under a branch of the body's `case` (`gi_gcd`'s base
+case is `z = 1·g` and `0 = 0·g` under `w = 0`, its step the chain under `w ≠ 0`), the likely
+branch first and one verified premise per instance, each probe under a one-second resource limit
+(deterministic under load); (5) asserts each verified premise's conclusion as the fact `g ≠ 0 ∧
+branch ⇒ R(x, g) = 0` before the negated goal and asks the final query. Sound: a conclusion
+follows from its premise by the three lemmas and the contract instances the certificate carries,
+so it adds nothing a model of the certificate could falsify; an unverified premise leaves its
+instance out, stated. The certificate is the final query, the premise script (every `(check-sat)`
+unsat) and the three lemma scripts, written beside it by `prove --smt-out`. It is a retry on
+UNKNOWN in both the numeric-induction ladder and the first-order ladder. Measured: `gi_gcd`'s
+divides-both as a law PROVED (3 of 7 premises; the rest are the other branch's or a divisor the
+certificate does not reduce); as a POST, stated "the result is 0 or divides both" so it proves
+WITHOUT the `nonzero` law (a verified run's posts-only pass has no laws; the form with `z = w = 0`
+as the escape needs `nonzero` for `g ≠ 0` in the step and costs that pass its whole ladder before
+the fallback), SOUND with the rung's share 5 s of a 60 s check (the measured-descent ladder's four
+5 s probes before it are the rest); the untrimmed rung spent 76 s on 36 failing probes before the
+candidate set was cut to divisors the certificate reduces and the branch order was fixed. Also
+fixed en route: `check-refinement` did not install the record's declared type or the linked
+measure (as `certify` does), so a tuple-valued recursive record's post could not be lowered for
+the induction rung there while `certify` lowered it.
+
 ## Semantic equivalence
 
 `nl-validator equiv` decides whether two functions compute the same thing — `∀x. f(x) = g(x)` over the
