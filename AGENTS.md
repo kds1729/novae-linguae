@@ -146,9 +146,16 @@ applies and publishes in one shot, and anyone can `verify-claim --node <node> ms
    the block), applied, and a re-run agreed. Whether the VALUE is pinned down depends
    on what the proved posts and laws say — `div_half_even`'s posts determine its answer;
    `mod_pow`'s only says `0 <= result < m` (a bound: the exponentiation itself rests on the body);
-   `is_prime` declares none, and the block says `proved: nothing about this result beyond
-   certification and an agreeing re-run`. When it matters, read the body
+   `is_prime`'s pin the small cases only (`result == true` ⇒ n ≥ 2 and n = 2 or odd; 2 and 3 ⇒
+   true) — none of them determines the answer for YOUR n. When it matters, read the body
    (`nl-validator unparse-body`) or prefer a candidate whose contract states the answer.
+   **Primality is the standing example: for "is N prime?" with N below about 10^10, run
+   `is_prime_trial`, not `is_prime`.** Its post IS the specification — `n < 2 || result ==
+   no_divisor_from(n, isqrt(n))`, both callees proved by address — so its proved block pins the
+   answer; `is_prime` (Miller–Rabin, instant up to 2^63−1) gives the same answer certified plus
+   an agreeing re-run, which you must report as not proved. Trial division walks to √N (10^9+7
+   answers in 0.3 s); from about 10^10 the walk exceeds the evaluator's 100 000-application depth
+   and the run fails outright, saying so — use `is_prime` there and say what its block says.
 
 **Chaining functions (one verified run, several stages).** When no single function answers the
 goal, give `orchestrate` one `--intent` per stage; the `--arg`s after an `--intent` are that stage's,
