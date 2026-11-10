@@ -41,6 +41,22 @@ The project already has the parts this needs, and this module uses them rather t
 
 The founding rule of the project applies unchanged: an agent reads the **record**, never a body of text.
 
+### 2.1 Why selection, not generation
+
+A generation-based provisioner, one that stamps environments from rules in code and a mutable bill of
+materials, fails as a record of what exists in predictable ways, and each failure names a property this
+design must have:
+
+| Generation-based failure | Property here |
+|---|---|
+| The record is edited forward in place; there is no "as of" | Plates and receipts are frozen and content-addressed |
+| What an environment gets is computed at run time by walking an inheritance tree; an edit high up silently changes everything below | A plate is a stored selection; needs lists have no inheritance |
+| Values are filled in late by token substitution, so some final values are never in the record | Dish inputs are only names and wiring; outputs land in the receipt |
+| Provisioning is create-only and additive, so the record diverges from the cloud | Environments are rebuilt, not changed; pets are add-only by policy and receipts record what each actually got |
+| One shape per resource type | One plate shape for everything |
+| Needs, provision, and per-environment exceptions mixed in one place | Needs list, plate, and instance are separate records |
+| The only true snapshot is deleted after a retention period | Records are never deleted |
+
 ## 3. Scope
 
 **In scope**
@@ -110,7 +126,8 @@ discussion decision it rests on where one exists.
   between components shall be fixed at authoring time and carried in the recipe. A referenced dish is
   never modified.
 - **R5.** A dish shall not be offered until a test build has produced a passing attestation. A failed test
-  build shall mark the dish unbuildable until a later passing one supersedes it.
+  build shall mark the dish unbuildable until a later passing one supersedes it. Test builds shall always
+  keep their traces.
 - **R6.** The menu shall be a view over records on a node, filtered by the receiver's trust policy:
   offered means published by a trusted publisher with a passing build attestation. Its change log is the
   publication stream.
@@ -136,18 +153,21 @@ discussion decision it rests on where one exists.
 - **R14.** Coverage shall be mechanical: for each need, the conjunction of the need's predicate and the
   profile's predicate for that kind, evaluated on the pinned dish's provides; and every wire bound to
   compatible ports.
-- **R15.** The planner shall order work from the recipes' requires/ensures and verify the plan with
-  `check-plan`. A plan that is not PLAN-SOUND shall not run. UNVERIFIABLE is reported, never passed.
+- **R15.** The planner shall produce the order of work from the recipes' requires/ensures and verify it
+  with `check-plan`. A plan that is not PLAN-SOUND shall not run. UNVERIFIABLE is reported, never passed.
+  Learned ordering hints may guide the planner but shall never make an unverified plan count as sound.
 - **R16.** Eventual consistency shall be an explicit wait obligation: a probe plus a time limit.
 - **R17.** If the plate is missing or pins an unbuildable dish, GO shall stop and name it. GO shall never
   search for a substitute.
-- **R18.** GO shall write a receipt recording plate, instance, recipe run per dish, outputs with secrets
-  only as references, and optional traces.
+- **R18.** GO shall write a receipt recording plate, instance, and per need which dish actually stands there
+  with the recipe run for it, outputs with secrets only as references, and optional traces.
 
 ### 6.4 Scrub
 
 - **R19.** Scrub shall take one input, a build receipt by content address, and derive deletes from the
   recipes in reverse dependency order, verified with `check-plan`.
+- **R19a.** Scrub shall be ordered through a scrub form, the counterpart of the GO form, and shall run only
+  within what policy allows for that environment.
 - **R20.** Scrub shall probe each resource gone within its wait obligation and write a scrub receipt that
   supersedes the build receipt. A failed scrub shall stop, name the failure, and write a partial scrub
   receipt. Re-running scrub against the same build receipt shall be legal and idempotent.
@@ -204,7 +224,7 @@ Five layers; each depends only on the layers below it.
 | 1 | **NL** | The library | operations, kinds (types), content addressing, `check-plan`, attestations, trust policy |
 | 2 | **Provisioning mechanism** | Doing exactly what it is told | dishes, recipes, needs, profiles, plates, receipts, coverage check, planner, kitchen, selector, test build, GO, scrub |
 | 3 | **Policy** | What a run may do | add-only, circuit breaker, who may delete, protected scrub, trace retention, trust in authors |
-| 4 | **Profile realm** | What to choose | GO form, needs-list configurator, consigliere, chef |
+| 4 | **Profile realm** | What to choose | GO form, scrub form, needs-list configurator, consigliere, chef |
 | 5 | **Organization specifics** | How it fits one company | not part of this module |
 
 Layer 2 never searches, substitutes, or chooses; layer 4 never executes. The only judgment in the system
@@ -225,9 +245,12 @@ sits in layer 4 and, for waivers, with a person.
 ### 7.2 Lifecycle of an environment
 
 1. A needs list is authored (configurator, with the consigliere suggesting from the release's SBOM).
-2. The selector composes a plate for a profile; a person or agent may override within the candidate set.
+2. The selector composes a plate for a profile, with the consigliere's candidates per need as input; a person
+   or agent may override within the candidate set. An optional made-from annotation records which needs list
+   the new one was copied from.
 3. The GO form supplies the instance by policy. GO runs: coverage → `check-plan` → kitchen → receipt.
-4. A change is a new needs list or plate, a new GO, and a scrub of the old environment from its receipt.
+4. A change is a new needs list or plate, a new GO, and a scrub of the old environment from its receipt,
+   ordered through the scrub form.
 5. If a pinned dish becomes unbuildable, GO stops; the selector composes an equivalent plate; GO builds it
    fresh.
 
@@ -247,7 +270,8 @@ sits in layer 4 and, for waivers, with a person.
 ## 9. Open questions
 
 Maintained in [`deferred.md`](deferred.md). The ones that block implementation, as opposed to discussion:
-the test build (where it runs, what it costs, under which cloud account) and the shape of an instance.
+the test build (where it runs, what it costs, under which cloud account), the shape of an instance, and the
+layer-1 gaps (a `ready` state, a planner, mid-plan waits).
 
 ## 10. Plan
 
