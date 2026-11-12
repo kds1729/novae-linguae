@@ -164,8 +164,12 @@ discussion decision it rests on where one exists.
 - **R10.** A profile shall be a content-addressed record of constraints by kind.
 - **R11.** A plate shall pin, by content address, its needs list, its profile, and its servings. A serving
   is one dish, provisioned once. Every need shall map to exactly one serving; several needs may map to the
-  same serving where the profile permits sharing for that kind. The plate shall record every wire resolved
-  to a typed dish-output → dish-input binding. Resolution shall be type-checked when the plate freezes.
+  same serving where the profile permits sharing for that kind. A serving may instead be a carried serving:
+  a serving of an earlier receipt, named by that receipt's content address and the serving's identifier,
+  whose dish, outputs and names are read from that receipt. A plate that carries servings shall record a
+  cleanup manifest: the servings of that receipt it neither carries nor replaces. The plate shall record every
+  wire resolved to a typed dish-output → dish-input binding. Resolution shall be type-checked when the plate
+  freezes.
 - **R12.** A plate may record that a dish was chosen by explicit override, with a reason. An override
   shall only choose from the mechanical candidate set.
 
@@ -173,7 +177,8 @@ discussion decision it rests on where one exists.
 
 - **R13.** The provisioning command shall take exactly three inputs, each by content address: a needs list, a plate, an
   instance. It shall derive everything else from records those reference. It shall refuse an instance that
-  was not generated for the pinned plate.
+  was not generated for the pinned plate. Before its first step it shall probe every carried serving's
+  resources and refuse the run if any is absent.
 - **R13a.** An instance shall be a frozen record naming the plate it was generated for, a lineage (the
   identity of an environment across its successive generations) and a generation, and holding, per serving,
   its placement and a literal name for every name input of its dish down through every component. The
@@ -192,8 +197,10 @@ discussion decision it rests on where one exists.
 - **R17.** If the plate is missing or pins an unprovisionable dish, provisioning shall stop and name it. The
   provisioning command shall never search for a substitute.
 - **R18.** The provisioning command shall write a receipt recording plate, instance, per serving which dish actually
-  stands there with the recipe run for it, per need which serving covers it, outputs with secrets only as
-  references, and optional traces. The port types make the last of these so: a credential-bearing output has
+  stands there with the recipe run for it, per need which serving covers it, for each serving whether it was provisioned in this run or carried and
+  from which receipt, the cleanup manifest, outputs with secrets only as references, and optional traces. A
+  carry-over shall publish a state record superseding the earlier receipt, naming the receipt that now holds
+  the serving. The port types make the secrets rule so: a credential-bearing output has
   the secret-reference type, and the secret scalar type keeps any value that passed through the kitchen out of
   every record.
 
@@ -241,7 +248,9 @@ discussion decision it rests on where one exists.
 
 - **R31.** The system's knowledge of any environment shall be exactly the sum of its own receipts. It shall
   never observe, import, or reason about pre-existing state. A collision with a pre-existing resource is
-  refused by the cloud API and surfaces as a stopped, named run.
+  refused by the cloud API and surfaces as a stopped, named run. A carried serving is read from the one receipt
+  the plate names; the provisioning command shall never search receipts or compute a difference between a
+  plate and a receipt.
 
 ### 6.9 Releases
 

@@ -55,6 +55,19 @@ offers nothing and says so (decisions 4, 11, 32).
 
 ## Layer 2 — the provisioning mechanism
 
+**Carried serving.** A serving a plate pins not as a dish to provision but as a serving of an earlier receipt,
+named by that receipt's content address and the serving's identifier. Its dish, outputs and names are read from
+that receipt; coverage evaluates the need on its dish's provides like any serving. The provisioning command
+provisions nothing for it, probes its resources before the first step, refuses the run if any is absent, and
+binds wires into it to the earlier receipt's recorded outputs. This is how a pet's next generation keeps what
+must survive, and how a surviving resource is adopted into a new environment. The comparison of plate with
+receipt happens in layer 4 when the plate is composed; the command compares nothing (decision 35).
+
+**Cleanup manifest.** Recorded in a carrying plate by the configurator, and copied into the receipt: the
+servings of the earlier receipt that the plate neither carries nor replaces, so they remain standing. Cleanup
+is a later scrub of exactly those servings, ordered through the scrub form and allowed or refused by policy;
+each cleaned item is a state record superseding the receipt (decision 35).
+
 **Constraint.** A predicate (NL refinement) over a kind's attributes, e.g. `engine = postgres ∧ major ≥ 15`.
 Needs carry constraints; so do profiles (decision 15).
 
@@ -78,6 +91,10 @@ side on a plate, each meeting its own need. A dish has no adjustable settings; a
 **Generation.** A counter within a lineage: the n-th environment provisioned for that lineage. Every resource
 name in an instance includes the generation, so the next generation can stand beside the current one in the
 same project and region without a name collision (decision 29).
+
+**Held-by state.** A state record a carry-over publishes, superseding the earlier receipt: "serving S of
+receipt R is now held by receipt R2". A scrub of R reads R's latest state and skips S. No scrub-exclusion
+setting is needed beyond this (decision 35).
 
 **Instance.** Where an environment is provisioned and what everything in it is called. A frozen record holding:
 the plate it was generated for (by content address; its entries are keyed by that plate's servings); the
@@ -322,7 +339,10 @@ provisioning question (deferred.md §3). Drift is a community problem (user, 202
 **Cattle / pets.** Cattle: environments that are replaced, never changed — a change means provisioning a new one and
 scrubbing the old. Pets: environments that cannot yet be replaced; a policy fact (add-only, permanent), not a
 type in the model. Pets are only ever added to; what existed before this system is never observed,
-imported, or reasoned about (decisions 8, 9).
+imported, or reasoned about (decisions 8, 9). A pet is a lineage under permanent add-only policy whose
+successive plates carry forward what must survive (**carried serving**); its next generation is an ordinary
+provisioning run with such a plate, which derives no deletes; what the plate leaves behind is listed in its
+**cleanup manifest** (decision 35).
 
 **Variation chain.** The records that are new when one part of a composite dish changes: the changed part
 and one new version of each dish that contains it, up to the top-level composite. Parts that did not change

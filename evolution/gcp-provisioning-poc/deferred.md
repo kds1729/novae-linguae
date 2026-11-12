@@ -186,23 +186,23 @@ around: each shortcut examined reintroduces a guess or a silent event.
 **Timing.** Phase 2 needs only these shapes and writes the five proposals. Phase 3 needs all five built before
 the worked example can run against the fake service. Phase 4 needs nothing further at layer 1.
 
-## 11. Pets: a "move" operation and the cleanup manifest — open
+## 11. Pets: a "move" operation and the cleanup manifest — shaped 2026-11-12; validated when the first pet exists
 
-**Raised 2026-11-10.** Today's decisions give pets the rules (add-only, circuit breaker, knowledge = own
-receipts) but no named operation. The earlier discussion had one, worth recording:
-- A **move** takes a pet's LATEST RECEIPT and a new plate, and provisions every dish the plate has that the
-  receipt does not. It compares against the receipt, not the old plate, because after a partial provisioning or a
-  substitution the old plate describes dishes that are not there.
-- It never deletes. Whatever the receipt has that the new plate no longer needs stays in place and is listed
-  in a **cleanup manifest**; cleanup is done separately, later, and each item cleaned should update the
-  receipt so receipts stay accurate.
-- A dish that holds data and must be replaced is the circuit breaker's canonical case: stop, never destroy.
-- Related: **adopting a surviving resource** (scrub everything but the database, then provision a new environment
-  around it). Needs scrub exclusions as a policy setting and a provisioning command that adopts rather than
-  provisions, which breaks "provisioning starts from nothing" and is a mechanism change; receipts would then
-  include a dish provisioned by another environment's provisioning run.
+**Raised 2026-11-10; shaped by decision 35.** The earlier discussion's "move" (take the pet's latest receipt and a
+new plate, provision what the receipt lacks, never delete, list what the plate no longer needs) would have the
+provisioning command compare a plate with a receipt, the reconciliation the convention-over-configuration guide
+set aside. Instead the comparison is made in layer 4 when the plate is composed, and the plate says the result:
+a serving is either a dish to provision or a **carried serving** of a named earlier receipt. The provisioning
+command then takes its usual three inputs, provisions nothing for carried servings, probes them before the first
+step, and binds wires into them to the earlier receipt's outputs. No new operation, no search, no difference
+computed; a carrying plate derives no deletes, so the circuit breaker is untouched. The **cleanup manifest** is
+recorded by the configurator in the plate and copied into the receipt; cleanup is a later scrub of exactly those
+servings under policy. A carry-over publishes a **held-by state** superseding the earlier receipt, so a scrub of
+the old environment skips the carried resource; adopting a surviving resource works the same way. A pet is a
+lineage under permanent add-only policy whose plates carry servings forward. Recorded in the charter (R11, R13,
+R18, R31) and the glossary (**Carried serving**, **Cleanup manifest**, **Held-by state**, **Cattle / pets**).
 
-**Reopens when:** the first pet exists under this system.
+**Validated when:** the first pet exists under this system (phase 4 or later).
 
 ---
 
