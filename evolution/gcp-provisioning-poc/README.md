@@ -145,9 +145,13 @@ discussion decision it rests on where one exists.
   recipe may reference other dishes by content address as components. Internal wiring
   between components shall be fixed at authoring time and carried in the recipe. A referenced dish is
   never modified.
-- **R5.** A dish shall not be offered until a test provisioning has produced a passing attestation. A failed test
-  provisioning shall mark the dish unprovisionable until a later passing one supersedes it. Test provisioning runs shall always
-  keep their traces.
+- **R5.** A dish shall not be offered until a test provisioning has produced a passing attestation. A test
+  provisioning shall run the chef's harness plate (the dish plus an offered dish for each of its input wires)
+  under a test instance and then scrub it; it passes when every step ran, every resource reached `ready`, the
+  dish's outputs were produced, and the scrub receipt confirms every resource gone. A composite shall be tested
+  whole. A failing attestation shall carry a cause class: a dish fault marks the dish unprovisionable until a
+  later passing attestation supersedes it; an environment fault (authentication, quota, a provider-side error,
+  a failing harness serving) is no verdict. Test provisioning runs shall always keep their traces.
 - **R6.** The menu shall be a view over records on a node, filtered by the receiver's trust policy on two
   axes: offered means published by a publisher the receiver trusts AND carrying a passing provisioning
   attestation from an attester the receiver trusts. The mechanism shall record both identities. A node with no
@@ -316,10 +320,11 @@ sits in layer 4 and, for waivers, with a person.
 
 ## 9. Open questions
 
-Maintained in [`deferred.md`](deferred.md). The one that blocks implementation, as opposed to discussion, is
-the test provisioning (where it runs, what it costs, under which cloud account, who runs catalog refreshes).
-The five layer-1 gaps (a `ready` state, a planner, mid-plan waits, authored refinements, a `secret` scalar
-type) are shaped (decision 34) and are built at the start of phase 3.
+Maintained in [`deferred.md`](deferred.md). As of 2026-11-12 every item is settled or shaped. The one thing
+that blocks implementation, as opposed to discussion, is which cloud account this module's own phase 4 uses as
+its attester; it is the author's decision at the phase-4 gate, with three options recorded under item 3. The
+five layer-1 gaps (a `ready` state, a planner, mid-plan waits, authored refinements, a `secret` scalar type) are
+shaped (decision 34) and are built at the start of phase 3.
 
 ## 10. Plan
 

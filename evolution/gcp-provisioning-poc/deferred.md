@@ -61,20 +61,28 @@ and runtime settings are.
 
 **Reopens when:** a real pet is in hand and a replacement plate is provisionable.
 
-## 3. The test provisioning — open; blocks implementation
+## 3. The test provisioning — design settled 2026-11-12; the account is the author's call at the phase-4 gate
 
-**Raised 2026-11-10.** A dish is offered only after a passing test provisioning (decisions 19, 21). A test provisioning
-provisions real cloud resources and scrubs them.
+**Raised 2026-11-10; settled by decision 36, except the account.** A test provisioning runs the chef's **harness
+plate** (the dish under test plus an offered dish for each input wire) under a test instance and scrubs it; it
+passes when every step ran, every resource reached `ready`, the outputs were produced and the scrub receipt
+confirms everything gone; the attestation records enough to reproduce it. The **attester** runs it against an
+account they pay for, signs it, and chooses what to test; an organization attests what it depends on; catalog
+refreshes are chefs then attesters, and nobody is obliged. Composites are tested whole. A failing attestation
+carries a cause class: a dish fault marks the dish unprovisionable, an environment fault is no verdict. Cadence is
+an item-8 knob on both sides. Recorded in the charter (R5) and the glossary (**Test provisioning**, **Harness
+plate**, **Attester**, **Provisioning attestation**).
 
-**Undecided.** Where it runs; what it costs and who pays; who runs catalog refreshes after a cloud API change
-(decision 33); which cloud account and identity it uses; whether
-a composite dish re-tests its already-tested components or only its new wiring; how often an offered dish
-is re-tested as the cloud API drifts (the recipe-versioning hook in the glossary's **Recipe** entry).
+**Still the author's.** Which cloud account and identity this module's own phase 4 uses. Phases 2 and 3 need none
+(phase 3 runs against the in-repo fake service). On record: the author's 2026-08-20 cloud policy (AWS only, on
+the personal account; no further Google Cloud on the work identity's billing), and the instruction that the
+account is settled when the plan reaches implementation. Options recorded for the phase-4 gate:
+1. A personal Google Cloud account with its own billing, used only as this module's attester.
+2. The existing personal AWS account, through the operations the AWS modules already certified; the mechanism is
+   cloud-neutral, so the live slice would run on a different cloud from the worked example.
+3. No live slice: the module closes at phase 3, and phase 4 stays open for a future attester.
 
-**Constraint on record.** The user's 2026-08-20 cloud policy was AWS-only on the personal account and no
-further GCP (the earlier GCP work ran on a work identity's billing). This exercise targets GCP. The account
-question is to be settled when the plan reaches implementation, not before (user, 2026-11-10: "don't get
-ahead of yourself").
+**Decided when:** phase 3 closes.
 
 ## 4. Instance generation by policy — settled 2026-11-12
 

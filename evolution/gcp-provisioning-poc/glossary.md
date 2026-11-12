@@ -92,6 +92,11 @@ side on a plate, each meeting its own need. A dish has no adjustable settings; a
 name in an instance includes the generation, so the next generation can stand beside the current one in the
 same project and region without a name collision (decision 29).
 
+**Harness plate.** The plate a chef submits with a new dish for its test provisioning: the dish under test plus,
+for each of its input wires, an already-offered dish producing a compatible output. The chef decides what to
+attempt; the mechanism verifies. Recorded by content address in the attestation, so the test is reproducible
+(decision 36).
+
 **Held-by state.** A state record a carry-over publishes, superseding the earlier receipt: "serving S of
 receipt R is now held by receipt R2". A scrub of R reads R's latest state and skips S. No scrub-exclusion
 setting is needed beyond this (decision 35).
@@ -171,7 +176,10 @@ adopts it into a recipe; the mechanism never promotes a hint by itself (decision
 the recipe, the date, the result and the content address of the trace record. The author of a dish is trusted
 for nothing; it is this attestation, from an attester the receiver trusts, that makes a dish offered. Whether
 the attester must be independent of the publisher, how many are needed and how fresh the attestation must be
-are policy (deferred.md §8; decision 32).
+are policy (deferred.md §8; decision 32). A failing attestation carries a cause class: a **dish fault** (the
+cloud refused the request as malformed or unsupported, or a declared readiness never arrived within its limit)
+makes the dish unprovisionable; an **environment fault** (authentication, quota, a provider-side error, a failing
+harness serving) is no verdict and may be retried (decision 36).
 
 **Provisioning command** (the verb is *provision*). The function that creates an environment. Inputs: a
 needs list, a plate, an instance — all by content address. Steps: coverage check → planner (check-plan) →
@@ -232,11 +240,16 @@ permits sharing for that kind (one database instance serving two services in a l
 forbidden in production by a profile rule on the plate). A need that no single dish satisfies is remedied by
 a chef composing a dish or by the needs-list author splitting the need, never by the mechanism (decision 28).
 
-**Test provisioning.** A provisioning run made to produce evidence rather than an environment for use: the provision-and-scrub of
-a newly composed dish, the verification of a new recipe against its dish, and the periodic re-provisioning that
-renews a dish's provisionable-as-of attestation. A dish is not offered without a passing one (decisions 19, 21).
-Test provisioning runs always keep their traces regardless of trace-retention policy: there the trace is the evidence
-that separates "the cloud retired this" from "our credential expired".
+**Test provisioning.** A provisioning run made to produce evidence rather than an environment for use: the
+provision-and-scrub of a newly composed dish, and the periodic re-provisioning that renews a dish's
+provisionable-as-of attestation. It runs the chef's **harness plate** under a test instance (a lineage of its own,
+one generation per attempt, test-marked names) and then scrubs its receipt. It passes when every step ran, every
+resource reached `ready`, the dish's outputs were produced, and the scrub receipt confirms every resource gone;
+the resulting **provisioning attestation** names dish, recipe, harness plate, instance, dates, result, trace and
+scrub receipt, so any **attester** can reproduce it. A composite is tested whole; its components' attestations do
+not substitute. A dish is not offered without a passing one (decisions 19, 21, 36). Test provisioning runs always
+keep their traces regardless of trace-retention policy: there the trace is the evidence that separates a dish
+fault from an environment fault.
 
 **Provisionable as of.** Whether a dish can still be provisioned is dated evidence, not a permanent property: a content
 address preserves a dish's description forever, not the cloud's willingness to accept it. Renewed by test
@@ -327,6 +340,13 @@ regions ≥ 2"). Plates pin their profile by content address (decision 15).
 
 **Actors.** All layer-4 tools are actor-agnostic. The AI orchestration agent does everything by default;
 people are the fallback and the override. Exception: **waivers are human-only** (decisions 2, 3).
+
+**Attester.** Whoever operates the mechanism against a cloud account they pay for and signs the provisioning
+attestations of the test provisioning runs they perform. An organization that depends on certain dishes is their
+natural attester, and its own receiver policy trusts its own attestations; several attesters may attest one
+dish, and each receiver decides whose count. The attester pays for what it signs and chooses what to test through
+its own policy (whose submissions, which kinds, a cost cap per test). Catalog refreshes are chefs re-authoring
+and attesters testing; nobody is obliged (decisions 32, 33, 36).
 
 **Catalog refresh.** The community's response to a change in the cloud's API: re-ingest the changed API
 description (the adapter produces new operation records), find the variation chains that reach the changed
