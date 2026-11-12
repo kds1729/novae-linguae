@@ -86,6 +86,11 @@ instance's names reach recipes (they are the one input a dish accepts besides wi
 one (naming conventions, region defaults, project allocation) are organization policy, i.e. layer 5 content
 configured through layer 3. That keeps the mechanism free of any one company's naming.
 
+**Requirement added 2026-11-12.** Names include the generation. The next version of production is built
+beside the current one in the same project and region, and the provider refuses the second at the first
+name collision; the same holds when a pet's next generation is added. See
+[`convention-over-configuration.md`](convention-over-configuration.md), section 3.3.
+
 ## 5. Secrets as references — open
 
 **Raised 2026-11-10.** Receipts carry secrets only as references. Undecided: which secret store the

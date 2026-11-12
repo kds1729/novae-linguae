@@ -57,6 +57,11 @@ cost is baked in; its only inputs are names and wiring. Declares typed **inputs*
 **provides** (a value of its kind). Dishes compose recursively: a dish's recipe may reference other dishes
 by content address as components, down to operations at the leaves (decision 17). A dish is "a function
 record with a cloud on the other end" (decision 21).
+**Composition depth** is the author's choice: parts that are always tested together and do not vary
+separately belong inside one composite dish; parts expected to be exchanged one at a time belong side by
+side on a plate, each meeting its own need. A dish has no adjustable settings; a variation is a new dish
+(see **variation chain** under cross-cutting terms, and
+[`convention-over-configuration.md`](convention-over-configuration.md)).
 
 **GO.** The build function. Inputs: a needs list, a plate, an instance — all by content address. Steps:
 coverage check → planner (check-plan) → kitchen → receipt. If the plate is missing or pins an unbuildable
@@ -237,6 +242,11 @@ people are the fallback and the override. Exception: **waivers are human-only** 
 scrub the old. Pets: environments that cannot yet be replaced; a policy fact (add-only, permanent), not a
 type in the model. Pets are only ever added to; what existed before this system is never observed,
 imported, or reasoned about (decisions 8, 9).
+
+**Variation chain.** The records that are new when one part of a composite dish changes: the changed part
+and one new version of each dish that contains it, up to the top-level composite. Parts that did not change
+are shared by content address, so the cost of a variation is a test build per new record, not storage
+([`convention-over-configuration.md`](convention-over-configuration.md)).
 
 **Pet migration.** An operational concern in the family of blue/green and canaries — how traffic and
 responsibility move from old to new. Deferred.

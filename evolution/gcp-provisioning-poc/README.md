@@ -2,7 +2,7 @@
 
 - **Status:** exploring (concept and requirements phase; nothing implemented, nothing provisioned)
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** chartered 2026-11-10, last updated 2026-11-10
+- **Dates:** chartered 2026-11-10, last updated 2026-11-12
 - **Scope:** a new evolution module. Reads against `evolution/gcp-sdk-poc`, `evolution/aws-sdk-poc`,
   `evolution/aws-ecosystem-poc` (certified operations, `check-plan`, world-state refinements, probes),
   `spec/world-state.md`, `spec/trust-model.md`, `spec/commons.md`, and the composite-record machinery
@@ -75,6 +75,17 @@ design must have:
   concern in the family of blue/green and canaries.
 - Importing, observing, or reasoning about infrastructure that existed before this system.
 - Any one organization's conventions (layer 5).
+
+**Fit.** The design suits organizations whose stored data can be copied or re-created outside this
+system, because every change to an environment is a new environment beside the old one. Where production
+data lives in resources that are not practical to re-provision, the fit is weaker; the pet exception
+(principle 5) exists for that case.
+
+**Parallel solutions.** Adjustable settings on dishes and in-place change of resources are reasonable
+things to want and are not part of this solution, because each gives up a property the design was chosen
+for (section 2.1). Anyone who wants them is welcome to propose a parallel solution, for example a fork of
+this module; a fork and the shared project can coexist and can exchange fixed dishes. The reasoning is in
+[`convention-over-configuration.md`](convention-over-configuration.md).
 
 ## 4. Principles
 
@@ -298,3 +309,4 @@ Nothing in phases 2–4 starts without the author's explicit go.
 | `README.md` | this charter and requirements document |
 | [`glossary.md`](glossary.md) | the vocabulary, by layer, with the GCP worked example |
 | [`deferred.md`](deferred.md) | open and provisional questions, with candidates and reopen conditions |
+| [`convention-over-configuration.md`](convention-over-configuration.md) | guide: why dishes have fixed settings and environments are replaced rather than changed, and what that costs |
