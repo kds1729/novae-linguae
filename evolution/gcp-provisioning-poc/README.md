@@ -143,9 +143,11 @@ discussion decision it rests on where one exists.
 - **R5.** A dish shall not be offered until a test provisioning has produced a passing attestation. A failed test
   provisioning shall mark the dish unprovisionable until a later passing one supersedes it. Test provisioning runs shall always
   keep their traces.
-- **R6.** The menu shall be a view over records on a node, filtered by the receiver's trust policy:
-  offered means published by a trusted publisher with a passing provisioning attestation. Its change log is the
-  publication stream.
+- **R6.** The menu shall be a view over records on a node, filtered by the receiver's trust policy on two
+  axes: offered means published by a publisher the receiver trusts AND carrying a passing provisioning
+  attestation from an attester the receiver trusts. The mechanism shall record both identities. A node with no
+  trusted roots configured shall offer nothing and shall name that as the reason. The menu's change log is
+  the publication stream.
 - **R7.** Retiring or deprecating a dish shall be a published state record and shall remove nothing.
 
 ### 6.2 Needs, profiles, plates

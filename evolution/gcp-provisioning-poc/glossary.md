@@ -17,7 +17,8 @@ The **menu** lists what has been made. A diner places an order through the **pro
 
 **Attestation.** A signed Nova Locutio assertion about a record: that an operation is certified, that a
 dish's test provisioning passed or failed, that a publisher is who they claim. Attestations are what the menu
-view reads to decide a dish's state (decision 4).
+view reads to decide a dish's state (decision 4). Trust in them is the receiver's local policy on two axes, the
+publisher and the attester (decision 32).
 
 **Check-plan.** NL's pre-effect symbolic plan checker. Verdicts: PLAN-SOUND, REJECTED (with provenance),
 UNVERIFIABLE. Used by the provisioning command's planner and by scrub. Never silently passed.
@@ -44,8 +45,11 @@ takes or returns one is certified like any other; the type is what keeps the val
 a cloud resource accepts a credential only as a supplied value, the kitchen generates it, stores it, sets it and
 discards it within one run, under this type. Not yet in NL: a named layer-1 gap (deferred.md §10; decision 31).
 
-**Trust policy.** The receiver's local rules for which publishers and attestations count. Governs who may
-publish a kind, a dish, or a recipe, and which dishes a menu view shows as offered (decisions 4, 11).
+**Trust policy.** The receiver's local rules for which publishers and attestations count, reused from NL
+unchanged: trusted roots, depth, number of distinct and disjoint attesters, recency, a domain scope. Governs
+which kinds, dishes and recipes a menu view shows as offered. There are no trust tiers in the mechanism; a
+receiver wanting a higher bar for kinds scopes it by domain in its own policy. A node with no trusted roots
+offers nothing and says so (decisions 4, 11, 32).
 
 ## Layer 2 — the provisioning mechanism
 
@@ -89,7 +93,8 @@ of product X"). The system knows a lineage only through the receipts of its gene
 generator reads the latest to learn the last generation (decisions 9, 29).
 
 **Menu.** Not a document: a trust-filtered VIEW over the dish, recipe, and attestation records on a node.
-"Offered" = published by a trusted publisher with a passing test-provisioning attestation. The dated change log
+"Offered" = published by a trusted publisher AND carrying a passing provisioning attestation from a trusted
+attester (two axes, decision 32). The dated change log
 is the publication stream itself. Dish states: **offered** (selectable), **deprecated** (selectable with a
 warning; a better dish exists), **retired** (not selectable for new work; old plates still provision it) — each a
 choice, published as a state record — and **unprovisionable** (a fact: a failed test-provisioning attestation, superseded
@@ -132,6 +137,12 @@ and may be approved by a person into a declared dependency. It never gates: a hi
 into PLAN-SOUND.
 
 **Port.** A typed input or output on a dish. Wires bind an output port to an input port.
+
+**Provisioning attestation.** A signed claim by the identity that ran a test provisioning, naming the dish,
+the recipe, the date, the result and the content address of the trace record. The author of a dish is trusted
+for nothing; it is this attestation, from an attester the receiver trusts, that makes a dish offered. Whether
+the attester must be independent of the publisher, how many are needed and how fresh the attestation must be
+are policy (deferred.md §8; decision 32).
 
 **Provisioning command** (the verb is *provision*). The function that creates an environment. Inputs: a
 needs list, a plate, an instance — all by content address. Steps: coverage check → planner (check-plan) →

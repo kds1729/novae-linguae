@@ -102,13 +102,16 @@ configuration and out of scope. A new generation creates fresh secrets; an addit
 references in the pet's latest receipt; rotation is outside scope. Recorded in the charter (scope, R18) and in
 the glossary under **Secret reference** and **Secret**.
 
-## 6. Publisher trust for dishes, recipes, and kinds — leaning
+## 6. Publisher trust for dishes, recipes, and kinds — settled 2026-11-12
 
-**Raised 2026-11-10** (decisions 4, 11, 14). The menu view is trust-filtered under the receiver's local
-trust policy, which NL already has for function records. **Leaning:** reuse it unchanged — a kind, a dish,
-a recipe, and a provisioning attestation are records like any other. Undecided: whether publishing a KIND should
-require a higher trust tier than publishing a dish, since every need and dish downstream depends on it;
-and what the default policy of a fresh node is.
+**Raised 2026-11-10; settled by decision 32.** The trust model is reused unchanged: kinds, dishes, recipes and
+provisioning attestations are records, and the menu is the existing policy engine evaluated over the attestation
+graph. "Offered" needs two things from two identities: a publisher the receiver trusts and a passing
+provisioning attestation from an attester the receiver trusts; the author alone is trusted for nothing. No trust
+tiers exist in the mechanism: a kind is immutable and makes no checkable claim, so it needs no higher tier, and a
+receiver who wants one scopes it by domain in its own policy. A fresh node with no trusted roots offers nothing
+and names that as the reason; no default roots are shipped. Three knobs went to item 8. Recorded in the charter
+(R6) and the glossary (**Trust policy**, **Menu**, **Attestation**, **Provisioning attestation**).
 
 ## 7. One dish per need — settled 2026-11-12
 
@@ -134,6 +137,10 @@ Each is a layer-3 setting whose existence is decided and whose default is not:
 - Plate-composition approval per profile (none for a dev profile, required for production).
 - Test-provisioning cadence (how often an offered dish's provisionable-as-of attestation is renewed).
 - Who may deprecate or retire a dish, and how long deprecated lasts before retired.
+- Whether the attester of a provisioning attestation must be independent of the dish's publisher (decision 32).
+- How many independent attesters an offered dish needs (decision 32).
+- How fresh a provisioning attestation must be for a dish to count as offered: the provisionable-as-of cadence
+  seen from the receiver's side (decision 32).
 
 ## 9. Recipe drift and re-testing — open
 
@@ -190,3 +197,4 @@ receipts) but no named operation. The earlier discussion had one, worth recordin
 - **Instance generation by policy** (item 4). Settled 2026-11-12, decision 29; the item above is kept as the record.
 - **One dish per need** (item 7). Settled 2026-11-12, decision 28; the item above is kept as the record.
 - **Secrets as references** (item 5). Settled 2026-11-12, decision 31; the item above is kept as the record.
+- **Publisher trust** (item 6). Settled 2026-11-12, decision 32; the item above is kept as the record.
