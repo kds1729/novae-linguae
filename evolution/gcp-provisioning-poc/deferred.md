@@ -66,7 +66,8 @@ and runtime settings are.
 **Raised 2026-11-10.** A dish is offered only after a passing test provisioning (decisions 19, 21). A test provisioning
 provisions real cloud resources and scrubs them.
 
-**Undecided.** Where it runs; what it costs and who pays; which cloud account and identity it uses; whether
+**Undecided.** Where it runs; what it costs and who pays; who runs catalog refreshes after a cloud API change
+(decision 33); which cloud account and identity it uses; whether
 a composite dish re-tests its already-tested components or only its new wiring; how often an offered dish
 is re-tested as the cloud API drifts (the recipe-versioning hook in the glossary's **Recipe** entry).
 
@@ -142,12 +143,18 @@ Each is a layer-3 setting whose existence is decided and whose default is not:
 - How fresh a provisioning attestation must be for a dish to count as offered: the provisionable-as-of cadence
   seen from the receiver's side (decision 32).
 
-## 9. Recipe drift and re-testing — open
+## 9. Recipe drift and re-testing — settled 2026-11-12
 
-**Implied by the glossary's Recipe entry.** "A dish can gain new recipes as the cloud API changes." Undecided:
-who notices the drift (a failed scheduled test provisioning? the OpenAPI adapter re-ingesting a changed spec?),
-whether a new recipe needs its own test provisioning before it replaces the old one for provisioning, and whether a dish
-with two live recipes is one dish or two.
+**Raised 2026-11-10; settled by decision 33.** A dish names exactly one recipe; a changed recipe is a new dish,
+test-provisioned like any dish, so "two live recipes" is two dishes and nothing is ever replaced inside a dish.
+Drift is detected only by test provisioning (a failing scheduled run makes the dish unprovisionable); a
+re-ingested API description is new material for the chef, not a verdict; a failed real run is evidence about the
+run, not the dish. Recovery is the equivalent re-provisioning already decided, with the successor dish among the
+candidates; the ripple through composites is the variation chain, re-authored by the chef. An optional
+succession annotation links successor to predecessor for the consigliere. The user's point stands in the
+charter: drift is a community problem — every cloud API change means somebody refreshes the catalog; who runs
+it and who pays is answered with item 3. Recorded in the charter (R4, lifecycle 7.1, Fit) and the glossary
+(**Recipe**, **Dish**, **Succession annotation**, **Catalog refresh**).
 
 ## 10. Layer-1 gaps this module needs closed — open; blocks the design phase
 
@@ -198,3 +205,4 @@ receipts) but no named operation. The earlier discussion had one, worth recordin
 - **One dish per need** (item 7). Settled 2026-11-12, decision 28; the item above is kept as the record.
 - **Secrets as references** (item 5). Settled 2026-11-12, decision 31; the item above is kept as the record.
 - **Publisher trust** (item 6). Settled 2026-11-12, decision 32; the item above is kept as the record.
+- **Recipe drift and re-testing** (item 9). Settled 2026-11-12, decision 33; the item above is kept as the record.

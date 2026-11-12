@@ -81,7 +81,11 @@ design must have:
 **Fit.** The design suits organizations whose stored data can be copied or re-created outside this
 system, because every change to an environment is a new environment beside the old one. Where production
 data lives in resources that are not practical to re-provision, the fit is weaker; the pet exception
-(principle 5) exists for that case.
+(principle 5) exists for that case. The design also has an upkeep cost that falls on its community: every
+time the cloud's API changes underneath the library, the affected dishes stop provisioning and somebody has to
+refresh the catalog (re-ingest the API description, re-author the affected variation chains, test-provision and
+publish the successors). The mechanism makes that work enumerable and mechanical; it does not make it free. A
+shared library of fixed parts stays usable only as long as its community refreshes it.
 
 **Parallel solutions.** Adjustable settings on dishes and in-place change of resources are reasonable
 things to want and are not part of this solution, because each gives up a property the design was chosen
@@ -137,7 +141,8 @@ discussion decision it rests on where one exists.
   that uses an undefined attribute or a wrongly typed value shall fail validation at publish time.
 - **R3.** A dish shall declare typed inputs and typed outputs. Its only inputs are names, placements (cloud
   project, regions, name-service zone) and wires.
-- **R4.** A dish's recipe may reference other dishes by content address as components. Internal wiring
+- **R4.** A dish shall name exactly one recipe by content address; a changed recipe is a new dish. The
+  recipe may reference other dishes by content address as components. Internal wiring
   between components shall be fixed at authoring time and carried in the recipe. A referenced dish is
   never modified.
 - **R5.** A dish shall not be offered until a test provisioning has produced a passing attestation. A failed test
@@ -267,8 +272,10 @@ sits in layer 4 and, for waivers, with a person.
 2. Layer 2 validates the composite against the kind's type, type-checks the wiring, and runs the **test
    provisioning** (provision, probe, scrub).
 3. The dish is published with its provisioning attestation. The trust-filtered menu now offers it.
-4. The cloud API drifts; a new recipe is authored for the same dish, test-provisioned, and published. The dish
-   is unchanged.
+4. The cloud API drifts. The dish's next scheduled test provisioning fails and it becomes unprovisionable, a
+   fact recorded by attestation. A chef authors a successor dish, with the same provides and a new recipe,
+   which is test-provisioned and published like any dish; plates that pinned the old dish re-provision
+   equivalently through the selector. The old dish is unchanged and remains resolvable.
 5. The dish is deprecated, then retired, by published state records. Its record, and every plate that
    pinned it, remain resolvable forever.
 

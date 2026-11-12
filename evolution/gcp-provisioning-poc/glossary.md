@@ -65,7 +65,8 @@ ports and every sharing rule the profile states for a kind holds on the plate. M
 cost is baked in; its only inputs are names, placements (cloud project, regions, name-service zone) and wiring. Declares typed **inputs**, typed **outputs**, and
 **provides** (a value of its kind). Dishes compose recursively: a dish's recipe may reference other dishes
 by content address as components, down to operations at the leaves (decision 17). A dish is "a function
-record with a cloud on the other end" (decision 21).
+record with a cloud on the other end" (decision 21). A dish names exactly one recipe; a changed recipe is a
+new dish (decision 33).
 **Composition depth** is the author's choice: parts that are always tested together and do not vary
 separately belong inside one composite dish; parts expected to be exchanged one at a time belong side by
 side on a plate, each meeting its own need. A dish has no adjustable settings; a variation is a new dish
@@ -118,6 +119,10 @@ with free text explaining why. Not inside the needs list (that would change its 
 dependency, never read by the mechanism; written automatically by the configurator. It tells a reader which
 of the many possible diffs is the meaningful one.
 
+**Succession annotation.** The same idea for dishes: an optional, separate record saying "dish X was made from
+dish Y" (typically after the cloud API changed under Y), with free text explaining why. Never read by the
+mechanism; the consigliere may read it to prefer the successor when ranking candidates (decision 33).
+
 **Operation** (ingredient). One cloud API call as a verified Novae Linguae function record. The leaf of
 every recipe. Produced today by the OpenAPI adapter.
 
@@ -168,7 +173,10 @@ environment is the sum of its receipts (decision 9). A **scrub receipt** superse
 
 **Recipe.** A standalone record of how a dish is made: ordered create steps, delete steps, dependencies
 (requires/ensures), **create-only settings**, and the dish's internal wiring (component output → component
-input, frozen at authoring). Points at its dish. A dish can gain new recipes as the cloud API changes.
+input, frozen at authoring). A dish names exactly one recipe by content address, as a function record has one
+body; a changed recipe is a new dish, usually with the same provides, test-provisioned like any dish. Whether an
+existing dish still provisions is decided only by provisioning attestations, never by inspecting its recipe
+against a newer API description (decision 33).
 
 **Create-only settings.** Parameters the cloud API accepts only at creation (region, storage type,
 encryption key). Changing one requires delete + recreate. Academic for cattle; decisive for pets
@@ -295,6 +303,14 @@ regions ≥ 2"). Plates pin their profile by content address (decision 15).
 
 **Actors.** All layer-4 tools are actor-agnostic. The AI orchestration agent does everything by default;
 people are the fallback and the override. Exception: **waivers are human-only** (decisions 2, 3).
+
+**Catalog refresh.** The community's response to a change in the cloud's API: re-ingest the changed API
+description (the adapter produces new operation records), find the variation chains that reach the changed
+operations, have chefs re-author them, test-provision and publish the successors. Mechanical once started, and
+enumerable because the publication stream shows which dishes went unprovisionable; it can be run proactively,
+from the re-ingest, before scheduled test provisioning runs start failing. Agents can run it, but an operator
+must run them and the test provisioning costs money; who runs it and who pays is settled with the test
+provisioning question (deferred.md §3). Drift is a community problem (user, 2026-11-12; decision 33).
 
 **Cattle / pets.** Cattle: environments that are replaced, never changed — a change means provisioning a new one and
 scrubbing the old. Pets: environments that cannot yet be replaced; a policy fact (add-only, permanent), not a
