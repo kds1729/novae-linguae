@@ -74,6 +74,8 @@ design must have:
 - Pet migration (moving traffic from an irreplaceable environment to its replacement): an operational
   concern in the family of blue/green and canaries.
 - Importing, observing, or reasoning about infrastructure that existed before this system.
+- Secrets the organization already holds (a third-party key, a licence): runtime configuration, written into
+  the environment after provisioning by the organization's own deployment tooling.
 - Any one organization's conventions (layer 5).
 
 **Fit.** The design suits organizations whose stored data can be copied or re-created outside this
@@ -184,7 +186,9 @@ discussion decision it rests on where one exists.
   provisioning command shall never search for a substitute.
 - **R18.** The provisioning command shall write a receipt recording plate, instance, per serving which dish actually
   stands there with the recipe run for it, per need which serving covers it, outputs with secrets only as
-  references, and optional traces.
+  references, and optional traces. The port types make the last of these so: a credential-bearing output has
+  the secret-reference type, and the secret scalar type keeps any value that passed through the kitchen out of
+  every record.
 
 ### 6.4 Scrub
 

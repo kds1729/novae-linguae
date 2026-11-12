@@ -39,6 +39,11 @@ certificate ACTIVE), and attribute states (a peering established). NL's world-st
 recipes; the planner orders work from them, reversed for scrub. Ingestion yields them empty: authoring them
 is the recipe author's job.
 
+**Secret.** A scalar type whose values no record, output, trace or receipt will serialize. An operation that
+takes or returns one is certified like any other; the type is what keeps the value out of every record. Where
+a cloud resource accepts a credential only as a supplied value, the kitchen generates it, stores it, sets it and
+discards it within one run, under this type. Not yet in NL: a named layer-1 gap (deferred.md §10; decision 31).
+
 **Trust policy.** The receiver's local rules for which publishers and attestations count. Governs who may
 publish a kind, a dish, or a recipe, and which dishes a menu view shows as offered (decisions 4, 11).
 
@@ -144,7 +149,8 @@ attribute of a network or a kind of its own is settled by the kind vocabulary, n
 
 **Receipt.** A standalone record of what one environment actually got: plate, instance, per serving WHICH
 DISH ACTUALLY STANDS THERE (the pinned one, a substitute, or nothing after a partial provisioning) with the recipe
-run for it, per need which serving covers it, outputs (secrets only as references), optional traces. The plate is what an environment is
+run for it, per need which serving covers it, outputs (secrets only as references, which the **secret
+reference** port type makes so), optional traces. The plate is what an environment is
 meant to have; the receipt is what it actually has. The system's ONLY knowledge of any
 environment is the sum of its receipts (decision 9). A **scrub receipt** supersedes a provisioning receipt; a
 **partial scrub receipt** records what is confirmed gone after a failed scrub (decisions 24, 25).
@@ -161,6 +167,15 @@ encryption key). Changing one requires delete + recreate. Academic for cattle; d
 the deletes in reverse dependency order, verifies with check-plan, runs, probes each resource gone within
 its wait obligation, writes a scrub receipt. Stops-and-names on failure AND is idempotently retryable
 (decisions 24, 25).
+
+**Secret reference.** A record type (store, name, version) naming a secret held in the cloud's own secret
+service. A credential-bearing dish output and the input that consumes it both have this type, so the plate-time
+wiring check refuses a credential flowing into a plain-string port or a literal flowing into a credential port.
+The secret itself is a resource created by the dish that produces it, named by the instance and deleted by
+scrub like any other; there is no secret-store dish. The consuming operation passes the reference to the cloud,
+which resolves it when the resource runs. A new generation creates fresh secrets; an addition to a pet wires to
+the references in the pet's latest receipt. Dish authors prefer identity-based access over shared secrets where
+the cloud offers it (decision 31).
 
 **Selector.** The deterministic tool that composes a plate (new or replacement). Per need, the candidate set
 is mechanical (offered dishes satisfying need ∧ profile predicates with ports fitting the wires); it ranks

@@ -89,12 +89,18 @@ generation in every name. Recorded in the charter as requirements R3, R13, R13a 
 under **Instance**, **Instance generator**, **Lineage** and **Generation**. The organization's naming rules
 themselves are layer 5 and stay outside this module.
 
-## 5. Secrets as references — open
+## 5. Secrets as references — settled 2026-11-12
 
-**Raised 2026-11-10.** Receipts carry secrets only as references. Undecided: which secret store the
-reference names; how the kitchen resolves a reference when wiring one dish's secret output (a database
-password) into another dish's input; whether the store is itself a dish; what the receipt records so a
-re-provisioning can re-wire without ever holding the secret.
+**Raised 2026-11-10; settled by decision 31.** A secret is a resource created by the dish that produces it, in
+the cloud's own secret service, named by the instance and deleted by scrub like any other resource; there is no
+secret-store dish. Ports carry references of the record type **secret reference** (store, name, version), and
+the plate-time wiring check keeps a credential out of any plain-string port. Where a cloud resource accepts a
+credential only as a supplied value, the kitchen generates, stores, sets and discards it within one run under
+the scalar type **secret**, whose values nothing serializes; that type is a layer-1 gap (item 10). Receipts
+carry references only as a consequence of the types. Secrets the organization already holds are runtime
+configuration and out of scope. A new generation creates fresh secrets; an addition to a pet wires to the
+references in the pet's latest receipt; rotation is outside scope. Recorded in the charter (scope, R18) and in
+the glossary under **Secret reference** and **Secret**.
 
 ## 6. Publisher trust for dishes, recipes, and kinds — leaning
 
@@ -138,7 +144,7 @@ with two live recipes is one dish or two.
 
 ## 10. Layer-1 gaps this module needs closed — open; blocks the design phase
 
-**Raised 2026-11-10.** Four things the mechanism assumes of NL that NL does not yet have:
+**Raised 2026-11-10.** Five things the mechanism assumes of NL that NL does not yet have:
 - **A `ready` state and attribute states** in the world-state vocabulary (today `exists`/`absent` only). Most
   real dependencies are on readiness (a database RUNNABLE, a certificate ACTIVE, a peering established).
 - **A planner.** `check-plan` verifies an order; nothing produces one. Topological order from
@@ -148,6 +154,8 @@ with two live recipes is one dish or two.
   be PLAN-SOUND and a timeout at run time is a named failure.
 - **Authored refinements.** Ingested operations carry empty requires/ensures; recipes need them authored,
   and the soft-hint path (a failed trace suggests one, a person approves it) needs a home.
+- **A `secret` scalar type** (added 2026-11-12, decision 31) whose values no record, output, trace or receipt
+  serializes, so that a credential the kitchen must generate and supply provably leaves no trace in any record.
 
 Each is a `spec/` or validator change with its own proposal; none is specific to this module.
 
@@ -181,3 +189,4 @@ receipts) but no named operation. The earlier discussion had one, worth recordin
 - **The scrub function.** Settled 2026-11-10, decisions 24–25.
 - **Instance generation by policy** (item 4). Settled 2026-11-12, decision 29; the item above is kept as the record.
 - **One dish per need** (item 7). Settled 2026-11-12, decision 28; the item above is kept as the record.
+- **Secrets as references** (item 5). Settled 2026-11-12, decision 31; the item above is kept as the record.
