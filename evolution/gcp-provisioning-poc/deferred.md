@@ -156,22 +156,35 @@ charter: drift is a community problem — every cloud API change means somebody 
 it and who pays is answered with item 3. Recorded in the charter (R4, lifecycle 7.1, Fit) and the glossary
 (**Recipe**, **Dish**, **Succession annotation**, **Catalog refresh**).
 
-## 10. Layer-1 gaps this module needs closed — open; blocks the design phase
+## 10. Layer-1 gaps this module needs closed — shaped 2026-11-12; blocks phase 3
 
-**Raised 2026-11-10.** Five things the mechanism assumes of NL that NL does not yet have:
-- **A `ready` state and attribute states** in the world-state vocabulary (today `exists`/`absent` only). Most
-  real dependencies are on readiness (a database RUNNABLE, a certificate ACTIVE, a peering established).
-- **A planner.** `check-plan` verifies an order; nothing produces one. Topological order from
-  requires/ensures with parallel waves.
-- **Mid-plan waits.** Long-running operations and "wait until DNS resolves" are not modelled; the wait
-  obligation (probe + time limit) has to be a plan step, stated at plan time, so a plan with waits can still
-  be PLAN-SOUND and a timeout at run time is a named failure.
-- **Authored refinements.** Ingested operations carry empty requires/ensures; recipes need them authored,
-  and the soft-hint path (a failed trace suggests one, a person approves it) needs a home.
-- **A `secret` scalar type** (added 2026-11-12, decision 31) whose values no record, output, trace or receipt
-  serializes, so that a credential the kitchen must generate and supply provably leaves no trace in any record.
+**Raised 2026-11-10; shaped by decision 34.** Five things the mechanism assumes of NL that NL does not yet
+have. This module is the driver that earns them (the world-state specification: richer state is "future
+vocabulary, earned by a driver, not anticipated"). Each has an agreed shape; each becomes its own
+specification proposal, written in phase 2 with the module's worked example as the driver case, and built at
+the start of phase 3, one at a time on the author's go. None is specific to this module. None is routed
+around: each shortcut examined reintroduces a guess or a silent event.
 
-Each is a `spec/` or validator change with its own proposal; none is specific to this module.
+- **A `ready` state.** A third built-in state, `ready` implying `exists`; each resource class declares how
+  readiness is observed (which read operation, which field value). Separate attribute states are not needed:
+  every case raised (a peering established) is the readiness of a resource of its own class.
+- **A planner.** Input: the recipe steps with their requires/ensures over the instance's literal names.
+  Output: a plan in waves (independent steps may run concurrently), graded by `check-plan`. Deterministic, ties
+  broken by content address, so a plan is a reproducible content-addressed artifact. Never makes a plan sound.
+  Soft hints add ordering edges and never satisfy a requires.
+- **Mid-plan waits.** A plan step declared at plan time: "wait until <resource> is ready, with time limit T",
+  whose operation is the class's readiness read. `check-plan` treats it as ensuring `ready`; a timeout at run
+  time is a named failure of that step. It is the only observation inside a plan and reads exactly one declared
+  resource, so probes still verify only the initial world.
+- **Authored refinements.** Live in the recipe, keyed by the operation's content address, so a recipe is
+  self-contained; a reusable library of refinement records may exist for chefs to copy from. Test provisioning
+  verifies them. A failed trace yields a PROPOSED refinement record; it becomes authored only when a chef
+  adopts it; the mechanism never promotes a hint.
+- **A `secret` scalar type** (decision 31): values that no record, output, trace or receipt serializes;
+  operations taking or returning one are certified like any other.
+
+**Timing.** Phase 2 needs only these shapes and writes the five proposals. Phase 3 needs all five built before
+the worked example can run against the fake service. Phase 4 needs nothing further at layer 1.
 
 ## 11. Pets: a "move" operation and the cleanup manifest — open
 

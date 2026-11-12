@@ -31,14 +31,16 @@ their profile, receipts reference plates — all by content address, so meaning 
 (enumeration, nat, bool, …). Extending the vocabulary = publishing a new kind, which supersedes but never
 invalidates the old one. "One concept, one symbol": no synonyms (decision 14).
 
-**Ready state.** A state meaning a resource exists AND is usable (a database RUNNABLE, a cluster RUNNING, a
-certificate ACTIVE), and attribute states (a peering established). NL's world-state vocabulary today has only
-`exists` and `absent`; `ready` and attribute states are a named layer-1 gap this module needs closed
-(deferred.md §10).
+**Ready state.** A third built-in world state beside `exists` and `absent`: the resource exists AND is usable
+(a database RUNNABLE, a cluster RUNNING, a certificate ACTIVE); `ready` implies `exists`. Each resource class
+declares how readiness is observed: which read operation, and which value of which field means ready. Separate
+"attribute states" are not needed: a peering established is the readiness of the peering connection, a resource
+of its own class. Not yet in NL; shaped by decision 34, built at the start of phase 3 (deferred.md §10).
 
 **Requires / ensures.** NL's world-state refinements over class+key resources. The dependency vocabulary of
 recipes; the planner orders work from them, reversed for scrub. Ingestion yields them empty: authoring them
-is the recipe author's job.
+is the recipe author's job. Authored refinements live in the recipe, keyed by the operation's content address,
+so a recipe is self-contained; test provisioning is what verifies them (decision 34).
 
 **Secret.** A scalar type whose values no record, output, trace or receipt will serialize. An operation that
 takes or returns one is certified like any other; the type is what keeps the value out of every record. Where
@@ -87,7 +89,9 @@ verifies each component name against its recipe. Written by the instance generat
 form; used for exactly one provisioning run (decision 29).
 
 **Kitchen.** The executor. Runs a fully resolved, verified plan — never anything less — and writes the
-receipt. Eventual consistency is an explicit **wait obligation**: probe plus time limit.
+receipt. Eventual consistency is an explicit **wait obligation**: a plan step declared at plan time, "wait
+until this resource is ready, with this time limit", whose operation is the class's readiness read; a timeout
+is a named failure of that step, never a silent pass (decision 34).
 
 **Lineage.** The identity of an environment across its successive generations ("the production environment
 of product X"). The system knows a lineage only through the receipts of its generations; the instance
@@ -134,12 +138,15 @@ freezes); and for any dish chosen by override, that it was an explicit pick with
 
 **Planner.** The provisioning command's second step. Produces the order of work (and which steps may run in parallel) from the
 recipes' requires/ensures, then verifies it with check-plan. New machinery: check-plan verifies an order it
-is given and does not produce one.
+is given and does not produce one. The planner is deterministic (ties broken by content address), so a plan is a
+reproducible content-addressed artifact; it never makes a plan sound, only check-plan's PLAN-SOUND does; soft
+hints may add ordering edges and never satisfy a requires (decision 34).
 
 **Soft hint.** Learned "this usually comes before that" knowledge, typically suggested by a failed run's
 trace (a "network not found" error implies a missing `requires`). A hint may guide the planner's ordering
 and may be approved by a person into a declared dependency. It never gates: a hint never turns UNVERIFIABLE
-into PLAN-SOUND.
+into PLAN-SOUND. Path: a failed trace yields a PROPOSED refinement record; it becomes authored only when a chef
+adopts it into a recipe; the mechanism never promotes a hint by itself (decision 34).
 
 **Port.** A typed input or output on a dish. Wires bind an output port to an input port.
 

@@ -307,8 +307,10 @@ sits in layer 4 and, for waivers, with a person.
 
 ## 9. Open questions
 
-Maintained in [`deferred.md`](deferred.md). The ones that block implementation, as opposed to discussion:
-the test provisioning (where it runs, what it costs, under which cloud account) and the layer-1 gaps (a `ready` state, a planner, mid-plan waits).
+Maintained in [`deferred.md`](deferred.md). The one that blocks implementation, as opposed to discussion, is
+the test provisioning (where it runs, what it costs, under which cloud account, who runs catalog refreshes).
+The five layer-1 gaps (a `ready` state, a planner, mid-plan waits, authored refinements, a `secret` scalar
+type) are shaped (decision 34) and are built at the start of phase 3.
 
 ## 10. Plan
 
@@ -317,11 +319,14 @@ This module advances in gated phases. A phase does not begin until the previous 
 1. **Concept** (this charter, the glossary, the deferred list). *Gate:* the author declares the plan
    fully realized. **Current phase.**
 2. **Design.** Record schemas for kind, dish, recipe, needs list, profile, plate, instance, receipt;
-   the coverage and selection algorithms stated precisely; the test-provisioning question in
+   the coverage and selection algorithms stated precisely; the five layer-1 specification proposals
+   written, each with the worked example as its driver case; the test-provisioning question in
    `deferred.md` answered. *Gate:* a worked example (the glossary's web service) hand-traced from needs
    list to receipt with every record written out.
-3. **Prototype against the fake service.** Kinds and dishes over `tooling/fake-service` operations;
-   provisioning and scrub end to end with no cloud. *Gate:* the worked example provisions, scrubs, and audits clean.
+3. **Prototype against the fake service.** First the five layer-1 proposals built in the specification and
+   validator, one at a time on the author's go (`ready`, planner, waits, authored refinements, `secret`);
+   then kinds and dishes over `tooling/fake-service` operations; provisioning and scrub end to end with no
+   cloud. *Gate:* the worked example provisions, scrubs, and audits clean.
 4. **Live GCP slice.** One small needs list, one profile, real GCP operations through the OpenAPI
    adapter; test provisioning runs, the provisioning command, scrub, audited by probes. *Gate:* a stranger agent provisions and scrubs
    the slice unaided.
