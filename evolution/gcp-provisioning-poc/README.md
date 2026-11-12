@@ -17,10 +17,10 @@
 Make the construction and teardown of an entire cloud infrastructure a **selection** problem rather than a
 **generation** problem. An orchestration agent is given a description of what a system needs, selects
 pre-verified, fully formed parts from a shared library, has the composition checked mechanically, and
-builds the result to a specified end state. Nothing is generated from rules at build time, nothing is
+provisions the result to a specified end state. Nothing is generated from rules at provisioning time, nothing is
 guessed, and every part that reaches the library has been verified before it can be chosen.
 
-The long-range goal is a library large enough, built up by many agents and people over time, that an
+The long-range goal is a library large enough, assembled by many agents and people over time, that an
 entire data center can be provisioned from one description with one command, and torn down the same way.
 
 ## 2. Why on Novae Linguae
@@ -52,7 +52,7 @@ design must have:
 | The record is edited forward in place; there is no "as of" | Plates and receipts are frozen and content-addressed |
 | What an environment gets is computed at run time by walking an inheritance tree; an edit high up silently changes everything below | A plate is a stored selection; needs lists have no inheritance |
 | Values are filled in late by token substitution, so some final values are never in the record | Dish inputs are only names and wiring; outputs land in the receipt |
-| Provisioning is create-only and additive, so the record diverges from the cloud | Environments are rebuilt, not changed; pets are add-only by policy and receipts record what each actually got |
+| Provisioning is create-only and additive, so the record diverges from the cloud | Environments are re-provisioned, not changed; pets are add-only by policy and receipts record what each actually got |
 | One shape per resource type | One plate shape for everything |
 | Needs, provision, and per-environment exceptions mixed in one place | Needs list, plate, and instance are separate records |
 | The only true snapshot is deleted after a retention period | Records are never deleted |
@@ -61,10 +61,10 @@ design must have:
 
 **In scope**
 
-- Building a cloud infrastructure to a declared end state from a needs list, a plate, and an instance.
+- Provisioning a cloud infrastructure to a declared end state from a needs list, a plate, and an instance.
 - Tearing one down (**scrub**) from its receipt.
-- The library: dishes, recipes, kinds, their publication, test build, and trust-filtered menu view.
-- The tools that choose: the GO form, the needs-list configurator, the consigliere, and the chef.
+- The library: dishes, recipes, kinds, their publication, test provisioning, and trust-filtered menu view.
+- The tools that choose: the provisioning form, the needs-list configurator, the consigliere, and the chef.
 - The policy layer that answers "what may a run do here?"
 
 **Out of scope**
@@ -98,9 +98,9 @@ These are the module's load-bearing walls. Everything in §6 derives from them.
 3. **Mechanism versus policy.** Generic mechanism is shared. Policy and organization specifics are
    configurable layers above it.
 4. **Use Novae Linguae wherever it already supports the need.**
-5. **Environments are cattle, not pets.** A change means building a new environment and scrubbing the
+5. **Environments are cattle, not pets.** A change means provisioning a new environment and scrubbing the
    old. Pets are the exception, a policy fact, and are only ever added to.
-6. **Reproduce the outcome, not the procedure.** What must be rebuilt is infrastructure that meets the
+6. **Reproduce the outcome, not the procedure.** What must be re-provisioned is infrastructure that meets the
    same needs, not the same API calls.
 7. **The author is trusted for nothing.** A part is real when the mechanism has verified it, not when
    its author says so. This is what lets agents compose freely.
@@ -116,9 +116,10 @@ operations, down to a whole data center. A **recipe** says how a dish is made. T
 trust-filtered view of what is offered. A **needs list** says what the software needs, as typed
 constraints and wires, independent of profile. A **profile** says what an organization wants of an
 environment of a given kind, as constraints by kind. A **plate** freezes the choice of dishes that covers
-one needs list for one profile. An **instance** says where and under what names. **GO** builds and writes
-a **receipt**; **scrub** tears down from one. The **chef** composes dishes, the **consigliere** advises,
-the **GO form** takes the order. All of these are content-addressed records.
+one needs list for one profile, as **servings**, each a dish provisioned once. An **instance** says where and
+under what names, every name written out, for one generation of an environment's lineage. The **provisioning command**
+provisions and writes a **receipt**; **scrub** tears down from one. The **chef** composes dishes, the **consigliere** advises,
+the **provisioning form** takes the order. All of these are content-addressed records.
 
 ## 6. Requirements
 
@@ -130,17 +131,18 @@ discussion decision it rests on where one exists.
 - **R1.** Every object in §5 shall be a content-addressed Novae Linguae record. No record is ever deleted;
   state changes are later records that supersede.
 - **R2.** A kind shall be a Nova Lingua record type whose fields are typed attributes. A dish's `provides`
-  shall be a value of its kind. A need's constraints shall be a predicate over its kind. A dish or need
+  shall be a value of exactly one kind. A need's constraints shall be a predicate over its kind. A dish or need
   that uses an undefined attribute or a wrongly typed value shall fail validation at publish time.
-- **R3.** A dish shall declare typed inputs and typed outputs. Its only inputs are names and wires.
+- **R3.** A dish shall declare typed inputs and typed outputs. Its only inputs are names, placements (cloud
+  project, regions, name-service zone) and wires.
 - **R4.** A dish's recipe may reference other dishes by content address as components. Internal wiring
   between components shall be fixed at authoring time and carried in the recipe. A referenced dish is
   never modified.
-- **R5.** A dish shall not be offered until a test build has produced a passing attestation. A failed test
-  build shall mark the dish unbuildable until a later passing one supersedes it. Test builds shall always
+- **R5.** A dish shall not be offered until a test provisioning has produced a passing attestation. A failed test
+  provisioning shall mark the dish unprovisionable until a later passing one supersedes it. Test provisioning runs shall always
   keep their traces.
 - **R6.** The menu shall be a view over records on a node, filtered by the receiver's trust policy:
-  offered means published by a trusted publisher with a passing build attestation. Its change log is the
+  offered means published by a trusted publisher with a passing provisioning attestation. Its change log is the
   publication stream.
 - **R7.** Retiring or deprecating a dish shall be a published state record and shall remove nothing.
 
@@ -151,44 +153,55 @@ discussion decision it rests on where one exists.
 - **R9.** A need shall have a local name, a kind, constraints over that kind, and wires naming abstract
   roles toward other needs.
 - **R10.** A profile shall be a content-addressed record of constraints by kind.
-- **R11.** A plate shall pin, by content address, its needs list, its profile, and one dish per need, and
-  shall record every wire resolved to a typed dish-output → dish-input binding. Resolution shall be
-  type-checked when the plate freezes.
+- **R11.** A plate shall pin, by content address, its needs list, its profile, and its servings. A serving
+  is one dish, provisioned once. Every need shall map to exactly one serving; several needs may map to the
+  same serving where the profile permits sharing for that kind. The plate shall record every wire resolved
+  to a typed dish-output → dish-input binding. Resolution shall be type-checked when the plate freezes.
 - **R12.** A plate may record that a dish was chosen by explicit override, with a reason. An override
   shall only choose from the mechanical candidate set.
 
-### 6.3 GO
+### 6.3 Provisioning
 
-- **R13.** GO shall take exactly three inputs, each by content address: a needs list, a plate, an
-  instance. It shall derive everything else from records those reference.
+- **R13.** The provisioning command shall take exactly three inputs, each by content address: a needs list, a plate, an
+  instance. It shall derive everything else from records those reference. It shall refuse an instance that
+  was not generated for the pinned plate.
+- **R13a.** An instance shall be a frozen record naming the plate it was generated for, a lineage (the
+  identity of an environment across its successive generations) and a generation, and holding, per serving,
+  its placement and a literal name for every name input of its dish down through every component. The
+  provisioning command shall derive no name and shall verify that every component name equals the fixed
+  derivation in its recipe.
+- **R13b.** The rules that generate an instance (naming convention, project allocation, region defaults)
+  shall be policy; the record shape shall be mechanism. The generator shall learn a lineage's last
+  generation from the lineage's latest receipt. An instance shall serve exactly one provisioning run.
 - **R14.** Coverage shall be mechanical: for each need, the conjunction of the need's predicate and the
-  profile's predicate for that kind, evaluated on the pinned dish's provides; and every wire bound to
-  compatible ports.
+  profile's predicate for that kind, evaluated on the provides of the dish of the need's serving; every wire
+  bound to compatible ports; and every sharing rule the profile states for a kind satisfied by the plate.
 - **R15.** The planner shall produce the order of work from the recipes' requires/ensures and verify it
   with `check-plan`. A plan that is not PLAN-SOUND shall not run. UNVERIFIABLE is reported, never passed.
   Learned ordering hints may guide the planner but shall never make an unverified plan count as sound.
 - **R16.** Eventual consistency shall be an explicit wait obligation: a probe plus a time limit.
-- **R17.** If the plate is missing or pins an unbuildable dish, GO shall stop and name it. GO shall never
-  search for a substitute.
-- **R18.** GO shall write a receipt recording plate, instance, and per need which dish actually stands there
-  with the recipe run for it, outputs with secrets only as references, and optional traces.
+- **R17.** If the plate is missing or pins an unprovisionable dish, provisioning shall stop and name it. The
+  provisioning command shall never search for a substitute.
+- **R18.** The provisioning command shall write a receipt recording plate, instance, per serving which dish actually
+  stands there with the recipe run for it, per need which serving covers it, outputs with secrets only as
+  references, and optional traces.
 
 ### 6.4 Scrub
 
-- **R19.** Scrub shall take one input, a build receipt by content address, and derive deletes from the
+- **R19.** Scrub shall take one input, a provisioning receipt by content address, and derive deletes from the
   recipes in reverse dependency order, verified with `check-plan`.
-- **R19a.** Scrub shall be ordered through a scrub form, the counterpart of the GO form, and shall run only
+- **R19a.** Scrub shall be ordered through a scrub form, the counterpart of the provisioning form, and shall run only
   within what policy allows for that environment.
 - **R20.** Scrub shall probe each resource gone within its wait obligation and write a scrub receipt that
-  supersedes the build receipt. A failed scrub shall stop, name the failure, and write a partial scrub
-  receipt. Re-running scrub against the same build receipt shall be legal and idempotent.
+  supersedes the provisioning receipt. A failed scrub shall stop, name the failure, and write a partial scrub
+  receipt. Re-running scrub against the same provisioning receipt shall be legal and idempotent.
 
-### 6.5 Rebuilds
+### 6.5 Re-provisioning
 
-- **R21.** The system shall grade a rebuild against needs as identical (every pinned dish still builds),
+- **R21.** The system shall grade a re-provisioning against needs as identical (every pinned dish still provisions),
   equivalent (a new plate meets every need), approximate (a need is not met exactly and a person has
-  signed a waiver; the environment stays labeled approximate), or unbuildable.
-- **R22.** Equivalent rebuilds shall be composed by a deterministic selector: candidates per need are the
+  signed a waiver; the environment stays labeled approximate), or unprovisionable.
+- **R22.** Equivalent re-provisionings shall be composed by a deterministic selector: candidates per need are the
   offered dishes satisfying need ∧ profile with ports fitting the wires; ranked by trust policy;
   tie-broken by publication order. Same inputs shall yield the same plate.
 - **R23.** The consigliere's advice shall enter the selector only as content-addressed preference rules,
@@ -209,7 +222,7 @@ discussion decision it rests on where one exists.
 
 - **R28.** All layer-4 tools shall be usable by an agent or a person. The agent is the default operator for
   everything, including composing dishes and plates; people are the fallback and the override.
-- **R29.** Signing a waiver for an approximate rebuild shall be reserved to a person.
+- **R29.** Signing a waiver for an approximate re-provisioning shall be reserved to a person.
 - **R30.** An agent composing a dish or plate shall be bounded exactly as a person is: menu offerings
   only, no search, no substitution; it shall stop and name what is missing.
 
@@ -233,9 +246,9 @@ Five layers; each depends only on the layers below it.
 | # | Layer | Concern | Holds |
 |---|---|---|---|
 | 1 | **NL** | The library | operations, kinds (types), content addressing, `check-plan`, attestations, trust policy |
-| 2 | **Provisioning mechanism** | Doing exactly what it is told | dishes, recipes, needs, profiles, plates, receipts, coverage check, planner, kitchen, selector, test build, GO, scrub |
+| 2 | **Provisioning mechanism** | Doing exactly what it is told | dishes, recipes, needs, profiles, plates, servings, instances, receipts, coverage check, planner, kitchen, selector, test provisioning, the provisioning command, scrub |
 | 3 | **Policy** | What a run may do | add-only, circuit breaker, who may delete, protected scrub, trace retention, trust in authors |
-| 4 | **Profile realm** | What to choose | GO form, scrub form, needs-list configurator, consigliere, chef |
+| 4 | **Profile realm** | What to choose | provisioning form, scrub form, needs-list configurator, consigliere, chef |
 | 5 | **Organization specifics** | How it fits one company | not part of this module |
 
 Layer 2 never searches, substitutes, or chooses; layer 4 never executes. The only judgment in the system
@@ -246,9 +259,9 @@ sits in layer 4 and, for waivers, with a person.
 1. A **chef** (agent or person) finds components in the menu and composes a dish: components by content
    address plus operations, with internal wiring and a recipe.
 2. Layer 2 validates the composite against the kind's type, type-checks the wiring, and runs the **test
-   build** (build, probe, scrub).
-3. The dish is published with its build attestation. The trust-filtered menu now offers it.
-4. The cloud API drifts; a new recipe is authored for the same dish, test-built, and published. The dish
+   provisioning** (provision, probe, scrub).
+3. The dish is published with its provisioning attestation. The trust-filtered menu now offers it.
+4. The cloud API drifts; a new recipe is authored for the same dish, test-provisioned, and published. The dish
    is unchanged.
 5. The dish is deprecated, then retired, by published state records. Its record, and every plate that
    pinned it, remain resolvable forever.
@@ -259,18 +272,19 @@ sits in layer 4 and, for waivers, with a person.
 2. The selector composes a plate for a profile, with the consigliere's candidates per need as input; a person
    or agent may override within the candidate set. An optional made-from annotation records which needs list
    the new one was copied from.
-3. The GO form supplies the instance by policy. GO runs: coverage → `check-plan` → kitchen → receipt.
-4. A change is a new needs list or plate, a new GO, and a scrub of the old environment from its receipt,
+3. The provisioning form generates the instance by policy, for the next generation of the environment's
+   lineage. The provisioning command runs: coverage → `check-plan` → kitchen → receipt.
+4. A change is a new needs list or plate, a new provisioning run, and a scrub of the old environment from its receipt,
    ordered through the scrub form.
-5. If a pinned dish becomes unbuildable, GO stops; the selector composes an equivalent plate; GO builds it
-   fresh.
+5. If a pinned dish becomes unprovisionable, provisioning stops; the selector composes an equivalent plate; the
+   provisioning command provisions it fresh.
 
 ## 8. Relationship to existing modules
 
 - `gcp-sdk-poc` and `aws-sdk-poc` proved that cloud operations can be certified function records and that a
   live loop closes on real clouds. They supply the operation layer.
 - `aws-ecosystem-poc` provisioned and tore down a two-region ecosystem through `check-plan`-verified plans
-  and audited the teardown with the language's own probes. It is the closest precedent for GO and scrub,
+  and audited the teardown with the language's own probes. It is the closest precedent for the provisioning command and scrub,
   and its finding that *names, not placeholders, keep plans literal* is inherited by the instance design.
 - The number tiers established the prover rungs this module's coverage check relies on
   (`check-refinement` over typed records), and the practice of cross-checking every validator change
@@ -281,8 +295,7 @@ sits in layer 4 and, for waivers, with a person.
 ## 9. Open questions
 
 Maintained in [`deferred.md`](deferred.md). The ones that block implementation, as opposed to discussion:
-the test build (where it runs, what it costs, under which cloud account), the shape of an instance, and the
-layer-1 gaps (a `ready` state, a planner, mid-plan waits).
+the test provisioning (where it runs, what it costs, under which cloud account) and the layer-1 gaps (a `ready` state, a planner, mid-plan waits).
 
 ## 10. Plan
 
@@ -291,13 +304,13 @@ This module advances in gated phases. A phase does not begin until the previous 
 1. **Concept** (this charter, the glossary, the deferred list). *Gate:* the author declares the plan
    fully realized. **Current phase.**
 2. **Design.** Record schemas for kind, dish, recipe, needs list, profile, plate, instance, receipt;
-   the coverage and selection algorithms stated precisely; the test-build and instance questions in
+   the coverage and selection algorithms stated precisely; the test-provisioning question in
    `deferred.md` answered. *Gate:* a worked example (the glossary's web service) hand-traced from needs
    list to receipt with every record written out.
-3. **Prototype against the fake service.** Kinds and dishes over `tooling/fake-service` operations; GO
-   and scrub end to end with no cloud. *Gate:* the worked example builds, scrubs, and audits clean.
+3. **Prototype against the fake service.** Kinds and dishes over `tooling/fake-service` operations;
+   provisioning and scrub end to end with no cloud. *Gate:* the worked example provisions, scrubs, and audits clean.
 4. **Live GCP slice.** One small needs list, one profile, real GCP operations through the OpenAPI
-   adapter; test builds, GO, scrub, audited by probes. *Gate:* a stranger agent provisions and scrubs
+   adapter; test provisioning runs, the provisioning command, scrub, audited by probes. *Gate:* a stranger agent provisions and scrubs
    the slice unaided.
 
 Nothing in phases 2–4 starts without the author's explicit go.

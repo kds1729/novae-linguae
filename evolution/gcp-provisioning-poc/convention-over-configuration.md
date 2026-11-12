@@ -190,7 +190,7 @@ products. The charter's section 2.1 is written that way, and this note follows i
 - **A dish's settings are fixed when it is authored.** Its inputs are names and connections to other
   dishes. This keeps a dish's behavior fully in its record and keeps coverage a simple evaluation. (In
   line with decisions 1, 2, 17, 18 and 22.)
-- **Resources are created and retired, not changed in place.** The provisioning command creates; the teardown command retires. This keeps
+- **Resources are created and retired, not changed in place.** The provisioning command creates; scrub retires. This keeps
   every record frozen and content-addressed, with no forward edits. (Charter principle 5.)
 - **A variation is a new chain of records from the changed part up to the top-level composite.**
   Unchanged parts are shared by content address. The cost is test provisioning per new record, not storage,
@@ -249,8 +249,8 @@ per-generation naming requirement is under instance generation in the deferred-q
 - **Chef**: the tool, agent, or person that composes new dishes and submits them for verification.
 - **Test provisioning**: provisioning a newly authored dish once, in the cloud, to show that it can be
   provisioned. A dish is offered for selection after test provisioning passes.
-- **Provisioning command** (called GO in the charter): the command that provisions an environment from a plate. **Teardown command** (called
-  scrub in the charter): the command that retires one.
+- **Provisioning command**: the command that provisions an environment from a plate. **Scrub**: the command
+  that retires one.
 - **Menu**: the set of dishes offered for selection: published, passed test provisioning, from a trusted publisher.
 
 ## Appendix B. What the current design says
