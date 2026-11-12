@@ -1,0 +1,12 @@
+{
+ "kind": "record",
+ "fields": [
+  {
+   "name": "name",
+   "type": {
+    "kind": "builtin",
+    "name": "string"
+   }
+  }
+ ]
+}

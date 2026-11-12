@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/recipe.schema.json",
+  "title": "Recipe record (rcp_…)",
+  "description": "How a dish is made (glossary: Recipe). Standalone and self-contained: components (other dishes, by content address) and operations (certified function records, by content address), each operation with its argument bindings and its AUTHORED world refinements (decision 34: refinements live in the recipe, keyed by operation); the retire steps; readiness declarations per resource class; create-only settings; and the dish's outputs. Internal wiring is the `bind` of each component and the bindings of each operation, fixed at authoring (R4, decision 18). Component names are derived from the dish's own name inputs by fixed rules (`derive`), which the instance generator applies and the provisioning command re-checks (decision 29). A recipe does not name its dish (the dish names it, decision 33). The recipe refers to the dish's declared inputs by name; publication checks that every referenced input is declared by the dish and that the dish's outputs are all produced. Unsigned.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "components", "operations", "retire", "readiness", "create_only", "outputs"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "recipe" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "hash": { "$ref": "common.schema.json#/$defs/recipe_address" },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["id", "dish", "bind"], "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/kebab_name" },
+          "dish": { "$ref": "common.schema.json#/$defs/dish_address" },
+          "bind": {
+            "type": "object", "required": ["names", "placements", "wires"], "additionalProperties": false,
+            "properties": {
+              "names": { "type": "array", "items": { "type": "object", "required": ["input", "value"], "additionalProperties": false, "properties": { "input": { "$ref": "common.schema.json#/$defs/kebab_name" }, "value": { "$ref": "#/$defs/binding" } } }, "description": "One entry per name input of the component's dish, each a `derive` from one of this dish's name inputs." },
+              "placements": { "type": "array", "items": { "type": "object", "required": ["input", "value"], "additionalProperties": false, "properties": { "input": { "$ref": "common.schema.json#/$defs/kebab_name" }, "value": { "$ref": "#/$defs/binding" } } }, "description": "One entry per placement input of the component's dish, each an `input` of this dish." },
+              "wires": { "type": "array", "items": { "type": "object", "required": ["input", "value"], "additionalProperties": false, "properties": { "input": { "$ref": "common.schema.json#/$defs/kebab_name" }, "value": { "$ref": "#/$defs/binding" } } }, "description": "One entry per wire input of the component's dish: a `wire` (this dish's own input passed through) or a `component-output` / `operation-output` (internal wiring, frozen here)." }
+            }
+          }
+        }
+      },
+      "description": "Dishes this dish is composed from (decision 17). Each is used whole, never modified."
+    },
+    "operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" },
+      "description": "The create steps. Order here is NOT the execution order: the planner orders steps from their refinements (R15)."
+    },
+    "retire": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" },
+      "description": "The delete steps, with their own refinements; scrub plans them in reverse dependency order (R19). Components retire through their own recipes."
+    },
+    "readiness": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["class", "probe", "args", "ready_when", "limit_seconds"], "additionalProperties": false,
+        "properties": {
+          "class": { "$ref": "common.schema.json#/$defs/kebab_name", "description": "The resource class whose readiness this declares." },
+          "probe": { "$ref": "common.schema.json#/$defs/fn_address", "description": "The read operation (a certified record) that observes the resource." },
+          "args": { "type": "array", "items": { "$ref": "#/$defs/binding" }, "description": "The probe's arguments, bound like any step's; they must ground at plan time." },
+          "ready_when": {
+            "type": "object", "required": ["path", "equals"], "additionalProperties": false,
+            "properties": { "path": { "type": "array", "items": { "type": ["string", "integer"] } }, "equals": { "$ref": "common.schema.json#/$defs/value_expression" } },
+            "description": "Which value of which field of the probe's result means `ready` (a database `state` equal to `RUNNABLE`)."
+          },
+          "limit_seconds": { "type": "integer", "minimum": 1, "description": "The wait obligation's time limit; a wait step that exceeds it is a named failure (decision 34)." }
+        }
+      },
+      "description": "How readiness is observed per resource class (design/proposals/01-ready-state.md). The planner turns a `ready` requirement no step ensures into a wait step over this probe (design/proposals/03-wait-steps.md)."
+    },
+    "create_only": {
+      "type": "array", "items": { "$ref": "common.schema.json#/$defs/snake_name" }, "uniqueItems": true,
+      "description": "Attributes of the dish's `provides` the cloud accepts only at creation (decision 7). Academic for replaceable environments; for a pet it is what makes a differing attribute an addition beside the old resource rather than a change."
+    },
+    "outputs": {
+      "type": "array",
+      "items": { "type": "object", "required": ["name", "from"], "additionalProperties": false, "properties": { "name": { "$ref": "common.schema.json#/$defs/kebab_name" }, "from": { "$ref": "#/$defs/binding" } } },
+      "description": "One entry per output port of the dish: where its value comes from (an operation output, a component output, or a literal)."
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object", "required": ["id", "target", "args", "refinements"], "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "common.schema.json#/$defs/kebab_name" },
+        "target": { "$ref": "common.schema.json#/$defs/fn_address", "description": "The certified operation this step applies." },
+        "args": { "type": "array", "items": { "$ref": "#/$defs/binding" }, "description": "Positional arguments, one per parameter of the target." },
+        "refinements": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/world_refinement" }, "description": "The step's authored requires/ensures (decision 34)." },
+        "outputs": {
+          "type": "array",
+          "items": { "type": "object", "required": ["name", "path"], "additionalProperties": false, "properties": { "name": { "$ref": "common.schema.json#/$defs/kebab_name" }, "path": { "type": "array", "items": { "type": ["string", "integer"] }, "description": "A path into the operation's result value (a `Just` payload is entered implicitly; a JSON-string result is parsed)." } } },
+          "description": "Named values this step yields for later bindings and for the dish's outputs."
+        }
+      }
+    },
+    "binding": {
+      "description": "How an argument, a component input or an output gets its value. Kinds that ground at PLAN time (literals, names, placements, derived names, JSON built from those) are what world keys may use; kinds that ground at KITCHEN time (outputs of earlier steps, wires) may not appear in a world key.",
+      "oneOf": [
+        { "type": "object", "required": ["kind", "value"], "additionalProperties": false, "properties": { "kind": { "const": "lit" }, "value": { "$ref": "common.schema.json#/$defs/value_expression" } } },
+        { "type": "object", "required": ["kind", "name"], "additionalProperties": false, "properties": { "kind": { "const": "input" }, "name": { "$ref": "common.schema.json#/$defs/kebab_name" } }, "description": "One of the dish's name or placement inputs, as a string (a `regions` placement as a list of strings)." },
+        { "type": "object", "required": ["kind", "name", "index"], "additionalProperties": false, "properties": { "kind": { "const": "input-at" }, "name": { "$ref": "common.schema.json#/$defs/kebab_name" }, "index": { "type": "integer", "minimum": 0 } }, "description": "One element of a `regions` placement input." },
+        { "type": "object", "required": ["kind", "from", "suffix"], "additionalProperties": false, "properties": { "kind": { "const": "derive" }, "from": { "$ref": "common.schema.json#/$defs/kebab_name" }, "suffix": { "type": "string", "pattern": "^-[a-z0-9-]{1,32}$" } }, "description": "A fixed derivation from one of the dish's name inputs: the input's value followed by `suffix`. The only way a component or an inner resource is named (decision 29)." },
+        { "type": "object", "required": ["kind", "name", "field"], "additionalProperties": false, "properties": { "kind": { "const": "wire" }, "name": { "$ref": "common.schema.json#/$defs/kebab_name" }, "field": { "$ref": "common.schema.json#/$defs/snake_name" } }, "description": "A field of one of the dish's wire inputs (kitchen time)." },
+        { "type": "object", "required": ["kind", "component", "output"], "additionalProperties": false, "properties": { "kind": { "const": "component-output" }, "component": { "$ref": "common.schema.json#/$defs/kebab_name" }, "output": { "$ref": "common.schema.json#/$defs/kebab_name" }, "field": { "$ref": "common.schema.json#/$defs/snake_name" } }, "description": "An output port of a component (kitchen time); `field` selects one field of a record-typed port." },
+        { "type": "object", "required": ["kind", "operation", "output"], "additionalProperties": false, "properties": { "kind": { "const": "operation-output" }, "operation": { "$ref": "common.schema.json#/$defs/kebab_name" }, "output": { "$ref": "common.schema.json#/$defs/kebab_name" } }, "description": "A named output of an earlier step (kitchen time)." },
+        { "type": "object", "required": ["kind", "fields"], "additionalProperties": false, "properties": { "kind": { "const": "json" }, "fields": { "type": "object", "additionalProperties": { "$ref": "#/$defs/binding" } } }, "description": "A JSON object built from bindings, rendered to a JSON string argument (the request-body idiom). A `body-field` world key reads a top-level field of it, which must itself ground at plan time." },
+        { "type": "object", "required": ["kind", "fields"], "additionalProperties": false, "properties": { "kind": { "const": "record" }, "fields": { "type": "object", "additionalProperties": { "$ref": "#/$defs/binding" } } }, "description": "A record value built from bindings, for a record-typed output port." },
+        { "type": "object", "required": ["kind", "items"], "additionalProperties": false, "properties": { "kind": { "const": "json-list" }, "items": { "type": "array", "items": { "$ref": "#/$defs/binding" } } }, "description": "A JSON array built from bindings, inside a `json` body." },
+        { "type": "object", "required": ["kind", "index"], "additionalProperties": false, "properties": { "kind": { "const": "resource-key" }, "index": { "type": "integer", "minimum": 0 } }, "description": "In a readiness declaration's probe args only: the i-th key value of the resource being waited on." },
+        { "type": "object", "required": ["kind", "generate"], "additionalProperties": false, "properties": { "kind": { "const": "secret" }, "generate": { "type": "object", "required": ["length"], "additionalProperties": false, "properties": { "length": { "type": "integer", "minimum": 16, "maximum": 128 } } } }, "description": "A value of the `secret` scalar type generated by the kitchen for this run, usable only as an argument to operations whose parameter has that type; never serialized (decision 31, design/proposals/05-secret-type.md)." }
+      ]
+    }
+  }
+}

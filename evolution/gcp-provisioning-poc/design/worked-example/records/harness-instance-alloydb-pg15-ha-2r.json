@@ -1,0 +1,70 @@
+{
+ "kind": "instance",
+ "schema_version": "0.1.0",
+ "plate": "plate_ef81ff9275623032678c3b47ecaab3ab46dc7cfe1d06649f3b585ad70a3d8f36",
+ "lineage": "test/eecfb078ba0d0bf6",
+ "generation": 1,
+ "servings": [
+  {
+   "id": "s1",
+   "placement": {
+    "project": "nl-attester-sandbox"
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "t-eecfb078ba0d0bf6-g1-harness-network"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-psa",
+     "value": "t-eecfb078ba0d0bf6-g1-harness-network-psa"
+    }
+   ]
+  },
+  {
+   "id": "s2",
+   "placement": {
+    "project": "nl-attester-sandbox",
+    "regions": [
+     "europe-west1",
+     "europe-west4"
+    ]
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-cred",
+     "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-cred"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-primary",
+     "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-primary"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-secondary",
+     "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-secondary"
+    }
+   ]
+  }
+ ],
+ "hash": "inst_f4fa5b522e65df60900346555278fd55abda941c0e58d63cde1fd7dd1a4ebf8a"
+}

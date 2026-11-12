@@ -1,0 +1,288 @@
+{
+ "kind": "plan",
+ "schema_version": "0.1.0",
+ "assume": [],
+ "steps": [
+  {
+   "target": "fn_7c915c80ecdecc782d2bfd1b9285e036331f3522c5331344f5e032b55655dc54",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "{\"name\":\"t-eecfb078ba0d0bf6-g1-harness-network\",\"autoCreateSubnetworks\":false}"
+    }
+   ],
+   "label": "s1/net-insert"
+  },
+  {
+   "target": "fn_015ce1b59fa12d93f0cc9e4ea2e05fea059a3fa59c375993f8a27db88730948b",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-cred"
+    },
+    {
+     "kind": "string",
+     "value": "{\"replication\":{\"automatic\":{}}}"
+    }
+   ],
+   "label": "s2/secret-create"
+  },
+  {
+   "target": "fn_14f30911d40ed9a4db628150cca3ec330eae49d1dae1b264c8b2ca8968383e27",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "variant",
+     "tag": "LaterJson",
+     "payload": {
+      "kind": "string",
+      "value": "{\"name\":\"t-eecfb078ba0d0bf6-g1-harness-network-psa\",\"purpose\":\"VPC_PEERING\",\"addressType\":\"INTERNAL\",\"prefixLength\":16,\"network\":\"{{s1/net-insert.self-link}}\"}"
+     }
+    }
+   ],
+   "label": "s1/addr-insert"
+  },
+  {
+   "target": "fn_2e87dffcac33712428bdede67ef15ffa0216aa5c742dee351083a1bd77d482a7",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-cred"
+    },
+    {
+     "kind": "variant",
+     "tag": "Secret"
+    }
+   ],
+   "label": "s2/secret-version"
+  },
+  {
+   "target": "fn_bab975f7c9e819bd0cd6de7ac20f83c0d4e7e7afb171595a266354aac7c22d22",
+   "args": [
+    {
+     "kind": "string",
+     "value": "services/servicenetworking.googleapis.com"
+    },
+    {
+     "kind": "variant",
+     "tag": "LaterJson",
+     "payload": {
+      "kind": "string",
+      "value": "{\"network\":\"{{s1/net-insert.self-link}}\",\"reservedPeeringRange\":\"t-eecfb078ba0d0bf6-g1-harness-network-psa\"}"
+     }
+    }
+   ],
+   "label": "s1/psa-connect"
+  },
+  {
+   "target": "fn_a7ae49413595443c1f399f0655e7bfbb9017038fbb9a307c7f6f5ccbccd56c6e",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "europe-west1"
+    },
+    {
+     "kind": "string",
+     "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database"
+    },
+    {
+     "kind": "variant",
+     "tag": "LaterJson",
+     "payload": {
+      "kind": "string",
+      "value": "{\"network\":\"{{s1/net-insert.self-link}}\",\"initialUser\":{\"user\":\"app\",\"password\":\"{{secret}}\"},\"continuousBackupConfig\":{\"enabled\":true}}"
+     }
+    }
+   ],
+   "label": "s2/cluster-create"
+  },
+  {
+   "kind": "wait",
+   "label": "wait/alloydb-cluster/t-eecfb078ba0d0bf6-g1-under-test-relational-database",
+   "resource": {
+    "class": "alloydb-cluster",
+    "key": [
+     {
+      "kind": "string",
+      "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database"
+     }
+    ]
+   },
+   "until": "ready",
+   "probe": {
+    "target": "fn_15614ae9cfc354349780b673f51270b6fbb4fae4e9517444e8ae20189288cb5d",
+    "args": [
+     {
+      "kind": "string",
+      "value": "nl-attester-sandbox"
+     },
+     {
+      "kind": "string",
+      "value": "europe-west1"
+     },
+     {
+      "kind": "string",
+      "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database"
+     }
+    ]
+   },
+   "ready_when": {
+    "path": [
+     "state"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "READY"
+    }
+   },
+   "interval_seconds": 15,
+   "limit_seconds": 1200
+  },
+  {
+   "target": "fn_5bb567e0bf171353a47707b3f0e8f5000799a9136b739a933383e417c5b43e1d",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "europe-west1"
+    },
+    {
+     "kind": "string",
+     "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database"
+    },
+    {
+     "kind": "string",
+     "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-primary"
+    },
+    {
+     "kind": "string",
+     "value": "{\"instanceType\":\"PRIMARY\",\"availabilityType\":\"REGIONAL\"}"
+    }
+   ],
+   "label": "s2/primary-create"
+  },
+  {
+   "kind": "wait",
+   "label": "wait/alloydb-instance/t-eecfb078ba0d0bf6-g1-under-test-relational-database-primary",
+   "resource": {
+    "class": "alloydb-instance",
+    "key": [
+     {
+      "kind": "string",
+      "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-primary"
+     }
+    ]
+   },
+   "until": "ready",
+   "probe": {
+    "target": "fn_9cb45ec253908fdd5752855a2edcc0d3f3da17edfdb6a1160bcdbf43a58cd559",
+    "args": [
+     {
+      "kind": "string",
+      "value": "nl-attester-sandbox"
+     },
+     {
+      "kind": "string",
+      "value": "europe-west1"
+     },
+     {
+      "kind": "string",
+      "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database"
+     },
+     {
+      "kind": "string",
+      "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-primary"
+     }
+    ]
+   },
+   "ready_when": {
+    "path": [
+     "state"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "READY"
+    }
+   },
+   "interval_seconds": 15,
+   "limit_seconds": 1200
+  },
+  {
+   "target": "fn_a7ae49413595443c1f399f0655e7bfbb9017038fbb9a307c7f6f5ccbccd56c6e",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "europe-west4"
+    },
+    {
+     "kind": "string",
+     "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-secondary"
+    },
+    {
+     "kind": "variant",
+     "tag": "LaterJson",
+     "payload": {
+      "kind": "string",
+      "value": "{\"secondaryConfig\":{\"primaryClusterName\":\"t-eecfb078ba0d0bf6-g1-under-test-relational-database\"},\"network\":\"{{s1/net-insert.self-link}}\"}"
+     }
+    }
+   ],
+   "label": "s2/secondary-create"
+  }
+ ],
+ "waves": [
+  [
+   0,
+   1
+  ],
+  [
+   2,
+   3
+  ],
+  [
+   4
+  ],
+  [
+   5
+  ],
+  [
+   6
+  ],
+  [
+   7
+  ],
+  [
+   8
+  ],
+  [
+   9
+  ]
+ ],
+ "hash": "plan_951ef06fb07a915ed4e2c8e629a28b725140a874addc4fefb82a4ee0bcc9ba59"
+}

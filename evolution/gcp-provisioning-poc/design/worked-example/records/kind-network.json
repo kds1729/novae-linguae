@@ -1,0 +1,47 @@
+{
+ "kind": "kind",
+ "schema_version": "0.1.0",
+ "name": "network",
+ "attributes": {
+  "kind": "record",
+  "fields": [
+   {
+    "name": "nat",
+    "type": {
+     "kind": "builtin",
+     "name": "bool"
+    }
+   },
+   {
+    "name": "private_service_access",
+    "type": {
+     "kind": "builtin",
+     "name": "bool"
+    }
+   },
+   {
+    "name": "subnets",
+    "type": {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   }
+  ]
+ },
+ "attribute_docs": [
+  {
+   "name": "nat",
+   "doc": "whether outbound network address translation is provided"
+  },
+  {
+   "name": "private_service_access",
+   "doc": "whether managed services can attach by private address"
+  },
+  {
+   "name": "subnets",
+   "doc": "how many subnets the network comes with"
+  }
+ ],
+ "supersedes": null,
+ "hash": "kind_acec91af360f953eb44c35cae9d75e52e36033872fa21ecb3d4ec21c57dc07d9"
+}

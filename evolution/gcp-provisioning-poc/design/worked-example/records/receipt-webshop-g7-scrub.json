@@ -1,0 +1,153 @@
+{
+ "kind": "receipt",
+ "schema_version": "0.1.0",
+ "receipt_kind": "scrub",
+ "plate": "plate_901e6fdb1cdaf4ae1ce900f6cc9e7284aea82b8603ffbfc6522f70674599c76a",
+ "instance": "inst_f526cbeb345edd9c073c3a758df500a97abb297ff813890bbfe23cbd6ed4bd12",
+ "lineage": "acme/webshop/production",
+ "generation": 7,
+ "plan": "plan_08adaeb6ea8da9261e533d74aa6c97aae3485697c6e98a8f6792e9c7c6266d1d",
+ "supersedes": "rcpt_f7d4b6dbbd3cf8ef2ed2d06991019d2de46fe0661f3a75733420bb1f89f11565",
+ "servings": [
+  {
+   "id": "s1",
+   "dish": "dish_b9248761a2b94e7510ee612de3703861f13b4f03f25424d13798041070a43eb0",
+   "recipe": "rcp_9b1d1bcb806d4581df3d99813dcf3a4646931a29e080adbf43f880997708a4e8",
+   "status": "scrubbed",
+   "resources": [
+    {
+     "class": "network",
+     "key": [
+      {
+       "kind": "string",
+       "value": "webshop-g7-api-network"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "global-address",
+     "key": [
+      {
+       "kind": "string",
+       "value": "webshop-g7-api-network-psa"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "psa-connection",
+     "key": [
+      {
+       "kind": "string",
+       "value": "webshop-g7-api-network"
+      }
+     ],
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "s2",
+   "dish": "dish_b1dbf68d4beb7be7967829649ed2dfb8a52365335ea1b19d4977d261ec7fe37a",
+   "recipe": "rcp_f9d3dceafa4e035778ad9cad0275e73d17bfd43a6ba2df01143447306141eab4",
+   "status": "scrubbed",
+   "resources": [
+    {
+     "class": "sql-instance",
+     "key": [
+      {
+       "kind": "string",
+       "value": "webshop-g7-primary-db"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "sql-instance",
+     "key": [
+      {
+       "kind": "string",
+       "value": "webshop-g7-primary-db-replica"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "secret",
+     "key": [
+      {
+       "kind": "string",
+       "value": "webshop-g7-primary-db-cred"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "secret-version",
+     "key": [
+      {
+       "kind": "string",
+       "value": "webshop-g7-primary-db-cred"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "sql-user",
+     "key": [
+      {
+       "kind": "string",
+       "value": "webshop-g7-primary-db"
+      },
+      {
+       "kind": "string",
+       "value": "app"
+      }
+     ],
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "s3",
+   "dish": "dish_989ded2e404593c1d0ab79c5f615affa0ab52be54e24812ea836af2a0fbf4b1f",
+   "recipe": "rcp_f5f49253ede33051ecf304d4c93c2df0f01f042a26ef308f16a3d883b9d37245",
+   "status": "scrubbed",
+   "resources": [
+    {
+     "class": "bucket",
+     "key": [
+      {
+       "kind": "string",
+       "value": "webshop-g7-assets"
+      }
+     ],
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "s4",
+   "dish": "dish_a1ec4beb9bada5b9191a772c0296913089894056bd2776cc7aed6c40607a2310",
+   "recipe": "rcp_2b4ce95088f1cff1c4f19089d8152d33103744135c48e12d04bc54f1e1c3bc97",
+   "status": "scrubbed",
+   "resources": [
+    {
+     "class": "run-service",
+     "key": [
+      {
+       "kind": "string",
+       "value": "webshop-g7-api"
+      }
+     ],
+     "state": "absent"
+    }
+   ]
+  }
+ ],
+ "cleanup_manifest": [],
+ "started": "2026-11-13T09:00:00Z",
+ "finished": "2026-11-13T09:14:05Z",
+ "hash": "rcpt_24d2186aae09738b352b5eead4cb96883c51533e30bc9bdd8518bbee047d9a94"
+}

@@ -1,0 +1,64 @@
+{
+ "kind": "needs-list",
+ "schema_version": "0.1.0",
+ "name_hints": [
+  "harness_cloudrun_min1_c80"
+ ],
+ "needs": [
+  {
+   "name": "harness-network",
+   "of_kind": "kind_acec91af360f953eb44c35cae9d75e52e36033872fa21ecb3d4ec21c57dc07d9",
+   "constraints": {
+    "kind": "lit",
+    "value": true
+   },
+   "wires": []
+  },
+  {
+   "name": "harness-relational-database",
+   "of_kind": "kind_608d4b0d272513a0b375bee6aa3d8774a61c9f16b27681e733844d6d27acd9b6",
+   "constraints": {
+    "kind": "lit",
+    "value": true
+   },
+   "wires": [
+    {
+     "role": "wired",
+     "to": "harness-network"
+    }
+   ]
+  },
+  {
+   "name": "harness-object-store",
+   "of_kind": "kind_ee7d511c3a1fd113599411cc6ba849f84dc449d05a7e6a5419c211010fdf78c4",
+   "constraints": {
+    "kind": "lit",
+    "value": true
+   },
+   "wires": []
+  },
+  {
+   "name": "under-test-container-service",
+   "of_kind": "kind_afac22a7ae708372f78aa00d314ca259a9368fb63e78691ba2ea2fe09236cb3a",
+   "constraints": {
+    "kind": "lit",
+    "value": true
+   },
+   "wires": [
+    {
+     "role": "wired",
+     "to": "harness-network"
+    },
+    {
+     "role": "wired",
+     "to": "harness-relational-database"
+    },
+    {
+     "role": "wired",
+     "to": "harness-object-store"
+    }
+   ]
+  }
+ ],
+ "hash": "needs_2225e75db9d21688838b63468a560f30264768d7a9574c43182c73e93dc868f3"
+}

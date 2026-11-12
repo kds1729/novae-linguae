@@ -1,0 +1,694 @@
+{
+ "kind": "recipe",
+ "schema_version": "0.1.0",
+ "components": [],
+ "operations": [
+  {
+   "id": "secret-create",
+   "target": "fn_015ce1b59fa12d93f0cc9e4ea2e05fea059a3fa59c375993f8a27db88730948b",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-cred"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "replication": {
+       "kind": "json",
+       "fields": {
+        "automatic": {
+         "kind": "json",
+         "fields": {}
+        }
+       }
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "secret",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ]
+  },
+  {
+   "id": "secret-version",
+   "target": "fn_2e87dffcac33712428bdede67ef15ffa0216aa5c742dee351083a1bd77d482a7",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-cred"
+    },
+    {
+     "kind": "secret",
+     "generate": {
+      "length": 32
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "secret",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "secret-version",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "version",
+     "path": [
+      "name"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "cluster-create",
+   "target": "fn_a7ae49413595443c1f399f0655e7bfbb9017038fbb9a307c7f6f5ccbccd56c6e",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input-at",
+     "name": "regions",
+     "index": 0
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "network": {
+       "kind": "wire",
+       "name": "network",
+       "field": "self_link"
+      },
+      "initialUser": {
+       "kind": "json",
+       "fields": {
+        "user": {
+         "kind": "lit",
+         "value": {
+          "kind": "string",
+          "value": "app"
+         }
+        },
+        "password": {
+         "kind": "secret",
+         "generate": {
+          "length": 32
+         }
+        }
+       }
+      },
+      "continuousBackupConfig": {
+       "kind": "json",
+       "fields": {
+        "enabled": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": true
+         }
+        }
+       }
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "psa-connection",
+      "key": [
+       {
+        "kind": "wire",
+        "name": "network",
+        "field": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "secret-version",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "alloydb-cluster",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ]
+  },
+  {
+   "id": "primary-create",
+   "target": "fn_5bb567e0bf171353a47707b3f0e8f5000799a9136b739a933383e417c5b43e1d",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input-at",
+     "name": "regions",
+     "index": 0
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-primary"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "instanceType": {
+       "kind": "lit",
+       "value": {
+        "kind": "string",
+        "value": "PRIMARY"
+       }
+      },
+      "availabilityType": {
+       "kind": "lit",
+       "value": {
+        "kind": "string",
+        "value": "REGIONAL"
+       }
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "alloydb-cluster",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "ready"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "alloydb-instance",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-primary"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "ip",
+     "path": [
+      "ipAddress"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "secondary-create",
+   "target": "fn_a7ae49413595443c1f399f0655e7bfbb9017038fbb9a307c7f6f5ccbccd56c6e",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input-at",
+     "name": "regions",
+     "index": 1
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-secondary"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "secondaryConfig": {
+       "kind": "json",
+       "fields": {
+        "primaryClusterName": {
+         "kind": "input",
+         "name": "name"
+        }
+       }
+      },
+      "network": {
+       "kind": "wire",
+       "name": "network",
+       "field": "self_link"
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "alloydb-instance",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-primary"
+       }
+      ]
+     },
+     "state": "ready"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "alloydb-cluster",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-secondary"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ]
+  }
+ ],
+ "retire": [
+  {
+   "id": "secondary-delete",
+   "target": "fn_edf2daab519b13ddd63f1421a6ce19b73d9cdbe828cb6d1d30aa9de922088f0b",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input-at",
+     "name": "regions",
+     "index": 1
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-secondary"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "alloydb-cluster",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-secondary"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "primary-delete",
+   "target": "fn_ad288fb8195a96835f0fb7cc6fc154c5fc999dc0b346b3a6a5df65cca9c83aa7",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input-at",
+     "name": "regions",
+     "index": 0
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-primary"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "alloydb-cluster",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-secondary"
+       }
+      ]
+     },
+     "state": "absent"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "alloydb-instance",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-primary"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "cluster-delete",
+   "target": "fn_edf2daab519b13ddd63f1421a6ce19b73d9cdbe828cb6d1d30aa9de922088f0b",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input-at",
+     "name": "regions",
+     "index": 0
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "alloydb-instance",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-primary"
+       }
+      ]
+     },
+     "state": "absent"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "alloydb-cluster",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "secret-delete",
+   "target": "fn_e88a1dc435282b9ea5797988143d8d46ebfb228b3b86541182aa3a885b364fa4",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-cred"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "secret",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "absent"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "secret-version",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  }
+ ],
+ "readiness": [
+  {
+   "class": "alloydb-cluster",
+   "probe": "fn_15614ae9cfc354349780b673f51270b6fbb4fae4e9517444e8ae20189288cb5d",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input-at",
+     "name": "regions",
+     "index": 0
+    },
+    {
+     "kind": "resource-key",
+     "index": 0
+    }
+   ],
+   "ready_when": {
+    "path": [
+     "state"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "READY"
+    }
+   },
+   "limit_seconds": 1200
+  },
+  {
+   "class": "alloydb-instance",
+   "probe": "fn_9cb45ec253908fdd5752855a2edcc0d3f3da17edfdb6a1160bcdbf43a58cd559",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input-at",
+     "name": "regions",
+     "index": 0
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    },
+    {
+     "kind": "resource-key",
+     "index": 0
+    }
+   ],
+   "ready_when": {
+    "path": [
+     "state"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "READY"
+    }
+   },
+   "limit_seconds": 1200
+  },
+  {
+   "class": "secret",
+   "probe": "fn_0350b5898ede72ce7eac1ebd75f5c9b4efcac53b1781f5fb31bc78f8813e980f",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "resource-key",
+     "index": 0
+    }
+   ],
+   "ready_when": {
+    "path": [
+     "name"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "*"
+    }
+   },
+   "limit_seconds": 120
+  }
+ ],
+ "create_only": [
+  "engine",
+  "major",
+  "regions",
+  "encryption_at_rest",
+  "columnar_engine"
+ ],
+ "outputs": [
+  {
+   "name": "endpoint",
+   "from": {
+    "kind": "record",
+    "fields": {
+     "instance": {
+      "kind": "input",
+      "name": "name"
+     },
+     "host": {
+      "kind": "operation-output",
+      "operation": "primary-create",
+      "output": "ip"
+     },
+     "port": {
+      "kind": "lit",
+      "value": {
+       "kind": "nat",
+       "value": 5432
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "credential",
+   "from": {
+    "kind": "record",
+    "fields": {
+     "store": {
+      "kind": "lit",
+      "value": {
+       "kind": "string",
+       "value": "secretmanager"
+      }
+     },
+     "name": {
+      "kind": "derive",
+      "from": "name",
+      "suffix": "-cred"
+     },
+     "version": {
+      "kind": "operation-output",
+      "operation": "secret-version",
+      "output": "version"
+     }
+    }
+   }
+  }
+ ],
+ "hash": "rcp_cdc5db5fc0de702de0a3c169ce6c5c4f9c64b86d87a40c3260dfaf3ac2733ef7"
+}

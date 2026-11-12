@@ -1,0 +1,87 @@
+{
+ "kind": "kind",
+ "schema_version": "0.1.0",
+ "name": "relational-database",
+ "attributes": {
+  "kind": "record",
+  "fields": [
+   {
+    "name": "columnar_engine",
+    "type": {
+     "kind": "builtin",
+     "name": "bool"
+    }
+   },
+   {
+    "name": "encryption_at_rest",
+    "type": {
+     "kind": "builtin",
+     "name": "bool"
+    }
+   },
+   {
+    "name": "engine",
+    "type": {
+     "kind": "sum",
+     "variants": [
+      {
+       "tag": "Mysql"
+      },
+      {
+       "tag": "Postgres"
+      }
+     ]
+    }
+   },
+   {
+    "name": "ha",
+    "type": {
+     "kind": "builtin",
+     "name": "bool"
+    }
+   },
+   {
+    "name": "major",
+    "type": {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   },
+   {
+    "name": "regions",
+    "type": {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   }
+  ]
+ },
+ "attribute_docs": [
+  {
+   "name": "columnar_engine",
+   "doc": "whether an analytical columnar engine is available"
+  },
+  {
+   "name": "encryption_at_rest",
+   "doc": "whether stored data is encrypted"
+  },
+  {
+   "name": "engine",
+   "doc": "the database engine"
+  },
+  {
+   "name": "ha",
+   "doc": "whether the service fails over automatically"
+  },
+  {
+   "name": "major",
+   "doc": "the engine's major version"
+  },
+  {
+   "name": "regions",
+   "doc": "how many regions hold a copy of the data"
+  }
+ ],
+ "supersedes": null,
+ "hash": "kind_608d4b0d272513a0b375bee6aa3d8774a61c9f16b27681e733844d6d27acd9b6"
+}

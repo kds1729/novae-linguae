@@ -1,0 +1,19 @@
+{
+ "kind": "needs-list",
+ "schema_version": "0.1.0",
+ "name_hints": [
+  "harness_gcs_versioned_private"
+ ],
+ "needs": [
+  {
+   "name": "under-test-object-store",
+   "of_kind": "kind_ee7d511c3a1fd113599411cc6ba849f84dc449d05a7e6a5419c211010fdf78c4",
+   "constraints": {
+    "kind": "lit",
+    "value": true
+   },
+   "wires": []
+  }
+ ],
+ "hash": "needs_6f31b068d90ee352a7c48f45884398faa7c8f0461f2746fadf50cf67824071fd"
+}

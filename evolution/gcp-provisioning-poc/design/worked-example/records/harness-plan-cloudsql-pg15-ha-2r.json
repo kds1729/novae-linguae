@@ -1,0 +1,209 @@
+{
+ "kind": "plan",
+ "schema_version": "0.1.0",
+ "assume": [],
+ "steps": [
+  {
+   "target": "fn_7c915c80ecdecc782d2bfd1b9285e036331f3522c5331344f5e032b55655dc54",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "{\"name\":\"t-b1dbf68d4beb7be7-g1-harness-network\",\"autoCreateSubnetworks\":false}"
+    }
+   ],
+   "label": "s1/net-insert"
+  },
+  {
+   "target": "fn_015ce1b59fa12d93f0cc9e4ea2e05fea059a3fa59c375993f8a27db88730948b",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "t-b1dbf68d4beb7be7-g1-under-test-relational-database-cred"
+    },
+    {
+     "kind": "string",
+     "value": "{\"replication\":{\"automatic\":{}}}"
+    }
+   ],
+   "label": "s2/secret-create"
+  },
+  {
+   "target": "fn_14f30911d40ed9a4db628150cca3ec330eae49d1dae1b264c8b2ca8968383e27",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "variant",
+     "tag": "LaterJson",
+     "payload": {
+      "kind": "string",
+      "value": "{\"name\":\"t-b1dbf68d4beb7be7-g1-harness-network-psa\",\"purpose\":\"VPC_PEERING\",\"addressType\":\"INTERNAL\",\"prefixLength\":16,\"network\":\"{{s1/net-insert.self-link}}\"}"
+     }
+    }
+   ],
+   "label": "s1/addr-insert"
+  },
+  {
+   "target": "fn_2e87dffcac33712428bdede67ef15ffa0216aa5c742dee351083a1bd77d482a7",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "t-b1dbf68d4beb7be7-g1-under-test-relational-database-cred"
+    },
+    {
+     "kind": "variant",
+     "tag": "Secret"
+    }
+   ],
+   "label": "s2/secret-version"
+  },
+  {
+   "target": "fn_bab975f7c9e819bd0cd6de7ac20f83c0d4e7e7afb171595a266354aac7c22d22",
+   "args": [
+    {
+     "kind": "string",
+     "value": "services/servicenetworking.googleapis.com"
+    },
+    {
+     "kind": "variant",
+     "tag": "LaterJson",
+     "payload": {
+      "kind": "string",
+      "value": "{\"network\":\"{{s1/net-insert.self-link}}\",\"reservedPeeringRange\":\"t-b1dbf68d4beb7be7-g1-harness-network-psa\"}"
+     }
+    }
+   ],
+   "label": "s1/psa-connect"
+  },
+  {
+   "target": "fn_159296d7cb64b6b25b68e8d4eae8b9d67ed24aa241166c5c19528d2f022fa7ce",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "variant",
+     "tag": "LaterJson",
+     "payload": {
+      "kind": "string",
+      "value": "{\"name\":\"t-b1dbf68d4beb7be7-g1-under-test-relational-database\",\"region\":\"europe-west1\",\"databaseVersion\":\"POSTGRES_15\",\"settings\":{\"tier\":\"db-custom-2-7680\",\"availabilityType\":\"REGIONAL\",\"ipConfiguration\":{\"ipv4Enabled\":false,\"privateNetwork\":\"{{s1/net-insert.self-link}}\"}}}"
+     }
+    }
+   ],
+   "label": "s2/inst-insert"
+  },
+  {
+   "kind": "wait",
+   "label": "wait/sql-instance/t-b1dbf68d4beb7be7-g1-under-test-relational-database",
+   "resource": {
+    "class": "sql-instance",
+    "key": [
+     {
+      "kind": "string",
+      "value": "t-b1dbf68d4beb7be7-g1-under-test-relational-database"
+     }
+    ]
+   },
+   "until": "ready",
+   "probe": {
+    "target": "fn_15385ebe072bfb177344ecfc8712439da25a022becde4ebdab747fd8cd29de18",
+    "args": [
+     {
+      "kind": "string",
+      "value": "nl-attester-sandbox"
+     },
+     {
+      "kind": "string",
+      "value": "t-b1dbf68d4beb7be7-g1-under-test-relational-database"
+     }
+    ]
+   },
+   "ready_when": {
+    "path": [
+     "state"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "RUNNABLE"
+    }
+   },
+   "interval_seconds": 15,
+   "limit_seconds": 900
+  },
+  {
+   "target": "fn_159296d7cb64b6b25b68e8d4eae8b9d67ed24aa241166c5c19528d2f022fa7ce",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "{\"name\":\"t-b1dbf68d4beb7be7-g1-under-test-relational-database-replica\",\"region\":\"europe-west4\",\"masterInstanceName\":\"t-b1dbf68d4beb7be7-g1-under-test-relational-database\",\"databaseVersion\":\"POSTGRES_15\",\"settings\":{\"tier\":\"db-custom-2-7680\"}}"
+    }
+   ],
+   "label": "s2/replica-insert"
+  },
+  {
+   "target": "fn_b5d9a62dc2ee910a0e6135e690d51474a5c729ef6e95c55a12415f1ff788d700",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "t-b1dbf68d4beb7be7-g1-under-test-relational-database"
+    },
+    {
+     "kind": "variant",
+     "tag": "LaterJson",
+     "payload": {
+      "kind": "string",
+      "value": "{\"name\":\"app\",\"password\":\"{{secret}}\"}"
+     }
+    }
+   ],
+   "label": "s2/user-insert"
+  }
+ ],
+ "waves": [
+  [
+   0,
+   1
+  ],
+  [
+   2,
+   3
+  ],
+  [
+   4
+  ],
+  [
+   5
+  ],
+  [
+   6
+  ],
+  [
+   7,
+   8
+  ]
+ ],
+ "hash": "plan_7bc7091b9c2aab240dc5a5e0928751de3975f00b952400565d51e83719a6b789"
+}

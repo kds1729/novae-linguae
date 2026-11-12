@@ -1,0 +1,74 @@
+{
+ "schema_version": "0.2.0",
+ "name_hints": [
+  "servicenetworking_connections_list"
+ ],
+ "param_docs": [
+  "parent (stand-in)",
+  "network (stand-in)"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "kind": "apply",
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ]
+   }
+  },
+  "refinements": [],
+  "effects": [
+   "net.read"
+  ],
+  "capabilities": [],
+  "terminates": "always"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "<parent>"
+    },
+    {
+     "kind": "string",
+     "value": "<network>"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "{}"
+    }
+   }
+  }
+ ],
+ "intent_tags": [
+  "io",
+  "io/network/http"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_c6727a02077511e4716e9d25a53e6b4620a29fc2ac5f0ef42e00c7059513dc5c",
+ "hash": "fn_5d54db2e2de396eb06383a79bfe7138cf5d6a0958d01ef47be150db538e6d39a"
+}

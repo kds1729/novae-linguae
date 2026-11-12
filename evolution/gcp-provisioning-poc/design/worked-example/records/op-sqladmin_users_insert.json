@@ -1,0 +1,83 @@
+{
+ "schema_version": "0.2.0",
+ "name_hints": [
+  "sqladmin_users_insert"
+ ],
+ "param_docs": [
+  "project (stand-in)",
+  "instance (stand-in)",
+  "body (stand-in)"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "kind": "apply",
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ]
+   }
+  },
+  "refinements": [],
+  "effects": [
+   "net.write"
+  ],
+  "capabilities": [],
+  "terminates": "always"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "<project>"
+    },
+    {
+     "kind": "string",
+     "value": "<instance>"
+    },
+    {
+     "kind": "string",
+     "value": "<body>"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "{}"
+    }
+   }
+  }
+ ],
+ "intent_tags": [
+  "io",
+  "io/network/http"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_d2d9dac4e495ddcfdb2b808fd35de55016868a234c91f03348a5d51f0e1f4b3a",
+ "hash": "fn_b5d9a62dc2ee910a0e6135e690d51474a5c729ef6e95c55a12415f1ff788d700"
+}

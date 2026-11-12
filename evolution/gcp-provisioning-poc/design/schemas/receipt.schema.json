@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/receipt.schema.json",
+  "title": "Receipt record (rcpt_…)",
+  "description": "What one environment actually got (glossary: Receipt; R18, R20; decisions 9, 24, 25, 28, 31, 35). A provisioning receipt records plate, instance, the verified plan that ran, and per serving which dish actually stands there with the recipe run for it, whether it was provisioned in this run or carried, its outputs (secrets only as references, which the port types make so) and its trace; per need which serving covers it is the plate's coverage. A scrub receipt supersedes a provisioning receipt and records per resource whether it is confirmed gone; a partial scrub receipt records what is confirmed gone after a failed scrub. The system's only knowledge of any environment is the sum of its receipts. Unsigned.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "receipt_kind", "plate", "instance", "lineage", "generation", "plan", "supersedes", "servings", "cleanup_manifest", "started", "finished"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "receipt" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "hash": { "$ref": "common.schema.json#/$defs/receipt_address" },
+    "receipt_kind": { "enum": ["provisioning", "scrub", "partial-scrub"] },
+    "plate": { "$ref": "common.schema.json#/$defs/plate_address" },
+    "instance": { "$ref": "common.schema.json#/$defs/instance_address" },
+    "lineage": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)*$", "maxLength": 200 },
+    "generation": { "type": "integer", "minimum": 1 },
+    "plan": { "$ref": "common.schema.json#/$defs/plan_address", "description": "The plan the kitchen ran, PLAN-SOUND under check-plan before the first step." },
+    "supersedes": { "oneOf": [ { "type": "null" }, { "$ref": "common.schema.json#/$defs/receipt_address" } ], "description": "A scrub or partial-scrub receipt supersedes the provisioning receipt it scrubbed; a provisioning receipt supersedes nothing (a new generation is a new environment)." },
+    "servings": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["id", "dish", "recipe", "status"], "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/kebab_name" },
+          "dish": { "$ref": "common.schema.json#/$defs/dish_address", "description": "Which dish actually stands there." },
+          "recipe": { "$ref": "common.schema.json#/$defs/recipe_address" },
+          "status": { "enum": ["provisioned", "carried", "failed", "not-started", "scrubbed", "remaining"], "description": "Provisioning receipts: provisioned | carried | failed | not-started. Scrub receipts: scrubbed | remaining | carried (held elsewhere, left alone)." },
+          "carried_from": { "$ref": "common.schema.json#/$defs/serving_ref" },
+          "outputs": { "type": "array", "items": { "type": "object", "required": ["port", "value"], "additionalProperties": false, "properties": { "port": { "$ref": "common.schema.json#/$defs/kebab_name" }, "value": { "$ref": "common.schema.json#/$defs/value_expression" } } }, "description": "The serving's output port values. A credential is a secret-reference record value." },
+          "resources": {
+            "type": "array",
+            "items": { "type": "object", "required": ["class", "key", "state"], "additionalProperties": false, "properties": { "class": { "$ref": "common.schema.json#/$defs/kebab_name" }, "key": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/value_expression" }, "description": "Ground key values." }, "state": { "$ref": "common.schema.json#/$defs/world_state" }, "probe_trace": { "$ref": "common.schema.json#/$defs/trace_address" } } },
+            "description": "The ground resources this serving's steps ensured (provisioning) or that scrub probed (scrub: `absent` confirmed gone, `exists` remaining)."
+          },
+          "trace": { "$ref": "common.schema.json#/$defs/trace_address", "description": "The recorded effect trace of this serving's steps, if retained (policy; always for test provisioning)." },
+          "failure": { "type": "string", "maxLength": 480, "description": "For `failed`: the named step and what the cloud answered." }
+        }
+      }
+    },
+    "cleanup_manifest": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/serving_ref" }, "description": "Copied from the plate (decision 35)." },
+    "started": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "finished": { "$ref": "common.schema.json#/$defs/timestamp" }
+  }
+}

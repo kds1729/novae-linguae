@@ -1,0 +1,16 @@
+{
+ "kind": "provisioning-attestation",
+ "schema_version": "0.1.0",
+ "dish": "dish_a1ec4beb9bada5b9191a772c0296913089894056bd2776cc7aed6c40607a2310",
+ "recipe": "rcp_2b4ce95088f1cff1c4f19089d8152d33103744135c48e12d04bc54f1e1c3bc97",
+ "harness_plate": "plate_0e0429bf00da807189095f777bdc81ef9ef0d9addd5fae054ade7120de0f1312",
+ "instance": "inst_af65e640945933c2247514a174a30311d7d8b8b8bc3d1f61aece58aca203b5ca",
+ "result": "pass",
+ "receipt": "rcpt_2b00a6a086155016dab5bd1dcb09e91f5849f68a9873404bb3b7a15fbb753c40",
+ "scrub_receipt": "rcpt_ce21b37b97811c2e5adc8d1c1a78655954028a80ec811cd374d189f6459fe48e",
+ "started": "2026-11-11T08:00:00Z",
+ "finished": "2026-11-11T08:45:00Z",
+ "from": "did:nova:1c162873663634f861c91e70bc19262f05ab42e9b35bc0fb662812b9b441b897",
+ "hash": "patt_9660d3705b5ee40493ce44078e0421f5111d80d78e1e21c93c47f9cb2161b236",
+ "signature": "ed25519:RA5e+lqjiYVjf/QvUXB+Z/6xBDfsnaz7ytzAwYc/B/s+Uuidni9QYwXVihjJ61OxqiXkaxScaoFFNN6I9obZCw=="
+}

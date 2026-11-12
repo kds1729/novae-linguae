@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/common.schema.json",
+  "title": "Provisioning records — shared definitions (design draft 0.1.0)",
+  "description": "Definitions shared by the module's record schemas. Every record kind here is a content-addressed Novae Linguae artifact: the `hash` is BLAKE3-256 over the JCS-canonical record with `hash` (and, for signed kinds, `signature`) removed, rendered as `<prefix>_<64 hex>` (spec/canonical-serialization.md). The module proposes ten new address prefixes — kind, dish, rcp, needs, prof, plate, inst, rcpt, patt, stmt — as an additive extension of the prefix vocabulary (spec/README.md, Content-address format); until that extension lands in spec/, these records live in the module and are checked by the module's design-phase checker. Type, predicate and value sub-trees are constrained only structurally here and must validate independently against spec/type-expression.schema.json, spec/predicate-expression.schema.json and spec/value-expression.schema.json, exactly as spec/plan.schema.json handles its argument values.",
+  "$defs": {
+    "hex64": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "fn_address":    { "type": "string", "pattern": "^fn_[0-9a-f]{64}$",    "description": "A certified operation (function record)." },
+    "type_address":  { "type": "string", "pattern": "^type_[0-9a-f]{64}$",  "description": "A type artifact in the commons." },
+    "plan_address":  { "type": "string", "pattern": "^plan_[0-9a-f]{64}$" },
+    "trace_address": { "type": "string", "pattern": "^trc_[0-9a-f]{64}$" },
+    "kind_address":  { "type": "string", "pattern": "^kind_[0-9a-f]{64}$",  "description": "A kind record (design/schemas/kind.schema.json)." },
+    "dish_address":  { "type": "string", "pattern": "^dish_[0-9a-f]{64}$" },
+    "recipe_address":{ "type": "string", "pattern": "^rcp_[0-9a-f]{64}$" },
+    "needs_address": { "type": "string", "pattern": "^needs_[0-9a-f]{64}$" },
+    "profile_address":{ "type": "string", "pattern": "^prof_[0-9a-f]{64}$" },
+    "plate_address": { "type": "string", "pattern": "^plate_[0-9a-f]{64}$" },
+    "instance_address":{ "type": "string", "pattern": "^inst_[0-9a-f]{64}$" },
+    "receipt_address":{ "type": "string", "pattern": "^rcpt_[0-9a-f]{64}$" },
+    "attestation_address":{ "type": "string", "pattern": "^patt_[0-9a-f]{64}$" },
+    "statement_address":{ "type": "string", "pattern": "^stmt_[0-9a-f]{64}$" },
+    "any_address": { "type": "string", "pattern": "^(fn|expr|type|cert|wgt|evl|trc|plan|msg|kind|dish|rcp|needs|prof|plate|inst|rcpt|patt|stmt)_[0-9a-f]{64}$" },
+    "did": { "type": "string", "pattern": "^did:nova:[0-9a-f]{64}$", "description": "An agent identity: the Ed25519 public key that signs (spec/did-document.md)." },
+    "signature": { "type": "string", "pattern": "^ed25519:[A-Za-z0-9+/=]+$", "description": "Ed25519 over the JCS-canonical record with only `signature` removed, so the signature covers the hash (the certification precedent, spec/certification.schema.json)." },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "kebab_name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "minLength": 1, "maxLength": 64, "description": "Lowercase kebab-case: need names, kinds, roles, ports, serving ids, resource classes." },
+    "snake_name": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_]*$", "minLength": 1, "maxLength": 64, "description": "Attribute and field names, as spec/type-expression.schema.json spells record fields." },
+    "name_hint": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "minLength": 1, "maxLength": 128 },
+    "schema_version": { "type": "string", "const": "0.1.0" },
+    "type_expression": { "type": "object", "required": ["kind"], "description": "A type-expression AST (spec/type-expression.schema.json); structural check only here." },
+    "predicate_expression": { "type": "object", "required": ["kind"], "description": "A predicate-expression AST (spec/predicate-expression.schema.json); structural check only here. Variables are the attribute names of the kind the predicate is over." },
+    "value_expression": { "type": "object", "required": ["kind"], "description": "A value-expression AST (spec/value-expression.schema.json); structural check only here." },
+    "world_state": { "type": "string", "enum": ["exists", "absent", "ready"], "description": "The world-state vocabulary with the third built-in state this module proposes (design/proposals/01-ready-state.md): `ready` implies `exists`." },
+    "world_key_part": {
+      "description": "A key part of a resource named by a recipe step. Unlike a function record's own world refinements (keyed by its parameter names), a recipe step keys resources by the STEP'S bindings, so every key grounds at plan time from literals and instance names — names, not placeholders, keep plans literal.",
+      "oneOf": [
+        { "type": "object", "required": ["kind", "arg"], "additionalProperties": false, "properties": { "kind": { "const": "arg" }, "arg": { "type": "integer", "minimum": 0 } }, "description": "The step's positional argument, which must ground to a literal at plan time." },
+        { "type": "object", "required": ["kind", "arg", "field"], "additionalProperties": false, "properties": { "kind": { "const": "body-field" }, "arg": { "type": "integer", "minimum": 0 }, "field": { "type": "string", "minLength": 1, "maxLength": 128 } }, "description": "A top-level field of a JSON-bound argument (the REST creation idiom, spec/world-state.md)." },
+        { "type": "object", "required": ["kind", "value"], "additionalProperties": false, "properties": { "kind": { "const": "lit" }, "value": { "$ref": "#/$defs/value_expression" } } },
+        { "type": "object", "required": ["kind", "name"], "additionalProperties": false, "properties": { "kind": { "const": "input" }, "name": { "$ref": "#/$defs/kebab_name" } }, "description": "One of the dish's name or placement inputs: a literal from the instance." },
+        { "type": "object", "required": ["kind", "from", "suffix"], "additionalProperties": false, "properties": { "kind": { "const": "derive" }, "from": { "$ref": "#/$defs/kebab_name" }, "suffix": { "type": "string", "pattern": "^-[a-z0-9-]{1,32}$" } }, "description": "A name derived from one of the dish's name inputs by the recipe's fixed rule: also a literal from the instance." },
+        { "type": "object", "required": ["kind", "name", "field"], "additionalProperties": false, "properties": { "kind": { "const": "wire" }, "name": { "$ref": "#/$defs/kebab_name" }, "field": { "$ref": "#/$defs/snake_name" } }, "description": "A field of one of the dish's wire inputs. Grounds at plan time only when the producing recipe binds that output field from a plan-time binding (a resource NAME carried in the reference type); this is how a dish declares a dependency on another dish's resource, and why reference types carry names, not just links." }
+      ]
+    },
+    "world_resource": {
+      "type": "object", "required": ["class", "key"], "additionalProperties": false,
+      "properties": { "class": { "$ref": "#/$defs/kebab_name" }, "key": { "type": "array", "items": { "$ref": "#/$defs/world_key_part" } } }
+    },
+    "world_refinement": {
+      "type": "object", "required": ["kind", "resource", "state"], "additionalProperties": false,
+      "properties": { "kind": { "enum": ["requires", "ensures"] }, "resource": { "$ref": "#/$defs/world_resource" }, "state": { "$ref": "#/$defs/world_state" } },
+      "description": "An authored requires/ensures on a recipe step (design/proposals/04-authored-refinements.md): the step's declared contract on the world, verified by test provisioning, consumed by the planner and by check-plan."
+    },
+    "placement_kind": { "type": "string", "enum": ["project", "region", "regions", "zone", "dns-zone"] },
+    "placement": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "project": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "region": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "regions": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+        "zone": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "dns_zone": { "type": "string", "minLength": 1, "maxLength": 253 }
+      },
+      "description": "Literal placement values for one serving: exactly the placement inputs its dish declares."
+    },
+    "name_path": {
+      "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/kebab_name" },
+      "description": "Where a name input sits in a serving's composition: component ids from the top-level dish down, ending in the name input's own name. `[\"name\"]` is the top-level dish's input; `[\"net\", \"name\"]` is component `net`'s."
+    },
+    "serving_ref": {
+      "type": "object", "required": ["receipt", "serving"], "additionalProperties": false,
+      "properties": { "receipt": { "$ref": "#/$defs/receipt_address" }, "serving": { "$ref": "#/$defs/kebab_name" } },
+      "description": "A serving of an earlier receipt, by receipt address and serving id (decision 35)."
+    }
+  }
+}

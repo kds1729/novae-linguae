@@ -1,0 +1,69 @@
+{
+ "kind": "plan",
+ "schema_version": "0.1.0",
+ "assume": [],
+ "steps": [
+  {
+   "target": "fn_7c915c80ecdecc782d2bfd1b9285e036331f3522c5331344f5e032b55655dc54",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "{\"name\":\"t-b9248761a2b94e75-g1-under-test-network\",\"autoCreateSubnetworks\":false}"
+    }
+   ],
+   "label": "s1/net-insert"
+  },
+  {
+   "target": "fn_14f30911d40ed9a4db628150cca3ec330eae49d1dae1b264c8b2ca8968383e27",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "variant",
+     "tag": "LaterJson",
+     "payload": {
+      "kind": "string",
+      "value": "{\"name\":\"t-b9248761a2b94e75-g1-under-test-network-psa\",\"purpose\":\"VPC_PEERING\",\"addressType\":\"INTERNAL\",\"prefixLength\":16,\"network\":\"{{s1/net-insert.self-link}}\"}"
+     }
+    }
+   ],
+   "label": "s1/addr-insert"
+  },
+  {
+   "target": "fn_bab975f7c9e819bd0cd6de7ac20f83c0d4e7e7afb171595a266354aac7c22d22",
+   "args": [
+    {
+     "kind": "string",
+     "value": "services/servicenetworking.googleapis.com"
+    },
+    {
+     "kind": "variant",
+     "tag": "LaterJson",
+     "payload": {
+      "kind": "string",
+      "value": "{\"network\":\"{{s1/net-insert.self-link}}\",\"reservedPeeringRange\":\"t-b9248761a2b94e75-g1-under-test-network-psa\"}"
+     }
+    }
+   ],
+   "label": "s1/psa-connect"
+  }
+ ],
+ "waves": [
+  [
+   0
+  ],
+  [
+   1
+  ],
+  [
+   2
+  ]
+ ],
+ "hash": "plan_900f8aef3860e2ed4e82276efd90e706036cae6c7da853ef84275ff4107100fb"
+}

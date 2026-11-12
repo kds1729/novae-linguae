@@ -1,0 +1,33 @@
+{
+ "kind": "needs-list",
+ "schema_version": "0.1.0",
+ "name_hints": [
+  "harness_alloydb_pg15_ha_2r"
+ ],
+ "needs": [
+  {
+   "name": "harness-network",
+   "of_kind": "kind_acec91af360f953eb44c35cae9d75e52e36033872fa21ecb3d4ec21c57dc07d9",
+   "constraints": {
+    "kind": "lit",
+    "value": true
+   },
+   "wires": []
+  },
+  {
+   "name": "under-test-relational-database",
+   "of_kind": "kind_608d4b0d272513a0b375bee6aa3d8774a61c9f16b27681e733844d6d27acd9b6",
+   "constraints": {
+    "kind": "lit",
+    "value": true
+   },
+   "wires": [
+    {
+     "role": "wired",
+     "to": "harness-network"
+    }
+   ]
+  }
+ ],
+ "hash": "needs_c9c96af0ee0607a05027420715c88f6eb44f98e8cc999e38e6c3a7ab7db094e4"
+}

@@ -1,0 +1,102 @@
+{
+ "kind": "dish",
+ "schema_version": "0.1.0",
+ "name_hints": [
+  "cloudsql_pg15_ha_2r",
+  "relational_database_postgres_15"
+ ],
+ "of_kind": "kind_608d4b0d272513a0b375bee6aa3d8774a61c9f16b27681e733844d6d27acd9b6",
+ "provides": {
+  "kind": "record",
+  "fields": [
+   {
+    "name": "columnar_engine",
+    "value": {
+     "kind": "bool",
+     "value": false
+    }
+   },
+   {
+    "name": "encryption_at_rest",
+    "value": {
+     "kind": "bool",
+     "value": true
+    }
+   },
+   {
+    "name": "engine",
+    "value": {
+     "kind": "variant",
+     "tag": "Postgres"
+    }
+   },
+   {
+    "name": "ha",
+    "value": {
+     "kind": "bool",
+     "value": true
+    }
+   },
+   {
+    "name": "major",
+    "value": {
+     "kind": "nat",
+     "value": 15
+    }
+   },
+   {
+    "name": "regions",
+    "value": {
+     "kind": "nat",
+     "value": 2
+    }
+   }
+  ]
+ },
+ "inputs": {
+  "names": [
+   {
+    "name": "name"
+   }
+  ],
+  "placements": [
+   {
+    "name": "project",
+    "placement": "project"
+   },
+   {
+    "name": "regions",
+    "placement": "regions",
+    "count": 2
+   }
+  ],
+  "wires": [
+   {
+    "name": "network",
+    "type": {
+     "kind": "ref",
+     "target": "type_4ec2cada052a441797996b2a881a45bfdc0996caf8ff5233b9a24b29a190ffd2"
+    }
+   }
+  ]
+ },
+ "outputs": [
+  {
+   "name": "endpoint",
+   "type": {
+    "kind": "ref",
+    "target": "type_d4f7d2e4fe1bbb522e4c80c8b77f28bfe4e09164a62be4442a5d96f2e231d74f"
+   }
+  },
+  {
+   "name": "credential",
+   "type": {
+    "kind": "ref",
+    "target": "type_cf72f8b6ec51a7d41a2fe67f8ac5f963d6ac42aca15847356b3cf94974aeb36f"
+   }
+  }
+ ],
+ "recipe": "rcp_f9d3dceafa4e035778ad9cad0275e73d17bfd43a6ba2df01143447306141eab4",
+ "supersedes": null,
+ "hash": "dish_b1dbf68d4beb7be7967829649ed2dfb8a52365335ea1b19d4977d261ec7fe37a"
+}

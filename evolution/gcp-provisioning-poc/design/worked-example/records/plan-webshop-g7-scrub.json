@@ -1,0 +1,142 @@
+{
+ "kind": "plan",
+ "schema_version": "0.1.0",
+ "assume": [],
+ "steps": [
+  {
+   "target": "fn_c4814225bcf47651e09b95cdb80ac825f0503e25a1fd24af57979d6d4547f6eb",
+   "args": [
+    {
+     "kind": "string",
+     "value": "acme-webshop-prod"
+    },
+    {
+     "kind": "string",
+     "value": "europe-west1"
+    },
+    {
+     "kind": "string",
+     "value": "webshop-g7-api"
+    }
+   ],
+   "label": "s4/svc-delete"
+  },
+  {
+   "target": "fn_e0b65d4bead111943d58eb7538a1c9f49e6123a93511ea82bf60672a4ae7e4b4",
+   "args": [
+    {
+     "kind": "string",
+     "value": "acme-webshop-prod"
+    },
+    {
+     "kind": "string",
+     "value": "webshop-g7-primary-db-replica"
+    }
+   ],
+   "label": "s2/replica-delete"
+  },
+  {
+   "target": "fn_e88a1dc435282b9ea5797988143d8d46ebfb228b3b86541182aa3a885b364fa4",
+   "args": [
+    {
+     "kind": "string",
+     "value": "acme-webshop-prod"
+    },
+    {
+     "kind": "string",
+     "value": "webshop-g7-primary-db-cred"
+    }
+   ],
+   "label": "s2/secret-delete"
+  },
+  {
+   "target": "fn_05d0304c29910a3d3c456dfcd76bd98c91095e49089ab364d203c202115b27b1",
+   "args": [
+    {
+     "kind": "string",
+     "value": "webshop-g7-assets"
+    }
+   ],
+   "label": "s3/bucket-delete"
+  },
+  {
+   "target": "fn_e0b65d4bead111943d58eb7538a1c9f49e6123a93511ea82bf60672a4ae7e4b4",
+   "args": [
+    {
+     "kind": "string",
+     "value": "acme-webshop-prod"
+    },
+    {
+     "kind": "string",
+     "value": "webshop-g7-primary-db"
+    }
+   ],
+   "label": "s2/inst-delete"
+  },
+  {
+   "target": "fn_344c6d99d3dff9e0e8dedad9a3b8a88653f93b9438f8c5d7f45fa3da0ec5004f",
+   "args": [
+    {
+     "kind": "string",
+     "value": "services/servicenetworking.googleapis.com"
+    },
+    {
+     "kind": "string",
+     "value": "webshop-g7-api-network"
+    }
+   ],
+   "label": "s1/psa-delete"
+  },
+  {
+   "target": "fn_79ec57c676c5b2844a3fab5df0bb8cf3f17baad5a35b9f38c11e491af8f1cb7c",
+   "args": [
+    {
+     "kind": "string",
+     "value": "acme-webshop-prod"
+    },
+    {
+     "kind": "string",
+     "value": "webshop-g7-api-network-psa"
+    }
+   ],
+   "label": "s1/addr-delete"
+  },
+  {
+   "target": "fn_d5340d5d80adbda1464aef74b1d14af33ddcbf22b8159c3be9d7c769927c94fc",
+   "args": [
+    {
+     "kind": "string",
+     "value": "acme-webshop-prod"
+    },
+    {
+     "kind": "string",
+     "value": "webshop-g7-api-network"
+    }
+   ],
+   "label": "s1/net-delete"
+  }
+ ],
+ "waves": [
+  [
+   0
+  ],
+  [
+   1,
+   2,
+   3
+  ],
+  [
+   4
+  ],
+  [
+   5
+  ],
+  [
+   6
+  ],
+  [
+   7
+  ]
+ ],
+ "hash": "plan_08adaeb6ea8da9261e533d74aa6c97aae3485697c6e98a8f6792e9c7c6266d1d"
+}

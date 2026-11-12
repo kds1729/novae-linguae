@@ -1,0 +1,93 @@
+{
+ "kind": "instance",
+ "schema_version": "0.1.0",
+ "plate": "plate_901e6fdb1cdaf4ae1ce900f6cc9e7284aea82b8603ffbfc6522f70674599c76a",
+ "lineage": "acme/webshop/production",
+ "generation": 7,
+ "servings": [
+  {
+   "id": "s1",
+   "placement": {
+    "project": "acme-webshop-prod"
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "webshop-g7-api-network"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-psa",
+     "value": "webshop-g7-api-network-psa"
+    }
+   ]
+  },
+  {
+   "id": "s2",
+   "placement": {
+    "project": "acme-webshop-prod",
+    "regions": [
+     "europe-west1",
+     "europe-west4"
+    ]
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "webshop-g7-primary-db"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-cred",
+     "value": "webshop-g7-primary-db-cred"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-replica",
+     "value": "webshop-g7-primary-db-replica"
+    }
+   ]
+  },
+  {
+   "id": "s3",
+   "placement": {
+    "project": "acme-webshop-prod",
+    "region": "europe-west1"
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "webshop-g7-assets"
+    }
+   ]
+  },
+  {
+   "id": "s4",
+   "placement": {
+    "project": "acme-webshop-prod",
+    "region": "europe-west1"
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "webshop-g7-api"
+    }
+   ]
+  }
+ ],
+ "hash": "inst_f526cbeb345edd9c073c3a758df500a97abb297ff813890bbfe23cbd6ed4bd12"
+}

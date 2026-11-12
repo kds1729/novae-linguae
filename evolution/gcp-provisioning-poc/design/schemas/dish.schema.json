@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/dish.schema.json",
+  "title": "Dish record (dish_…)",
+  "description": "A fully formed, selectable unit of infrastructure (glossary: Dish). Everything that affects behaviour, topology or cost is fixed in the record; its only inputs are names, placements and wires (R3). `provides` is a value of exactly one kind (R2, decision 28); `recipe` names exactly one recipe (R4, decision 33). What an agent reads to decide whether the dish satisfies a need is `provides`, the ports and the attestations about this address — never the recipe (decision 22). Unsigned; a changed anything is a new dish.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "name_hints", "of_kind", "provides", "inputs", "outputs", "recipe"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "dish" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "hash": { "$ref": "common.schema.json#/$defs/dish_address" },
+    "name_hints": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/name_hint" } },
+    "of_kind": { "$ref": "common.schema.json#/$defs/kind_address", "description": "The one kind this dish provides a value of." },
+    "provides": { "$ref": "common.schema.json#/$defs/value_expression", "description": "A value-expression `record` conforming to the kind's attributes type. Publication fails if a field is missing, unknown or wrongly typed (R2)." },
+    "inputs": {
+      "type": "object", "required": ["names", "placements", "wires"], "additionalProperties": false,
+      "properties": {
+        "names": {
+          "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "$ref": "common.schema.json#/$defs/kebab_name" }, "doc": { "type": "string", "maxLength": 240 } } },
+          "description": "Name inputs: literal resource names the instance supplies (decision 29). A composite's components' names are derived from these by the recipe's fixed rules and ALSO written out in the instance, which the provisioning command checks."
+        },
+        "placements": {
+          "type": "array", "items": { "type": "object", "required": ["name", "placement"], "additionalProperties": false, "properties": { "name": { "$ref": "common.schema.json#/$defs/kebab_name" }, "placement": { "$ref": "common.schema.json#/$defs/placement_kind" }, "count": { "type": "integer", "minimum": 1, "description": "For `regions`: how many the instance must supply, matching `provides`." } } },
+          "description": "Placement inputs the instance supplies: project, region(s), zone, name-service zone."
+        },
+        "wires": {
+          "type": "array", "items": { "type": "object", "required": ["name", "type"], "additionalProperties": false, "properties": { "name": { "$ref": "common.schema.json#/$defs/kebab_name" }, "type": { "$ref": "common.schema.json#/$defs/type_expression" }, "doc": { "type": "string", "maxLength": 240 } } },
+          "description": "Typed input ports. A wire binds another serving's output port of the SAME type (structural equality of the canonical type expressions) to one of these; a credential input has the secret-reference type (decision 31)."
+        }
+      }
+    },
+    "outputs": {
+      "type": "array", "items": { "type": "object", "required": ["name", "type"], "additionalProperties": false, "properties": { "name": { "$ref": "common.schema.json#/$defs/kebab_name" }, "type": { "$ref": "common.schema.json#/$defs/type_expression" }, "doc": { "type": "string", "maxLength": 240 } } },
+      "description": "Typed output ports. Values are produced at kitchen time and land in the receipt; a secret-bearing output is a secret reference, never a value."
+    },
+    "recipe": { "$ref": "common.schema.json#/$defs/recipe_address", "description": "Exactly one recipe. A changed recipe is a new dish (decision 33)." },
+    "supersedes": { "oneOf": [ { "type": "null" }, { "$ref": "common.schema.json#/$defs/dish_address" } ], "default": null, "description": "Lineage only; the mechanism never follows it (principle 1). A succession statement carries the reason." }
+  }
+}

@@ -1,0 +1,83 @@
+{
+ "schema_version": "0.2.0",
+ "name_hints": [
+  "alloydb_clusters_delete"
+ ],
+ "param_docs": [
+  "project (stand-in)",
+  "region (stand-in)",
+  "cluster_id (stand-in)"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "kind": "apply",
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ]
+   }
+  },
+  "refinements": [],
+  "effects": [
+   "net.write"
+  ],
+  "capabilities": [],
+  "terminates": "always"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "<project>"
+    },
+    {
+     "kind": "string",
+     "value": "<region>"
+    },
+    {
+     "kind": "string",
+     "value": "<cluster_id>"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "{}"
+    }
+   }
+  }
+ ],
+ "intent_tags": [
+  "io",
+  "io/network/http"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_0242b9a184ed60d865bbd45027bf272ae64078b7eab12308640507c6123d3a11",
+ "hash": "fn_edf2daab519b13ddd63f1421a6ce19b73d9cdbe828cb6d1d30aa9de922088f0b"
+}

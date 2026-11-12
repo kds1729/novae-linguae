@@ -1,0 +1,14 @@
+{
+ "kind": "statement",
+ "schema_version": "0.1.0",
+ "statement": {
+  "kind": "made-from",
+  "needs_list": "needs_c43ba4865781dca4a377ce4c7092e4de566d4f4eefa6984f1f50373ef4676683",
+  "from": "needs_26aaf284adea36ec6884a053de0b1d10aeb2cfacf2b5599e0015305020b25210",
+  "note": "The October draft had no object store; the assets need was added when the release gained file uploads."
+ },
+ "timestamp": "2026-11-12T19:00:00Z",
+ "from": "did:nova:1c162873663634f861c91e70bc19262f05ab42e9b35bc0fb662812b9b441b897",
+ "hash": "stmt_292c4b0f5584542166790e9f712d6d6f6ffb4da820d40f9336f53f7ee05b7481",
+ "signature": "ed25519:aKUb2L43HzL6vdpx2sfNyZVvCrv08UiPxkvYpjfuSqW47jrgim32YDlVc5ZmUQgyONkeR8phRKABh2OXk7aoDQ=="
+}

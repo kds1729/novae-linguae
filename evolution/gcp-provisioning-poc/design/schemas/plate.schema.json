@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/plate.schema.json",
+  "title": "Plate record (plate_…)",
+  "description": "The frozen selection that covers one needs list for one profile (glossary: Plate; R11, R12; decisions 15, 18, 23, 28, 35). Servings are dishes provisioned once, or carried servings of an earlier receipt; every need maps to exactly one serving; wires are resolved to typed output→input bindings, type-checked when the plate freezes; overrides are recorded with a reason; a carrying plate lists its cleanup manifest. Unsigned; the selector's output is reproducible from its inputs.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "needs_list", "profile", "servings", "coverage", "wires", "overrides", "cleanup_manifest"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "plate" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "hash": { "$ref": "common.schema.json#/$defs/plate_address" },
+    "needs_list": { "$ref": "common.schema.json#/$defs/needs_address" },
+    "profile": { "$ref": "common.schema.json#/$defs/profile_address" },
+    "servings": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "type": "object", "required": ["id", "dish"], "additionalProperties": false, "properties": { "id": { "$ref": "common.schema.json#/$defs/kebab_name" }, "dish": { "$ref": "common.schema.json#/$defs/dish_address" } }, "description": "A dish to provision once in this run." },
+          { "type": "object", "required": ["id", "carried"], "additionalProperties": false, "properties": { "id": { "$ref": "common.schema.json#/$defs/kebab_name" }, "carried": { "$ref": "common.schema.json#/$defs/serving_ref" } }, "description": "A carried serving: an existing resource of an earlier receipt, read from that receipt (decision 35)." }
+        ]
+      }
+    },
+    "coverage": {
+      "type": "array", "minItems": 1,
+      "items": { "type": "object", "required": ["need", "serving"], "additionalProperties": false, "properties": { "need": { "$ref": "common.schema.json#/$defs/kebab_name" }, "serving": { "$ref": "common.schema.json#/$defs/kebab_name" } } },
+      "description": "Every need of the needs list exactly once → one serving id. Several needs on one serving only where the profile allows sharing for that kind."
+    },
+    "wires": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["need", "role", "to", "output", "input"], "additionalProperties": false,
+        "properties": {
+          "need": { "$ref": "common.schema.json#/$defs/kebab_name" },
+          "role": { "$ref": "common.schema.json#/$defs/kebab_name" },
+          "to": { "$ref": "common.schema.json#/$defs/kebab_name" },
+          "output": { "type": "object", "required": ["serving", "port"], "additionalProperties": false, "properties": { "serving": { "$ref": "common.schema.json#/$defs/kebab_name" }, "port": { "$ref": "common.schema.json#/$defs/kebab_name" } }, "description": "The output port of the serving covering `to`." },
+          "input": { "type": "object", "required": ["serving", "port"], "additionalProperties": false, "properties": { "serving": { "$ref": "common.schema.json#/$defs/kebab_name" }, "port": { "$ref": "common.schema.json#/$defs/kebab_name" } }, "description": "The wire input of the serving covering `need`." }
+        }
+      },
+      "description": "At least one entry per wire of the needs list (a role such as reads-from may carry several values, e.g. an endpoint and a credential, so one needs-list wire may resolve to several port bindings), each resolved to an output port and an input port whose types are equal. Every wire input of every serving is fed by exactly one entry."
+    },
+    "overrides": {
+      "type": "array",
+      "items": { "type": "object", "required": ["need", "serving", "reason", "by"], "additionalProperties": false, "properties": { "need": { "$ref": "common.schema.json#/$defs/kebab_name" }, "serving": { "$ref": "common.schema.json#/$defs/kebab_name" }, "reason": { "type": "string", "minLength": 1, "maxLength": 480 }, "by": { "$ref": "common.schema.json#/$defs/did" } } },
+      "description": "Dishes chosen by explicit pick from the mechanical candidate set, with the reason (R12)."
+    },
+    "cleanup_manifest": {
+      "type": "array", "items": { "$ref": "common.schema.json#/$defs/serving_ref" },
+      "description": "For a carrying plate: the servings of the earlier receipt this plate neither carries nor replaces; they stay standing and are cleaned up by a later scrub under policy (decision 35). Empty otherwise."
+    }
+  }
+}

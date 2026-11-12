@@ -1,0 +1,348 @@
+{
+ "kind": "recipe",
+ "schema_version": "0.1.0",
+ "components": [],
+ "operations": [
+  {
+   "id": "svc-create",
+   "target": "fn_5b0619246a21fed3af20752679d9ed0c8eebc122b893e7070a81e56183ea60e6",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input",
+     "name": "region"
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "template": {
+       "kind": "json",
+       "fields": {
+        "scaling": {
+         "kind": "json",
+         "fields": {
+          "minInstanceCount": {
+           "kind": "lit",
+           "value": {
+            "kind": "nat",
+            "value": 1
+           }
+          }
+         }
+        },
+        "maxInstanceRequestConcurrency": {
+         "kind": "lit",
+         "value": {
+          "kind": "nat",
+          "value": 80
+         }
+        },
+        "vpcAccess": {
+         "kind": "json",
+         "fields": {
+          "networkInterfaces": {
+           "kind": "json-list",
+           "items": [
+            {
+             "kind": "json",
+             "fields": {
+              "network": {
+               "kind": "wire",
+               "name": "network",
+               "field": "self_link"
+              }
+             }
+            }
+           ]
+          },
+          "egress": {
+           "kind": "lit",
+           "value": {
+            "kind": "string",
+            "value": "PRIVATE_RANGES_ONLY"
+           }
+          }
+         }
+        },
+        "containers": {
+         "kind": "json-list",
+         "items": [
+          {
+           "kind": "json",
+           "fields": {
+            "image": {
+             "kind": "lit",
+             "value": {
+              "kind": "string",
+              "value": "us-docker.pkg.dev/cloudrun/container/hello"
+             }
+            },
+            "env": {
+             "kind": "json-list",
+             "items": [
+              {
+               "kind": "json",
+               "fields": {
+                "name": {
+                 "kind": "lit",
+                 "value": {
+                  "kind": "string",
+                  "value": "DB_HOST"
+                 }
+                },
+                "value": {
+                 "kind": "wire",
+                 "name": "database",
+                 "field": "host"
+                }
+               }
+              },
+              {
+               "kind": "json",
+               "fields": {
+                "name": {
+                 "kind": "lit",
+                 "value": {
+                  "kind": "string",
+                  "value": "DB_PORT"
+                 }
+                },
+                "value": {
+                 "kind": "wire",
+                 "name": "database",
+                 "field": "port"
+                }
+               }
+              },
+              {
+               "kind": "json",
+               "fields": {
+                "name": {
+                 "kind": "lit",
+                 "value": {
+                  "kind": "string",
+                  "value": "DB_PASSWORD"
+                 }
+                },
+                "valueSource": {
+                 "kind": "json",
+                 "fields": {
+                  "secretKeyRef": {
+                   "kind": "json",
+                   "fields": {
+                    "secret": {
+                     "kind": "wire",
+                     "name": "credential",
+                     "field": "name"
+                    },
+                    "version": {
+                     "kind": "wire",
+                     "name": "credential",
+                     "field": "version"
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              },
+              {
+               "kind": "json",
+               "fields": {
+                "name": {
+                 "kind": "lit",
+                 "value": {
+                  "kind": "string",
+                  "value": "ASSETS_BUCKET"
+                 }
+                },
+                "value": {
+                 "kind": "wire",
+                 "name": "assets",
+                 "field": "name"
+                }
+               }
+              }
+             ]
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "network",
+      "key": [
+       {
+        "kind": "wire",
+        "name": "network",
+        "field": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "sql-instance",
+      "key": [
+       {
+        "kind": "wire",
+        "name": "database",
+        "field": "instance"
+       }
+      ]
+     },
+     "state": "ready"
+    },
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "secret-version",
+      "key": [
+       {
+        "kind": "wire",
+        "name": "credential",
+        "field": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "bucket",
+      "key": [
+       {
+        "kind": "wire",
+        "name": "assets",
+        "field": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "run-service",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "uri",
+     "path": [
+      "uri"
+     ]
+    }
+   ]
+  }
+ ],
+ "retire": [
+  {
+   "id": "svc-delete",
+   "target": "fn_c4814225bcf47651e09b95cdb80ac825f0503e25a1fd24af57979d6d4547f6eb",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input",
+     "name": "region"
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "run-service",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  }
+ ],
+ "readiness": [
+  {
+   "class": "run-service",
+   "probe": "fn_38eb637df6b9b49f06b50215be8eeafd63a7798af2c6f9972af49f4a7a650206",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input",
+     "name": "region"
+    },
+    {
+     "kind": "resource-key",
+     "index": 0
+    }
+   ],
+   "ready_when": {
+    "path": [
+     "terminalCondition",
+     "state"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "CONDITION_SUCCEEDED"
+    }
+   },
+   "limit_seconds": 600
+  }
+ ],
+ "create_only": [],
+ "outputs": [
+  {
+   "name": "url",
+   "from": {
+    "kind": "record",
+    "fields": {
+     "url": {
+      "kind": "operation-output",
+      "operation": "svc-create",
+      "output": "uri"
+     }
+    }
+   }
+  }
+ ],
+ "hash": "rcp_2b4ce95088f1cff1c4f19089d8152d33103744135c48e12d04bc54f1e1c3bc97"
+}

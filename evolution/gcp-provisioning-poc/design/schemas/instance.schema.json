@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/instance.schema.json",
+  "title": "Instance record (inst_…)",
+  "description": "Where an environment is provisioned and what everything in it is called (glossary: Instance; R13a, R13b; decision 29). A frozen record of every literal name and placement a provisioning run will use, written by the instance generator before the run for one generation of a lineage; the provisioning command derives no name and checks every derived name against the recipes' fixed rules. Used for exactly one run. Unsigned.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "plate", "lineage", "generation", "servings"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "instance" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "hash": { "$ref": "common.schema.json#/$defs/instance_address" },
+    "plate": { "$ref": "common.schema.json#/$defs/plate_address", "description": "The plate this instance was generated for; `servings[].id` are that plate's serving ids." },
+    "lineage": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)*$", "maxLength": 200, "description": "The environment's identity across generations, chosen by the organization: `acme/webshop/production`. Found in receipts; the generator reads the lineage's latest receipt for the last generation." },
+    "generation": { "type": "integer", "minimum": 1, "description": "One more than the lineage's latest receipt's generation. Every name below includes it." },
+    "servings": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["id", "placement", "names"], "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/kebab_name" },
+          "placement": { "$ref": "common.schema.json#/$defs/placement" },
+          "names": {
+            "type": "array",
+            "items": { "type": "object", "required": ["path", "value"], "additionalProperties": false, "properties": { "path": { "$ref": "common.schema.json#/$defs/name_path" }, "suffix": { "type": "string", "pattern": "^-[a-z0-9-]{1,32}$", "description": "Present for a DERIVED name: this entry is the name input at `path` plus `suffix`, as the recipe's `derive` rule states; the provisioning command checks the equality." }, "value": { "type": "string", "minLength": 1, "maxLength": 253 } } },
+            "description": "A literal name for every name input of the serving's dish, down through every component, AND every name derived from one by a recipe's `derive` rule (marked with its `suffix`). Every name the kitchen will send is here. The provisioning command refuses a missing name or one that does not equal its derivation."
+          }
+        }
+      },
+      "description": "One entry per serving the plate provisions in this run. Carried servings have no entry: their names stand in the receipt they are carried from."
+    }
+  }
+}

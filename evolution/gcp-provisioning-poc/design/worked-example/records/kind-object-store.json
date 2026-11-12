@@ -1,0 +1,36 @@
+{
+ "kind": "kind",
+ "schema_version": "0.1.0",
+ "name": "object-store",
+ "attributes": {
+  "kind": "record",
+  "fields": [
+   {
+    "name": "public_read",
+    "type": {
+     "kind": "builtin",
+     "name": "bool"
+    }
+   },
+   {
+    "name": "versioning",
+    "type": {
+     "kind": "builtin",
+     "name": "bool"
+    }
+   }
+  ]
+ },
+ "attribute_docs": [
+  {
+   "name": "public_read",
+   "doc": "whether anonymous reads are allowed"
+  },
+  {
+   "name": "versioning",
+   "doc": "whether every overwrite keeps the previous version"
+  }
+ ],
+ "supersedes": null,
+ "hash": "kind_ee7d511c3a1fd113599411cc6ba849f84dc449d05a7e6a5419c211010fdf78c4"
+}

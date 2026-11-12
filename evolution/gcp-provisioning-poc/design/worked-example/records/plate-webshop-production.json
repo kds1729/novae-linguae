@@ -1,0 +1,112 @@
+{
+ "kind": "plate",
+ "schema_version": "0.1.0",
+ "needs_list": "needs_c43ba4865781dca4a377ce4c7092e4de566d4f4eefa6984f1f50373ef4676683",
+ "profile": "prof_eb41de3bdc959151d70f9a63145b8b67961a978ccdd82c963482b8c49259fa81",
+ "servings": [
+  {
+   "id": "s1",
+   "dish": "dish_b9248761a2b94e7510ee612de3703861f13b4f03f25424d13798041070a43eb0"
+  },
+  {
+   "id": "s2",
+   "dish": "dish_b1dbf68d4beb7be7967829649ed2dfb8a52365335ea1b19d4977d261ec7fe37a"
+  },
+  {
+   "id": "s3",
+   "dish": "dish_989ded2e404593c1d0ab79c5f615affa0ab52be54e24812ea836af2a0fbf4b1f"
+  },
+  {
+   "id": "s4",
+   "dish": "dish_a1ec4beb9bada5b9191a772c0296913089894056bd2776cc7aed6c40607a2310"
+  }
+ ],
+ "coverage": [
+  {
+   "need": "api-network",
+   "serving": "s1"
+  },
+  {
+   "need": "primary-db",
+   "serving": "s2"
+  },
+  {
+   "need": "assets",
+   "serving": "s3"
+  },
+  {
+   "need": "api",
+   "serving": "s4"
+  }
+ ],
+ "wires": [
+  {
+   "need": "primary-db",
+   "role": "lives-in",
+   "to": "api-network",
+   "output": {
+    "serving": "s1",
+    "port": "network"
+   },
+   "input": {
+    "serving": "s2",
+    "port": "network"
+   }
+  },
+  {
+   "need": "api",
+   "role": "lives-in",
+   "to": "api-network",
+   "output": {
+    "serving": "s1",
+    "port": "network"
+   },
+   "input": {
+    "serving": "s4",
+    "port": "network"
+   }
+  },
+  {
+   "need": "api",
+   "role": "reads-from",
+   "to": "primary-db",
+   "output": {
+    "serving": "s2",
+    "port": "endpoint"
+   },
+   "input": {
+    "serving": "s4",
+    "port": "database"
+   }
+  },
+  {
+   "need": "api",
+   "role": "reads-from",
+   "to": "primary-db",
+   "output": {
+    "serving": "s2",
+    "port": "credential"
+   },
+   "input": {
+    "serving": "s4",
+    "port": "credential"
+   }
+  },
+  {
+   "need": "api",
+   "role": "reads-from",
+   "to": "assets",
+   "output": {
+    "serving": "s3",
+    "port": "bucket"
+   },
+   "input": {
+    "serving": "s4",
+    "port": "assets"
+   }
+  }
+ ],
+ "overrides": [],
+ "cleanup_manifest": [],
+ "hash": "plate_901e6fdb1cdaf4ae1ce900f6cc9e7284aea82b8603ffbfc6522f70674599c76a"
+}

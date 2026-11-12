@@ -1,0 +1,74 @@
+{
+ "schema_version": "0.2.0",
+ "name_hints": [
+  "sqladmin_instances_delete"
+ ],
+ "param_docs": [
+  "project (stand-in)",
+  "instance (stand-in)"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "kind": "apply",
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ]
+   }
+  },
+  "refinements": [],
+  "effects": [
+   "net.write"
+  ],
+  "capabilities": [],
+  "terminates": "always"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "<project>"
+    },
+    {
+     "kind": "string",
+     "value": "<instance>"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "{}"
+    }
+   }
+  }
+ ],
+ "intent_tags": [
+  "io",
+  "io/network/http"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_63ab2822773a692f10e6b65dfacdbd2dfa7f186987be0046f09eaf47285c7a92",
+ "hash": "fn_e0b65d4bead111943d58eb7538a1c9f49e6123a93511ea82bf60672a4ae7e4b4"
+}

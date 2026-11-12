@@ -1,0 +1,63 @@
+{
+ "kind": "instance",
+ "schema_version": "0.1.0",
+ "plate": "plate_487a2b8ca202cf90e8f8231c0996ba80ddbae3e057d4ced1df8cda8486e9e5a6",
+ "lineage": "test/b1dbf68d4beb7be7",
+ "generation": 1,
+ "servings": [
+  {
+   "id": "s1",
+   "placement": {
+    "project": "nl-attester-sandbox"
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "t-b1dbf68d4beb7be7-g1-harness-network"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-psa",
+     "value": "t-b1dbf68d4beb7be7-g1-harness-network-psa"
+    }
+   ]
+  },
+  {
+   "id": "s2",
+   "placement": {
+    "project": "nl-attester-sandbox",
+    "regions": [
+     "europe-west1",
+     "europe-west4"
+    ]
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "t-b1dbf68d4beb7be7-g1-under-test-relational-database"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-cred",
+     "value": "t-b1dbf68d4beb7be7-g1-under-test-relational-database-cred"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-replica",
+     "value": "t-b1dbf68d4beb7be7-g1-under-test-relational-database-replica"
+    }
+   ]
+  }
+ ],
+ "hash": "inst_f038dfe49c2c0cf9413b98abebf07ae9527dd4e1c32f5f19d9dfb92b7bafc045"
+}

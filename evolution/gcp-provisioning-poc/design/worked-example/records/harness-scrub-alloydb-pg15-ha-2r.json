@@ -1,0 +1,113 @@
+{
+ "kind": "receipt",
+ "schema_version": "0.1.0",
+ "receipt_kind": "scrub",
+ "plate": "plate_ef81ff9275623032678c3b47ecaab3ab46dc7cfe1d06649f3b585ad70a3d8f36",
+ "instance": "inst_f4fa5b522e65df60900346555278fd55abda941c0e58d63cde1fd7dd1a4ebf8a",
+ "lineage": "test/eecfb078ba0d0bf6",
+ "generation": 1,
+ "plan": "plan_951ef06fb07a915ed4e2c8e629a28b725140a874addc4fefb82a4ee0bcc9ba59",
+ "supersedes": "rcpt_09d82a5b5828971480844e5fa3cd45f9d2ae55023637852c9b71b27d1aa11807",
+ "servings": [
+  {
+   "id": "s1",
+   "dish": "dish_b9248761a2b94e7510ee612de3703861f13b4f03f25424d13798041070a43eb0",
+   "recipe": "rcp_9b1d1bcb806d4581df3d99813dcf3a4646931a29e080adbf43f880997708a4e8",
+   "status": "scrubbed",
+   "resources": [
+    {
+     "class": "network",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-eecfb078ba0d0bf6-g1-harness-network"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "global-address",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-eecfb078ba0d0bf6-g1-harness-network-psa"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "psa-connection",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-eecfb078ba0d0bf6-g1-harness-network"
+      }
+     ],
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "s2",
+   "dish": "dish_eecfb078ba0d0bf6fb4414072cd7bf7e59636f0ea921bae54709e7c9887a59dd",
+   "recipe": "rcp_cdc5db5fc0de702de0a3c169ce6c5c4f9c64b86d87a40c3260dfaf3ac2733ef7",
+   "status": "scrubbed",
+   "resources": [
+    {
+     "class": "secret",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-cred"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "secret-version",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-cred"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "alloydb-cluster",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "alloydb-instance",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-primary"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "alloydb-cluster",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-eecfb078ba0d0bf6-g1-under-test-relational-database-secondary"
+      }
+     ],
+     "state": "absent"
+    }
+   ]
+  }
+ ],
+ "cleanup_manifest": [],
+ "started": "2026-11-11T08:30:00Z",
+ "finished": "2026-11-11T08:45:00Z",
+ "hash": "rcpt_b4cbf04a60f8bab327b92ae902148b80cdcf9acf9a5914203d7e3f94f1feecf4"
+}

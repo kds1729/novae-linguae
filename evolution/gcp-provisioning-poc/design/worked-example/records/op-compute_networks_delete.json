@@ -1,0 +1,74 @@
+{
+ "schema_version": "0.2.0",
+ "name_hints": [
+  "compute_networks_delete"
+ ],
+ "param_docs": [
+  "project (stand-in)",
+  "network (stand-in)"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "kind": "apply",
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ]
+   }
+  },
+  "refinements": [],
+  "effects": [
+   "net.write"
+  ],
+  "capabilities": [],
+  "terminates": "always"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "<project>"
+    },
+    {
+     "kind": "string",
+     "value": "<network>"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "{}"
+    }
+   }
+  }
+ ],
+ "intent_tags": [
+  "io",
+  "io/network/http"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_19d4ada78d995abd1595a777a8301271c9e2fcdfdcf359c4c9c7cc3a6ba52501",
+ "hash": "fn_d5340d5d80adbda1464aef74b1d14af33ddcbf22b8159c3be9d7c769927c94fc"
+}

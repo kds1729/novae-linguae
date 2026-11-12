@@ -1,0 +1,12 @@
+{
+ "kind": "record",
+ "fields": [
+  {
+   "name": "url",
+   "type": {
+    "kind": "builtin",
+    "name": "string"
+   }
+  }
+ ]
+}

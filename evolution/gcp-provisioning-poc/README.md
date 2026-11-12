@@ -1,8 +1,8 @@
 # Declarative infrastructure provisioning on Novae Linguae — project charter
 
-- **Status:** exploring (concept and requirements phase; nothing implemented, nothing provisioned)
+- **Status:** exploring (design phase since 2026-11-12; nothing implemented, nothing provisioned)
 - **Author:** Keith Sprochi <kds1729@gmail.com>
-- **Dates:** chartered 2026-11-10, last updated 2026-11-12
+- **Dates:** chartered 2026-11-10; concept phase closed 2026-11-12 (the author: "the plan is fully realized"); design phase begun the same day; last updated 2026-11-12
 - **Scope:** a new evolution module. Reads against `evolution/gcp-sdk-poc`, `evolution/aws-sdk-poc`,
   `evolution/aws-ecosystem-poc` (certified operations, `check-plan`, world-state refinements, probes),
   `spec/world-state.md`, `spec/trust-model.md`, `spec/commons.md`, and the composite-record machinery
@@ -331,12 +331,14 @@ shaped (decision 34) and are built at the start of phase 3.
 This module advances in gated phases. A phase does not begin until the previous one's gate is met.
 
 1. **Concept** (this charter, the glossary, the deferred list). *Gate:* the author declares the plan
-   fully realized. **Current phase.**
+   fully realized. **Gate met 2026-11-12.**
 2. **Design.** Record schemas for kind, dish, recipe, needs list, profile, plate, instance, receipt;
    the coverage and selection algorithms stated precisely; the five layer-1 specification proposals
    written, each with the worked example as its driver case; the test-provisioning question in
    `deferred.md` answered. *Gate:* a worked example (the glossary's web service) hand-traced from needs
-   list to receipt with every record written out.
+   list to receipt with every record written out. **Current phase.** The deliverables are under
+   [`design/`](design/): schemas, algorithms, the five proposals, and the worked example with every record
+   written out, hashed, signed and checked by `design/worked-example/build.py`.
 3. **Prototype against the fake service.** First the five layer-1 proposals built in the specification and
    validator, one at a time on the author's go (`ready`, planner, waits, authored refinements, `secret`);
    then kinds and dishes over `tooling/fake-service` operations; provisioning and scrub end to end with no
@@ -355,3 +357,4 @@ Nothing in phases 2–4 starts without the author's explicit go.
 | [`glossary.md`](glossary.md) | the vocabulary, by layer, with the GCP worked example |
 | [`deferred.md`](deferred.md) | open and provisional questions, with candidates and reopen conditions |
 | [`convention-over-configuration.md`](convention-over-configuration.md) | guide: why dishes have fixed settings and environments are replaced rather than changed, and what that costs |
+| [`design/`](design/) | phase 2: record schemas, the algorithms stated precisely, the five layer-1 specification proposals, and the worked example with every record written out |

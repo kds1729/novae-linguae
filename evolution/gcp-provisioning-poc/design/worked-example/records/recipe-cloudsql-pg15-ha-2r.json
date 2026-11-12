@@ -1,0 +1,625 @@
+{
+ "kind": "recipe",
+ "schema_version": "0.1.0",
+ "components": [],
+ "operations": [
+  {
+   "id": "inst-insert",
+   "target": "fn_159296d7cb64b6b25b68e8d4eae8b9d67ed24aa241166c5c19528d2f022fa7ce",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "name": {
+       "kind": "input",
+       "name": "name"
+      },
+      "region": {
+       "kind": "input-at",
+       "name": "regions",
+       "index": 0
+      },
+      "databaseVersion": {
+       "kind": "lit",
+       "value": {
+        "kind": "string",
+        "value": "POSTGRES_15"
+       }
+      },
+      "settings": {
+       "kind": "json",
+       "fields": {
+        "tier": {
+         "kind": "lit",
+         "value": {
+          "kind": "string",
+          "value": "db-custom-2-7680"
+         }
+        },
+        "availabilityType": {
+         "kind": "lit",
+         "value": {
+          "kind": "string",
+          "value": "REGIONAL"
+         }
+        },
+        "ipConfiguration": {
+         "kind": "json",
+         "fields": {
+          "ipv4Enabled": {
+           "kind": "lit",
+           "value": {
+            "kind": "bool",
+            "value": false
+           }
+          },
+          "privateNetwork": {
+           "kind": "wire",
+           "name": "network",
+           "field": "self_link"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "psa-connection",
+      "key": [
+       {
+        "kind": "wire",
+        "name": "network",
+        "field": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "sql-instance",
+      "key": [
+       {
+        "kind": "body-field",
+        "arg": 1,
+        "field": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "ip",
+     "path": [
+      "ipAddresses",
+      0,
+      "ipAddress"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "replica-insert",
+   "target": "fn_159296d7cb64b6b25b68e8d4eae8b9d67ed24aa241166c5c19528d2f022fa7ce",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "name": {
+       "kind": "derive",
+       "from": "name",
+       "suffix": "-replica"
+      },
+      "region": {
+       "kind": "input-at",
+       "name": "regions",
+       "index": 1
+      },
+      "masterInstanceName": {
+       "kind": "input",
+       "name": "name"
+      },
+      "databaseVersion": {
+       "kind": "lit",
+       "value": {
+        "kind": "string",
+        "value": "POSTGRES_15"
+       }
+      },
+      "settings": {
+       "kind": "json",
+       "fields": {
+        "tier": {
+         "kind": "lit",
+         "value": {
+          "kind": "string",
+          "value": "db-custom-2-7680"
+         }
+        }
+       }
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "sql-instance",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "ready"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "sql-instance",
+      "key": [
+       {
+        "kind": "body-field",
+        "arg": 1,
+        "field": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ]
+  },
+  {
+   "id": "secret-create",
+   "target": "fn_015ce1b59fa12d93f0cc9e4ea2e05fea059a3fa59c375993f8a27db88730948b",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-cred"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "replication": {
+       "kind": "json",
+       "fields": {
+        "automatic": {
+         "kind": "json",
+         "fields": {}
+        }
+       }
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "secret",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ]
+  },
+  {
+   "id": "secret-version",
+   "target": "fn_2e87dffcac33712428bdede67ef15ffa0216aa5c742dee351083a1bd77d482a7",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-cred"
+    },
+    {
+     "kind": "secret",
+     "generate": {
+      "length": 32
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "secret",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "secret-version",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "version",
+     "path": [
+      "name"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "user-insert",
+   "target": "fn_b5d9a62dc2ee910a0e6135e690d51474a5c729ef6e95c55a12415f1ff788d700",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "name": {
+       "kind": "lit",
+       "value": {
+        "kind": "string",
+        "value": "app"
+       }
+      },
+      "password": {
+       "kind": "secret",
+       "generate": {
+        "length": 32
+       }
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "sql-instance",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "ready"
+    },
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "secret-version",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "sql-user",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       },
+       {
+        "kind": "lit",
+        "value": {
+         "kind": "string",
+         "value": "app"
+        }
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ]
+  }
+ ],
+ "retire": [
+  {
+   "id": "replica-delete",
+   "target": "fn_e0b65d4bead111943d58eb7538a1c9f49e6123a93511ea82bf60672a4ae7e4b4",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-replica"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "sql-instance",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-replica"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "inst-delete",
+   "target": "fn_e0b65d4bead111943d58eb7538a1c9f49e6123a93511ea82bf60672a4ae7e4b4",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "sql-instance",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-replica"
+       }
+      ]
+     },
+     "state": "absent"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "sql-instance",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "absent"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "sql-user",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       },
+       {
+        "kind": "lit",
+        "value": {
+         "kind": "string",
+         "value": "app"
+        }
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "secret-delete",
+   "target": "fn_e88a1dc435282b9ea5797988143d8d46ebfb228b3b86541182aa3a885b364fa4",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-cred"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "secret",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "absent"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "secret-version",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-cred"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  }
+ ],
+ "readiness": [
+  {
+   "class": "sql-instance",
+   "probe": "fn_15385ebe072bfb177344ecfc8712439da25a022becde4ebdab747fd8cd29de18",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "resource-key",
+     "index": 0
+    }
+   ],
+   "ready_when": {
+    "path": [
+     "state"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "RUNNABLE"
+    }
+   },
+   "limit_seconds": 900
+  },
+  {
+   "class": "secret",
+   "probe": "fn_0350b5898ede72ce7eac1ebd75f5c9b4efcac53b1781f5fb31bc78f8813e980f",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "resource-key",
+     "index": 0
+    }
+   ],
+   "ready_when": {
+    "path": [
+     "name"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "*"
+    }
+   },
+   "limit_seconds": 120
+  }
+ ],
+ "create_only": [
+  "engine",
+  "major",
+  "regions",
+  "encryption_at_rest"
+ ],
+ "outputs": [
+  {
+   "name": "endpoint",
+   "from": {
+    "kind": "record",
+    "fields": {
+     "instance": {
+      "kind": "input",
+      "name": "name"
+     },
+     "host": {
+      "kind": "operation-output",
+      "operation": "inst-insert",
+      "output": "ip"
+     },
+     "port": {
+      "kind": "lit",
+      "value": {
+       "kind": "nat",
+       "value": 5432
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "credential",
+   "from": {
+    "kind": "record",
+    "fields": {
+     "store": {
+      "kind": "lit",
+      "value": {
+       "kind": "string",
+       "value": "secretmanager"
+      }
+     },
+     "name": {
+      "kind": "derive",
+      "from": "name",
+      "suffix": "-cred"
+     },
+     "version": {
+      "kind": "operation-output",
+      "operation": "secret-version",
+      "output": "version"
+     }
+    }
+   }
+  }
+ ],
+ "hash": "rcp_f9d3dceafa4e035778ad9cad0275e73d17bfd43a6ba2df01143447306141eab4"
+}

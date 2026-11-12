@@ -1,0 +1,144 @@
+{
+ "kind": "needs-list",
+ "schema_version": "0.1.0",
+ "name_hints": [
+  "webshop_api_2026_10_draft"
+ ],
+ "needs": [
+  {
+   "name": "api-network",
+   "of_kind": "kind_acec91af360f953eb44c35cae9d75e52e36033872fa21ecb3d4ec21c57dc07d9",
+   "constraints": {
+    "kind": "app",
+    "op": "eq",
+    "args": [
+     {
+      "kind": "var",
+      "name": "private_service_access"
+     },
+     {
+      "kind": "lit",
+      "value": true
+     }
+    ]
+   },
+   "wires": []
+  },
+  {
+   "name": "primary-db",
+   "of_kind": "kind_608d4b0d272513a0b375bee6aa3d8774a61c9f16b27681e733844d6d27acd9b6",
+   "constraints": {
+    "kind": "app",
+    "op": "and",
+    "args": [
+     {
+      "kind": "app",
+      "op": "eq",
+      "args": [
+       {
+        "kind": "var",
+        "name": "engine"
+       },
+       {
+        "kind": "lit",
+        "value": {
+         "kind": "variant",
+         "tag": "Postgres"
+        }
+       }
+      ]
+     },
+     {
+      "kind": "app",
+      "op": "and",
+      "args": [
+       {
+        "kind": "app",
+        "op": "ge",
+        "args": [
+         {
+          "kind": "var",
+          "name": "major"
+         },
+         {
+          "kind": "lit",
+          "value": 15
+         }
+        ]
+       },
+       {
+        "kind": "app",
+        "op": "eq",
+        "args": [
+         {
+          "kind": "var",
+          "name": "encryption_at_rest"
+         },
+         {
+          "kind": "lit",
+          "value": true
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "wires": [
+    {
+     "role": "lives-in",
+     "to": "api-network"
+    }
+   ]
+  },
+  {
+   "name": "api",
+   "of_kind": "kind_afac22a7ae708372f78aa00d314ca259a9368fb63e78691ba2ea2fe09236cb3a",
+   "constraints": {
+    "kind": "app",
+    "op": "and",
+    "args": [
+     {
+      "kind": "app",
+      "op": "ge",
+      "args": [
+       {
+        "kind": "var",
+        "name": "min_instances"
+       },
+       {
+        "kind": "lit",
+        "value": 1
+       }
+      ]
+     },
+     {
+      "kind": "app",
+      "op": "ge",
+      "args": [
+       {
+        "kind": "var",
+        "name": "max_concurrency"
+       },
+       {
+        "kind": "lit",
+        "value": 80
+       }
+      ]
+     }
+    ]
+   },
+   "wires": [
+    {
+     "role": "lives-in",
+     "to": "api-network"
+    },
+    {
+     "role": "reads-from",
+     "to": "primary-db"
+    }
+   ]
+  }
+ ],
+ "hash": "needs_26aaf284adea36ec6884a053de0b1d10aeb2cfacf2b5599e0015305020b25210"
+}

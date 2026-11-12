@@ -1,0 +1,93 @@
+{
+ "kind": "instance",
+ "schema_version": "0.1.0",
+ "plate": "plate_0e0429bf00da807189095f777bdc81ef9ef0d9addd5fae054ade7120de0f1312",
+ "lineage": "test/a1ec4beb9bada5b9",
+ "generation": 1,
+ "servings": [
+  {
+   "id": "s1",
+   "placement": {
+    "project": "nl-attester-sandbox"
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "t-a1ec4beb9bada5b9-g1-harness-network"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-psa",
+     "value": "t-a1ec4beb9bada5b9-g1-harness-network-psa"
+    }
+   ]
+  },
+  {
+   "id": "s2",
+   "placement": {
+    "project": "nl-attester-sandbox",
+    "regions": [
+     "europe-west1",
+     "europe-west4"
+    ]
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "t-a1ec4beb9bada5b9-g1-harness-relational-database"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-cred",
+     "value": "t-a1ec4beb9bada5b9-g1-harness-relational-database-cred"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-replica",
+     "value": "t-a1ec4beb9bada5b9-g1-harness-relational-database-replica"
+    }
+   ]
+  },
+  {
+   "id": "s3",
+   "placement": {
+    "project": "nl-attester-sandbox",
+    "region": "europe-west1"
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "t-a1ec4beb9bada5b9-g1-harness-object-store"
+    }
+   ]
+  },
+  {
+   "id": "s4",
+   "placement": {
+    "project": "nl-attester-sandbox",
+    "region": "europe-west1"
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "t-a1ec4beb9bada5b9-g1-under-test-container-service"
+    }
+   ]
+  }
+ ],
+ "hash": "inst_af65e640945933c2247514a174a30311d7d8b8b8bc3d1f61aece58aca203b5ca"
+}

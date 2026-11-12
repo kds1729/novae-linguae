@@ -1,0 +1,55 @@
+{
+ "kind": "receipt",
+ "schema_version": "0.1.0",
+ "receipt_kind": "scrub",
+ "plate": "plate_f755823b42d7fb8ce88aaba75cc1162f8dc8012a87210b3666e0d91134d3a74a",
+ "instance": "inst_5756b0055c8429674138e07df9e6526ccb5c642c268976ac271b5dbb85e65337",
+ "lineage": "test/b9248761a2b94e75",
+ "generation": 1,
+ "plan": "plan_900f8aef3860e2ed4e82276efd90e706036cae6c7da853ef84275ff4107100fb",
+ "supersedes": "rcpt_6c66b3fa8ac299f74fee91311600b34e9b543719e54b887e3b49220ab6998270",
+ "servings": [
+  {
+   "id": "s1",
+   "dish": "dish_b9248761a2b94e7510ee612de3703861f13b4f03f25424d13798041070a43eb0",
+   "recipe": "rcp_9b1d1bcb806d4581df3d99813dcf3a4646931a29e080adbf43f880997708a4e8",
+   "status": "scrubbed",
+   "resources": [
+    {
+     "class": "network",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-b9248761a2b94e75-g1-under-test-network"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "global-address",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-b9248761a2b94e75-g1-under-test-network-psa"
+      }
+     ],
+     "state": "absent"
+    },
+    {
+     "class": "psa-connection",
+     "key": [
+      {
+       "kind": "string",
+       "value": "t-b9248761a2b94e75-g1-under-test-network"
+      }
+     ],
+     "state": "absent"
+    }
+   ]
+  }
+ ],
+ "cleanup_manifest": [],
+ "started": "2026-11-11T08:30:00Z",
+ "finished": "2026-11-11T08:45:00Z",
+ "hash": "rcpt_097c3e7ec0dbf029c026a5a59a31d13ffb693d5814f01ab183c4cdec17efca83"
+}

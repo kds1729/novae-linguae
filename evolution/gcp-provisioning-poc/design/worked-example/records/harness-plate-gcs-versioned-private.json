@@ -1,0 +1,22 @@
+{
+ "kind": "plate",
+ "schema_version": "0.1.0",
+ "needs_list": "needs_6f31b068d90ee352a7c48f45884398faa7c8f0461f2746fadf50cf67824071fd",
+ "profile": "prof_39a4c583fb8bc0f9904ccd8a3000d7e8f6a7ed8b8d52def3040841e3cb1f2b48",
+ "servings": [
+  {
+   "id": "s1",
+   "dish": "dish_989ded2e404593c1d0ab79c5f615affa0ab52be54e24812ea836af2a0fbf4b1f"
+  }
+ ],
+ "coverage": [
+  {
+   "need": "under-test-object-store",
+   "serving": "s1"
+  }
+ ],
+ "wires": [],
+ "overrides": [],
+ "cleanup_manifest": [],
+ "hash": "plate_a36ff6d3ce9a76d4a628f1c344c4e2aff81ae7800b77d655941dc0c6ff898f7c"
+}

@@ -1,0 +1,25 @@
+{
+ "kind": "instance",
+ "schema_version": "0.1.0",
+ "plate": "plate_a36ff6d3ce9a76d4a628f1c344c4e2aff81ae7800b77d655941dc0c6ff898f7c",
+ "lineage": "test/989ded2e404593c1",
+ "generation": 1,
+ "servings": [
+  {
+   "id": "s1",
+   "placement": {
+    "project": "nl-attester-sandbox",
+    "region": "europe-west1"
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "t-989ded2e404593c1-g1-under-test-object-store"
+    }
+   ]
+  }
+ ],
+ "hash": "inst_d08ff5d273ef8cfbe48a9813d4edfaee85b515835b236077b1d84c318149970a"
+}

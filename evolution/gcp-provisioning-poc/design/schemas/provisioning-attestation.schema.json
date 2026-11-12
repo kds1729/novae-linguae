@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/provisioning-attestation.schema.json",
+  "title": "Provisioning attestation (patt_…) — signed",
+  "description": "A signed record by the identity that ran a test provisioning (the attester), naming the dish, the recipe, the harness plate, the instance, the result, the cause class on failure, and the receipts and trace (R5, R6; decisions 32, 36). Modelled on spec/certification.schema.json rather than on the `verified` claim (design-phase finding: the attestation carries fields a claim cannot). Hashed and signed exactly as a certification: `hash` over the JCS form with `hash` and `signature` removed; `signature` over the form with only `signature` removed, so it covers the hash; the signer's key is the `from` DID. Any attester can reproduce the test from the harness plate and instance.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "dish", "recipe", "harness_plate", "instance", "result", "receipt", "scrub_receipt", "started", "finished", "from", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "provisioning-attestation" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "hash": { "$ref": "common.schema.json#/$defs/attestation_address" },
+    "dish": { "$ref": "common.schema.json#/$defs/dish_address" },
+    "recipe": { "$ref": "common.schema.json#/$defs/recipe_address" },
+    "harness_plate": { "$ref": "common.schema.json#/$defs/plate_address", "description": "The dish under test plus an offered dish for each of its input wires (decision 36)." },
+    "instance": { "$ref": "common.schema.json#/$defs/instance_address", "description": "The test instance: a lineage of its own, one generation per attempt, test-marked names." },
+    "result": { "enum": ["pass", "fail"] },
+    "cause": { "enum": ["dish-fault", "environment-fault"], "description": "Required when `result` is `fail`. A dish fault makes the dish unprovisionable; an environment fault is no verdict." },
+    "detail": { "type": "string", "maxLength": 960, "description": "For `fail`: the step and what the cloud answered, in plain words." },
+    "receipt": { "$ref": "common.schema.json#/$defs/receipt_address", "description": "The provisioning receipt of the test run (every step ran, every resource reached ready, the outputs were produced)." },
+    "scrub_receipt": { "$ref": "common.schema.json#/$defs/receipt_address", "description": "The scrub receipt that followed; a pass requires every resource confirmed gone. A partial scrub receipt here means the attester has something left to clean up." },
+    "trace": { "$ref": "common.schema.json#/$defs/trace_address", "description": "The run's recorded effect trace. Test provisioning traces are always kept (R5)." },
+    "started": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "finished": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "from": { "$ref": "common.schema.json#/$defs/did", "description": "The attester." },
+    "signature": { "$ref": "common.schema.json#/$defs/signature" }
+  },
+  "allOf": [ { "if": { "properties": { "result": { "const": "fail" } } }, "then": { "required": ["cause"] } } ]
+}

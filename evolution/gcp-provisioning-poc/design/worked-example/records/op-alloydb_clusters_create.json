@@ -1,0 +1,92 @@
+{
+ "schema_version": "0.2.0",
+ "name_hints": [
+  "alloydb_clusters_create"
+ ],
+ "param_docs": [
+  "project (stand-in)",
+  "region (stand-in)",
+  "cluster_id (stand-in)",
+  "body (stand-in)"
+ ],
+ "signature": {
+  "type": {
+   "kind": "fn",
+   "params": [
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    },
+    {
+     "kind": "builtin",
+     "name": "string"
+    }
+   ],
+   "result": {
+    "kind": "apply",
+    "ctor": {
+     "kind": "builtin",
+     "name": "Maybe"
+    },
+    "args": [
+     {
+      "kind": "builtin",
+      "name": "string"
+     }
+    ]
+   }
+  },
+  "refinements": [],
+  "effects": [
+   "net.write"
+  ],
+  "capabilities": [],
+  "terminates": "always"
+ },
+ "examples": [
+  {
+   "args": [
+    {
+     "kind": "string",
+     "value": "<project>"
+    },
+    {
+     "kind": "string",
+     "value": "<region>"
+    },
+    {
+     "kind": "string",
+     "value": "<cluster_id>"
+    },
+    {
+     "kind": "string",
+     "value": "<body>"
+    }
+   ],
+   "result": {
+    "kind": "variant",
+    "tag": "Just",
+    "payload": {
+     "kind": "string",
+     "value": "{}"
+    }
+   }
+  }
+ ],
+ "intent_tags": [
+  "io",
+  "io/network/http"
+ ],
+ "derived_from": null,
+ "supersedes": null,
+ "body_hash": "expr_17d5fda49aafd1b58f2a989e5ce42d8a293aac28e56b5d57519263b9e20f6b8d",
+ "hash": "fn_a7ae49413595443c1f399f0655e7bfbb9017038fbb9a307c7f6f5ccbccd56c6e"
+}

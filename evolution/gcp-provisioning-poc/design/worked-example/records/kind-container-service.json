@@ -1,0 +1,36 @@
+{
+ "kind": "kind",
+ "schema_version": "0.1.0",
+ "name": "container-service",
+ "attributes": {
+  "kind": "record",
+  "fields": [
+   {
+    "name": "max_concurrency",
+    "type": {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   },
+   {
+    "name": "min_instances",
+    "type": {
+     "kind": "builtin",
+     "name": "nat"
+    }
+   }
+  ]
+ },
+ "attribute_docs": [
+  {
+   "name": "max_concurrency",
+   "doc": "requests one instance serves at once"
+  },
+  {
+   "name": "min_instances",
+   "doc": "instances kept warm at all times"
+  }
+ ],
+ "supersedes": null,
+ "hash": "kind_afac22a7ae708372f78aa00d314ca259a9368fb63e78691ba2ea2fe09236cb3a"
+}

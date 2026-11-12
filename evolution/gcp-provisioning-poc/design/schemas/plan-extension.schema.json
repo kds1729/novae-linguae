@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/plan-extension.schema.json",
+  "title": "Plan artifact with wait steps and waves (proposed extension of spec/plan.schema.json)",
+  "description": "The plan artifact as proposals 01–03 extend it: `assume[].state` and the symbolic vocabulary gain `ready`; `steps[]` admits a second form, the wait step; an optional `waves` groups step indices that may run concurrently. Everything else is spec/plan.schema.json unchanged; a plan without wait steps or waves is exactly a v0.1 plan. Hash: `plan_` over the JCS form with `hash` removed, unsigned, as today.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "plan" },
+    "schema_version": { "const": "0.1.0" },
+    "hash": { "$ref": "common.schema.json#/$defs/plan_address" },
+    "assume": {
+      "type": "array",
+      "items": { "type": "object", "required": ["resource", "state"], "additionalProperties": false, "properties": { "resource": { "type": "object", "required": ["class", "key"], "additionalProperties": false, "properties": { "class": { "$ref": "common.schema.json#/$defs/kebab_name" }, "key": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/value_expression" } } } }, "state": { "$ref": "common.schema.json#/$defs/world_state" } } }
+    },
+    "steps": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "type": "object", "required": ["target", "args"], "additionalProperties": false, "properties": { "target": { "$ref": "common.schema.json#/$defs/fn_address" }, "args": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/value_expression" } }, "label": { "type": "string", "maxLength": 128, "description": "Advisory: `<serving id>/<step id>`; not read by the checker." } }, "description": "An operation step, exactly as spec/plan.schema.json. Proposal 02 adds one argument form for values known only at kitchen time: the variant `Later` whose payload names `<step label>.<output>`, or `LaterJson` whose payload is a JSON body template with `{{<step label>.<output>}}` and `{{secret}}` placeholders and literal top-level fields (which `body-field` keys ground from); the checker treats a `Later` argument as opaque and grounds keys only from literal parts." },
+          { "type": "object", "required": ["kind", "resource", "until", "probe", "interval_seconds", "limit_seconds"], "additionalProperties": false, "properties": { "kind": { "const": "wait" }, "resource": { "type": "object", "required": ["class", "key"], "additionalProperties": false, "properties": { "class": { "$ref": "common.schema.json#/$defs/kebab_name" }, "key": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/value_expression" } } } }, "until": { "enum": ["ready", "absent"] }, "probe": { "type": "object", "required": ["target", "args"], "additionalProperties": false, "properties": { "target": { "$ref": "common.schema.json#/$defs/fn_address" }, "args": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/value_expression" } } } }, "ready_when": { "type": "object", "required": ["path", "equals"], "additionalProperties": false, "properties": { "path": { "type": "array", "items": { "type": ["string", "integer"] } }, "equals": { "$ref": "common.schema.json#/$defs/value_expression" } } }, "interval_seconds": { "type": "integer", "minimum": 1 }, "limit_seconds": { "type": "integer", "minimum": 1 }, "label": { "type": "string", "maxLength": 128 } }, "description": "A wait step (proposal 03): symbolically `requires (resource, exists)` and `ensures (resource, until)`; at run time a paced poll of `probe` until `ready_when` (for `ready`) or a not-found answer (for `absent`), failing as wait-timeout after `limit_seconds`." }
+        ]
+      }
+    },
+    "waves": {
+      "type": "array", "items": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 0 } },
+      "description": "Proposal 02: indices into `steps`, grouped; steps in one wave have no dependency between them and may run concurrently. `steps` is the waves flattened in order."
+    }
+  }
+}

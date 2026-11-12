@@ -1,0 +1,31 @@
+{
+ "kind": "instance",
+ "schema_version": "0.1.0",
+ "plate": "plate_f755823b42d7fb8ce88aaba75cc1162f8dc8012a87210b3666e0d91134d3a74a",
+ "lineage": "test/b9248761a2b94e75",
+ "generation": 1,
+ "servings": [
+  {
+   "id": "s1",
+   "placement": {
+    "project": "nl-attester-sandbox"
+   },
+   "names": [
+    {
+     "path": [
+      "name"
+     ],
+     "value": "t-b9248761a2b94e75-g1-under-test-network"
+    },
+    {
+     "path": [
+      "name"
+     ],
+     "suffix": "-psa",
+     "value": "t-b9248761a2b94e75-g1-under-test-network-psa"
+    }
+   ]
+  }
+ ],
+ "hash": "inst_5756b0055c8429674138e07df9e6526ccb5c642c268976ac271b5dbb85e65337"
+}

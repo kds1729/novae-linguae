@@ -1,0 +1,44 @@
+{
+ "kind": "plate",
+ "schema_version": "0.1.0",
+ "needs_list": "needs_a69ba9aefda45e65dd780e7604501350320ba3d451587366f535ca9dad7d0c20",
+ "profile": "prof_39a4c583fb8bc0f9904ccd8a3000d7e8f6a7ed8b8d52def3040841e3cb1f2b48",
+ "servings": [
+  {
+   "id": "s1",
+   "dish": "dish_b9248761a2b94e7510ee612de3703861f13b4f03f25424d13798041070a43eb0"
+  },
+  {
+   "id": "s2",
+   "dish": "dish_b1dbf68d4beb7be7967829649ed2dfb8a52365335ea1b19d4977d261ec7fe37a"
+  }
+ ],
+ "coverage": [
+  {
+   "need": "harness-network",
+   "serving": "s1"
+  },
+  {
+   "need": "under-test-relational-database",
+   "serving": "s2"
+  }
+ ],
+ "wires": [
+  {
+   "need": "under-test-relational-database",
+   "role": "wired",
+   "to": "harness-network",
+   "output": {
+    "serving": "s1",
+    "port": "network"
+   },
+   "input": {
+    "serving": "s2",
+    "port": "network"
+   }
+  }
+ ],
+ "overrides": [],
+ "cleanup_manifest": [],
+ "hash": "plate_487a2b8ca202cf90e8f8231c0996ba80ddbae3e057d4ced1df8cda8486e9e5a6"
+}

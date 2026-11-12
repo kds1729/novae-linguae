@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/kind.schema.json",
+  "title": "Kind record (kind_…)",
+  "description": "One sort of infrastructure thing (decision 14): a NAMED record type whose fields are the kind's attributes, each typed. The name gives the kind nominal identity (two kinds with the same attributes but different names are different kinds — one concept, one symbol); the attributes are an ordinary type-expression `record`, so a dish's `provides` is a value of that type and a need's constraints are a predicate over its fields, evaluated by `check-refinement`. Enumerated attributes are sum types with nullary variants. Extending a kind is publishing a new kind that `supersedes` the old; the old one keeps resolving. Unsigned; `hash` = BLAKE3 over the JCS form with `hash` removed.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "name", "attributes"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "kind" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "hash": { "$ref": "common.schema.json#/$defs/kind_address" },
+    "name": { "$ref": "common.schema.json#/$defs/kebab_name", "description": "The kind's name, e.g. `relational-database`. Nominal identity together with the attributes." },
+    "attributes": {
+      "$ref": "common.schema.json#/$defs/type_expression",
+      "description": "A type-expression of kind `record` whose fields are the attributes. Field names are snake_case per spec/type-expression.schema.json (`encryption_at_rest`)."
+    },
+    "attribute_docs": {
+      "type": "array",
+      "items": { "type": "object", "required": ["name", "doc"], "additionalProperties": false, "properties": { "name": { "$ref": "common.schema.json#/$defs/snake_name" }, "doc": { "type": "string", "minLength": 1, "maxLength": 240 } } },
+      "description": "One plain-words line per attribute: what it means and its unit. Testimony for a reader, never read by coverage."
+    },
+    "supersedes": { "oneOf": [ { "type": "null" }, { "$ref": "common.schema.json#/$defs/kind_address" } ], "default": null }
+  }
+}

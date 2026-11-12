@@ -1,0 +1,438 @@
+{
+ "kind": "recipe",
+ "schema_version": "0.1.0",
+ "components": [],
+ "operations": [
+  {
+   "id": "net-insert",
+   "target": "fn_7c915c80ecdecc782d2bfd1b9285e036331f3522c5331344f5e032b55655dc54",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "name": {
+       "kind": "input",
+       "name": "name"
+      },
+      "autoCreateSubnetworks": {
+       "kind": "lit",
+       "value": {
+        "kind": "bool",
+        "value": false
+       }
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "network",
+      "key": [
+       {
+        "kind": "body-field",
+        "arg": 1,
+        "field": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "self-link",
+     "path": [
+      "selfLink"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "addr-insert",
+   "target": "fn_14f30911d40ed9a4db628150cca3ec330eae49d1dae1b264c8b2ca8968383e27",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "name": {
+       "kind": "derive",
+       "from": "name",
+       "suffix": "-psa"
+      },
+      "purpose": {
+       "kind": "lit",
+       "value": {
+        "kind": "string",
+        "value": "VPC_PEERING"
+       }
+      },
+      "addressType": {
+       "kind": "lit",
+       "value": {
+        "kind": "string",
+        "value": "INTERNAL"
+       }
+      },
+      "prefixLength": {
+       "kind": "lit",
+       "value": {
+        "kind": "nat",
+        "value": 16
+       }
+      },
+      "network": {
+       "kind": "operation-output",
+       "operation": "net-insert",
+       "output": "self-link"
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "network",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "global-address",
+      "key": [
+       {
+        "kind": "body-field",
+        "arg": 1,
+        "field": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ]
+  },
+  {
+   "id": "psa-connect",
+   "target": "fn_bab975f7c9e819bd0cd6de7ac20f83c0d4e7e7afb171595a266354aac7c22d22",
+   "args": [
+    {
+     "kind": "lit",
+     "value": {
+      "kind": "string",
+      "value": "services/servicenetworking.googleapis.com"
+     }
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "network": {
+       "kind": "operation-output",
+       "operation": "net-insert",
+       "output": "self-link"
+      },
+      "reservedPeeringRange": {
+       "kind": "derive",
+       "from": "name",
+       "suffix": "-psa"
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "network",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "global-address",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-psa"
+       }
+      ]
+     },
+     "state": "exists"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "psa-connection",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ]
+  }
+ ],
+ "retire": [
+  {
+   "id": "psa-delete",
+   "target": "fn_344c6d99d3dff9e0e8dedad9a3b8a88653f93b9438f8c5d7f45fa3da0ec5004f",
+   "args": [
+    {
+     "kind": "lit",
+     "value": {
+      "kind": "string",
+      "value": "services/servicenetworking.googleapis.com"
+     }
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "psa-connection",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "addr-delete",
+   "target": "fn_79ec57c676c5b2844a3fab5df0bb8cf3f17baad5a35b9f38c11e491af8f1cb7c",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "derive",
+     "from": "name",
+     "suffix": "-psa"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "psa-connection",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "absent"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "global-address",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-psa"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  },
+  {
+   "id": "net-delete",
+   "target": "fn_d5340d5d80adbda1464aef74b1d14af33ddcbf22b8159c3be9d7c769927c94fc",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "input",
+     "name": "name"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "psa-connection",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "absent"
+    },
+    {
+     "kind": "requires",
+     "resource": {
+      "class": "global-address",
+      "key": [
+       {
+        "kind": "derive",
+        "from": "name",
+        "suffix": "-psa"
+       }
+      ]
+     },
+     "state": "absent"
+    },
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "network",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  }
+ ],
+ "readiness": [
+  {
+   "class": "network",
+   "probe": "fn_a1cfbc9be82d65c623f759f499f346a3183cc882b3af9422be92018e809b6943",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "resource-key",
+     "index": 0
+    }
+   ],
+   "ready_when": {
+    "path": [
+     "kind"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "compute#network"
+    }
+   },
+   "limit_seconds": 300
+  },
+  {
+   "class": "global-address",
+   "probe": "fn_3362cc9ba1ad0c3f42e18fdf431f91b038b1d64aea982ad6f0f8f3eb0f44edb4",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "resource-key",
+     "index": 0
+    }
+   ],
+   "ready_when": {
+    "path": [
+     "status"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "RESERVED"
+    }
+   },
+   "limit_seconds": 300
+  },
+  {
+   "class": "psa-connection",
+   "probe": "fn_5d54db2e2de396eb06383a79bfe7138cf5d6a0958d01ef47be150db538e6d39a",
+   "args": [
+    {
+     "kind": "lit",
+     "value": {
+      "kind": "string",
+      "value": "services/servicenetworking.googleapis.com"
+     }
+    },
+    {
+     "kind": "resource-key",
+     "index": 0
+    }
+   ],
+   "ready_when": {
+    "path": [
+     "connections",
+     0,
+     "network"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "*"
+    }
+   },
+   "limit_seconds": 600
+  }
+ ],
+ "create_only": [
+  "private_service_access"
+ ],
+ "outputs": [
+  {
+   "name": "network",
+   "from": {
+    "kind": "record",
+    "fields": {
+     "name": {
+      "kind": "input",
+      "name": "name"
+     },
+     "self_link": {
+      "kind": "operation-output",
+      "operation": "net-insert",
+      "output": "self-link"
+     }
+    }
+   }
+  }
+ ],
+ "hash": "rcp_9b1d1bcb806d4581df3d99813dcf3a4646931a29e080adbf43f880997708a4e8"
+}

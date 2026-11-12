@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/needs-list.schema.json",
+  "title": "Needs list record (needs_…)",
+  "description": "What one version of the software needs (glossary: Needs list; R8, R9). Immutable, self-contained, free of profile names and port names; any two are diffable. Each need has a local name, a kind, constraints (a predicate over the kind's attributes) and wires naming abstract roles toward other needs. Which needs list a needs list was copied from is a separate made-from statement, never a field here (it would change the address). Unsigned.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "needs"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "needs-list" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "hash": { "$ref": "common.schema.json#/$defs/needs_address" },
+    "name_hints": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/name_hint" }, "description": "Testimony for readers (the software and version this list is for); never read by the mechanism." },
+    "needs": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["name", "of_kind", "constraints", "wires"], "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/kebab_name", "description": "Local handle, the target of wires. Unique within the list." },
+          "of_kind": { "$ref": "common.schema.json#/$defs/kind_address" },
+          "constraints": { "$ref": "common.schema.json#/$defs/predicate_expression", "description": "A predicate over the kind's attribute names; a need tests only the attributes it names. `{\"kind\":\"lit\",\"value\":true}` is the unconstrained need." },
+          "wires": {
+            "type": "array",
+            "items": { "type": "object", "required": ["role", "to"], "additionalProperties": false, "properties": { "role": { "$ref": "common.schema.json#/$defs/kebab_name", "description": "An abstract role: `lives-in`, `reads-from`. Never a port name (decision 18)." }, "to": { "$ref": "common.schema.json#/$defs/kebab_name", "description": "The name of another need in this list." } } }
+          }
+        }
+      }
+    }
+  }
+}

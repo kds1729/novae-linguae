@@ -1,0 +1,19 @@
+{
+ "kind": "needs-list",
+ "schema_version": "0.1.0",
+ "name_hints": [
+  "harness_vpc_psa"
+ ],
+ "needs": [
+  {
+   "name": "under-test-network",
+   "of_kind": "kind_acec91af360f953eb44c35cae9d75e52e36033872fa21ecb3d4ec21c57dc07d9",
+   "constraints": {
+    "kind": "lit",
+    "value": true
+   },
+   "wires": []
+  }
+ ],
+ "hash": "needs_4e8303519cc4a334ced97b8291fd4fae44bb299e0083e23d94512774216e363b"
+}

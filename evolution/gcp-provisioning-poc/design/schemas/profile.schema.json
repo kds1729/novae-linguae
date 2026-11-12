@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/profile.schema.json",
+  "title": "Profile record (prof_…)",
+  "description": "What an organization wants of an environment of a given kind (glossary: Profile; R10, decision 15): constraints by kind, and which kinds may be shared between needs (decision 28). A plate pins its profile by content address, so a profile can never change under a plate. Unsigned.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "name", "constraints", "sharing"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "profile" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "hash": { "$ref": "common.schema.json#/$defs/profile_address" },
+    "name": { "$ref": "common.schema.json#/$defs/kebab_name", "description": "`production`, `minimal-cost-dev`. Testimony; the address is the identity." },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "object", "required": ["of_kind", "predicate"], "additionalProperties": false, "properties": { "of_kind": { "$ref": "common.schema.json#/$defs/kind_address" }, "predicate": { "$ref": "common.schema.json#/$defs/predicate_expression" } } },
+      "description": "For each kind named, a predicate every serving of that kind must satisfy, conjoined with each need's own constraints (R14). Kinds not named are unconstrained by the profile."
+    },
+    "sharing": {
+      "type": "array",
+      "items": { "type": "object", "required": ["of_kind", "allowed"], "additionalProperties": false, "properties": { "of_kind": { "$ref": "common.schema.json#/$defs/kind_address" }, "allowed": { "type": "boolean" } } },
+      "description": "Whether one serving of this kind may cover several needs. A kind not listed is NOT shareable: the safe default."
+    }
+  }
+}

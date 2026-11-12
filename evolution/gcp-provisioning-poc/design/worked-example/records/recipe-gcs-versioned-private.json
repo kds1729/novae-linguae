@@ -1,0 +1,149 @@
+{
+ "kind": "recipe",
+ "schema_version": "0.1.0",
+ "components": [],
+ "operations": [
+  {
+   "id": "bucket-insert",
+   "target": "fn_81f4324cf9cd29411330bba9b209343e89c410041ce9b5a1695194b3ccbc3e91",
+   "args": [
+    {
+     "kind": "input",
+     "name": "project"
+    },
+    {
+     "kind": "json",
+     "fields": {
+      "name": {
+       "kind": "input",
+       "name": "name"
+      },
+      "location": {
+       "kind": "input",
+       "name": "region"
+      },
+      "versioning": {
+       "kind": "json",
+       "fields": {
+        "enabled": {
+         "kind": "lit",
+         "value": {
+          "kind": "bool",
+          "value": true
+         }
+        }
+       }
+      },
+      "iamConfiguration": {
+       "kind": "json",
+       "fields": {
+        "uniformBucketLevelAccess": {
+         "kind": "json",
+         "fields": {
+          "enabled": {
+           "kind": "lit",
+           "value": {
+            "kind": "bool",
+            "value": true
+           }
+          }
+         }
+        },
+        "publicAccessPrevention": {
+         "kind": "lit",
+         "value": {
+          "kind": "string",
+          "value": "enforced"
+         }
+        }
+       }
+      }
+     }
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "bucket",
+      "key": [
+       {
+        "kind": "body-field",
+        "arg": 1,
+        "field": "name"
+       }
+      ]
+     },
+     "state": "exists"
+    }
+   ]
+  }
+ ],
+ "retire": [
+  {
+   "id": "bucket-delete",
+   "target": "fn_05d0304c29910a3d3c456dfcd76bd98c91095e49089ab364d203c202115b27b1",
+   "args": [
+    {
+     "kind": "input",
+     "name": "name"
+    }
+   ],
+   "refinements": [
+    {
+     "kind": "ensures",
+     "resource": {
+      "class": "bucket",
+      "key": [
+       {
+        "kind": "input",
+        "name": "name"
+       }
+      ]
+     },
+     "state": "absent"
+    }
+   ]
+  }
+ ],
+ "readiness": [
+  {
+   "class": "bucket",
+   "probe": "fn_30c4159f5216dacaaa19097a22e271a2d113b6b607152965baa6d56d8fa428b9",
+   "args": [
+    {
+     "kind": "resource-key",
+     "index": 0
+    }
+   ],
+   "ready_when": {
+    "path": [
+     "kind"
+    ],
+    "equals": {
+     "kind": "string",
+     "value": "storage#bucket"
+    }
+   },
+   "limit_seconds": 120
+  }
+ ],
+ "create_only": [
+  "versioning"
+ ],
+ "outputs": [
+  {
+   "name": "bucket",
+   "from": {
+    "kind": "record",
+    "fields": {
+     "name": {
+      "kind": "input",
+      "name": "name"
+     }
+    }
+   }
+  }
+ ],
+ "hash": "rcp_f5f49253ede33051ecf304d4c93c2df0f01f042a26ef308f16a3d883b9d37245"
+}

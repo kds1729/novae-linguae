@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novae-linguae.org/evolution/gcp-provisioning-poc/design/statement.schema.json",
+  "title": "Statement (stmt_…) — signed",
+  "description": "A signed state record about another record. Nothing is ever deleted or edited; a later statement supersedes (R1, R7). Six statements: `dish-state` (deprecated or retired, by whoever policy lets; decision 4), `held-by` (a carried serving is now held by a later receipt; decision 35), `cleanup-done` (an item of a cleanup manifest was scrubbed; decision 35), `made-from` (a needs list was copied from another; glossary), `succession` (a dish was made from another, typically after the cloud changed under it; decision 33), and `proposed-refinement` (a failed trace suggests a requires/ensures on an operation; adopted only by a chef into a recipe; decision 34). Hashed and signed as a certification is.",
+  "type": "object",
+  "required": ["kind", "schema_version", "hash", "statement", "timestamp", "from", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "statement" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "hash": { "$ref": "common.schema.json#/$defs/statement_address" },
+    "statement": {
+      "oneOf": [
+        { "type": "object", "required": ["kind", "dish", "state"], "additionalProperties": false, "properties": { "kind": { "const": "dish-state" }, "dish": { "$ref": "common.schema.json#/$defs/dish_address" }, "state": { "enum": ["deprecated", "retired"] }, "reason": { "type": "string", "maxLength": 480 }, "better": { "$ref": "common.schema.json#/$defs/dish_address", "description": "For `deprecated`: the dish the signer points to instead. Advisory; never followed by the mechanism." } } },
+        { "type": "object", "required": ["kind", "receipt", "serving", "held_by"], "additionalProperties": false, "properties": { "kind": { "const": "held-by" }, "receipt": { "$ref": "common.schema.json#/$defs/receipt_address" }, "serving": { "$ref": "common.schema.json#/$defs/kebab_name" }, "held_by": { "$ref": "common.schema.json#/$defs/receipt_address" } } },
+        { "type": "object", "required": ["kind", "receipt", "serving", "scrub_receipt"], "additionalProperties": false, "properties": { "kind": { "const": "cleanup-done" }, "receipt": { "$ref": "common.schema.json#/$defs/receipt_address" }, "serving": { "$ref": "common.schema.json#/$defs/kebab_name" }, "scrub_receipt": { "$ref": "common.schema.json#/$defs/receipt_address" } } },
+        { "type": "object", "required": ["kind", "needs_list", "from"], "additionalProperties": false, "properties": { "kind": { "const": "made-from" }, "needs_list": { "$ref": "common.schema.json#/$defs/needs_address" }, "from": { "$ref": "common.schema.json#/$defs/needs_address" }, "note": { "type": "string", "maxLength": 960 } } },
+        { "type": "object", "required": ["kind", "dish", "from"], "additionalProperties": false, "properties": { "kind": { "const": "succession" }, "dish": { "$ref": "common.schema.json#/$defs/dish_address" }, "from": { "$ref": "common.schema.json#/$defs/dish_address" }, "note": { "type": "string", "maxLength": 960 } } },
+        { "type": "object", "required": ["kind", "operation", "refinement", "evidence"], "additionalProperties": false, "properties": { "kind": { "const": "proposed-refinement" }, "operation": { "$ref": "common.schema.json#/$defs/fn_address" }, "refinement": { "$ref": "common.schema.json#/$defs/world_refinement" }, "evidence": { "$ref": "common.schema.json#/$defs/trace_address" }, "note": { "type": "string", "maxLength": 960 } } }
+      ]
+    },
+    "timestamp": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "from": { "$ref": "common.schema.json#/$defs/did" },
+    "signature": { "$ref": "common.schema.json#/$defs/signature" }
+  }
+}

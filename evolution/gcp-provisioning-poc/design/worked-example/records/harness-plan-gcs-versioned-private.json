@@ -1,0 +1,27 @@
+{
+ "kind": "plan",
+ "schema_version": "0.1.0",
+ "assume": [],
+ "steps": [
+  {
+   "target": "fn_81f4324cf9cd29411330bba9b209343e89c410041ce9b5a1695194b3ccbc3e91",
+   "args": [
+    {
+     "kind": "string",
+     "value": "nl-attester-sandbox"
+    },
+    {
+     "kind": "string",
+     "value": "{\"name\":\"t-989ded2e404593c1-g1-under-test-object-store\",\"location\":\"europe-west1\",\"versioning\":{\"enabled\":true},\"iamConfiguration\":{\"uniformBucketLevelAccess\":{\"enabled\":true},\"publicAccessPrevention\":\"enforced\"}}"
+    }
+   ],
+   "label": "s1/bucket-insert"
+  }
+ ],
+ "waves": [
+  [
+   0
+  ]
+ ],
+ "hash": "plan_a74c1da51637e57ddb3e96a9518b5b1f54c019d23d06d36a4cbdf77ff9bd6228"
+}

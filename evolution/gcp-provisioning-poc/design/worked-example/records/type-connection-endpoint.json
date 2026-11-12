@@ -1,0 +1,26 @@
+{
+ "kind": "record",
+ "fields": [
+  {
+   "name": "host",
+   "type": {
+    "kind": "builtin",
+    "name": "string"
+   }
+  },
+  {
+   "name": "instance",
+   "type": {
+    "kind": "builtin",
+    "name": "string"
+   }
+  },
+  {
+   "name": "port",
+   "type": {
+    "kind": "builtin",
+    "name": "nat"
+   }
+  }
+ ]
+}

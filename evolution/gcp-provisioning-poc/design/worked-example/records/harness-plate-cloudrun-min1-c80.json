@@ -1,0 +1,112 @@
+{
+ "kind": "plate",
+ "schema_version": "0.1.0",
+ "needs_list": "needs_2225e75db9d21688838b63468a560f30264768d7a9574c43182c73e93dc868f3",
+ "profile": "prof_39a4c583fb8bc0f9904ccd8a3000d7e8f6a7ed8b8d52def3040841e3cb1f2b48",
+ "servings": [
+  {
+   "id": "s1",
+   "dish": "dish_b9248761a2b94e7510ee612de3703861f13b4f03f25424d13798041070a43eb0"
+  },
+  {
+   "id": "s2",
+   "dish": "dish_b1dbf68d4beb7be7967829649ed2dfb8a52365335ea1b19d4977d261ec7fe37a"
+  },
+  {
+   "id": "s3",
+   "dish": "dish_989ded2e404593c1d0ab79c5f615affa0ab52be54e24812ea836af2a0fbf4b1f"
+  },
+  {
+   "id": "s4",
+   "dish": "dish_a1ec4beb9bada5b9191a772c0296913089894056bd2776cc7aed6c40607a2310"
+  }
+ ],
+ "coverage": [
+  {
+   "need": "harness-network",
+   "serving": "s1"
+  },
+  {
+   "need": "harness-relational-database",
+   "serving": "s2"
+  },
+  {
+   "need": "harness-object-store",
+   "serving": "s3"
+  },
+  {
+   "need": "under-test-container-service",
+   "serving": "s4"
+  }
+ ],
+ "wires": [
+  {
+   "need": "harness-relational-database",
+   "role": "wired",
+   "to": "harness-network",
+   "output": {
+    "serving": "s1",
+    "port": "network"
+   },
+   "input": {
+    "serving": "s2",
+    "port": "network"
+   }
+  },
+  {
+   "need": "under-test-container-service",
+   "role": "wired",
+   "to": "harness-network",
+   "output": {
+    "serving": "s1",
+    "port": "network"
+   },
+   "input": {
+    "serving": "s4",
+    "port": "network"
+   }
+  },
+  {
+   "need": "under-test-container-service",
+   "role": "wired",
+   "to": "harness-relational-database",
+   "output": {
+    "serving": "s2",
+    "port": "endpoint"
+   },
+   "input": {
+    "serving": "s4",
+    "port": "database"
+   }
+  },
+  {
+   "need": "under-test-container-service",
+   "role": "wired",
+   "to": "harness-relational-database",
+   "output": {
+    "serving": "s2",
+    "port": "credential"
+   },
+   "input": {
+    "serving": "s4",
+    "port": "credential"
+   }
+  },
+  {
+   "need": "under-test-container-service",
+   "role": "wired",
+   "to": "harness-object-store",
+   "output": {
+    "serving": "s3",
+    "port": "bucket"
+   },
+   "input": {
+    "serving": "s4",
+    "port": "assets"
+   }
+  }
+ ],
+ "overrides": [],
+ "cleanup_manifest": [],
+ "hash": "plate_0e0429bf00da807189095f777bdc81ef9ef0d9addd5fae054ade7120de0f1312"
+}
